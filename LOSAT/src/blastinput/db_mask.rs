@@ -19,6 +19,7 @@
 //! (`ResolvedMask::check_losat_limits`). psiblast, rpsblast and rpstblastn have neither option, as
 //! in NCBI.
 
+use crate::wording::{DATABASE_ERROR, OPTIONS_ERROR};
 use anyhow::Result;
 
 use crate::cli::NativeError;
@@ -153,7 +154,7 @@ impl DbMaskOption {
             return Err(NativeError {
                 exit: 1,
                 message: format!(
-                    "BLAST options error: Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
+                    "{OPTIONS_ERROR} Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
                     if nucleotide { "nucleotide" } else { "protein" }
                 ).into(),
             }
@@ -220,7 +221,7 @@ impl DbMaskOption {
             match error {
                 SeqDbError::Range(text) => NativeError {
                     exit: 2,
-                    message: format!("BLAST Database error: {text}\n").into(),
+                    message: format!("{DATABASE_ERROR} {text}\n").into(),
                 }
                 .into(),
                 error => crate::algorithm::common::database::database_error_of(error, program),

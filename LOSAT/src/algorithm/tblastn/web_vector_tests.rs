@@ -32,7 +32,10 @@ pub(crate) fn cases() -> Vec<Case> {
             else {
                 panic!("seven columns: {line:?}");
             };
+            // The files are NCBI's bytes (the vector was frozen identical to NCBI's); LOSAT
+            // writes them in its own words (`crate::wording::losat_output_bytes`).
             let expected = read(&format!("{name}.{kind}"));
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             Case {
                 name: name.to_string(),
                 query: query.to_string(),

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.65
+- Version: 1.68
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -272,10 +272,31 @@
   `int` in psiblast `-in_msa`, line PS item PS6b, PR #1440; proposed under the standing instruction
   2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」
   and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
-  PR #1440 ready for review, as the PR asked; numbered after 1.63)
-  1.65 2026-11-21 (approved exception 19, the Owner's decision of 2026-11-20 on line RG's question
+  PR #1440 ready for review, as the PR asked; numbered after 1.63);
+  1.65 2026-11-21 (`losat blastn -use_index true`, line RG item D5b-1: the explicit rejections,
+  rule 3, of an empty first MegaBLAST index volume, whose header NCBI reads through a null
+  pointer, of a new-style index volume whose sequence count NCBI reads from words its stream never
+  set, and of an `-index_name` range of volumes whose loop NCBI never ends; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.66 2026-11-21 (approved exception 19, hit list sizes past `Int4`, NCBI parity line O1c, PR
+  #1448: the preliminary hit list size, and the best-hit writer's twice that size, computed without
+  NCBI's `Int4` overflow, which ends the rule-2
+  reproduction of its wrapped sizes and the rule-3 rejection of the sizes on which NCBI crashes;
+  proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of
+  2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, and accepted by the
+  maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked; numbered after 1.65);
+  1.67 2026-11-20 (the approved difference of `losat rpsbproc`'s sorts: Rust's standard sort, so hits
+  equal in E-value and bit score and data rows of one key keep their input order, and a NaN
+  E-value or bit score sorts after every number; the explicit rejection of 1.17 of hits whose NaN
+  values would make NCBI's sort read outside its vector removed; decided by the Owner on
+  2026-11-20, line LIB `DECISIONS.md` 33; the place of a NaN Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; line LIB-S item S1; numbered after 1.66; first 1.54, then 1.56, 1.58, 1.62 and 1.66 at
+  the merges of dev that brought line RG item X5's 1.54, then line RG item X6's 1.55 and line RG
+  item D1a-4's 1.56 and 1.57, then line RG's 1.58 to 1.61, then the 1.62 to 1.65 of lines LIB-O,
+  RG and PS, then line NP's 1.66);
+  1.68 2026-11-21 (approved exception 20, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`)
+  F2, `-import_search_strategy`; numbered after 1.67)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -456,8 +477,8 @@ Explicit rejections (rule 3):
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
-  exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
-  list size not positive. A query length plus `-window_size` in (2^30, 2^31 - 1], where
+  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
@@ -467,7 +488,8 @@ together with D8, every sum above 2^30 is rejected).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
-more in BLASTP, whose preliminary hit list size wraps to 2 to 48. TBLASTX's culling limit
+more in BLASTP, whose preliminary hit list size wraps to 2 to 48, before version 1.66 (approved
+exception 19 computes it without the overflow). TBLASTX's culling limit
 plus 3 wrapping in `Int4` (decision D1) was reproduced until version 1.4 (exception 4).
 
 ## Approved exception (every program with `-culling_limit`, version 1.4)
@@ -1017,6 +1039,61 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
     (`LOSAT/src/algorithm/blastp/hsp.rs`).
 
+## Approved difference (`losat rpsbproc`, the order of tied hits, version 1.67)
+
+Decided by the Owner on 2026-11-20 (line LIB `DECISIONS.md` 33; the Owner's words are in
+[`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat rpsbproc` sorts with Rust's
+standard sort. NCBI's order is deterministic for its binary, so rule 2 would otherwise reproduce
+it. The place of a NaN (below) is Owner-delegated (2026-11-20, standing instruction 2026-09-29,
+restated 2026-10-07).
+
+rpsbproc 0.5.1 sorts with `std::sort` in five places whose order the output reads: the hits of a
+query, twice, by `TDomAlignOrderByEValue` (the E-value ascending, then the bit score descending,
+`common/cdalignproc_base.hpp:62-70`), before it picks the representative, standard and specific hits
+(`common/cdalignproc_base.cpp:197-270`) and the structural domains (`:305-342`); and the rows of
+its CDD data by PSSM-ID, by accession and by cluster (`CPtrMap::Reset`, `common/ptrmap.hpp:167-179`).
+A sixth map, the clusters by PSSM-ID (`m_pssmid2fam.Reset`, `common/basedata.cpp:2585` and `:2688`),
+is sorted but never searched, so its order does not reach the output; LOSAT does not build it.
+The C++ standard does not keep the order of elements that compare equal in `std::sort`; NCBI's
+Linux builds leave them in the order that their C++ library's sort gives. LOSAT sorts with
+Rust's `slice::sort_unstable_by`, which sorts in place, by NCBI's comparisons made a total order
+and then by the element's place in the input, which gives the order of a stable sort
+(`rpsbproc::data::sort_ties_in_input_order`):
+
+- Hits equal in E-value and bit score (the numbers compared as C++ compares doubles: -0.0 and 0.0
+  are equal) keep the order of the archive or XML. Data rows of one key keep the order of their
+  file; no CDD v3.22 file has two rows of one key.
+- A hit whose E-value or bit score is NaN (printed `-nan`) sorts after every hit with a number in
+  that key (Owner-delegated, 2026-11-20): a NaN E-value after every E-value that is a number, a NaN
+  bit score last among the hits of one E-value; two NaNs are equal. NCBI's comparison orders a NaN
+  against no number (no strict weak ordering), so its place for such a hit depends on the steps of its library's sort. Of the six
+  fixtures whose sorts hold NaN keys, the place after every number leaves 2 equal to NCBI and 46
+  lines different in the other 4, the place before every number also 2, with 59 lines.
+
+Where it shows: in the DOMAINS lines of `-m std` and `-m full` within one query, tied hits change
+order, and which of two tied hits becomes `Specific` can change (`-m std` prints the other hit's
+line, `-m full` swaps their hit types). In a query with a NaN hit, the order of its hits, which hit
+is representative, `Specific` or its superfamily's, and the SITES and MOTIFS lines that follow can
+change. Line LIB measured the stable sort on 2026-11-20 (dev e851ce5a7, the same order of numbers
+as here): 6 of the 408 fixture outputs and 18 of 74 real-size outputs (E. coli K-12 MG1655 proteins
+with rpsblast, `-evalue` 0.01 and 10, and its genome in 929 pieces of 5 kb with rpstblastn, against
+CDD v3.22, as archives and as XML) differed, by 1 to 6 lines each, every one from the first sort of
+hits; in 7 of them one query (`Query_4017` of the `-evalue` 10 search) printed smart00370 in place
+of smart00369 as `Specific` (both E-value 0.759289 and bit score 28.0864). No real-size output holds
+a NaN. With the NaN rule, 9 of the 408 fixture outputs differ: `tie1.std`, `tie1.std.f`, `tie1.full`,
+`tie1.full.f` and `x.tie1.doms.full` by 2 lines each (two tied hits change places), and
+`x.h_tnan3.full`, `x.h_tnan3.both`, `x.h_ntnanthird.full` and `x.h_ntnanthird.both`, inputs with NaN
+values made by hand (fixture README).
+
+Fixtures: the rows of `use` `tied` in `LOSAT/tests/fixtures/rpsbproc/CASES.tsv` hold LOSAT's bytes
+(`tied/`), and the test `tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits`
+(`LOSAT/tests/rpsbproc_fixtures.rs`) compares them with NCBI's frozen bytes (`oracle/`): standard
+error and exit status are equal, and the standard output differs only inside query blocks, either in
+runs of DOMAINS lines that share one query, E-value and bit score with the same hit types, or in a
+query with a NaN E-value or bit score, with the number of such blocks and lines that
+`tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
+`rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
+
 ## Reproduced as NCBI (rule 2)
 
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
@@ -1199,8 +1276,6 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   extensions with NCBI's functions on the batch's buffer.
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
-- `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
-  (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
 - A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
   or for a database sequence with an empty stored title the scientific name from which NCBI makes
   it (since version 1.38 also the name that `x_AdjustProteinTitleSuffix` writes at the end of a
@@ -1256,8 +1331,6 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
 
 - A scoring system without Karlin-Altschul values when an invalid query (such as all N)
   comes first in its batch: NCBI goes on without a gapped block and crashes (SIGSEGV).
-- `-max_target_seqs` above 2^31-51: the preliminary hit list size becomes negative and
-  NCBI crashes.
 - A reward of 32767 or a penalty of -32768 (after NCBI's 16-bit conversion):
   `BLAST_SCORE_MAX`/`BLAST_SCORE_MIN` fall outside NCBI's score range; a reward of 32767
   is counted past the end of the frequency array (invalid queries or a crash), a penalty
@@ -1479,15 +1552,10 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     `Hsp_hit-from` of `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of
     `ParseAlignStrings`) to exception 12. Every case is made by hand; none occurs in the 2,310 jobs
     of PS16d probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
-  - NaN E-values and bit scores of hits, archives and XML alike (version 1.17, the PS16d review
-    S3-3; it narrows PS16a's refusal of every NaN): NCBI's `HUGE_VAL/HUGE_VAL` (sign set, printed
-    `-nan`) is kept and the hits are sorted as libstdc++'s `std::sort` sorts them with
-    `TDomAlignOrderByEValue`, which a NaN makes no strict weak order. Refused only where one of
-    that sort's unguarded loops would read outside its vector (the comparison stays irreflexive and
-    asymmetric with a NaN, so the partition's sentinels hold; the final insertion's walk can leave
-    the vector only after the heap sort of the leftmost part, when it reaches the depth limit). The
-    permutations of 86 NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows
-    `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
+  - NaN E-values and bit scores of hits, archives and XML alike: no longer refused since version
+    1.67 (NCBI's `HUGE_VAL/HUGE_VAL`, sign set, printed `-nan`, is kept and sorted after every
+    number; the approved difference of version 1.67). Version 1.17 (the PS16d review S3-3) had
+    refused the hits whose sort would read outside NCBI's vector.
 
 - TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated;
   version 1.48): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
@@ -2140,6 +2208,25 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
+- `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
+  D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
+  loader of the MegaBLAST database index meets one of these. LOSAT refuses each (exit 1) before
+  the search:
+  - The first index volume (`<name>.NN.idx`, new or old style) is a file of 0 bytes. NCBI maps it
+    as no memory and reads its header through a null pointer when it checks the word size
+    (SIGSEGV, exit status 139, also without read access; fixture row `used_old_empty` of
+    `tests/blastn_mb_index`). A first volume that is not a regular file, does not open or has a
+    word size field above 15 gives NCBI's warning and its search without the index (rows
+    `failread_*`); one shorter than its header reads zeros past its end, as NCBI's mapping does.
+  - A new-style index volume of 36 to 39 bytes, or one NCBI cannot open: NCBI's count of its
+    sequences reads a word that its stream never set, an uninitialized value (row
+    `undefined_idx38`, where NCBI printed 42,008,582). Shorter volumes give NCBI's exception
+    (`at start oid`, `at end oid`), reproduced.
+  - An `-index_name` range whose last volume converts to the largest `unsigned long` (a last
+    volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
+    is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
+    negative ones too, end and are reproduced.
+
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
 `CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
@@ -2234,9 +2321,47 @@ accepted by the maintainer on 2026-11-21 by marking PR #1440 ready for review, a
     Seq-ids, finishes up to the memory it has (2e7 ids in 115 s and 6.9 GB), and LOSAT writes the ids
     as it expands them, in less memory than NCBI.
 
-## Approved exception 19 (an imported strategy's subjects at more than one thread, version 1.65)
+## Approved exception (hit list sizes past `Int4`, NCBI parity line O1c, version 1.66)
 
-Version 1.65, line RG item F2 (DECISIONS F2-Q1). The Owner
+Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), under the Owner's rules
+of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
+accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked.
+
+19. **A hit list size whose preliminary size, or twice it with `-best_hit_*`, passes `Int4`.** `GetPrelimHitlistSize`
+    (`core/blast_hits.c:44-70`) computes the preliminary hit list size in `Int4`:
+    `MIN(MAX(2*h,10),h+50)` for a gapped search without composition-based statistics, `2*h+50`
+    above 500 with them (from 1000 with `ADAPTIVE_CBS`), a signed overflow (undefined behavior in C)
+    from h = 2^30 without them and from h = 2^30 - 25 (1073741799) with them. NCBI BLAST+ 2.17.0's
+    build wraps: without composition-based statistics a size from 2^30 to 2^31 - 51 keeps 10
+    subjects per query and a larger one crashes (SIGSEGV); with them a size from 1073741799 to
+    2147483623 crashes and one from 2147483624 keeps 2 to 48 (probes of line O1c, `-max_target_seqs`
+    and BLASTN's `-num_descriptions` with outfmt 0, in BLASTN, BLASTP, TBLASTN, BLASTX, PSIBLAST,
+    RPSBLAST and RPSTBLASTN). The size is the one of every collector of the preliminary stage
+    (`hspfilter_collector.c`, `hspfilter_culling.c`, `hspfilter_besthit.c`, whose `2 *
+    prelim_hitlist_size` LOSAT computes in 64 bits too), and PSIBLAST's traceback takes it as its hit
+    list size (`traceback_stage.cpp:214-223`). LOSAT computes the size in 64 bits, once for every
+    program (`blastn::hsp::get_prelim_hitlist_size`; on a 32-bit target a size past `usize` is its
+    largest value, which no hit list reaches, since NCBI's OIDs are `Int4`), so each such size keeps
+    every hit, as NCBI's 1073741798 (2^30 - 26) does: NCBI's output at 1073741798 equals LOSAT's at
+    these sizes (the rows with the contract `approved_hitlist_wrap:1073741798` of
+    `LOSAT/tests/outfmt0_manifest.tsv` and the `ncbi-near` rows `db.acbs.blastx.*` and
+    `db.hitlist.*` of `LOSAT/tests/db_search_manifest/`). Ungapped searches and TBLASTX keep the
+    size itself, in NCBI as in LOSAT. With `-best_hit_overhang` or `-best_hit_score_edge` the
+    best-hit writer holds `2 * prelim_hitlist_size` HSPs of a query before it rebuilds its list
+    (`max_hsps`, `core/hspfilter_besthit.c:79`), also in `Int4`, which overflows from a smaller size:
+    1073741774 for a gapped search without composition-based statistics, 536870887 with them
+    (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
+    its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
+    probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
+    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
+    gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
+    contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT
+    reproduced the wrapped sizes (rule 2) and rejected those on which NCBI crashes (rule 3).
+
+## Approved exception 20 (an imported strategy's subjects at more than one thread, version 1.68)
+
+Version 1.68, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -2244,7 +2369,7 @@ duplication itself not a bug?"), that a search strategy whose subjects are seque
 alignment printed N times is not a result of the search), and a refusal of the combination (option B:
 the search itself is valid and its `-num_threads 1` result is deterministic).
 
-19. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
+20. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
     `-num_threads` from the command line's `-subject` only (`CMTArgs::x_ExtractAlgorithmOptions`, NCBI
     reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3203-3236): a strategy that carries its subjects
     (`s_ImportSearchStrategy`, NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628)

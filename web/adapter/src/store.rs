@@ -616,6 +616,12 @@ fn set_sources(store: &mut Store, handles: [u32; 2], give: bool) {
 mod tests {
     use super::*;
 
+    /// NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`): the tests state what NCBI
+    /// writes and compare it with what LOSAT writes.
+    fn ncbi_in_losat_words(ncbi: &str) -> String {
+        losat::web_adapter::losat_text(ncbi).into_owned()
+    }
+
     // `register` stops when the scan and the reader disagree on the records.
     #[test]
     fn a_scan_that_disagrees_with_the_reader_fails_register() {
@@ -692,7 +698,7 @@ mod tests {
         );
         assert_eq!(
             register("blastp", ROLE_QUERY, true, b";c\n\n").unwrap_err(),
-            "BLAST engine error: Empty CBlastQueryVector"
+            ncbi_in_losat_words("BLAST engine error: Empty CBlastQueryVector")
         );
     }
 
@@ -785,12 +791,12 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             reader,
-            "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+            ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.")
         );
         // With the loaders off the reader's check of the data line ends the run, as the CLI's.
         assert_eq!(
             register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap_err(),
-            "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+            ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.")
         );
     }
 

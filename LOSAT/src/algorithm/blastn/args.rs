@@ -1,5 +1,6 @@
 use super::disc_lookup::DiscWordType;
 use crate::blastinput::value_parsers::*;
+use crate::wording::QUERY_OPTIONS_ERROR;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -163,13 +164,22 @@ pub struct BlastnArgs {
     #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3363
-    /// `-use_index` as NCBI's handler reads it (`blast_engine::run` `megablast_index`): ignored
-    /// with `-subject` and for a task other than megablast; with `-db` and megablast, NCBI tries
-    /// the database's index, warns that it has none and searches without it, which LOSAT does,
-    /// and LOSAT refuses a database that has an index (it has no indexed search). `-index_name`
-    /// stays unported.
-    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index (a database that has one is not supported) [default: false]")]
+    /// `-use_index` as NCBI's handler reads it (`blast_engine::mb_index`): ignored with
+    /// `-subject` and for a task other than megablast; with `-db` and megablast, NCBI loads the
+    /// database's index. When it loads none, or the word size is below the index's, NCBI warns
+    /// and searches without it, which LOSAT does; LOSAT refuses an index that NCBI searches with
+    /// (it has no indexed search yet, line RG item D5b).
+    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index (an index that would be used is not supported) [default: false]")]
     pub use_index: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362
+    /// `-index_name`: the old-style index of `-use_index true` (`megablast_index_name`); without
+    /// `-use_index true` NCBI ignores it.
+    #[arg(
+        long,
+        value_name = "string",
+        help = "MegaBLAST database index name (deprecated; use only for old style indices)"
+    )]
+    pub index_name: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // An omitted value keeps the default of the task (`coordination.rs` `determine_evalue`).
     #[arg(long, value_parser = blastn_evalue, help = "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)")]
@@ -518,16 +528,20 @@ impl BlastnArgs {
         self.db.as_deref().map(crate::seqdb::db_argument_name)
     }
 
-    /// The `-db` value as given when NCBI's handler asks for the database's MegaBLAST index:
-    /// `-use_index true` with a database and task megablast (with `-subject` or another task
-    /// NCBI ignores `-use_index`; `blast_engine::run` `megablast_index`).
+    /// The name of the MegaBLAST index that NCBI's handler asks for, and whether it is an
+    /// old-style one: with `-use_index true`, task megablast and a database (with `-subject` or
+    /// another task NCBI ignores `-use_index`; `blast_engine::mb_index`), the `-index_name` value
+    /// (old style) or else the `-db` value as given (new style first).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
-    pub(crate) fn megablast_index_name(&self) -> Option<&str> {
-        if self.use_index == Some(true) && self.task == "megablast" {
-            self.db.as_deref()
-        } else {
-            None
+    pub(crate) fn megablast_index_name(&self) -> Option<(&str, bool)> {
+        if self.use_index != Some(true) || self.task != "megablast" {
+            return None;
+        }
+        match (&self.index_name, &self.db) {
+            (Some(name), Some(_)) => Some((name, true)),
+            (None, Some(db)) => Some((db, false)),
+            (_, None) => None,
         }
     }
 
@@ -596,7 +610,7 @@ impl BlastnArgs {
             self.dust =
                 parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
                     exit: 1,
-                    message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
+                    message: format!("{QUERY_OPTIONS_ERROR} {message}\n{footer}\n").into(),
                 })?;
         }
         Ok(())
@@ -631,7 +645,7 @@ impl BlastnArgs {
             return Err(crate::cli::NativeError {
                 exit: 1,
                 message: format!(
-                    "BLAST query/options error: Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\n{}\n",
+                    "{QUERY_OPTIONS_ERROR} Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
                 ).into(),
             }

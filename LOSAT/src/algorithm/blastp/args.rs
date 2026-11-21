@@ -536,8 +536,6 @@ pub struct ResolvedBlastpArgs {
     /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
     /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
     pub sort: crate::report::hit_sort::ReportSort,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
@@ -689,8 +687,7 @@ impl ResolvedBlastpArgs {
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
-            )
-            .max(1) as usize,
+            ),
         }
     }
 
@@ -1070,7 +1067,6 @@ impl BlastpArgs {
                 BlastpApp::Blastp => self.formatting.report_sort(),
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
-            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315

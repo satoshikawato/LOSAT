@@ -70,7 +70,10 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 8 since the index scan and `register` read as
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 10 since a run prints the text that the command
+/// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and
+/// the *start* field `prints` (line WQA's D14, 2026-11-20; version 9 is taken by another open
+/// branch); 8 since the index scan and `register` read as
 /// the engine's reader with the run's data loaders (`scan_begin` and `register` take the program,
 /// the role and the setting, which *validation* gives on stream 2; a `>?` gap line and the lines
 /// that NCBI's line reader joins are indexed, and the reader's refusals come in its words; line
@@ -84,7 +87,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    8
+    10
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -433,6 +436,12 @@ pub unsafe extern "C" fn losat_web2_run(
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
         let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
+        // A run that prints a text in place of a search reads no input, as the command line reads
+        // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
+        if run::prints(&argv).is_some() {
+            run::run(&argv, &[], &[])?;
+            return Ok(0);
+        }
         store::with_inputs(
             program,
             query_handle,

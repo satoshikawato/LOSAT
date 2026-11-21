@@ -12,11 +12,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::rc::Rc;
 
+use super::format::Header;
 use super::stream::{SeqData, SequenceStream, StreamError};
-use super::{
-    code_bits, min_offset, Options, SeqNum, Word, CR, OFFSET_COMBINED, UNCOMPRESSED, VERSION,
-    WIDTH_32,
-};
+use super::{code_bits, min_offset, Options, SeqNum, Word, CR};
 
 /// `CDbIndex_Factory::MEGABYTE`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
@@ -840,32 +838,6 @@ impl OffsetData {
     }
 }
 
-/// `CDbIndex_Factory::SaveHeader`: the version (5 legacy, 6 new), the width, the Nmer length,
-/// then `OFFSET_COMBINED` and `UNCOMPRESSED` (legacy) or the stride and the word size hint,
-/// then the first and last sequences and chunks.
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
-fn save_header(
-    os: &mut impl Write,
-    options: &Options,
-    [start, start_chunk, stop, stop_chunk]: [SeqNum; 4],
-) -> std::io::Result<()> {
-    let version = if options.legacy { VERSION } else { VERSION + 1 };
-    os.write_all(&[version, 0, 0, 0, 0, 0, 0, 0])?;
-    os.write_all(&WIDTH_32.to_le_bytes())?;
-    write_word(os, options.hkey_width as Word)?;
-    if options.legacy {
-        write_word(os, OFFSET_COMBINED)?;
-        write_word(os, UNCOMPRESSED)?;
-    } else {
-        write_word(os, options.stride as Word)?;
-        write_word(os, options.ws_hint as Word)?;
-    }
-    for word in [start, start_chunk, stop, stop_chunk] {
-        write_word(os, word)?;
-    }
-    Ok(())
-}
-
 /// Why a volume was not made, after what NCBI's would have posted.
 pub(crate) enum Stop {
     Stream(StreamError),
@@ -968,7 +940,15 @@ pub(crate) fn make_index(
     // open, or a write that fails, is not reported.
     if let Ok(file) = File::create(oname) {
         let mut os = BufWriter::with_capacity(1 << 20, file);
-        let _ = save_header(&mut os, options, [start, start_chunk, *stop, stop_chunk])
+        let header = Header::of(
+            options.legacy,
+            options.hkey_width as Word,
+            options.stride as Word,
+            options.ws_hint as Word,
+            [start, start_chunk, *stop, stop_chunk],
+        );
+        let _ = header
+            .write(&mut os)
             .and_then(|()| offset_data.save(&mut os, options))
             .and_then(|()| subject_map.save(&mut os))
             .and_then(|()| os.flush());

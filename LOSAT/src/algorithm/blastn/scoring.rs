@@ -9,6 +9,7 @@ use crate::blastinput::report_counts::{run_report_counts_with, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{ungapped_beta, KarlinParams, NuclValues};
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 
 fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
@@ -112,7 +113,7 @@ fn check_scoring_options_with(
     let footer = crate::wording::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
+        message: format!("{QUERY_OPTIONS_ERROR} {message}\n{footer}\n").into(),
     }
     .into())
 }
@@ -120,23 +121,11 @@ fn check_scoring_options_with(
 /// LOSAT's limits on the options that NCBI accepts, checked where NCBI starts the search
 /// (after its `Query is Empty!` success, before its Karlin-Altschul table error, whose
 /// computation the range limit bounds): a reward of 0 or less with a penalty that is not 0
-/// (no valid query; reward 0 with penalty 0 is matrix-only scoring, which runs), a hit list
-/// size whose preliminary size overflows (`get_prelim_hitlist_size`),
-/// and a reward of `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values
-/// after NCBI's conversion). The limit on greedy gap costs follows the table check
+/// (no valid query; reward 0 with penalty 0 is matrix-only scoring, which runs) and a reward of
+/// `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values after NCBI's
+/// conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_losat_limits_with(args, &args.report_counts, args.ungapped)
-}
-
-/// `check_losat_limits` with the hit list size of `counts`, see `check_scoring_options_with`.
-/// An ungapped search keeps `hitlist_size` preliminary hits (`get_prelim_hitlist_size` with
-/// `gapped_calculation` false), which cannot overflow.
-fn check_losat_limits_with(
-    args: &BlastnArgs,
-    counts: &ReportCounts,
-    ungapped: bool,
-) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     // Reward 0 with penalty 0 is matrix-only scoring (`coordination::engine_scoring_pair`).
     // Another reward of 0 or less leaves every query without Karlin-Altschul values (NCBI:
@@ -148,13 +137,6 @@ fn check_losat_limits_with(
             spec.penalty
         );
     }
-    super::hsp::check_prelim_hitlist_size(
-        counts.hitlist_size,
-        args.max_target_seqs.is_some(),
-        false,
-        !ungapped,
-        "BLASTN",
-    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1520
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2175-2179
     // NCBI leaves a reward of BLAST_SCORE_MAX (32767) or a penalty of BLAST_SCORE_MIN
@@ -242,7 +224,7 @@ pub(crate) fn karlin_error(
     message: &str,
     empty_queries: impl IntoIterator<Item = bool>,
 ) -> anyhow::Error {
-    let mut text = String::from("BLAST engine error: ");
+    let mut text = format!("{ENGINE_ERROR} ");
     for empty in empty_queries {
         text.push_str("Error: ");
         text.push_str(message);

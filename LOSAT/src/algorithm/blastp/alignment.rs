@@ -63,6 +63,21 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
     hit: &Hit,
     matrix: ScoringMatrix,
 ) -> Option<ProteinAlignmentView> {
+    // An ungapped HSP of length 0 (`-ungapped` with a low `-threshold`, which `Blast_HSPTest` keeps)
+    // has no column: empty rows, whose range of the subject may start at its first letter.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780
+    if hit.length == 0 {
+        return Some(ProteinAlignmentView {
+            query_aln: String::new(),
+            subject_aln: String::new(),
+            num_ident: 0,
+            num_positives: 0,
+            gap_letters: 0,
+            gap_opens: 0,
+            alignment_len: 0,
+        });
+    }
     let q_offset = hit.q_start.checked_sub(1)?;
     let s_offset = hit.s_start.min(hit.s_end).checked_sub(1)?;
 

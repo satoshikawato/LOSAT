@@ -523,6 +523,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
+            oid_masks: None,
             hash_index: false,
             taxid: None,
             taxid_map: None,
@@ -623,6 +624,7 @@ fn makedb_version(
         metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,
+        oid_masks: None,
         hash_index: false,
         taxid: None,
         taxid_map: None,
@@ -1592,6 +1594,20 @@ fn the_metadata_files_of_version_5_are_makeblastdb_s() {
 )]
 fn metadata_output_prefix_runs_as_makeblastdb() {
     run_v5_cases("P_");
+}
+
+/// `-oid_masks` as makeblastdb 2.17.0 has it: the OID mask file of each volume (`.pxm`, `.nxm`)
+/// whose bit is 0 for a sequence whose ids but GIs are all predicted RefSeq accessions, with and
+/// without `-parse_seqids`, the values 0 and 2 (no file), -1 and `0x01`, a database without models,
+/// several volumes, version 4 with a GI alone (a model) and the accession guide's warnings that
+/// the mask posts again, for every id (line RG item D3b).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn oid_masks_runs_as_makeblastdb() {
+    run_v5_cases("O_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed

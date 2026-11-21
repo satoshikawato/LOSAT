@@ -15,5 +15,6 @@ pub mod diagnostics;
 pub(crate) mod masks;
 pub(crate) mod tabular;
 pub(crate) mod translated_chunks;
+pub(crate) mod unknown_matrix;
 pub(crate) mod x_context_table;
 pub(crate) mod x_db_stream;

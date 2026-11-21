@@ -5314,28 +5314,12 @@ mod tests {
                     .collect();
                 assert_eq!(actual.len(), expected.len(), "{name} retained count");
                 for (
-                    (
-                        score,
-                        ident,
-                        length,
-                        mismatch,
-                        gaps,
-                        gapopen,
-                        q0,
-                        q1,
-                        s0,
-                        s1,
-                        frame,
-                        e,
-                        bits,
-                    ),
+                    (score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame, e, bits),
                     expected,
                 ) in actual.into_iter().zip(expected)
                 {
                     assert_eq!(
-                        (
-                            score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame
-                        ),
+                        (score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame),
                         expected,
                         "{name} report values/order"
                     );

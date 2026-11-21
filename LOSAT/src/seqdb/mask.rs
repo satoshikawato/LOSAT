@@ -630,10 +630,22 @@ impl SeqDb {
     /// reads them (line SW, SW8 DECISIONS 40): unsorted, inverted or past the sequence, so
     /// a caller that indexes letters must check them ([`MaskRanges::Ranges`]).
     pub fn mask_ranges_at(&self, at: SeqLocation, algo_id: i32) -> Result<MaskRanges, SeqDbError> {
+        self.mask_ranges_in(at, algo_id, &mut MaskBlock::default())
+    }
+
+    /// [`SeqDb::mask_ranges_at`] through the caller's `block`, whose buffers (and the name of the
+    /// column's file) are kept from one sequence to the next: the reader of a program that asks
+    /// for the masks of one sequence after another (`blastdbcmd`'s `%m` and
+    /// `-mask_sequence_with`, `makembindex -db_mask`).
+    pub fn mask_ranges_in(
+        &self,
+        at: SeqLocation,
+        algo_id: i32,
+        block: &mut MaskBlock,
+    ) -> Result<MaskRanges, SeqDbError> {
         let SeqLocation {
             volume, vol_oid, ..
         } = at;
-        let mut block = MaskBlock::default();
         self.read_mask_block(
             BlockRange {
                 volume,
@@ -642,7 +654,7 @@ impl SeqDb {
                 first_ordinal: at.id,
             },
             algo_id,
-            &mut block,
+            block,
         );
         match block.ranges(vol_oid) {
             Ok(BlockMasks::Ranges(ranges)) => return Ok(MaskRanges::Ranges(ranges.to_vec())),
@@ -654,7 +666,7 @@ impl SeqDb {
             Err(BlockMaskError::Ranges(error)) => return Err(error),
             Err(BlockMaskError::Read(_)) => {}
         }
-        Err(block.into_read_error(vol_oid))
+        Err(std::mem::take(block).into_read_error(vol_oid))
     }
 
     // No NCBI counterpart (reads only): NCBI maps the column files and its `GetMaskData` points into
@@ -665,15 +677,22 @@ impl SeqDb {
     /// its blobs (`Column::read_blobs`); [`MaskBlock::ranges`] gives each sequence's, with
     /// [`SeqDb::mask_ranges_at`]'s checks and errors in its order (the algorithms' table and the
     /// volume's columns: the error of every sequence of the block).
+    #[inline]
     pub fn read_mask_block(&self, range: BlockRange, algo_id: i32, block: &mut MaskBlock) {
-        if block.read == Some((range, algo_id)) {
-            return;
+        if block.read != Some((range, algo_id)) {
+            self.fill_mask_block(range, algo_id, block);
         }
+    }
+
+    /// [`SeqDb::read_mask_block`] of a block that `block` does not hold: the algorithms' table,
+    /// then the volume's mask column or the GI masks (apart, so that the check of the block held
+    /// stays a short call in the caller).
+    #[inline(never)]
+    fn fill_mask_block(&self, range: BlockRange, algo_id: i32, block: &mut MaskBlock) {
         block.read = Some((range, algo_id));
         block.error = None;
-        block.column = false;
+        block.source = BlockSource::None;
         block.volume_algo = None;
-        block.gi = false;
         let algorithms = match self.mask_algorithms() {
             Ok(algorithms) => algorithms,
             Err(error) => {
@@ -681,10 +700,13 @@ impl SeqDb {
                 return;
             }
         };
-        if let Some(masks) = algorithms.gi_masks() {
-            self.read_gi_mask_block(masks, range, algo_id, block);
-            return;
-        }
+        let table = match &algorithms.kind {
+            AlgorithmsKind::Columns(table) => table,
+            AlgorithmsKind::Gi(masks) => {
+                self.read_gi_mask_block(masks, range, algo_id, block);
+                return;
+            }
+        };
         let column = match self.volumes[range.volume].mask_column() {
             Ok(Some(column)) => column,
             Ok(None) => return,
@@ -693,10 +715,10 @@ impl SeqDb {
                 return;
             }
         };
-        block.column = true;
+        block.source = BlockSource::Column;
         // If there actually is mask data, then we need to do the algorithm translation (the
         // volume's id, read for the blobs that are not empty).
-        block.volume_algo = algorithms.volume_algorithm(range.volume, algo_id);
+        block.volume_algo = table.volume_algorithm(range.volume, algo_id);
         if block.path.as_path() != column.data_path() {
             block.path = column.data_path().to_path_buf();
         }
@@ -715,7 +737,7 @@ impl SeqDb {
         algo_id: i32,
         block: &mut MaskBlock,
     ) {
-        block.gi = true;
+        block.source = BlockSource::Gi;
         block.ranges.clear();
         block.gi_spans.clear();
         let volume = &self.volumes[range.volume];
@@ -909,8 +931,9 @@ pub struct MaskBlock {
     read: Option<(BlockRange, i32)>,
     /// The error of every sequence of the block: the algorithms' table or the volume's columns.
     error: Option<SeqDbError>,
-    /// Whether the volume has a mask column (none: no sequence has masks).
-    column: bool,
+    /// Where the masks were read from: none (no sequence has masks), the volume's mask column, or
+    /// the GI masks.
+    source: BlockSource,
     /// The volume's own id of the algorithm (`None`: the volume does not have it).
     volume_algo: Option<i32>,
     /// The column's data file, which the errors of the ranges name.
@@ -920,10 +943,21 @@ pub struct MaskBlock {
     /// The ranges of the last sequence asked for, and the passes of `read_ranges_into`.
     ranges: Vec<(u32, u32)>,
     pass_starts: std::collections::HashSet<i64>,
-    /// Whether the block was read from GI masks (`SeqDb::read_gi_mask_block`): then `ranges`
-    /// holds the ranges of all its sequences and `gi_spans` each one's part, or its error.
-    gi: bool,
+    /// With GI masks (`SeqDb::read_gi_mask_block`), each sequence's part of `ranges` (which holds
+    /// the ranges of all the block's sequences), or its error.
     gi_spans: Vec<Result<std::ops::Range<usize>, SeqDbError>>,
+}
+
+/// Where a [`MaskBlock`] read its masks from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BlockSource {
+    /// Nowhere: the volume has no mask column (no sequence has masks), or the read failed.
+    #[default]
+    None,
+    /// The volume's mask column.
+    Column,
+    /// The GI masks of `MASKLIST`.
+    Gi,
 }
 
 /// The masks of a sequence of a [`MaskBlock`].
@@ -964,16 +998,17 @@ impl MaskBlock {
         if let Some(error) = &self.error {
             return Err(BlockMaskError::Read(error));
         }
-        if self.gi {
-            let first = self.read.map_or(0, |(range, _)| range.first);
-            return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
-                Some(Ok(span)) => Ok(BlockMasks::Ranges(&self.ranges[span.clone()])),
-                Some(Err(error)) => Err(BlockMaskError::Read(error)),
-                None => Ok(BlockMasks::Ranges(&[])),
-            };
-        }
-        if !self.column {
-            return Ok(BlockMasks::Ranges(&[]));
+        match self.source {
+            BlockSource::Column => {}
+            BlockSource::None => return Ok(BlockMasks::Ranges(&[])),
+            BlockSource::Gi => {
+                let first = self.read.map_or(0, |(range, _)| range.first);
+                return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
+                    Some(Ok(span)) => Ok(BlockMasks::Ranges(&self.ranges[span.clone()])),
+                    Some(Err(error)) => Err(BlockMaskError::Read(error)),
+                    None => Ok(BlockMasks::Ranges(&[])),
+                };
+            }
         }
         let blob = self.blobs.blob(vol_oid).map_err(BlockMaskError::Read)?;
         if blob.is_empty() {
@@ -999,7 +1034,7 @@ impl MaskBlock {
         if let Some(error) = self.error {
             return error;
         }
-        if self.gi {
+        if self.source == BlockSource::Gi {
             let first = self.read.map_or(0, |(range, _)| range.first);
             let at = vol_oid.wrapping_sub(first) as usize;
             if let Some(Err(error)) = self.gi_spans.into_iter().nth(at) {

@@ -11,6 +11,7 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
 use crate::seqdb::mask::MaskRanges;
+use crate::seqdb::MaskBlock;
 use crate::seqdb::SeqType;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{BdbError, MaskBdbReader};
@@ -196,6 +197,9 @@ pub(crate) struct BlastDbStream {
     filter: Option<i32>,
     /// `-idmap`: the sequences' titles are read.
     titles: bool,
+    /// The buffers of the masks' reads, kept from one sequence to the next
+    /// (`SeqDb::mask_ranges_in`).
+    mask_block: MaskBlock,
 }
 
 /// The exception or refusal of a database error of the reader.
@@ -239,6 +243,7 @@ impl BlastDbStream {
             reader,
             filter: None,
             titles,
+            mask_block: MaskBlock::default(),
         };
         stream.filter = match filter {
             Filter::None => None,
@@ -357,7 +362,7 @@ impl SequenceStream for BlastDbStream {
             let db = self.reader.db();
             let ranges = db
                 .locate_oid(oid)
-                .and_then(|at| db.mask_ranges_at(at, algo_id))
+                .and_then(|at| db.mask_ranges_in(at, algo_id, &mut self.mask_block))
                 .map_err(|error| bdb_error(self.reader.database_error(error)))?;
             match ranges {
                 MaskRanges::Ranges(ranges) => masks.push(

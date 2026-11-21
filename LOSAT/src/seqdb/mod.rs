@@ -221,7 +221,7 @@ pub enum SeqDbError {
     /// NCBI's `CSeqDBException::eMemoryMappingFailure` of a file that its reader maps without
     /// testing that it was found (a GI-mask data file, `gi_mask::GiMaskFiles::open`, survey D8 of
     /// line NP M4c): the exception's text (`GetMsg`). The command lines' catch reports it as
-    /// "Database memory map file error - <text>" ([`SeqDbError::ncbi_message`]), blastdbcmd's
+    /// `Database memory map file error - <text>` ([`SeqDbError::ncbi_message`]), blastdbcmd's
     /// per-request catch as the text alone ([`SeqDbError::ncbi_request_message`]).
     MemoryMap(String),
 }

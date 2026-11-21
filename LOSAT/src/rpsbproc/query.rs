@@ -408,8 +408,7 @@ fn process_cd_query(
             )));
         }
         // (A NaN E-value or bit score, `NOT-A-NUMBER` in the text, is kept: `domains::calculate`
-        // sorts the hits as NCBI's `std::sort` does and refuses only where that sort would read
-        // outside its vector; the DOMAINS line prints it `-nan`, `ncbi_str::NCBI_NAN`.)
+        // sorts it after every number; the DOMAINS line prints it `-nan`, `ncbi_str::NCBI_NAN`.)
         let dom = match (dom, &align.segs) {
             (Some(mut dom), _) => {
                 dom.pssm_id = pssm_id;
@@ -430,16 +429,14 @@ fn process_cd_query(
     }
     if !query.is_na {
         let all: Vec<usize> = (0..query.aligns.len()).collect();
-        query.frames[0] =
-            calculate(&mut query.aligns, &all, data).map_err(ProcessError::Unsupported)?;
+        query.frames[0] = calculate(&mut query.aligns, &all, data);
         return Ok(());
     }
     let frames = sort_reading_frames(&query.aligns, query.length)
         .map_err(|what| ProcessError::Std(what.to_string()))?;
     for (frame, selected) in frames.iter().enumerate() {
         if !selected.is_empty() {
-            query.frames[frame] =
-                calculate(&mut query.aligns, selected, data).map_err(ProcessError::Unsupported)?;
+            query.frames[frame] = calculate(&mut query.aligns, selected, data);
         }
     }
     Ok(())

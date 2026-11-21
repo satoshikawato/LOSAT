@@ -436,11 +436,11 @@ fn a_batch_without_valid_contexts_and_with_queries_without_letters_stops() {
     for (records, message) in [
         (
             vec![("q1", &b""[..]), ("q2 two", &b""[..])],
-            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n",
+            "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n",
         ),
         (
             vec![("q1", &b"AC"[..]), ("q2 two", &b""[..])],
-            "BLAST engine error: Warning: Sequence contains no data \n",
+            "LOSAT engine error: Warning: Sequence contains no data \n",
         ),
     ] {
         let inputs = Inputs {
@@ -452,7 +452,7 @@ fn a_batch_without_valid_contexts_and_with_queries_without_letters_stops() {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let prolog = String::from_utf8_lossy(&outputs[0]);
         assert!(
-            prolog.starts_with("TBLASTX 2.17.0+") && !prolog.contains("Query="),
+            prolog.starts_with(&format!("TBLASTX (LOSAT {})", env!("CARGO_PKG_VERSION"))) && !prolog.contains("Query="),
             "{prolog}"
         );
         assert!(outputs[1].is_empty());
@@ -508,11 +508,12 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
             native_error(result),
             (
                 3,
-                "BLAST engine error: The average subject length is too short\n".to_string()
+                "LOSAT engine error: The average subject length is too short\n".to_string()
             )
         );
         assert_eq!(String::from_utf8_lossy(&diagnostics), warnings);
-        assert!(String::from_utf8_lossy(&outputs[0]).starts_with("TBLASTX 2.17.0+"));
+        assert!(String::from_utf8_lossy(&outputs[0])
+            .starts_with(&format!("TBLASTX (LOSAT {})", env!("CARGO_PKG_VERSION"))));
         assert!(outputs[1].is_empty());
     }
 }
@@ -577,7 +578,7 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
         for queries in [&queries[..], &[]] {
             assert_eq!(
                 run(&["-evalue", evalue], queries),
-                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n"
+                "LOSAT query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n"
             );
         }
     }

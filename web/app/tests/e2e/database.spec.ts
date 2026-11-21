@@ -1,13 +1,14 @@
 // -db in the browsers through the package's API, without the application's screens (line WQA D12a, 2026-11-20): the
 // db_search rows that the wasm-threading check runs (LOSAT/tests/check_wasm_threading.py) and two of the filters
 // (-seqidlist, -taxids), each with the files of its database's folder given to the run as Files, on the serial module
-// and on the threaded one at 4 threads, whose threads read the descriptors that another thread opened. Outfmt 6 is
-// NCBI BLAST+ 2.17.0's frozen bytes (LOSAT/tests/fixtures/db_search). Each search logs its time and the engine's
-// memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has compiled
-// their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more tests give
-// the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the Engine worker
-// and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick, which the
-// browser no longer reads (review of D12a, low 5).
+// and on the threaded one at 4 threads, whose threads read the descriptors that another thread opened. Outfmt 6 is NCBI
+// BLAST+ 2.17.0's frozen bytes (LOSAT/tests/fixtures/db_search) in LOSAT's words. Each search logs its time and the
+// engine's memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has
+// compiled their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more
+// tests give the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the
+// Engine worker and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick,
+// which the browser no longer reads (review of D12a, low 5).
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,6 +32,14 @@ const LOSAT = join(REPOSITORY, 'LOSAT');
 // left out.
 const CHANGED_FILE_ERROR = /engine error: Database memory map file error/;
 const ROWS = ['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6'];
+
+/** The SHA-256 of a row's frozen NCBI outfmt 6 in LOSAT's words (LOSAT/tests/losat_wording.py map-output, line NW2). */
+function frozenInLosatWords(id: string): string {
+  const mapped = spawnSync('python3', ['-I', join(LOSAT, 'tests/losat_wording.py'), 'map-output', join(LOSAT, 'tests/fixtures/db_search', `${id}.out`)]);
+  if (mapped.error) throw mapped.error;
+  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${id}: ${mapped.stderr.toString()}`);
+  return createHash('sha256').update(mapped.stdout).digest('hex');
+}
 
 interface Row {
   readonly id: string;
@@ -92,7 +101,7 @@ test('-db searches read the database in place and write NCBI frozen outfmt 6, on
   for (const [i, result] of results.entries()) {
     const label = `${browserName} ${result.id} n=${result.threads}`;
     expect.soft(result.error, label).toBeUndefined();
-    const frozen = createHash('sha256').update(readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${result.id}.out`))).digest('hex');
+    const frozen = frozenInLosatWords(result.id);
     expect.soft(result.sha256, `${label}: outfmt 6 = NCBI frozen`).toBe(frozen);
     expect.soft(result.runtime?.path, label).toBe(list[i]!.threads === 1 ? 'serial' : 'threaded');
     expect.soft(result.runtime?.threads, label).toBe(list[i]!.threads);
@@ -125,7 +134,7 @@ test("-db searches read the user's picked Files from the disk, in the Engine wor
   for (const [i, result] of results.entries()) {
     const label = `${browserName} picked ${result.id} n=${result.threads}`;
     expect.soft(result.error, label).toBeUndefined();
-    const frozen = createHash('sha256').update(readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${result.id}.out`))).digest('hex');
+    const frozen = frozenInLosatWords(result.id);
     expect.soft(result.sha256, `${label}: outfmt 6 = NCBI frozen`).toBe(frozen);
     expect.soft(result.runtime?.path, label).toBe(list[i]!.threads === 1 ? 'serial' : 'threaded');
   }

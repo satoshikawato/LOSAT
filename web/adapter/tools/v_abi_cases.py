@@ -419,14 +419,15 @@ def own_search() -> list[dict]:
     Runs of two searches (`-num_descriptions`, `-num_alignments`; abi_v2.md §7) that fail:
     `-num_alignments 0` with `-outfmt 6` in every program (NCBI's `No hits are being saved` after
     the formatting handler's warning, where the CLI's outfmt 0 completes), also with `-evalue 0`,
-    whose error the CLI gives after the hit list's (`validate` too); BLASTN's `-num_descriptions
-    2147483647` without `-outfmt` (LOSAT's error for format 0, whose N + 50 overflows, where the
-    CLI's outfmt 6 and 7 complete); and two searches that both fail, with and without `-outfmt 6`,
-    whose error and stream 3 are those of the argv's own `-outfmt` (BLASTN's overflow with
-    `-num_alignments 0`, BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that
-    complete where the other search fails, whose formats are empty and whose warnings and error
-    stream 3 adds after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every
-    program, BLASTN's overflow with `-outfmt 6`.
+    whose error the CLI gives after the hit list's (`validate` too); and two searches that both
+    fail, with and without `-outfmt 6`, whose error and stream 3 are those of the argv's own
+    `-outfmt` (BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that complete where
+    the other search fails, whose formats are empty and whose warnings and error stream 3 adds
+    after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every program, also
+    with BLASTN's `-num_descriptions 2147483647`, whose format 0 keeps every hit (LOSAT computes the
+    preliminary hit list size without NCBI's 32-bit overflow, PD-LOSAT-NCBI-DEFECTS); BLASTN's
+    `-num_descriptions 2147483647` with `-outfmt 6` fails as the argv's `-num_alignments 0`, and
+    without `-num_alignments 0` completes with every format, with and without `-outfmt 6`.
 
     The formatting handler's warnings of the formats that the argv does not ask for (review r2
     M1): runs that fail with `-line_length`, `-sorthits`, `-sorthsps` or equal `-num_descriptions`
@@ -488,11 +489,11 @@ def own_search() -> list[dict]:
         add(f"own_search.{program}.na0.outfmt6", program, ["-num_alignments", "0"], "6")
         add(f"own_search.{program}.na0", program, ["-num_alignments", "0"], failure=False)
     overflow = ["-num_descriptions", "2147483647"]
-    add("own_search.blastn.nd_overflow", "blastn", overflow, prolog=False)
+    add("own_search.blastn.nd_overflow", "blastn", overflow, failure=False)
     add("own_search.blastn.nd_overflow.outfmt6", "blastn", overflow, "6", failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt0", "blastn", [*overflow, "-num_alignments", "0"], failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt6", "blastn", [*overflow, "-num_alignments", "0"], "6")
     for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6")):
-        add(f"own_search.blastn.nd_overflow.na0.{name}", "blastn", [*overflow, "-num_alignments", "0"], outfmt,
-            prolog=False)
         for program in ("blastx", "blastp", "tblastn", "tblastx"):
             add(f"own_search.{program}.na0.evalue0.{name}", program, ["-num_alignments", "0", "-evalue", "0"],
                 outfmt, prolog=False)

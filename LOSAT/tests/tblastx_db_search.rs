@@ -260,7 +260,7 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.ends_with("BLAST engine error: Database memory map file error\n"),
+        stderr.ends_with("LOSAT engine error: Database memory map file error\n"),
         "{stderr}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -344,7 +344,7 @@ fn query_batches_read_the_titles_of_their_reported_sequences() {
             && stderr
                 .lines()
                 .last()
-                .is_some_and(|line| line.starts_with("BLAST Database error: ")),
+                .is_some_and(|line| line.starts_with("LOSAT database error: ")),
         "{stderr}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -385,7 +385,7 @@ fn a_truncated_sequence_file_stops_the_run() {
 
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
 // reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
-// `BLAST Database error`, exit status 2.
+// `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
 fn database_arguments_are_checked_as_ncbi_checks_them() {
     let output = losat()
@@ -411,7 +411,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.starts_with(
-            "BLAST Database error: No alias or index file found for nucleotide database ["
+            "LOSAT database error: No alias or index file found for nucleotide database ["
         ),
         "{stderr}"
     );

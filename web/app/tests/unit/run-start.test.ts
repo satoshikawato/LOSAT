@@ -362,11 +362,11 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     ]);
     expect(opened).toBe(2);
     // The verdict and start are the engine's.
-    const { abi } = fakeExports({ validate: 'BLAST query/options error: bad' });
-    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'BLAST query/options error: bad' }).abi);
+    const { abi } = fakeExports({ validate: 'LOSAT query/options error: bad' });
+    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'LOSAT query/options error: bad' }).abi);
     expect(await engine.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({
       ok: false,
-      message: 'BLAST query/options error: bad',
+      message: 'LOSAT query/options error: bad',
     });
     expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null, database: false } });
   });
@@ -625,7 +625,7 @@ function workerRun(words: readonly string[], conffile?: RegistryFile) {
   return { run, delivered, close };
 }
 
-const LOG: RunFile = { name: 'run.log', bytes: encode('BLAST engine error: The average subject length is too short\n') };
+const LOG: RunFile = { name: 'run.log', bytes: encode('LOSAT engine error: The average subject length is too short\n') };
 const CONFFILE = { name: 'c.ini', file: new Blob(['[BLAST]\n']) };
 
 describe("the Engine worker's runtime and the files of a run", () => {
@@ -815,13 +815,13 @@ describe("the Engine worker's runtime and the files of a run", () => {
   });
 
   it("gives a failed run's files with its error, releases what it registered, and sends fail, not end", async () => {
-    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'BLAST engine error: The average subject length is too short' });
+    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'LOSAT engine error: The average subject length is too short' });
     const { run, delivered, close } = workerRun(['-logfile', 'run.log'], CONFFILE);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineCallError);
-    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
     expect(runFilesOf(error)).toEqual([LOG]);
     expect(calls.slice(-2)).toEqual(['release 102', 'file release 101']);
     // The chunk written before the failure, then fail, and no end.
@@ -841,12 +841,12 @@ describe("the Engine worker's runtime and the files of a run", () => {
     // Two chunks that split the two bytes of é.
     const cut = text.indexOf(0xc3) + 1;
     const warnings = [text.subarray(0, cut), text.subarray(cut)];
-    const { abi } = fakeAbi({ warnings, fail: 'BLAST engine error: The average subject length is too short' });
+    const { abi } = fakeAbi({ warnings, fail: 'LOSAT engine error: The average subject length is too short' });
     const { run, delivered, close } = workerRun([]);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
-    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
     expect(runOutputFailedOf(error)).toBe(true);
     expect('diagnostics' in (error as Error)).toBe(false);
     expect(runFilesOf(error)).toBeUndefined();
@@ -859,7 +859,7 @@ describe("the Engine worker's runtime and the files of a run", () => {
     close();
     // A failed run without warnings ends with `fail` too; a stop sends nothing after its chunks.
     const silent = workerRun([]);
-    const failed = await runtimeWith(fakeAbi({ fail: 'BLAST engine error: Empty CBlastQueryVector' }).abi)
+    const failed = await runtimeWith(fakeAbi({ fail: 'LOSAT engine error: Empty CBlastQueryVector' }).abi)
       .run(silent.run, () => undefined)
       .catch((e: unknown) => e);
     expect(runOutputFailedOf(failed)).toBe(true);
@@ -908,12 +908,12 @@ describe("the Engine worker's runtime and the files of a run", () => {
     await expect(runtimeWith(completed.abi).run(first.run, () => undefined)).rejects.toThrow('entry 1 is not stored (method 8)');
     expect(await first.delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
     first.close();
-    const failed = fakeAbi({ runFiles: broken, fail: 'BLAST engine error: x' });
+    const failed = fakeAbi({ runFiles: broken, fail: 'LOSAT engine error: x' });
     const second = workerRun(['-logfile', 'run.log']);
     const error = await runtimeWith(failed.abi)
       .run(second.run, () => undefined)
       .catch((e: unknown) => e);
-    expect((error as Error).message).toMatch(/^BLAST engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
+    expect((error as Error).message).toMatch(/^LOSAT engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
     expect(runFilesOf(error)).toBeUndefined();
     second.close();
   });
@@ -1006,9 +1006,9 @@ describe('the gateway and the files of a run', () => {
 
     const failed = engine.run(request('r2'), channel.port1, () => undefined);
     await runPosted(2);
-    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'BLAST engine error: x', runFiles: [LOG] } });
+    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'LOSAT engine error: x', runFiles: [LOG] } });
     const error = await failed.catch((e: unknown) => e);
-    expect(error).toMatchObject({ name: 'EngineCallError', message: 'BLAST engine error: x' });
+    expect(error).toMatchObject({ name: 'EngineCallError', message: 'LOSAT engine error: x' });
     expect(runFilesOf(error)).toEqual([LOG]);
 
     const plain = engine.run(request('r3'), channel.port1, () => undefined);
@@ -1109,13 +1109,13 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const [file] = readStoredZip(failed.joined(RUN_FILES_STREAM));
     expect(file!.name).toBe('run.log');
     expect(new TextDecoder().decode(file!.bytes)).toBe(
-      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nBLAST engine error: The average subject length is too short\n',
+      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nLOSAT engine error: The average subject length is too short\n',
     );
     expect(failed.streams.has(3)).toBe(false);
     // Without -logfile the warning before the error is on stream 3, where the command line writes it
     // (NCBI BLAST+ 2.17.0; line WQA's sweep, D3, 2026-11-19), and the error is the run's.
     const plain = run(abi, [], encode('>s1 alpha\n'));
-    expect((plain.error as Error).message).toBe('BLAST engine error: The average subject length is too short\n');
+    expect((plain.error as Error).message).toBe('LOSAT engine error: The average subject length is too short\n');
     expect(new TextDecoder().decode(plain.joined(3))).toBe('Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\n');
   }, 120_000);
 

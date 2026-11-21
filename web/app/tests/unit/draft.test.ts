@@ -1516,13 +1516,13 @@ describe('SearchDraft submit', () => {
 
   it("validates the draft's argv with the engine and shows its message", async () => {
     const { draft, validated } = setup({
-      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'BLAST query/options error: bad' } : { ok: true, dataLoaders: true }),
+      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'LOSAT query/options error: bad' } : { ok: true, dataLoaders: true }),
     });
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
     draft.setField('-word_size', '3');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'BLAST query/options error: bad' });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'LOSAT query/options error: bad' });
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-word_size', '3']);
   });
 

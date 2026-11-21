@@ -528,6 +528,6 @@ describe('the remedy', () => {
     const crossed = new Error(SERIAL);
     crossed.name = 'UnavailableError';
     expect(failureText(crossed)).toBe(`${SERIAL}. Reload the page.`);
-    expect(failureText(new Error('BLAST engine error: x'))).toBe('BLAST engine error: x');
+    expect(failureText(new Error('LOSAT engine error: x'))).toBe('LOSAT engine error: x');
   });
 });

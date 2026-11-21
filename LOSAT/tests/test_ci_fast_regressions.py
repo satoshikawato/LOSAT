@@ -60,6 +60,13 @@ class SamClRuleTests(unittest.TestCase):
         self.assertEqual(db_fixtures.strip_sam_cl(other), self.WITHOUT)
         self.assertEqual(db_fixtures.strip_sam_cl(self.WITHOUT), self.WITHOUT)
 
+    def test_losats_version_form_is_stripped_the_same_way(self):
+        # LOSAT states `VN:LOSAT 0.2.0` (AGENTS.md rule 8); NCBI's frozen bytes in LOSAT's words do too.
+        losat = self.WITH.replace(b"VN:2.17.0+", b"VN:" + db_fixtures.losat_wording.LOSAT_VERSION)
+        expected = self.WITHOUT.replace(b"VN:2.17.0+", b"VN:" + db_fixtures.losat_wording.LOSAT_VERSION)
+        self.assertEqual(db_fixtures.strip_sam_cl(losat), expected)
+        self.assertEqual(db_fixtures.strip_sam_cl(losat.replace(b"/x/blastn -a ", b"losat blastn -b ")), expected)
+
     def test_any_other_byte_is_compared(self):
         for old, new in ((b"r\t0", b"r\t1"), (b"LN:3", b"LN:4"), (b"PN:blastn", b"PN:blastx"),
                          (b"VN:2.17.0+", b"VN:2.17.1+"), (b"@HD", b"@XX")):
@@ -420,7 +427,8 @@ class DbSearchFixtureTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT program is a shell script")
     def test_check_compares_a_cut_near_row_with_the_first_bytes_of_its_near_run(self):
         # `check` of a rejection row with `ncbi-near: ROW_ID first N bytes` expects exactly the first N bytes of
-        # ROW_ID's frozen stdout (the prolog of the db.x2g.bx.of rows), and LOSAT's rc and expected stderr text.
+        # ROW_ID's frozen stdout (the prolog of the db.x2g.bx.of rows) in LOSAT's words (AGENTS.md rule 8), and
+        # LOSAT's rc and expected stderr text.
         rows = db_fixtures.read_manifest()[1]
         row = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
         whole = (db_fixtures.FROZEN / f"{db_fixtures.near_row_id(row)}.out").read_bytes()
@@ -429,12 +437,14 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertEqual(db_fixtures.expected_stdout(row), whole[:cut])
         with tempfile.TemporaryDirectory() as tmp:
             losat, out = Path(tmp) / "losat", Path(tmp) / "out"
-            losat.write_text(f'#!/bin/sh\ncat "{out}"\nprintf "BLAST engine error: %s\\n" '
+            losat.write_text(f'#!/bin/sh\ncat "{out}"\nprintf "LOSAT engine error: %s\\n" '
                              f'{shlex.quote(db_fixtures.expected_text(row))} >&2\nexit {row["rc"]}\n')
             losat.chmod(0o755)
             env = db_fixtures.clean_env(dict(os.environ), tmp)
-            for stdout, status in ((whole[:cut], "rejection"), (whole, "differs"), (whole[:cut - 1], "differs"),
-                                   (b"", "differs")):
+            words = db_fixtures.losat_wording.losat_output_bytes
+            self.assertNotEqual(words(whole[:cut]), whole[:cut])  # the prolog states the version
+            for stdout, status in ((words(whole[:cut]), "rejection"), (whole[:cut], "differs"),
+                                   (words(whole), "differs"), (words(whole[:cut])[:-1], "differs"), (b"", "differs")):
                 out.write_bytes(stdout)
                 self.assertEqual(db_fixtures.check_row(row, losat, 1, env)[0], status, len(stdout))
 

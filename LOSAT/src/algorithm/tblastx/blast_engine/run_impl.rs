@@ -11,6 +11,7 @@ use crate::algorithm::tblastx::subjects::{SubjectSetNumbers, Subjects, SubjectsU
 use crate::blastinput::report_counts::ReportCounts;
 use crate::report::diag_log::Posts;
 use crate::report::tabular::SubjectFetch;
+use crate::wording::ENGINE_ERROR;
 use std::sync::Arc;
 
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
@@ -895,7 +896,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "tblastx", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -1131,7 +1135,7 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -1583,7 +1587,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "tblastx", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts) =
@@ -1951,7 +1955,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        crate::NCBI_BLAST_VERSION,
+                        crate::wording::REPORT_VERSION,
                         tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
                         // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
@@ -1968,7 +1972,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Database { pairwise, .. } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        crate::NCBI_BLAST_VERSION,
+                        crate::wording::REPORT_VERSION,
                         b"",
                         0,
                         0,
@@ -2385,7 +2389,7 @@ fn write_tblastx_outputs(
                         args.report_counts.num_alignments,
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
-                        version: crate::NCBI_BLAST_VERSION.to_string(),
+                        version: crate::wording::REPORT_VERSION.to_string(),
                         database_name: database.clone().into(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
@@ -3259,6 +3263,14 @@ fn run_batch_loop(
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
     ));
+    // Whether the reports write the same where every load of a subject with a positive taxid throws
+    // (`db_subject::unchanged_by_load_throws`).
+    let reports_unchanged_by_load_throws =
+        crate::report::db_subject::unchanged_by_load_throws_outfmts(
+            outputs.formats.iter().map(|format| format.outfmt),
+            crate::blastinput::app::Program::Tblastx,
+            crate::report::archive::options::RequestKind::Tblastx,
+        );
     let (query_code, db_code) = (
         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
         crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
@@ -3362,7 +3374,7 @@ fn run_batch_loop(
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
         }
@@ -3414,7 +3426,7 @@ fn run_batch_loop(
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for _ in 0..no_data_queries {
                 message.push_str("Warning: ");
                 message.push_str(NO_DATA_MESSAGE);
@@ -3440,7 +3452,7 @@ fn run_batch_loop(
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for record in batch_queries {
                 message.push_str("Error: Unknown error code -1 ");
                 if record.seq().is_empty() {
@@ -3809,7 +3821,10 @@ fn run_batch_loop(
                         &reports.titles.borrow(),
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                             .after_unrecorded_calls(unrecorded_calls)
-                            .after_xml_reports(xml_before.as_ref()),
+                            .after_xml_reports(xml_before.as_ref())
+                            .where_reports_unchanged_by_load_throws(
+                                reports_unchanged_by_load_throws,
+                            ),
                     );
                     drop(reads);
                     let messages = match prefetch {

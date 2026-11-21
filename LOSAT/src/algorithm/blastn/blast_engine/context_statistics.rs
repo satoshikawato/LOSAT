@@ -27,6 +27,7 @@ use crate::algorithm::blastn::scoring::{
     karlin_error,
 };
 use crate::report::pairwise::BlastnIntro;
+use crate::wording::ENGINE_ERROR;
 use anyhow::Result;
 
 /// What `context_statistics` reads: the batch's contexts with the ungapped blocks of their
@@ -328,7 +329,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                     anyhow::Error::from(crate::cli::NativeError {
                         exit: 3,
                         message: format!(
-                            "BLAST engine error: {}\n",
+                            "{ENGINE_ERROR} {}\n",
                             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
                         )
                         .into(),

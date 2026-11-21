@@ -164,8 +164,12 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         let ncbi = ncbi_xml(program);
         if matches!(
             program,
-            "blastdbcmd" | "dustmasker" | "segmasker" | "windowmasker" | "convert2blastmask"
-            | "makembindex"
+            "blastdbcmd"
+                | "dustmasker"
+                | "segmasker"
+                | "windowmasker"
+                | "convert2blastmask"
+                | "makembindex"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

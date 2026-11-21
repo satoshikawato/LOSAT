@@ -68,8 +68,10 @@ use super::super::lookup::{
 };
 use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, pairwise_windows, DisplayMasks, Rows as PairwiseRows};
+use super::super::repeat_filter::MasksOutside;
 use super::super::query_split::{
-    restrict_masks, restrict_masks_with_letter_before, split_query_batch, splits, QueryChunk,
+    masked_before_part, restrict_masks, restrict_masks_with_letter_before, split_query_batch,
+    splits, QueryChunk,
     SplitSizes,
 };
 use super::super::scoring::{
@@ -10447,7 +10449,8 @@ enum BatchStage<'a> {
     /// (`-window_masker_db`, whose errors stop the batch before its search); `None`: made here.
     /// `lower_case_before`: whether the letter before each query's interval is lower case, which
     /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
-    /// `-window_masker_db`).
+    /// `-window_masker_db`). `masks_outside`: with `-filtering_db`, the masks next to each query's
+    /// interval that the batch's masks joined (`repeat_filter::MasksOutside`; empty without them).
     ///
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
@@ -10456,6 +10459,7 @@ enum BatchStage<'a> {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
+        masks_outside: &'a [MasksOutside],
         last: bool,
     },
     /// The preliminary search of one query chunk of a split batch
@@ -11050,9 +11054,32 @@ fn run_in_pool(
         // repeat search's (`coordination::query_masks`, `repeat_filter`): NCBI makes them in the
         // set-up of the batch's queries, and an error of the repeat search fails each query of
         // the batch (`repeat_filter::batch_error`).
+        // NCBI combines the repeat hits with the masks of each query's whole record: with
+        // `-query_loc`, the lower case next to the interval (`MasksOutside`) joins the interval's
+        // masks too, and what the combination joins before it goes on to the chunks of a split
+        // batch (`BatchStage::Search`'s `masks_outside`).
+        let mut masks_outside: Vec<MasksOutside> = Vec::new();
         if let Some(filter) = &args.repeat_filter {
             let searched = batch_records.searched();
-            match super::super::coordination::query_masks(&args, searched, parallel_pool) {
+            if args.lcase_masking && query_input.placements.ranged() {
+                masks_outside = (start..end)
+                    .map(|index| {
+                        let record =
+                            &batch_records.input()[query_input.ordinal(index) - input_start];
+                        MasksOutside::lower_case(
+                            record.seq(),
+                            query_offsets[index],
+                            searched[index - start].seq().len(),
+                        )
+                    })
+                    .collect();
+            }
+            match super::super::coordination::query_masks(
+                &args,
+                searched,
+                &mut masks_outside,
+                parallel_pool,
+            ) {
                 Ok(masks) => window_masker_masks = Some(masks),
                 Err(MaskError::Repeats(error)) => {
                     match super::super::repeat_filter::batch_error(&error, searched.len()) {
@@ -11240,6 +11267,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    masks_outside: &masks_outside,
                     last,
                 },
                 &mut warnings[start],
@@ -11259,6 +11287,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    masks_outside: &masks_outside,
                     last,
                 },
                 &mut warnings[start],
@@ -13035,7 +13064,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_masks: Some(masks),
             ..
         } => masks.to_vec(),
-        BatchStage::Search { .. } => query_masks(args, &letters, parallel_pool)
+        BatchStage::Search { .. } => query_masks(args, &letters, &mut [], parallel_pool)
             .map_err(|error| mask_rejection(args, error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
@@ -13331,6 +13360,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         BatchStage::Search {
             query_offsets,
             lower_case_before,
+            masks_outside,
             ..
         } if any_valid_context && !UNGAPPED => search_query_chunks(
             args,
@@ -13338,6 +13368,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             &seq_data.query_masks,
             query_offsets,
             lower_case_before,
+            masks_outside,
             option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
             &query_context_offsets,
             subjects,
@@ -13873,6 +13904,7 @@ fn search_query_chunks(
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[usize],
     lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
     batch_eff_searchsp: &[i64],
     context_offsets: &[i32],
     subjects: SubjectSource<'_>,
@@ -13955,8 +13987,29 @@ fn search_query_chunks(
         if let Some(window_masker) = &args.window_masker {
             posts.append(window_masker.load_posts(false));
         }
-        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
-            .map_err(|error| mask_rejection(args, error))?;
+        // With `-filtering_db` the masks that the chunk keeps before a part's letters join the
+        // part's masks when it combines the part's repeat hits with them
+        // (`query_split::masked_before_part`).
+        let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
+            chunk
+                .queries
+                .iter()
+                .map(|part| {
+                    let before = masks_outside.get(part.query).map_or(0, |outside| outside.before);
+                    MasksOutside::before_part(masked_before_part(
+                        &query_masks[part.query],
+                        before,
+                        part,
+                        query_offsets[part.query],
+                    ))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let part_masks =
+            chunk_query_masks(args, &parts, restricted, &mut parts_outside, parallel_pool)
+                .map_err(|error| mask_rejection(args, error))?;
         let batch = search_query_batch::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),

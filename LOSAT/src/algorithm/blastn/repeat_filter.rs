@@ -26,7 +26,58 @@ use super::coordination::QueryLetters;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_filter.h:72
 /// `REPEAT_MASK_LINK_VALUE`: a hit's interval joins the masks before it when it starts less
 /// than 5 letters after the end of one (`common::masks::combine_linked`).
-const REPEAT_MASK_LINK_VALUE: usize = 5;
+const REPEAT_MASK_LINK_VALUE: u8 = 5;
+
+/// The letters next to a query's searched letters whose masks can join theirs (`combine`): a mask
+/// that ends `REPEAT_MASK_LINK_VALUE` or more letters before an interval does not join it.
+const REACH: usize = REPEAT_MASK_LINK_VALUE as usize;
+
+/// The masks of a query's record next to its `-query_loc` interval, which NCBI's masks of the
+/// query hold (the lower case of the whole record, `-lcase_masking`) and which join the
+/// interval's own masks when its repeat hits are combined with them (`RepeatFilter::add_masks`).
+/// The masks of a query without a range, or without `-lcase_masking`, are the default (none).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MasksOutside {
+    /// Bit `k`: the letter `k + 1` letters before the interval is masked (`k < REACH`): lower
+    /// case, or a letter that the combination of the batch's masks joined to the interval's
+    /// (`add_masks`), which a chunk of a split batch restricts (`query_split::masked_before_part`).
+    pub(crate) before: u8,
+    /// The first masked letter after the interval, in letters after its last (up to `REACH`).
+    pub(crate) after: Option<usize>,
+}
+
+impl MasksOutside {
+    /// The lower case of `record` next to its letters `offset..offset + length`.
+    pub(crate) fn lower_case(record: &[u8], offset: usize, length: usize) -> Self {
+        let lower = |index: Option<usize>| {
+            index
+                .and_then(|index| record.get(index))
+                .is_some_and(u8::is_ascii_lowercase)
+        };
+        let before = (0..REACH)
+            .filter(|&k| lower(offset.checked_sub(k + 1)))
+            .fold(0u8, |bits, k| bits | 1 << k);
+        let after = (1..=REACH).find(|&a| lower(Some(offset + length + a - 1)));
+        Self { before, after }
+    }
+
+    /// The masks of a part of a split batch's chunk: those the chunk keeps before the part's
+    /// letters end `before` letters before its first (`query_split::masked_before_part`).
+    pub(crate) fn before_part(before: Option<usize>) -> Self {
+        let before = before
+            .filter(|&letters| letters <= REACH)
+            .map_or(0, |letters| 1 << (letters - 1));
+        Self {
+            before,
+            after: None,
+        }
+    }
+
+    /// The nearest masked letter before the interval, in letters before its first.
+    fn nearest_before(&self) -> Option<usize> {
+        (self.before != 0).then(|| self.before.trailing_zeros() as usize + 1)
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:306-322
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_filter.h:57-66
@@ -144,22 +195,57 @@ impl RepeatFilter {
     /// (`hits`) join its masks (`combine`); a query without a hit keeps its masks as they are.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
+    ///
+    /// NCBI combines the masks in the record's letters, so with `-query_loc` the masks outside
+    /// the interval join too (`outside`, one for each query, or empty without a range); the
+    /// search then takes the masks' part in the interval. The letters before the interval that
+    /// a query's combination joins are added to its `outside` (`MasksOutside::before`).
     pub(crate) fn add_masks<L: QueryLetters + ?Sized>(
         &self,
         strand: &str,
         queries: &L,
         masks: &mut [Vec<MaskedInterval>],
+        outside: &mut [MasksOutside],
         pool: &SearchPool<'_>,
     ) -> Result<(), RepeatError> {
         let found = self.hits(strand, queries, pool)?;
-        for (query_masks, mut intervals) in masks.iter_mut().zip(found) {
-            if intervals.is_empty() {
+        for (index, (query_masks, hits)) in masks.iter_mut().zip(found).enumerate() {
+            if hits.is_empty() {
                 continue;
             }
-            intervals.extend(query_masks.iter().map(|mask| (mask.start, mask.end - 1)));
-            *query_masks = combine(intervals)
+            let last = queries.length(index) as i64 - 1;
+            let mut intervals: Vec<(i64, i64)> = hits
+                .iter()
+                .copied()
+                .chain(query_masks.iter().map(|mask| (mask.start, mask.end - 1)))
+                .map(|(left, right)| (left as i64, right as i64))
+                .collect();
+            let mut outside = outside.get_mut(index);
+            if let Some(outside) = outside.as_deref() {
+                if let Some(before) = outside.nearest_before() {
+                    intervals.push((-(before as i64), -(before as i64)));
+                }
+                if let Some(after) = outside.after {
+                    intervals.push((last + after as i64, last + after as i64));
+                }
+            }
+            let combined = combine(intervals);
+            if let Some(outside) = outside.as_deref_mut() {
+                for &(left, right) in combined.iter().filter(|interval| interval.0 < 0) {
+                    for k in 0..REACH {
+                        let letter = -(k as i64) - 1;
+                        if left <= letter && letter <= right {
+                            outside.before |= 1 << k;
+                        }
+                    }
+                }
+            }
+            *query_masks = combined
                 .into_iter()
-                .map(|(left, right)| MaskedInterval::new(left, right + 1))
+                .filter_map(|(left, right)| {
+                    let (left, right) = (left.max(0), right.min(last));
+                    (left <= right).then(|| MaskedInterval::new(left as usize, right as usize + 1))
+                })
                 .collect();
         }
         Ok(())
@@ -173,8 +259,11 @@ impl RepeatFilter {
 
 /// A query's masks with its repeat hits (0-based, inclusive): `BlastSeqLocCombine` with
 /// `REPEAT_MASK_LINK_VALUE`, sorted by their starts (`common::masks::combine_linked`).
-pub(crate) fn combine(intervals: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    crate::algorithm::common::masks::combine_linked(intervals, REPEAT_MASK_LINK_VALUE)
+pub(crate) fn combine<T>(intervals: Vec<(T, T)>) -> Vec<(T, T)>
+where
+    T: Copy + Ord + std::ops::Add<Output = T> + From<u8>,
+{
+    crate::algorithm::common::masks::combine_linked(intervals, T::from(REPEAT_MASK_LINK_VALUE))
 }
 
 /// NCBI's stop at the set-up of a query batch whose repeat search failed with `error`, with

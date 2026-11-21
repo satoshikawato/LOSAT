@@ -1445,6 +1445,7 @@ pub(crate) enum MaskError {
 pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
     queries: &L,
+    outside: &mut [super::repeat_filter::MasksOutside],
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
@@ -1488,7 +1489,7 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:206-214
     if let Some(filter) = &args.repeat_filter {
         filter
-            .add_masks(&args.strand, queries, &mut query_masks, pool)
+            .add_masks(&args.strand, queries, &mut query_masks, outside, pool)
             .map_err(MaskError::Repeats)?;
     }
     Ok(query_masks)
@@ -1529,6 +1530,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
+    outside: &mut [super::repeat_filter::MasksOutside],
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
@@ -1542,7 +1544,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
     // A chunk's query data is made with the options (`MakeLocalQueryData(m_Options)`), so its
     // query source calculates the masks of the chunk's parts again, WindowMasker last.
     if args.window_masker.is_some() {
-        return query_masks(args, parts, pool);
+        return query_masks(args, parts, &mut [], pool);
     }
     let mut masks: Vec<Vec<MaskedInterval>> = apply_dust_masking(args, parts, pool)
         .into_iter()
@@ -1554,7 +1556,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
         .collect();
     if let Some(filter) = &args.repeat_filter {
         filter
-            .add_masks(&args.strand, parts, &mut masks, pool)
+            .add_masks(&args.strand, parts, &mut masks, outside, pool)
             .map_err(MaskError::Repeats)?;
     }
     Ok(masks)

@@ -173,19 +173,9 @@ impl Volume {
         self.lazy_file(&self.seq, "sq")
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-246
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (at
-    // `common::database::PreliminaryReadError`)
-    // A database whose alias files have an OID list and the counts `NSEQ` and `LENGTH` is opened
-    // without its OID list, which NCBI builds at its first use (`x_GetOidList`); a search uses it
-    // first where its preliminary stage asks for the first chunk of sequences, just before it
-    // reads them. So an OID list file that fails (`SeqDb::oid_list_error`) fails the search
-    // where the first read of a sequence file fails, as one that cannot be opened does (probes
-    // G2c, G8 of line RG D1b: `BLAST engine error: Database memory map file error`, exit
-    // status 3). The other readers that build the list first check it themselves
-    // (`SeqDb::oid_list_ready`).
     /// Makes every read of the sequence file fail with `failure`, the failure of NCBI's OID
-    /// list of the database (`SeqDb::read_alias_tree`).
+    /// list of the database, before which a search reads no sequence
+    /// (`SeqDb::fail_search_reads_with_oid_list`).
     pub(super) fn fail_sequence_reads(&mut self, failure: super::oid_list::OidListError) {
         self.read_failure = Some(failure);
     }

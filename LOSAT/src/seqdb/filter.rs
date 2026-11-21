@@ -1203,11 +1203,13 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
-        self.db.oid_list_ready()?;
-        Ok(oids
-            .into_iter()
-            .filter(|&oid| self.db.check_oid(oid))
-            .collect())
+        let mut kept = Vec::with_capacity(oids.len());
+        for oid in oids {
+            if self.db.check_oid(oid)? {
+                kept.push(oid);
+            }
+        }
+        Ok(kept)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1325
@@ -1222,10 +1224,9 @@ impl TaxIdLookup<'_> {
     /// visits where the alias files have ranges), ascending.
     pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
         let mut tax_ids = BTreeSet::new();
-        if self.db.filter.is_some() || self.db.oid_list_error.is_some() {
-            self.db.oid_list_ready()?;
-            self.db.set_up_oid_list();
-            let oids: Vec<u32> = self.db.oid_walk().collect();
+        self.db.build_oid_list()?;
+        if self.db.filter.is_some() {
+            let oids: Vec<u32> = self.db.oid_walk()?.collect();
             entries_oid_tax_ids(&self.entries, &oids, &mut tax_ids)?;
             return Ok(tax_ids);
         }
@@ -1375,53 +1376,59 @@ impl SeqDb {
         self.list_applied
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-258
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-262
     // NCBI builds its OID list at its first use: `x_CheckOrFindOID`, and the readers that call
     // `x_GetOidList` first (`AccessionToOids`, `GetDBTaxIds`, `GetBioseq`, `GetHdr`,
     // `GetSeqIDs`, `OidToGi`, `GetNextOIDChunk`), or in the constructor that scans the totals
-    // with a list (`apply_filter`). Only `x_CheckOrFindOID` sees the difference: before the
-    // build its range is every OID.
-    /// Marks NCBI's OID list as built (`x_GetOidList`): from here on `x_CheckOrFindOID`
-    /// ([`SeqDb::check_or_find_oid`]) sees the iteration range.
-    pub fn set_up_oid_list(&self) {
-        self.oid_list_set_up.store(true, Ordering::Relaxed);
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-246
-    // `m_OidListSetup` stays false when the build throws, so every later use throws again.
-    /// The error of NCBI's first build of its OID list (`x_GetOidList`) where it fails: an alias
-    /// file's OID list file that fails when NCBI opened the database without building the list
-    /// (`read_alias_tree`). Each reader that builds the list calls this where NCBI builds it
-    /// (blastdbcmd's requests, the maskers' `GetBioseq`, the lookups); a search meets it at its
-    /// first read of a sequence (`Volume::fail_sequence_reads`).
-    pub fn oid_list_ready(&self) -> Result<(), SeqDbError> {
-        match &self.oid_list_error {
-            Some(failure) => Err(failure.to_error()),
-            None => Ok(()),
+    // (`apply_filter`, `check_alias_values`). Only `x_CheckOrFindOID` sees the difference: before
+    // the build its range is every OID. Where an alias file's OID list file fails and NCBI opened
+    // the database without building the list (`read_alias_tree`), the build throws, and
+    // `m_OidListSetup` stays false, so every later use throws again.
+    /// NCBI's build of its OID list (`x_GetOidList`), the one gate of every reader that uses it:
+    /// whether the list was built before this call, which builds it; the error of an alias
+    /// file's OID list file where the build fails.
+    pub fn build_oid_list(&self) -> Result<bool, SeqDbError> {
+        if let Some(failure) = &self.oid_list_error {
+            return Err(failure.to_error());
         }
-    }
-
-    /// Whether NCBI's OID list was built before this call, which builds it (a call that reads
-    /// the list: [`SeqDb::check_or_find_oid`], [`SeqDb::oid_walk`]). A load and a store, as
-    /// only one thread (blastdbcmd's) sets the list up.
-    fn oid_list_was_set_up(&self) -> bool {
         let set_up = self.oid_list_set_up.load(Ordering::Relaxed);
         if !set_up {
-            self.set_up_oid_list();
+            self.oid_list_set_up.store(true, Ordering::Relaxed);
         }
-        set_up
+        Ok(set_up)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:300-313
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (at
+    // `common::database::PreliminaryReadError`)
+    // A search asks for its first chunk of OIDs (`GetNextOIDChunk`, which builds the list) just
+    // before it reads their sequences, in its preliminary stage: a build that fails fails the
+    // search where the first read of a sequence file fails, as one that cannot be opened does
+    // (probes G2c, G8 of line RG D1b: `BLAST engine error: Database memory map file error`, exit
+    // status 3; psiblast's full text with exit status 2). The other readers read the sequences
+    // that NCBI reads without building the list (blastdbcmd `-ipg` with `%s`, `%h`, probe S3 of
+    // review A of line RG D1b-1).
+    /// Makes every read of a sequence fail with the failure of NCBI's build of its OID list
+    /// ([`SeqDb::build_oid_list`]), as the reads of a search follow its first request of OIDs:
+    /// the database's opening for a search (`common::database::open_search_database`).
+    pub fn fail_search_reads_with_oid_list(&mut self) {
+        if let Some(failure) = &self.oid_list_error {
+            for volume in &mut self.volumes {
+                volume.fail_sequence_reads(failure.clone());
+            }
+        }
     }
 
     /// `x_CheckOrFindOID(next)` (`OidFilter::check_or_find`; without an OID list every OID of
     /// the volumes passes): whether `next`, moved to the first OID from it on that NCBI's list
-    /// holds, passes NCBI's checks of the iteration range. Sets the list up
-    /// ([`SeqDb::set_up_oid_list`]).
-    pub fn check_or_find_oid(&self, next: &mut u32) -> bool {
-        let set_up = self.oid_list_was_set_up();
-        match &self.filter {
+    /// holds, passes NCBI's checks of the iteration range. Builds the list
+    /// ([`SeqDb::build_oid_list`]).
+    pub fn check_or_find_oid(&self, next: &mut u32) -> Result<bool, SeqDbError> {
+        let set_up = self.build_oid_list()?;
+        Ok(match &self.filter {
             Some(filter) => filter.check_or_find(next, set_up),
             None => *next < self.num_oids(),
-        }
+        })
     }
 
     /// Whether the database includes `oid` ([`SeqDb::num_seqs`]: NCBI's list holds it, inside
@@ -1440,16 +1447,16 @@ impl SeqDb {
     /// `x_CheckOrFindOID(oid2) && oid2 == oid`: whether NCBI's check keeps `oid`. Once the list
     /// is set up, the OIDs it keeps are the included ones ([`SeqDb::includes_oid`]); the first
     /// check of a list not set up keeps any listed OID up to the range's end.
-    pub fn check_oid(&self, oid: u32) -> bool {
+    pub fn check_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
         let mut next = oid;
-        self.check_or_find_oid(&mut next) && next == oid
+        Ok(self.check_or_find_oid(&mut next)? && next == oid)
     }
 
     /// The OIDs of NCBI's loop `for (oid = 0; CheckOrFindOID(oid); oid++)`, ascending
-    /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop sets the list
-    /// up ([`SeqDb::set_up_oid_list`]).
-    pub fn oid_walk(&self) -> impl Iterator<Item = u32> + '_ {
-        let set_up = self.oid_list_was_set_up();
+    /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop builds the
+    /// list ([`SeqDb::build_oid_list`]).
+    pub fn oid_walk(&self) -> Result<impl Iterator<Item = u32> + '_, SeqDbError> {
+        let set_up = self.build_oid_list()?;
         let (filter, walk) = match &self.filter {
             Some(filter) => (Some(&**filter), Some(filter.walk(set_up))),
             None => (None, None),
@@ -1459,7 +1466,7 @@ impl SeqDb {
             .zip(filter)
             .into_iter()
             .flat_map(|(walk, filter)| walk.oids(filter));
-        all.into_iter().flatten().chain(listed)
+        Ok(all.into_iter().flatten().chain(listed))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:213-262
@@ -1950,7 +1957,7 @@ impl SeqDb {
     ) -> Result<(), SeqDbError> {
         // The constructor builds the OID list to scan: an alias file's OID list that fails is
         // its error, after the list's own (`CSeqDBGiListSet` resolves the list first).
-        self.oid_list_ready()?;
+        self.build_oid_list()?;
         let range = match &self.filter {
             Some(alias) => {
                 for (word, kept) in words.iter_mut().zip(&alias.words) {

@@ -941,7 +941,7 @@ fn alias_value_errors_come_in_ncbis_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
-// (cited at `alias::alias_oid_mask`): a node's range is ANDed with its parent's, the paths to one
+// (cited at `alias::alias_oids`): a node's range is ANDed with its parent's, the paths to one
 // volume are ORed, and the OIDs count the whole volume set.
 #[test]
 fn alias_oid_ranges_select_ncbis_oids() {
@@ -1008,12 +1008,18 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!(oids(&db), [2, 3, 4, 5, 6]);
     assert_eq!(db.included_length().unwrap(), lengths(&db));
     assert_eq!((db.ncbi_num_seqs(), db.total_length()), (20, 1602));
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 2, 3, 4, 5, 6]);
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [2, 3, 4, 5, 6]);
-    assert!(!db.check_oid(0) && db.check_oid(2) && !db.check_oid(7));
-    assert!((0..20).all(|oid| db.includes_oid(oid) == db.check_oid(oid)));
+    assert_eq!(
+        db.oid_walk().unwrap().collect::<Vec<u32>>(),
+        [0, 2, 3, 4, 5, 6]
+    );
+    assert_eq!(
+        db.oid_walk().unwrap().collect::<Vec<u32>>(),
+        [2, 3, 4, 5, 6]
+    );
+    assert!(!db.check_oid(0).unwrap() && db.check_oid(2).unwrap() && !db.check_oid(7).unwrap());
+    assert!((0..20).all(|oid| db.includes_oid(oid) == db.check_oid(oid).unwrap()));
     let db = SeqDb::open(&names("r", "prot_v4"), SeqType::Protein).unwrap();
-    assert!(db.check_oid(0) && !db.check_oid(0));
+    assert!(db.check_oid(0).unwrap() && !db.check_oid(0).unwrap());
     // With a list the constructor's scan of the totals follows that loop over the listed OIDs,
     // and the search reads every listed OID (the constructor sets the range back).
     let mut db = SeqDb::open_search_in(
@@ -1026,7 +1032,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!(oids(&db), [0, 4, 8]);
     assert_eq!(db.ncbi_num_seqs(), 2);
     assert_eq!(db.included_length().unwrap(), lengths(&db));
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 4, 8]);
+    assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), [0, 4, 8]);
     // The loop passes the OID at the range's end when the list holds it and not the OID before
     // it (`x_CheckOrFindOID` tests `next_oid > m_RestrictEnd`).
     write("b.pal", "DBLIST prot_old\nFIRST_OID 1\nLAST_OID 5\n");
@@ -1034,30 +1040,30 @@ fn alias_oid_ranges_select_ncbis_oids() {
     let db = SeqDb::open(&names("t", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), [0, 1, 2, 3, 4]);
     let walk = [0, 1, 2, 3, 4, 10];
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
+    assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), walk);
+    assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), walk);
     // FIRST_OID and LAST_OID of 2^31 or more are NCBI's negative ints: a negative first OID
     // keeps no OID, a negative last OID is no bound for the list and the end 0 of the range.
     write("l3g.pal", "DBLIST prot_v4\nLAST_OID 3000000000\n");
     let db = open("l3g").unwrap();
     assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0]);
+    assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), [0]);
     write("f3g.pal", "DBLIST prot_v4\nFIRST_OID 3000000000\n");
     let db = open("f3g").unwrap();
-    assert_eq!(db.oid_walk().count(), 0);
+    assert_eq!(db.oid_walk().unwrap().count(), 0);
     write(
         "f3l3g.pal",
         "DBLIST prot_v4\nFIRST_OID 3\nLAST_OID 3000000000\n",
     );
     let db = open("f3l3g").unwrap();
-    assert_eq!((db.num_seqs(), db.oid_walk().count()), (0, 0));
+    assert_eq!((db.num_seqs(), db.oid_walk().unwrap().count()), (0, 0));
     write("nest.pal", "DBLIST f3l3g\n");
     assert_eq!(oids(&open("nest").unwrap()), [2, 3, 4, 5, 6, 7, 8, 9]);
     // FIRST_OID 2^31: NCBI's `INT_MIN--` gives INT_MAX, the range [N, N).
     write("f31.pal", "DBLIST prot_old\nFIRST_OID 2147483648\n");
     let db = SeqDb::open(&names("f31", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), Vec::<u32>::new());
-    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [10]);
+    assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), [10]);
     write("f31p1.pal", "DBLIST prot_old\nFIRST_OID 2147483649\n");
     let db = SeqDb::open(&names("f31p1", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), (10..20).collect::<Vec<u32>>());
@@ -1065,7 +1071,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-234
-// (cited at `alias::alias_oid_mask`): an OID list is ANDed after the node's range, relative to
+// (cited at `alias::alias_oids`): an OID list is ANDed after the node's range, relative to
 // each volume; with one the constructor scans the totals of the included OIDs
 // (`alias::needs_totals_scan`) and the counts are that scan's.
 #[test]
@@ -1124,9 +1130,13 @@ fn alias_oid_lists_select_ncbis_oids() {
         "l.pal",
         b"DBLIST prot_v4\nOIDLIST none.msk\nNSEQ 7\nLENGTH 70\n",
     );
-    let db = open("l").unwrap();
+    let mut db = open("l").unwrap();
     assert_eq!((db.ncbi_num_seqs(), db.total_length()), (7, 70));
-    assert!(matches!(db.oid_list_ready(), Err(SeqDbError::MemoryMap(_))));
+    assert!(matches!(db.build_oid_list(), Err(SeqDbError::MemoryMap(_))));
+    assert!(matches!(db.oid_walk(), Err(SeqDbError::MemoryMap(_))));
+    // A sequence is read without the list (blastdbcmd `-ipg`), but not by a search.
+    assert!(db.volumes()[0].open_sequence_file().is_ok());
+    db.fail_search_reads_with_oid_list();
     assert!(matches!(
         db.volumes()[0].open_sequence_file(),
         Err(SeqDbError::MemoryMap(_))
@@ -1136,6 +1146,121 @@ fn alias_oid_lists_select_ncbis_oids() {
     assert_eq!(open("ab").unwrap().ncbi_num_seqs(), 1);
     write("an.pal", b"DBLIST x\nNSEQ 1\n");
     assert!(matches!(open("an"), Err(SeqDbError::MemoryMap(_))));
+    // The scan's error comes after a list (`restrict`), else before the walks of the counts.
+    let path = SearchPath::new(&dir, None, None).unwrap();
+    let db = SeqDb::open_search_in("x", SeqType::Protein, &path).unwrap();
+    assert!(matches!(
+        db.check_alias_values(),
+        Err(SeqDbError::MemoryMap(_))
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:191-294
+// (cited at `alias::OidSet::intersect_with`): an OID list over sub-nodes whose union is a bit
+// array that starts at another OID or has other bytes than the list's keeps the union's OIDs up
+// to the list's last OID (NCBI 2.17.0, probes B1 of review A of line RG D1b-1); the same start
+// and bytes are ANDed.
+#[test]
+fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
+    let dir = temp_dir("oidlist-union");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let write = |file: &str, bytes: &[u8]| std::fs::write(dir.join(file), bytes).unwrap();
+    let oids = |name: &str| {
+        let db = SeqDb::open(dir.join(name).to_str().unwrap(), SeqType::Protein).unwrap();
+        (0..db.num_seqs())
+            .map(|at| db.oid(at).get())
+            .collect::<Vec<u32>>()
+    };
+    write("c1.pal", b"DBLIST prot_v4\nFIRST_OID 2\nLAST_OID 4\n");
+    write("c2.pal", b"DBLIST prot_v4\nFIRST_OID 8\nLAST_OID 10\n");
+    write("d1.pal", b"DBLIST prot_v4\nFIRST_OID 1\nLAST_OID 2\n");
+    write("d2.pal", b"DBLIST prot_v4\nFIRST_OID 5\nLAST_OID 6\n");
+    write("e2.pal", b"DBLIST prot_v4\nFIRST_OID 9\nLAST_OID 10\n");
+    // The union of OIDs 1-3 and 7-9 is a bit array over OIDs 1-9.
+    write("m2.msk", &[0, 0, 0, 9, 0b0010_0000, 0]);
+    write("m8.msk", &[0, 0, 0, 9, 0, 0b1000_0000]);
+    write("m29.msk", &[0, 0, 0, 9, 0b0010_0000, 0b0100_0000]);
+    write("m0.msk", &[0, 0, 0, 9, 0, 0]);
+    for (mask, kept) in [
+        ("m2", &[1, 2][..]),
+        ("m8", &[1, 2, 3, 7, 8]),
+        ("m29", &[1, 2, 3, 7, 8, 9]),
+        ("m0", &[]),
+    ] {
+        write(
+            &format!("p{mask}.pal"),
+            format!("DBLIST c1 c2\nOIDLIST {mask}.msk\n").as_bytes(),
+        );
+        assert_eq!(oids(&format!("p{mask}")), kept, "{mask}");
+    }
+    // OIDs 0-1 and 4-5: a bit array of 1 byte from OID 0, the list's has 2.
+    write("m4.msk", &[0, 0, 0, 9, 0b0000_1000, 0]);
+    write("q.pal", b"DBLIST d1 d2\nOIDLIST m4.msk\n");
+    assert_eq!(oids("q"), [0, 1, 4]);
+    // OIDs 0-1 and 8-9: the bit array of the list's start and bytes, ANDed.
+    write("m19.msk", &[0, 0, 0, 9, 0b0100_0000, 0b0100_0000]);
+    write("r.pal", b"DBLIST d1 e2\nOIDLIST m19.msk\n");
+    assert_eq!(oids("r"), [1, 9]);
+    // A range that ends before the union's bit array (OIDs 5 and 7): NCBI clears bits below the
+    // array and crashes where it builds the list (probes D1a_P, D1a_R); one that starts past the
+    // array inside its byte keeps no OID (D1a_Q).
+    write("c3.pal", b"DBLIST prot_v4\nFIRST_OID 6\nLAST_OID 6\n");
+    write("c4.pal", b"DBLIST prot_v4\nFIRST_OID 8\nLAST_OID 8\n");
+    write("pb.pal", b"DBLIST c3 c4\nFIRST_OID 1\nLAST_OID 3\n");
+    let db = SeqDb::open(dir.join("pb").to_str().unwrap(), SeqType::Protein).unwrap();
+    let error = db.build_oid_list().unwrap_err();
+    assert!(error.ncbi_crashes(), "{error}");
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("{}:", dir.join("pb.pal").display())),
+        "{error}"
+    );
+    write("pa.pal", b"DBLIST c3 c4\nFIRST_OID 10\nLAST_OID 10\n");
+    assert_eq!(oids("pa"), []);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
+// (cited at `SeqDbError::memory_map_message`): an OID list file that cannot be opened is NCBI's
+// `CMemoryFile` text (probe S2 of review A of line RG D1b-1).
+#[cfg(unix)]
+#[test]
+fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir("oidlist-perm");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let mask = dir.join("np.msk");
+    std::fs::write(&mask, [0, 0, 0, 9, 0xFF, 0xC0]).unwrap();
+    std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&mask).is_ok() {
+        // A user that reads any file (root) cannot see the error.
+        std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        return;
+    }
+    std::fs::write(dir.join("np.pal"), b"DBLIST prot_v4\nOIDLIST np.msk\n").unwrap();
+    let error = SeqDb::open(dir.join("np").to_str().unwrap(), SeqType::Protein).unwrap_err();
+    let text = format!(
+        "CMemoryFile: Cannot memory map file '{}':Permission denied",
+        mask.display()
+    );
+    assert_eq!(error.ncbi_request_message().unwrap(), text.as_bytes());
+    assert_eq!(
+        error.ncbi_message().unwrap(),
+        format!("Database memory map file error - {text}").as_bytes()
+    );
+    assert_eq!(
+        error.ncbi_search_message(),
+        Some("Database memory map file error")
+    );
+    let site = throw_site(text.as_bytes()).unwrap();
+    assert_eq!(
+        (site.line, site.function),
+        (718, Some("ncbi::CSeqDBFileMemMap::Init"))
+    );
+    std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o600)).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

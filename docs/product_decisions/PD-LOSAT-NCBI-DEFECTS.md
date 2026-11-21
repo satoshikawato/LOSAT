@@ -248,7 +248,10 @@
   1.60 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
   OID list file, of bits past the memory page after it and of a file of its header alone, rule 3, and
   the two RPSBLAST and RPSTBLASTN rejections of D1a-4 extended to the profiles `OIDLIST` leaves out
-  and to the totals of its scan; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  and to the totals of its scan; the explicit rejection of an alias file's `FIRST_OID`-`LAST_OID`
+  range outside the bit array of the ranges below it, where NCBI clears bits outside that array and
+  crashes (SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1), rule 3; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2054,11 +2057,21 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   D1b); or whose bits NCBI copies for a volume past the memory page after the file's end (a volume
   of more OIDs than the file's page holds bits for, under a header that does not stop the copy): NCBI
   reads memory that is not the file's. A read inside that page reads the page's zeros, as NCBI does
-  (probes H2 and H7, not refused). A file of 1 to 4 bytes fails NCBI's `SEQDB_FILE_ASSERT(start <
-  end)`, whose text names a line of NCBI's source: LOSAT's words, refused where NCBI's constructor
+  (probes H2 and H7, not refused). A file of 1 to 4 bytes fails NCBI's assertion that the file is
+  longer than its header, whose text names a line of NCBI's source: LOSAT's words, refused where NCBI's constructor
   reads the file (its scan; exit 2 in NCBI), and NCBI's `Database memory map file error` (exit 3) at
   a search's first read under `NSEQ` and `LENGTH`, as for the column files' assertions
   (`seqdb::column`). Rows `db.ol.bp.rej.empty`, `db.ol.bp.rej.hdr` and `db.ol.bp.hdrl.6`.
+
+- An alias file's `FIRST_OID`-`LAST_OID` range that lies outside the bit array of the OIDs that the
+  ranges of the alias files below it keep (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS
+  D1b1-10 of line RG): NCBI's intersection clears the array's bits outside the range at the OID less
+  the array's first, so a range that ends before the array's first OID wraps that index below 0 and
+  writes far outside the array (SIGSEGV where the OID list is built: `blastdbcmd -entry all`, probes
+  D1a_P and D1a_R of review A of D1b-1; `-info` builds no list and works), and one that starts past
+  the array's bytes writes past them. Inside the array's last byte the clearing is harmless and no
+  OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is first used (case A238 of
+  `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

@@ -24,7 +24,8 @@ fn not_a_file(path: &str) -> Vec<u8> {
     .concat()
 }
 
-/// Why an OID list file cannot be applied: NCBI's error, or LOSAT's refusal where NCBI crashes.
+/// Why NCBI's OID list of the alias files cannot be built: the error of an OID list file, or
+/// LOSAT's refusal where NCBI crashes.
 /// It is kept with the database where NCBI meets it later (`SeqDb::oid_list_error`), so it is
 /// `Clone` and makes its `SeqDbError` on demand (`OidListError::to_error`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,8 +36,8 @@ pub(super) enum OidListError {
     /// The file holds no byte: NCBI maps nothing and reads the header through a null pointer
     /// (SIGSEGV, probe G5 of line RG D1b).
     Empty(PathBuf),
-    /// The file holds 1 to 4 bytes, no byte of bits: NCBI's `SEQDB_FILE_ASSERT(start < end)` of
-    /// `GetFileDataPtr(lease, 4, file_length)` fails (probes G3, G4).
+    /// The file holds 1 to 4 bytes, no byte of bits: NCBI's assertion that the file is longer
+    /// than its 4-byte header fails (probes G3, G4).
     Short(PathBuf, u64),
     /// The bits NCBI copies for a volume reach past the last memory page of the file's mapping,
     /// where NCBI reads memory that is not the file's.
@@ -46,6 +47,10 @@ pub(super) enum OidListError {
         read: u64,
         len: u64,
     },
+    /// An alias file's `FIRST_OID`-`LAST_OID` range lies outside the bit array of the OIDs of the
+    /// alias files below it, where NCBI clears bits outside that array (`alias::OidSet`): a
+    /// crash, or a write into memory that is not the array's. The path is the alias file's.
+    RangeOutsideBits(PathBuf),
     /// The file cannot be opened or read (`DbFile`): `SeqDbError::Open` with the system's code,
     /// else `SeqDbError::Io`.
     Read {
@@ -73,6 +78,12 @@ impl OidListError {
                     "the OID list file of an alias file's OIDLIST holds {len} bytes, no bit \
                      after its 4-byte header"
                 ),
+            },
+            OidListError::RangeOutsideBits(path) => SeqDbError::NcbiCrashes {
+                path: path.clone(),
+                message: "its FIRST_OID-LAST_OID range lies outside the OIDs that the alias files \
+                          below it keep, where NCBI clears bits outside its array of them"
+                    .to_string(),
             },
             OidListError::PastPage { path, read, len } => SeqDbError::NcbiCrashes {
                 path: path.clone(),
@@ -135,7 +146,7 @@ pub(super) struct OidListFile {
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:123-133
 // `x_GetOidMask` maps the file (`not_a_file`), reads the header with `ReadSwapped` (big-endian;
 // a file of 1 to 3 bytes is read past its end, inside the mapped page, before the check), then
-// `GetFileDataPtr(lease, 4, file_length)` asserts `4 < file_length`.
+// asserts that the file holds a byte after the 4-byte header.
 /// Reads the OID list file `path` (the path of the alias file's `OIDLIST`, as
 /// `alias::compute_masks` resolved it).
 pub(super) fn read(path: &str) -> Result<OidListFile, OidListError> {
@@ -162,9 +173,10 @@ pub(super) fn read(path: &str) -> Result<OidListFile, OidListError> {
 impl OidListFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:37-58
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:248-251
-    // `num_oids` is the header plus one and `bitend` lies `((num_oids + 31) / 32) * 4` bytes after
-    // the bits, in `Uint4` arithmetic: a header of 0xFFFFFFFF leaves no byte (probe H3), and the
-    // bits past the header's last OID count up to their 32-bit word (H1). `CSeqDB_BitSet` copies
+    // The number of OIDs is the header plus one, and the end of the bits lies that number rounded
+    // up to whole 32-bit words, in bytes, after their start, in `Uint4` arithmetic: a header of
+    // 0xFFFFFFFF leaves no byte (probe H3), and the bits past the header's last OID count up to
+    // their 32-bit word (H1). `CSeqDB_BitSet` copies
     // the bytes of the volume's OIDs, `ceil(oids / 8)`, or fewer when `bitend` comes first. The bytes
     // past the end of the file are the zeros of its last mapped page (H2, H7, `file::mapped_length`);
     // a read past that page reads memory that is not the file's, which LOSAT refuses
@@ -187,18 +199,15 @@ impl OidListFile {
         }
         let mut words = vec![0u64; (oids as usize).div_ceil(64)];
         let stored = &self.bytes[4..];
-        for at in 0..count as usize {
-            let byte = stored.get(at).copied().unwrap_or(0);
-            if byte == 0 {
-                continue;
-            }
-            for bit in 0..8 {
-                if byte & (0x80 >> bit) != 0 {
-                    let oid = at * 8 + bit;
-                    if oid < oids as usize {
-                        words[oid / 64] |= 1u64 << (oid % 64);
-                    }
-                }
+        let count = (count as usize).min(stored.len());
+        // The first OID of a byte is its most significant bit, of a word its least significant.
+        for (at, &byte) in stored[..count].iter().enumerate() {
+            words[at / 8] |= u64::from(byte.reverse_bits()) << ((at % 8) * 8);
+        }
+        let tail = oids % 64;
+        if tail > 0 {
+            if let Some(last) = words.last_mut() {
+                *last &= (1u64 << tail) - 1;
             }
         }
         Ok(words)

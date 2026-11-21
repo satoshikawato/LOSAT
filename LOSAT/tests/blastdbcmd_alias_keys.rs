@@ -361,6 +361,30 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A219", &["-db", "db/ak/ol/p_missl", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 1),
     ("A220", &["-db", "db/ak/ol/p_missl", "-metadata"], 2),
     ("A221", &["-db", "db/ak/ol/p_knl", "-info", "-exact_length"], 0),
+    // Review A of line RG D1b-1 (2026-11-21, NCBI 2.17.0): an OID list over two range-only
+    // sub-nodes keeps NCBI's OIDs (the union's bit array cut at the list's last OID where the
+    // arrays differ in start or bytes, A222-A227; ANDed where they agree, A228); a range across
+    // the volumes of tfn; a relative path through `../` as NCBI joins it; the list file beside
+    // the first volume; `-ipg` reads a sequence without building the list (A232, A233) but not
+    // its header (A234); a taxid list over a list file that fails at the scan.
+    ("A222", &["-db", "db/ak/ol/p_cu2", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A223", &["-db", "db/ak/ol/p_cu2", "-info"], 0),
+    ("A224", &["-db", "db/ak/ol/p_cu8", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A225", &["-db", "db/ak/ol/p_cu29", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A226", &["-db", "db/ak/ol/p_cu0", "-info"], 0),
+    ("A227", &["-db", "db/ak/ol/p_dq", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A228", &["-db", "db/ak/ol/p_dr", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A229", &["-db", "db/ak/ol/n_nr", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A230", &["-db", "db/ak/ol/p_reln", "-info", "-dbtype", "prot"], 2),
+    ("A231", &["-db", "db/ak/ol/p_fb", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A232", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%s"], 0),
+    ("A233", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%h"], 0),
+    ("A234", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%s %a"], 1),
+    ("A235", &["-db", "db/ak/ol/p_miss", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 2),
+    // A range outside the bit array of the union below it: `-info` builds no list (A236); past
+    // the array inside its last byte no OID is kept (A237). Before it, `RANGE_REFUSALS`.
+    ("A236", &["-db", "db/ak/ol/p_pb", "-info"], 0),
+    ("A237", &["-db", "db/ak/ol/p_pa", "-entry", "all", "-outfmt", "%o|%a"], 0),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
@@ -381,6 +405,29 @@ fn asn1_texts_of_a_pig_outside_the_range_are_refused() {
         assert_eq!(code, 1, "{id} {words:?}: {stderr}");
         assert!(
             stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
+            "{id} {words:?}: {stderr}"
+        );
+    }
+}
+
+/// A range that ends before the bit array of the union of the ranges below it: NCBI clears bits
+/// below the array and crashes (SIGSEGV) where it builds its OID list (line RG D1b-1, probe
+/// D1a_P), which LOSAT refuses there.
+#[rustfmt::skip]
+const RANGE_REFUSALS: &[(&str, &[&str])] = &[
+    ("A238", &["-db", "db/ak/ol/p_pb", "-entry", "all", "-outfmt", "%o|%a"]),
+];
+
+#[test]
+fn ranges_before_the_bit_array_below_them_are_refused() {
+    let config = TestDir::new("range-refusals");
+    for &(id, words) in RANGE_REFUSALS {
+        let (stdout, stderr, code) = blastdbcmd(words, &config.0);
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(stdout, b"", "{id} {words:?}");
+        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
+        assert!(
+            stderr.contains("(NCBI crashes on it)"),
             "{id} {words:?}: {stderr}"
         );
     }

@@ -856,8 +856,7 @@ impl Run<'_, '_, '_> {
         // check keeps (`SeqDb::check_oid`, `SeqDb::oid_walk`), or, for `-ipg`, the OID of a
         // PIG whose volume holds it (`PigToOid`), kept or not.
         if self.formatter.reads_deflines() {
-            self.source.db.oid_list_ready()?;
-            self.source.db.set_up_oid_list();
+            self.source.db.build_oid_list()?;
         }
         self.formatter
             .write(self.source, oid, config, target, &mut self.output)
@@ -871,8 +870,7 @@ impl Run<'_, '_, '_> {
     /// D1a-2, survey A, pattern 3).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
         let db = self.source.db;
-        db.oid_list_ready()?;
-        for oid in db.oid_walk() {
+        for oid in db.oid_walk()? {
             self.write(oid, config, None)?;
         }
         Ok(())

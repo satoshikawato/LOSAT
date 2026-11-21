@@ -125,8 +125,8 @@ impl MaskBdbReader {
         self.oid += 1;
         let program = self.program;
         let error = |error| database_error(error, program);
-        // `GetBioseq` builds NCBI's OID list first (`SeqDb::oid_list_ready`).
-        self.db.oid_list_ready().map_err(error)?;
+        // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
+        self.db.build_oid_list().map_err(error)?;
         let set = self.db.defline_set(oid).map_err(error)?;
         if set
             .deflines

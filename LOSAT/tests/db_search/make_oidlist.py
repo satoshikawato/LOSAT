@@ -32,6 +32,8 @@ MASKS = {
     "hdr.msk": mask(22, b""),
     # No byte: NCBI crashes (probe G5).
     "empty.msk": b"",
+    # tfp: OID 2 alone, over the union of two ranges (p_cu, probe B1 of review A of D1b-1).
+    "u2.msk": mask(22, bytes([0b0010_0000, 0, 0])),
 }
 
 # A path that is not a file: printed as it is (an absolute value is not joined to the alias file's
@@ -58,6 +60,19 @@ ALIASES = {
     "n_nnl.nal": "TITLE oidlist n walk\nDBLIST ../taxfilter/tfn\nOIDLIST n.msk\nNSEQ 30\nLENGTH 30000\n",
     "n_miss.nal": f"TITLE oidlist missing\nDBLIST ../taxfilter/tfn\nOIDLIST {MISSING}\n",
     "n_missl.nal": f"TITLE oidlist missing walk\nDBLIST ../taxfilter/tfn\nOIDLIST {MISSING}\nNSEQ 8\nLENGTH 5000\n",
+    # The OIDs 1-3 and 7-9 of tfp, whose union is a bit array over OIDs 1-9: under an OID list
+    # of OID 2 alone NCBI keeps OIDs 1 and 2 (review A of D1b-1, B1).
+    "p_c1.pal": "TITLE oidlist c1\nDBLIST ../taxfilter/tfp\nFIRST_OID 2\nLAST_OID 4\n",
+    "p_c2.pal": "TITLE oidlist c2\nDBLIST ../taxfilter/tfp\nFIRST_OID 8\nLAST_OID 10\n",
+    "p_cu.pal": "TITLE oidlist union\nDBLIST p_c1 p_c2\nOIDLIST u2.msk\n",
+    # A range across the two volumes of tfn with an OID list of each volume: OIDs 10 and 12.
+    "n_nr.nal": "TITLE oidlist n range\nDBLIST ../taxfilter/tfn\nOIDLIST n.msk\nFIRST_OID 10\nLAST_OID 14\n",
+}
+
+# A text seqid list (two proteins of tfp) and a protein that no profile of rps_mini hits.
+TEXT_FILES = {
+    "ids.txt": "sp|P69905.2|\nsp|P01923.1|\n",
+    "w36.faa": ">w36\n" + "W" * 36 + "\n",
 }
 
 
@@ -67,7 +82,7 @@ def main() -> None:
         "# OID list and alias fixtures are compared byte for byte: no line-ending conversion.\n* -text\n")
     for name, data in MASKS.items():
         (OUT / name).write_bytes(data)
-    for name, text in ALIASES.items():
+    for name, text in {**ALIASES, **TEXT_FILES}.items():
         (OUT / name).write_bytes(text.encode())
 
 

@@ -1323,89 +1323,139 @@ pub(super) fn needs_totals_scan(node: &AliasNode) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:219-234
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-220
-// (The whole of `IntersectWith` is cited at `BitSetShape::intersect_with`.)
-// For each volume in order, the tree specialised to it (`specialize`): a node that names the
-// volume starts from all of its OIDs and does not look at its sub-nodes, any other node from the
-// union of its sub-nodes; the node's range and OID list are then ANDed in, the range first. So
-// the OID lists are read in that order, a sub-node's before its parent's, and only on the branches
-// that reach the volume without passing a node that names it: the first file that fails is
-// NCBI's error (`oid_list::OidListError`). An OID list is read relative to each volume (bit `i` is
-// the volume's OID `i`, probe F1 of line RG D1b); the ranges count the OIDs of the whole volume
-// set. The `int` bounds of a range become `size_t`: a negative one is sign-extended past every
-// OID (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
-// `LAST_OID` is no upper bound, as `bound` reads them.
-/// The OIDs that the alias tree `root` includes, one bit per OID of the volume set (bit
-/// `oid % 64` of word `oid / 64`): `volumes` are the volume paths in NCBI's order with their
-/// global OIDs `[start, end)`. `None` when no node has a filter: NCBI builds no OID list then,
-/// and every OID is included. The OID list files are read once each (`files`).
-pub(super) fn alias_oid_mask(
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:338-348
+// `x_Setup` ORs the bit set of each volume (`volume_set`) into `m_AllBits`, a bit array over
+// every OID, all clear. That set becomes the special all-set only by the copy of a volume's
+// special all-set that covers every OID: the `-db` names reach one volume (that holds OIDs), and
+// at least one path of the alias tree to it crosses no `FIRST_OID`-`LAST_OID` range that cuts
+// the volume and no OID list (a union of special sets stays special only when one covers the
+// others; two ranges whose union is the volume make a bit array; an OID list is a bit array).
+// Its `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
+// its capacity (`vector::operator=` reuses the storage).
+/// What the filters of an alias tree make of NCBI's OID list (`CSeqDBOIDList::x_Setup`,
+/// [`alias_oids`]).
+#[derive(Debug)]
+pub(super) struct AliasOids {
+    /// The OIDs the tree includes, one bit per OID of the volume set (bit `oid % 64` of word
+    /// `oid / 64`). `None` when no node has a filter: NCBI builds no OID list then, and every
+    /// OID is included.
+    pub words: Option<Vec<u64>>,
+    /// Whether NCBI's bit set of the volume set (`m_AllBits`) is the special all-set one.
+    pub all_bits_special_set: bool,
+}
+
+/// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
+/// `volumes` are the volume paths in NCBI's order with their global OIDs `[start, end)`. The
+/// OID list files are read once each (`files`), in NCBI's order ([`volume_set`]): the first
+/// that fails is the error.
+pub(super) fn alias_oids(
     root: &AliasNode,
     volumes: &[(&str, u32, u32)],
     num_oids: u32,
-) -> Result<Option<Vec<u64>>, OidListError> {
-    if !has_filters(root) {
-        return Ok(None);
-    }
+) -> Result<AliasOids, OidListError> {
+    let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
+    let mut all = Shape::new(0, u64::from(num_oids), Special::None);
     let mut files = std::collections::HashMap::new();
-    let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
     for &(name, start, end) in volumes {
         let Some(node) = specialize(root, name) else {
             continue;
         };
-        let oids = volume_oids(&node, start, end, &mut files)?;
-        or_at(&mut words, &oids, start);
+        let frame = Frame {
+            start: u64::from(start),
+            end: u64::from(end),
+        };
+        let set = volume_set(&node, frame, &mut files)?;
+        all = match all.union_with(set.shape) {
+            Union::Left => all,
+            Union::Right => set.shape,
+            Union::Array(shape) => shape,
+        };
+        if let Some(words) = &mut words {
+            set.or_into(words, frame);
+        }
     }
-    Ok(Some(words))
+    Ok(AliasOids {
+        words,
+        all_bits_special_set: all.special == Special::AllSet,
+    })
 }
 
-/// The OIDs `[start, end)` of one volume (volume-relative bits, `alias_oid_mask`) that the
-/// specialised tree `node` keeps (`CSeqDBOIDList::x_ComputeFilters`).
-fn volume_oids<'a>(
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:219-234
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:464-505
+// For each volume in order, the tree specialised to it (`specialize`): a node that names the
+// volume starts from all of its OIDs and does not look at its sub-nodes, any other node from the
+// union of its sub-nodes; the node's filter, every OID of the volume ANDed with its range and
+// then with its OID list, is then ANDed in. So the OID lists are read in that order, a
+// sub-node's before its parent's, and only on the branches that reach the volume without passing
+// a node that names it: the first file that fails is NCBI's error (`oid_list::OidListError`).
+// An OID list is read relative to each volume (bit `i` is the volume's OID `i`, probe F1 of line
+// RG D1b), a bit array over the volume's OIDs (`x_GetOidMask`); the ranges count the OIDs of the
+// whole volume set. The `int` bounds of a range become `size_t`: a negative one is sign-extended
+// past every OID (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a
+// negative `LAST_OID` is no upper bound, as `bound` reads them.
+/// NCBI's bit set of the OIDs of one volume (`frame`) that the specialised tree `node` keeps
+/// (`CSeqDBOIDList::x_ComputeFilters`).
+fn volume_set<'a>(
     node: &VolumeNode<'a>,
-    start: u32,
-    end: u32,
+    frame: Frame,
     files: &mut std::collections::HashMap<&'a str, OidListFile>,
-) -> Result<Vec<u64>, OidListError> {
-    let len = end - start;
-    let mut map = vec![0u64; (len as usize).div_ceil(64)];
-    if node.volumes > 0 {
-        set_bits(&mut map, 0, u64::from(len));
+) -> Result<OidSet, OidListError> {
+    let map = if node.volumes > 0 {
+        OidSet::special(frame.start, frame.end, Special::AllSet)
     } else {
+        let mut map = OidSet::special(frame.start, frame.end, Special::AllClear);
         for sub in &node.nodes {
-            let bits = volume_oids(sub, start, end, files)?;
-            for (word, bit) in map.iter_mut().zip(bits) {
-                *word |= bit;
-            }
+            let sub = volume_set(sub, frame, files)?;
+            map = map.union_with(sub, frame);
         }
-    }
+        map
+    };
+    let mut filter = OidSet::special(frame.start, frame.end, Special::AllSet);
     if let Some(range) = node.range {
         let (first, last) = range.bounds();
-        let from = bound(first).max(u64::from(start)) - u64::from(start);
-        let to = bound(last)
-            .min(u64::from(end))
-            .saturating_sub(u64::from(start));
-        let mut kept = vec![0u64; map.len()];
-        set_bits(&mut kept, from, to);
-        for (word, keep) in map.iter_mut().zip(kept) {
-            *word &= keep;
-        }
+        let range = OidSet::special(bound(first), bound(last), Special::AllSet);
+        filter = filter.intersect_with(range, frame);
     }
     if let Some(path) = node.oid_list {
         let file = match files.entry(path) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => entry.insert(oid_list::read(path)?),
         };
-        for (word, keep) in map.iter_mut().zip(file.volume_words(len)?) {
-            *word &= keep;
-        }
+        let bits = file.volume_words((frame.end - frame.start) as u32)?;
+        filter = filter.intersect_with(OidSet::array(frame, bits), frame);
     }
-    Ok(map)
+    if map.clears_outside(&filter) {
+        return Err(OidListError::RangeOutsideBits(std::path::PathBuf::from(
+            node.name.unwrap_or("-"),
+        )));
+    }
+    Ok(map.intersect_with(filter, frame))
+}
+
+/// The global OIDs `[start, end)` of the volume whose bit sets are computed ([`volume_set`]).
+#[derive(Debug, Clone, Copy)]
+struct Frame {
+    start: u64,
+    end: u64,
+}
+
+impl Frame {
+    /// An empty array of bits over the volume's OIDs (bit `oid - start`).
+    fn clear_words(self) -> Vec<u64> {
+        vec![0u64; ((self.end - self.start) as usize).div_ceil(64)]
+    }
+
+    /// The bits over the volume's OIDs of the global OIDs `[from, to)`.
+    fn range_words(self, from: u64, to: u64) -> Vec<u64> {
+        let mut words = self.clear_words();
+        let from = from.max(self.start) - self.start;
+        let to = to.min(self.end).saturating_sub(self.start);
+        set_bits(&mut words, from, to);
+        words
+    }
 }
 
 /// ORs the volume-relative bits `bits` into the global bits `words` from OID `start`.
@@ -1448,14 +1498,13 @@ fn set_bits(words: &mut [u64], from: u64, to: u64) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:142-177
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:309-319
-/// The shape of an NCBI `CSeqDB_BitSet` that its operations decide by: the OIDs
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:248-251
+/// The shape of an NCBI `CSeqDB_BitSet`, which its operations decide by: the OIDs
 /// `[start, end)` and whether it is a special set (all of them set, `eAllSet`, or none,
-/// `eAllClear`) or a bit array (`eNone`), whose bits do not matter here
-/// ([`all_bits_special_set`]).
+/// `eAllClear`) or a bit array (`eNone`) of one bit per OID, rounded up to whole bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BitSetShape {
+struct Shape {
     start: u64,
     end: u64,
     special: Special,
@@ -1472,7 +1521,18 @@ enum Special {
     AllClear,
 }
 
-impl BitSetShape {
+/// The result of `UnionWith` ([`Shape::union_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Union {
+    /// The set itself.
+    Left,
+    /// A copy of the other set.
+    Right,
+    /// A bit array of this shape (`x_Normalize` widens the range to both).
+    Array(Shape),
+}
+
+impl Shape {
     fn new(start: u64, end: u64, special: Special) -> Self {
         Self {
             start,
@@ -1481,52 +1541,171 @@ impl BitSetShape {
         }
     }
 
-    /// `UnionWith`: `x_Normalize` widens the range to both and makes a bit array.
-    fn union_with(self, other: Self) -> Self {
+    /// The bytes of the bit array (`x_Alloc`).
+    fn bytes(self) -> u64 {
+        (self.end - self.start).div_ceil(8)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:142-189
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:309-334
+    /// `UnionWith`: which set the union is, by the shapes.
+    fn union_with(self, other: Self) -> Union {
         if other.special == Special::AllClear {
-            return self;
+            return Union::Left;
         }
         if self.special == Special::AllClear {
-            return other;
+            return Union::Right;
         }
         if other.start >= self.start && other.end <= self.end && self.special == Special::AllSet {
-            return self;
+            return Union::Left;
         }
         if other.start <= self.start && other.end >= self.end && other.special == Special::AllSet {
-            return other;
+            return Union::Right;
         }
-        Self::new(
+        Union::Array(Self::new(
             self.start.min(other.start),
             self.end.max(other.end),
             Special::None,
-        )
+        ))
+    }
+}
+
+/// An NCBI `CSeqDB_BitSet` of OIDs of one volume ([`volume_set`]): its shape and, for a bit
+/// array, its OIDs.
+#[derive(Debug, Clone)]
+struct OidSet {
+    shape: Shape,
+    /// The OIDs of a bit array (`Special::None`), bit `oid - frame.start` of the volume's
+    /// [`Frame`]; empty for a special set, whose OIDs its shape gives.
+    bits: Vec<u64>,
+}
+
+impl OidSet {
+    fn special(start: u64, end: u64, special: Special) -> Self {
+        Self {
+            shape: Shape::new(start, end, special),
+            bits: Vec::new(),
+        }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:193-243
-    /// `IntersectWith`: of a special all-set and a bit array, the bit array (its range).
-    fn intersect_with(self, other: Self) -> Self {
-        if self.special == Special::AllClear {
+    /// A bit array over the OIDs of the volume (`x_GetOidMask`).
+    fn array(frame: Frame, bits: Vec<u64>) -> Self {
+        Self {
+            shape: Shape::new(frame.start, frame.end, Special::None),
+            bits,
+        }
+    }
+
+    /// The OIDs of the set, as bits over the volume's OIDs.
+    fn into_words(self, frame: Frame) -> Vec<u64> {
+        match self.shape.special {
+            Special::None => self.bits,
+            Special::AllClear => frame.clear_words(),
+            Special::AllSet => frame.range_words(self.shape.start, self.shape.end),
+        }
+    }
+
+    /// ORs the OIDs of the set into the global bits `words`.
+    fn or_into(self, words: &mut [u64], frame: Frame) {
+        match self.shape.special {
+            Special::AllClear => {}
+            Special::AllSet => set_bits(
+                words,
+                self.shape.start.max(frame.start),
+                self.shape.end.min(frame.end),
+            ),
+            Special::None => or_at(words, &self.bits, frame.start as u32),
+        }
+    }
+
+    /// `UnionWith`: the union of the OIDs, in the shape [`Shape::union_with`] gives.
+    fn union_with(self, other: Self, frame: Frame) -> Self {
+        match self.shape.union_with(other.shape) {
+            Union::Left => self,
+            Union::Right => other,
+            Union::Array(shape) => {
+                let mut bits = self.into_words(frame);
+                for (word, other) in bits.iter_mut().zip(other.into_words(frame)) {
+                    *word |= other;
+                }
+                Self { shape, bits }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:222-243
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:376-405
+    // Of a bit array and a special all-set, NCBI clears the array's bits from its first OID up
+    // to the range's start and from the range's end up to its last OID, one bit or one byte at a
+    // time at the OID less the array's first. A range that ends before the array's first OID
+    // makes the first index wrap below 0: NCBI writes far outside the array and crashes (probes
+    // D1a_P, D1a_R of line RG D1b-1, SIGSEGV); one that starts past the array's bytes writes past
+    // them, into memory that is not the array's. Inside the array's last byte the clearing is
+    // harmless (probe D1a_Q: no OID).
+    /// Whether NCBI's `IntersectWith` of this set with `other` clears bits outside this bit
+    /// array (`OidListError::RangeOutsideBits`).
+    fn clears_outside(&self, other: &Self) -> bool {
+        let (a, b) = (self.shape, other.shape);
+        if a.special != Special::None || b.special != Special::AllSet {
+            return false;
+        }
+        b.end < a.start || (b.start > a.end && (b.start - 1 - a.start) / 8 >= a.bytes())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:191-294
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:90-140
+    // Of a special all-set and a bit array, the bit array keeps its shape and loses its bits
+    // outside the all-set's range (where NCBI's clearing stays inside the array:
+    // `clears_outside`). Two bit arrays with the same first OID and the same bytes
+    // are ANDed byte by byte. Any other two bit arrays take NCBI's last loop, which walks the set
+    // bits of this set and passes its index by reference to the other set's search for its next
+    // set bit: where the other set has one, the index jumps there and no bit is cleared, so the
+    // only bits cleared are those past the other set's last set bit (probes B1 of review A of line
+    // RG D1b-1: OIDs 2-4 and 8-10 under an OID list of OID 2 keep OIDs 1 and 2, under one of OID 8
+    // the OIDs 1-3, 7, 8). The result keeps this set's shape.
+    /// `IntersectWith`: this set ANDed with `other` as NCBI computes it.
+    fn intersect_with(self, other: Self, frame: Frame) -> Self {
+        let (a, b) = (self.shape, other.shape);
+        if a.special == Special::AllClear {
             return self;
         }
-        if other.special == Special::AllClear {
+        if b.special == Special::AllClear {
             return other;
         }
-        match (self.special, other.special) {
+        match (a.special, b.special) {
             (Special::AllSet, Special::AllSet) => {
-                let start = self.start.max(other.start);
-                let end = self.end.min(other.end);
+                let start = a.start.max(b.start);
+                let end = a.end.min(b.end);
                 if start >= end {
-                    Self {
-                        special: Special::AllClear,
-                        ..self
-                    }
+                    Self::special(a.start, a.end, Special::AllClear)
                 } else {
-                    Self::new(start, end, Special::AllSet)
+                    Self::special(start, end, Special::AllSet)
                 }
             }
-            (Special::AllSet, _) => other,
-            _ => self,
+            (Special::AllSet, _) => other.and_words(frame.range_words(a.start, a.end)),
+            (_, Special::AllSet) => self.and_words(frame.range_words(b.start, b.end)),
+            _ if a.start == b.start && a.bytes() == b.bytes() => self.and_words(other.bits),
+            _ => {
+                let last = other
+                    .bits
+                    .iter()
+                    .rposition(|&word| word != 0)
+                    .map(|at| at as u64 * 64 + 63 - u64::from(other.bits[at].leading_zeros()));
+                let kept = match last {
+                    Some(last) => frame.range_words(frame.start, frame.start + last + 1),
+                    None => frame.clear_words(),
+                };
+                self.and_words(kept)
+            }
         }
+    }
+
+    /// The bit array with only its OIDs that `kept` (bits over the volume's OIDs) holds.
+    fn and_words(mut self, kept: Vec<u64>) -> Self {
+        for (word, kept) in self.bits.iter_mut().zip(kept) {
+            *word &= kept;
+        }
+        self
     }
 }
 
@@ -1537,6 +1716,8 @@ impl BitSetShape {
 /// A node of NCBI's filter tree specialised to one volume (`CSeqDB_FilterTree::Specialize`):
 /// its OID range and OID list, its sub-nodes, and how many times it names the volume.
 struct VolumeNode<'a> {
+    /// The alias file of the node (`m_ThisName`), `None` for the top node.
+    name: Option<&'a str>,
     range: Option<OidRange>,
     oid_list: Option<&'a str>,
     nodes: Vec<VolumeNode<'a>>,
@@ -1553,6 +1734,7 @@ impl VolumeNode<'_> {
 /// `Specialize(volume)` of the tree under `node`; `None` when no branch reaches the volume.
 fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
     let mut clone = VolumeNode {
+        name: node.this_name.as_deref(),
         range: node.range,
         oid_list: node.oid_list.as_deref(),
         nodes: Vec::new(),
@@ -1575,59 +1757,6 @@ fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
         clone = clone.nodes.pop().expect("one sub-node");
     }
     (!clone.nodes.is_empty() || clone.volumes > 0).then_some(clone)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:145-177
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
-/// The shape of the OIDs `[start, end)` of one volume that the specialised tree `node` keeps
-/// (`CSeqDBOIDList::x_ComputeFilters`).
-fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
-    let map = if node.volumes > 0 {
-        BitSetShape::new(start, end, Special::AllSet)
-    } else {
-        node.nodes.iter().fold(
-            BitSetShape::new(start, end, Special::AllClear),
-            |map, sub| map.union_with(volume_bits(sub, start, end)),
-        )
-    };
-    let mut filter = BitSetShape::new(start, end, Special::AllSet);
-    if let Some(range) = node.range {
-        let (first, last) = range.bounds();
-        filter =
-            filter.intersect_with(BitSetShape::new(bound(first), bound(last), Special::AllSet));
-    }
-    // An OID list is a bit array (`x_GetOidMask`).
-    if node.oid_list.is_some() {
-        filter = filter.intersect_with(BitSetShape::new(start, end, Special::None));
-    }
-    map.intersect_with(filter)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:338-348
-// `m_AllBits` starts as a bit array over every OID, all clear. It becomes the special all-set
-// only by the copy of a volume's special all-set that covers every OID: the `-db` names reach
-// one volume (that holds OIDs), and at least one path of the alias tree to it crosses no
-// `FIRST_OID`-`LAST_OID` range that cuts the volume and no OID list (a union of special sets
-// stays special only when one covers the others; two ranges whose union is the volume make a bit
-// array; an OID list is a bit array). Its
-// `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
-// its capacity (`vector::operator=` reuses the storage).
-/// Whether NCBI's OID bit set of the volume set (`CSeqDBOIDList::m_AllBits`) is the special
-/// all-set one after the filters of the alias tree `root` (`x_Setup`), the volumes `names`
-/// (in NCBI's order) holding the global OIDs `starts[i]..starts[i + 1]`.
-pub(super) fn all_bits_special_set(root: &AliasNode, names: &[String], starts: &[u32]) -> bool {
-    let mut all = BitSetShape::new(0, u64::from(starts[names.len()]), Special::None);
-    for (at, name) in names.iter().enumerate() {
-        let node = specialize(root, name).expect("the alias tree reaches every volume");
-        all = all.union_with(volume_bits(
-            &node,
-            u64::from(starts[at]),
-            u64::from(starts[at + 1]),
-        ));
-    }
-    all.special == Special::AllSet
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:247-258

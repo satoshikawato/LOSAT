@@ -4,25 +4,23 @@
 //! All functions are direct ports from NCBI C code with original comments preserved.
 //!
 //! Reference files:
-//! - ncbi-blast/c++/src/algo/blast/core/blast_parameters.c
-//! - ncbi-blast/c++/include/algo/blast/core/blast_options.h
+//! - c++/src/algo/blast/core/blast_parameters.c
+//! - c++/include/algo/blast/core/blast_options.h
 
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::stats::KarlinParams;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// Default gap trigger bit score for nucleotide searches
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:140
-/// #define BLAST_GAP_TRIGGER_NUCL 27.0
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:140
 pub const GAP_TRIGGER_BIT_SCORE_NUCL: f64 = 27.0;
 
 /// Default cutoff E-value for blastn ungapped extension
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:76
-/// #define CUTOFF_E_BLASTN 0.05
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:76
 pub const CUTOFF_E_BLASTN: f64 = 0.05;
 
 /// Smallest float to avoid floating point exception
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
 
 /// The gap trigger's raw score from its bits and the UNGAPPED Karlin params (kbp_std), by every
@@ -38,10 +36,7 @@ pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinPara
 
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
 ///
-/// NCBI reference (verbatim from blast_parameters.c:943):
-/// ```c
-/// BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943
 ///
 /// CRITICAL: Uses GAPPED params (kbp_gap) for gapped mode.
 ///
@@ -57,15 +52,14 @@ pub fn cutoff_score_max_from_evalue(
     eff_searchsp: i64,
     gapped_params: &KarlinParams,
 ) -> i32 {
-    // NCBI: Check for invalid Karlin parameters (blast_stat.c:4101-4102)
-    // if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.) return 1;
+    // NCBI: Check for invalid Karlin parameters (c++/src/algo/blast/core/blast_stat.c:4101-4102)
     if gapped_params.lambda < 0.0 || gapped_params.k < 0.0 || gapped_params.h < 0.0 {
         return 1; // Return error value (matches NCBI behavior)
     }
 
     // NCBI: es = 1 (default), then calculate if e > 0.
     // NCBI: if (es > s) *S = es; (pick larger between initial S and calculated es)
-    // Reference: blast_stat.c:4108-4129
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
     let mut s = 1; // Initial value (matches NCBI: es = 1)
 
     // NCBI: if (e > 0.)
@@ -93,16 +87,7 @@ pub fn cutoff_score_max_from_evalue(
 
 /// Calculate cutoff_score for blastn ungapped extension.
 ///
-/// NCBI reference (verbatim from blast_parameters.c:368-373):
-/// ```c
-/// } else {
-///     new_cutoff = gap_trigger;
-/// }
-/// new_cutoff *= (Int4)sbp->scale_factor;
-/// new_cutoff = MIN(new_cutoff,
-///                  hit_params->cutoffs[context].cutoff_score_max);
-/// curr_cutoffs->cutoff_score = new_cutoff;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374
 ///
 /// For blastn in gapped mode:
 /// 1. Start with gap_trigger
@@ -133,23 +118,7 @@ pub fn cutoff_score_for_ungapped_extension(
 
 /// Calculate cutoff_score for ungapped extension when !gapped_calculation || matrix_only_scoring.
 ///
-/// NCBI reference (verbatim from blast_parameters.c:348-367):
-/// ```c
-/// if (!gapped_calculation || sbp->matrix_only_scoring) {
-///     double cutoff_e = s_GetCutoffEvalue(program_number);
-///     Int4 query_length = query_info->contexts[context].query_length;
-///     if (program_number == eBlastTypeBlastn ||
-///         program_number == eBlastTypeMapping)
-///        query_length *= 2;
-///     kbp = kbp_array[context];
-///     BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-///                   MIN((Uint8)subj_length,
-///                       (Uint8)query_length)*((Uint8)subj_length),
-///                   TRUE, gap_decay_rate);
-///     if (program_number != eBlastTypeBlastn)  
-///        new_cutoff = MIN(new_cutoff, gap_trigger);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-367
 ///
 /// This function is used for ungapped blastn or matrix_only_scoring mode.
 /// Uses CUTOFF_E_BLASTN = 0.05 (fixed) and searchsp without length adjustment.
@@ -181,8 +150,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
     let min_len = subject_len.min(query_len);
     let searchsp = min_len * subject_len;
 
-    // NCBI: Check for invalid Karlin parameters (blast_stat.c:4101-4102)
-    // if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.) return 1;
+    // NCBI: Check for invalid Karlin parameters (c++/src/algo/blast/core/blast_stat.c:4101-4102)
     if ungapped_params.lambda < 0.0 || ungapped_params.k < 0.0 || ungapped_params.h < 0.0 {
         return 1; // Return error value (matches NCBI behavior)
     }
@@ -190,7 +158,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
     // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
     // NCBI: es = 1 (default), then calculate if e > 0.
     // NCBI: if (es > s) *S = es; (pick larger between initial S and calculated es)
-    // Reference: blast_stat.c:4108-4129
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
     let mut new_cutoff = 1; // Initial value (matches NCBI: es = 1, s = *S = 1)
 
     // NCBI: if (e > 0.)
@@ -230,7 +198,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
-    // Reference: blast_parameters.c:372-373
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:372-373
     new_cutoff = new_cutoff.min(cutoff_score_max);
 
     new_cutoff

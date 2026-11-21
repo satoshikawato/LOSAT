@@ -267,22 +267,6 @@
 //! need no sign extension):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
-//! ```c
-//!                 if (diff >= window) {
-//!                     /* We are beyond the window for this diagonal; start a
-//!                        new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//!                 }
-//!
-//!                 /* If the difference is less than the wordsize (i.e. last
-//!                    hit and this hit overlap), give up */
-//!
-//!                 if (diff < wordsize) {
-//!                     continue;
-//!                 }
-//! ```
 //! With the per-hit loop on every subject (`LOSAT_X_BPDIAG=0`) 72-74 % of the hits of the two blastp
 //! cases of v4-A10 probe bp1 are too far and 18.6-18.8 % overlap, which of the two is hard to
 //! predict, and 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 % are candidates for the extension.
@@ -635,7 +619,7 @@ impl XHitBf {
         subject_offset.wrapping_add(self.diag_offset) as u32
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:519-551 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551 (cited at `x_test_hit`)
     /// The two-hit test of one hit on `entry`, with `here` = [`XHitBf::here`]: when the entry's
     /// flag is 0 and the hit is too far or overlaps, stores what [`x_test_hit`] stores and returns
     /// `true`; otherwise (a flag-1 entry or a candidate) leaves the entry and returns `false`.
@@ -1065,10 +1049,7 @@ impl<'a> XDiagTable<'a> {
     }
 
     /// The entry index of a hit.
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
     #[inline(always)]
     fn coord(&self, query_offset: i32, subject_offset: i32) -> usize {
         (query_offset.wrapping_sub(subject_offset) & self.mask) as usize
@@ -1147,44 +1128,7 @@ pub fn x_bp_hit_bf_print_summary() {
 
 /// The diagonal test of one word hit as NCBI applies it before an extension, on the hit's own
 /// entry. Returns `Some((last_hit, diff))` when the hit needs the rest of the test.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552
-// ```c
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-//             /* If the reset bit is set, an extension just happened. */
-//             if (diag_array[diag_coord].flag) {
-//                 /* If we've already extended past this hit, skip it. */
-//                 if ((Int4) (subject_offset + diag_offset) <
-//                     diag_array[diag_coord].last_hit) {
-//                     continue;
-//                 }
-//                 /* Otherwise, start a new hit. */
-//                 else {
-//                     diag_array[diag_coord].last_hit =
-//                         subject_offset + diag_offset;
-//                     diag_array[diag_coord].flag = 0;
-//                 }
-//             }
-//             /* If the reset bit is cleared, try to start an extension. */
-//             else {
-//                 /* find the distance to the last hit on this diagonal */
-//                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//                 diff = subject_offset - last_hit;
-//
-//                 if (diff >= window) {
-//                     /* We are beyond the window for this diagonal; start a
-//                        new hit */
-//                     diag_array[diag_coord].last_hit =
-//                         subject_offset + diag_offset;
-//                     continue;
-//                 }
-//
-//                 /* If the difference is less than the wordsize (i.e. last
-//                    hit and this hit overlap), give up */
-//
-//                 if (diff < wordsize) {
-//                     continue;
-//                 }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //
 // The sums and differences wrap (two's complement i32): that is what `+` and `-` do in release
 // builds (no overflow checks), and what NCBI's arithmetic on its `Uint4 subject_offset` gives.
@@ -1224,26 +1168,7 @@ pub(super) fn x_test_hit(
 ///
 /// `subject` starts at the first residue and keeps the sentinel after the last one, as the
 /// reference scan reads it; `subject_length` is the number of residues.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-//
-//         totalhits += hits;
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-512
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_two_hit<K: XCell, F>(
     lookup: &BlastAaLookupTable<K>,
@@ -1386,7 +1311,7 @@ fn x_scan_two_hit_hitbf<K: XCell, F>(
 /// `branch_free` finds the cells with [`x_scan_cells_bf`] (module header). EXPERIMENT
 /// (LOSAT_X_BXCROSS): [`XCellTest::Cross`] runs here ([`x_scan_cells_cross`]); the other cell
 /// tests run through the choice that blastp's loops share ([`x_scan_two_hit_in_with`]).
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 (quoted at `x_scan_two_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-512 (cited at `x_scan_two_hit`)
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_two_hit_with<K: XCell, F>(
     mode: XCellTest,
@@ -2027,18 +1952,8 @@ fn x_cross_query(coord: i32, s: i32, mask: i32) -> i32 {
 /// closure made LLVM inline the drain without `DEFER` into the scan, whose machine code then
 /// differed from the build before LOSAT_X_BXCROSS128). `$branch_free`, `$defer`, `$chunk`, `$k`
 /// and `$f` are the scan function's parameters `BRANCH_FREE`, `DEFER`, `CHUNK`, `K` and `F`.
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:502-509 (the scan and its hits in
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-509 (the scan and its hits in
 // order; the rest of the loop at `x_scan_two_hit`)
-// ```c
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-//
-//         totalhits += hits;
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-// ```
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -2143,29 +2058,7 @@ fn x_scan_cells_with<const BRANCH_FREE: bool, K: XCell, C>(
 
 /// The subject scan of [`x_scan_two_hit`]: `on_cell(subject_offset, hits)` for every scan position
 /// whose lookup cell has hits, in scan order, with the cell's list in its stored order.
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99
-// ```c
-//    for (s = s_first; s <= s_last; s++) {
-//       /* compute the index value */
-//       index = ComputeTableIndexIncremental(word_length, lut->charsize,
-//                                            lut->mask, s, index);
-//       /* if there are hits... */
-//       if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//          Int4 numhits = bbcell[index].num_used;
-//          ...
-//          if (numhits <= AA_HITS_PER_CELL)
-//             /* hits live in thick_backbone */
-//             src = bbcell[index].payload.entries;
-//          else
-//             /* hits live in overflow array */
-//             src = & (lut->overflow[bbcell[index].payload.overflow_cursor]);
-//
-//          /* copy the hits. */
-//          for (i = 0; i < numhits; i++) {
-//             offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//             offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//          }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-113
 #[inline(always)]
 fn x_scan_cells<K: XCell, C>(
     lookup: &BlastAaLookupTable<K>,
@@ -2213,7 +2106,7 @@ fn x_scan_cells<K: XCell, C>(
 /// `position << 32 | index`, the list's length advanced by the bit, and the listed cells then go to
 /// `on_cell` in position order. The positions, indices and presence bits are those of
 /// [`x_scan_cells`]'s loop (the same rolling index over the same bytes), so the calls are the same.
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-99 (cited at `x_scan_cells`)
 #[inline(always)]
 fn x_scan_cells_bf<K: XCell, C>(
     lookup: &BlastAaLookupTable<K>,
@@ -2283,7 +2176,7 @@ fn x_scan_cells_bf<K: XCell, C>(
 
 /// The diagonal test of a cell's hits one after the other (the fused loop without
 /// LOSAT_X_BPDIAG).
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[inline(always)]
 fn x_cell_per_hit<H: XHit, F>(
     hits: &[H],
@@ -2314,7 +2207,7 @@ fn x_cell_per_hit<H: XHit, F>(
 /// EXPERIMENT (LOSAT_X_BPHITBF): [`x_cell_per_hit`] with each hit first through the branch-free
 /// test ([`XHitBf::test`]): a flag-1 entry or a candidate goes on to [`x_test_hit`], unchanged
 /// (module header).
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[inline(always)]
 fn x_cell_per_hit_bf<H: XHit, F>(
     hits: &[H],
@@ -2349,7 +2242,7 @@ fn x_cell_per_hit_bf<H: XHit, F>(
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): one hit of [`x_cell_per_hit_bf`]: [`XHitBf::test`], then
 /// [`x_test_hit`] and the candidate's call for a flag-1 entry or a candidate.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[inline(always)]
 fn x_hit_bf<F>(
     query_offset: i32,
@@ -2390,7 +2283,7 @@ fn x_batch_coords_distinct(coords: &[usize]) -> bool {
 
 /// EXPERIMENT (LOSAT_X_BPDIAG): calls `candidate` for the lanes set in `lanes` (bit `i` = hit `i`
 /// of `hits`) in lane order, which is the cell's order, with the values [`x_test_hit`] returns.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[inline(always)]
 fn x_call_candidates<H: XHit, F>(
@@ -2425,7 +2318,7 @@ fn x_call_candidates<H: XHit, F>(
 ///   bits with the flag cleared (`set_last_hit` + `set_flag(0)`, or `set_last_hit` on an entry
 ///   without the flag), otherwise the old entry;
 /// - candidate = !flag && word_size <= diff < window (its entry is not written).
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[inline(always)]
 fn x_test_batch_scalar<H: XHit, F>(
     hits: &[H],
@@ -2609,7 +2502,7 @@ const X_PACK_LANES: [[u8; X_DIAG_LANES]; 256] = {
 ///
 /// # Safety
 /// The CPU must have AVX2.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
@@ -2671,7 +2564,7 @@ where
 ///
 /// # Safety
 /// The CPU must have AVX2, and every coordinate must be at most `table.mask`.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
@@ -2727,7 +2620,7 @@ unsafe fn x_batch_avx2_at(
 ///
 /// # Safety
 /// The CPU must have AVX2.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
@@ -2843,7 +2736,7 @@ where
 /// The CPU must have AVX2 and POPCNT, `staged` must be below `CHUNK + X_CROSS_PIECE`, every
 /// staged hit's query offset must be at most `table.mask`, and with `DEFER` the stage made by
 /// `XCross::new::<true>`.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[inline(never)]
@@ -2870,7 +2763,7 @@ where
 ///
 /// # Safety
 /// `i` must be below the staged count, and the hit's query offset at most `table.mask`.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -2949,7 +2842,7 @@ fn x_cross_part_end(coords: &[i32; X_DIAG_LANES], start: usize) -> usize {
 ///
 /// # Safety
 /// As [`x_batch_lanes`].
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[inline]
@@ -3020,7 +2913,7 @@ unsafe fn x_batch_avx2_lanes_mark<const MARK: bool>(
 /// # Safety
 /// `b + i` must be below the staged count for every lane `i` set in `lanes`, and those hits' query
 /// offsets at most `table.mask`.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[cfg(any(
     target_arch = "x86_64",
@@ -3107,7 +3000,7 @@ const X_CROSS_MARKER: i32 = -1;
 /// # Safety
 /// The records must be those of [`x_cross_defer`] in this drain, and the staged hits they name
 /// not yet moved.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[cfg(any(
     target_arch = "x86_64",
@@ -3172,19 +3065,8 @@ unsafe fn x_cross_flush_cold<const CHUNK: usize, F>(
 ///
 /// # Safety
 /// As [`x_cross_batch`].
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[cold]
@@ -3218,7 +3100,7 @@ where
 /// # Safety
 /// The CPU must have AVX2 and POPCNT, `b + 8` must be at most the staged count, and the hits'
 /// query offsets at most `table.mask`.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[cold]
@@ -3310,7 +3192,7 @@ where
 ///
 /// # Safety
 /// As [`x_cross_window`], and `pending` below [`XCross::PENDING`] with the records of this drain.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[cold]
@@ -3607,22 +3489,8 @@ const X_CROSS_NO_DEFER: &str = "the kernel does not defer its calls (LOSAT_X_BXC
 /// subject and after every call of this function), and every query offset of `hits` must be at
 /// most `table.mask` ([`x_cross_query`]). For `u16` hits the 48 bytes from the list's start must
 /// lie inside the table's allocations (`XCell::PAD_CELLS`, `XCell::PAD_HITS`).
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
 // hits) and aa_ungapped.c:516 (the coordinate)
-// ```c
-//                 /* copy the hits. */
-//                 {
-//                     Int4 i;
-//                     Int4 s_off = (Int4)(s - subject->sequence);
-//                     for (i = 0; i < numhits; i++) {
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//                     }
-//                 }
-// ```
-// ```c
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -3685,19 +3553,8 @@ where
 ///
 /// # Safety
 /// Inlined into code compiled for `Kn`'s instructions; as [`x_cross_drain`].
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -3790,19 +3647,8 @@ where
 /// # Safety
 /// Inlined into code compiled for `Kn`'s instructions; every coordinate must be at most
 /// `table.mask`.
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -3828,19 +3674,8 @@ unsafe fn x_batch_lanes<Kn: XCrossKernel>(
 /// # Safety
 /// Inlined into code compiled for `Kn`'s instructions; `b + 8` must be at most the staged count,
 /// and the hits' query offsets at most `table.mask`.
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -3875,19 +3710,8 @@ where
 ///
 /// # Safety
 /// As [`x_cross_batch`].
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn x_cross_batch_marked<Kn: XCrossKernel, const CHUNK: usize>(
@@ -3913,7 +3737,7 @@ unsafe fn x_cross_batch_marked<Kn: XCrossKernel, const CHUNK: usize>(
 /// # Safety
 /// Inlined into code compiled for `Kn`'s instructions; `pending` must be below
 /// [`XCross::PENDING`].
-// No NCBI counterpart: NCBI calls each candidate at once (aa_ungapped.c:513-552, quoted at
+// No NCBI counterpart: NCBI calls each candidate at once (aa_ungapped.c:513-552, cited at
 // `x_test_hit`); the record of a deferred call is LOSAT's and holds no value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
@@ -3993,22 +3817,8 @@ impl XCrossKernel for XCrossAvx2 {
         [_mm256_set1_epi32(s), _mm256_set1_epi32(mask)]
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
     // hits) and aa_ungapped.c:516 (the coordinate)
-    // ```c
-    //                 /* copy the hits. */
-    //                 {
-    //                     Int4 i;
-    //                     Int4 s_off = (Int4)(s - subject->sequence);
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    //                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-    //                     }
-    //                 }
-    // ```
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     #[inline(always)]
     unsafe fn stage<H: XHit>(
         cell: Self::Cell,
@@ -4214,22 +4024,8 @@ impl XCrossKernel for XCrossW128 {
         [splat_i32(s), splat_i32(mask)]
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:107-114 (the copy of a cell's
     // hits) and aa_ungapped.c:516 (the coordinate)
-    // ```c
-    //                 /* copy the hits. */
-    //                 {
-    //                     Int4 i;
-    //                     Int4 s_off = (Int4)(s - subject->sequence);
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    //                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-    //                     }
-    //                 }
-    // ```
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     #[inline(always)]
     unsafe fn stage<H: XHit>(
         cell: Self::Cell,
@@ -4266,45 +4062,7 @@ impl XCrossKernel for XCrossW128 {
         any_set(or(within, across))
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:516-552 (each lane's test)
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    //
-    //             /* If the reset bit is set, an extension just happened. */
-    //             if (diag_array[diag_coord].flag) {
-    //                 /* If we've already extended past this hit, skip it. */
-    //                 if ((Int4) (subject_offset + diag_offset) <
-    //                     diag_array[diag_coord].last_hit) {
-    //                     continue;
-    //                 }
-    //                 /* Otherwise, start a new hit. */
-    //                 else {
-    //                     diag_array[diag_coord].last_hit =
-    //                         subject_offset + diag_offset;
-    //                     diag_array[diag_coord].flag = 0;
-    //                 }
-    //             }
-    //             /* If the reset bit is cleared, try to start an extension. */
-    //             else {
-    //                 /* find the distance to the last hit on this diagonal */
-    //                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
-    //                 diff = subject_offset - last_hit;
-    //
-    //                 if (diff >= window) {
-    //                     /* We are beyond the window for this diagonal; start a
-    //                        new hit */
-    //                     diag_array[diag_coord].last_hit =
-    //                         subject_offset + diag_offset;
-    //                     continue;
-    //                 }
-    //
-    //                 /* If the difference is less than the wordsize (i.e. last
-    //                    hit and this hit overlap), give up */
-    //
-    //                 if (diff < wordsize) {
-    //                     continue;
-    //                 }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (each lane's test)
     #[inline(always)]
     unsafe fn lanes_mark<const MARK: bool>(
         lane_coords: [u32; X_DIAG_LANES],
@@ -4401,18 +4159,8 @@ impl XCrossKernel for XCrossW128 {
 /// # Safety
 /// On x86-64 the CPU must have SSSE3, SSE4.1 and POPCNT; every query offset of `lookup` must be at
 /// most `table.mask` ([`x_scan_cells_cross128`]).
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:502-509 (the scan and its hits in
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-509 (the scan and its hits in
 // order; the rest of the loop at `x_scan_two_hit`)
-// ```c
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-//
-//         totalhits += hits;
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-// ```
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -4455,19 +4203,8 @@ unsafe fn x_scan_cells_w128_cross<const BRANCH_FREE: bool, const CHUNK: usize, K
 ///
 /// # Safety
 /// As [`x_scan_cells_w128_cross`] and [`x_cross_drain`].
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -4504,19 +4241,8 @@ where
 ///
 /// # Safety
 /// As [`x_scan_cells_w128_cross`] and [`x_cross_hit`]: `b + 8` at most the staged count.
-// NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
-// on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits in order, each
+// on its entry; the test of each, :518-552, is cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -4549,8 +4275,8 @@ where
 ///
 /// # Safety
 /// On x86-64 the CPU must have SSSE3, SSE4.1 and POPCNT ([`x_cross128_available`]).
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-552 (the scan's cells, quoted at
-// `x_scan_two_hit`; the test of each hit, quoted at `x_test_hit`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-552 (the scan's cells, cited at
+// `x_scan_two_hit`; the test of each hit, cited at `x_test_hit`)
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -4598,7 +4324,7 @@ unsafe fn x_scan_cells_w128<const BRANCH_FREE: bool, K: XCell, F>(
 /// Inlined into code compiled for the 128-bit layer (on x86-64 SSSE3, SSE4.1 and POPCNT); every
 /// hit's query offset must be at most `table.mask`; with `bf`, [`XHitBf::fits`] must hold for the
 /// subject the cell is in.
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`): the
 // hits of the cell in order, each tested on its entry; a hit that passes reaches the context check
 // with `last_hit` and `diff`.
 #[cfg(any(
@@ -4830,15 +4556,8 @@ mod tests {
         }
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits of a
-    // subject in order, each on its entry; the test of each, :518-552, is quoted at `x_test_hit`)
-    // ```c
-    //         for (i = 0; i < hits; ++i) {
-    //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    //             ...
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-516 (the hits of a
+    // subject in order, each on its entry; the test of each, :518-552, is cited at `x_test_hit`)
     /// LOSAT_X_BXCROSS's cell test with the kernel `Kn` (LOSAT_X_BXCROSS's AVX2 kernel, or
     /// LOSAT_X_BXCROSS128's) over `cells` as for one subject's scan, its calls deferred with
     /// `DEFER` (LOSAT_X_BXCROSSDEFER): every cell staged with the batches run at `CHUNK` staged
@@ -5176,7 +4895,7 @@ mod tests {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 24, 64, 333, 1024,
     ];
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     #[test]
     fn batched_cells_equal_the_per_hit_test_on_random_tables() {
         let mut seed = 0x5eed_u64;
@@ -5246,7 +4965,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     #[test]
     fn batched_cells_equal_the_per_hit_test_at_every_edge_of_the_test() {
         let mut seed = 0xed9e_u64;
@@ -5290,7 +5009,7 @@ mod tests {
     /// entries at every edge of the test and random bits, and later cells on the entries earlier
     /// cells and their calls wrote: the same calls in the same order with the same arguments, and
     /// the same bits in every entry of the table.
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn the_masked_batch_equals_the_deferred_calls() {
@@ -5372,7 +5091,7 @@ mod tests {
         )
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     #[test]
     fn the_branch_free_test_gives_the_reference_outcomes_in_its_range() {
         // too far, overlap, candidate, flag 1 kept, flag 1 reset
@@ -5522,7 +5241,7 @@ mod tests {
         calls
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     #[test]
     fn the_branch_free_per_hit_loop_equals_the_per_hit_loop() {
         let mut seed = 0xb7_u64;
@@ -5716,8 +5435,8 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 and blast_aascan.c:60-99
-    // (quoted at `x_scan_two_hit` and `x_scan_cells`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-512 and c++/src/algo/blast/core/blast_aascan.c:60-99
+    // (cited at `x_scan_two_hit` and `x_scan_cells`)
     #[test]
     fn batched_scans_of_real_lookup_tables_equal_the_per_hit_scan() {
         use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
@@ -5954,8 +5673,8 @@ mod tests {
         (wide, narrow, subjects, (size, mask, window))
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 and blast_aascan.c:60-99
-    // (quoted at `x_scan_two_hit` and `x_scan_cells`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-512 and c++/src/algo/blast/core/blast_aascan.c:60-99
+    // (cited at `x_scan_two_hit` and `x_scan_cells`)
     // LOSAT_X_BPLK16: the scans of the table of 16-bit hits (every cell test of blastp's loops, with
     // both scans of the cells, and the scans that list the cells) call `candidate` and `on_cell`
     // with the same offsets in the same order, and leave the same diagonal entries, as the scans of
@@ -6101,8 +5820,8 @@ mod tests {
         assert!(compared > 100, "{compared} cells compared");
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 and blast_aascan.c:60-99
-    // (quoted at `x_scan_two_hit` and `x_scan_cells`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-512 and c++/src/algo/blast/core/blast_aascan.c:60-99
+    // (cited at `x_scan_two_hit` and `x_scan_cells`)
     // BLASTX's table of 16-bit hits (BackboneCell16): every cell test of blastx's fused loop,
     // LOSAT_X_BXCROSS's among them (with the instances of both chunks, its calls deferred and not,
     // and both scans of the cells), calls `candidate` with the same arguments in the same order,
@@ -6192,7 +5911,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-99 (cited at `x_scan_cells`)
     // Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): the branch-free scan calls `on_cell` with the positions and
     // hit lists of the presence-test loop, on subjects across the block boundaries, with the
     // letters of translated frames (X, stop; all of 1-27) and with the word sizes 2-4 (the general
@@ -6417,7 +6136,7 @@ mod tests {
             .collect()
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     // Subjects of 7 to 200 cells at consecutive subject offsets (some gaps), each cell of 0 to 40
     // hits or of 25 to 120 (more than one piece of the copy), one of 333 in some: the batches cross
     // the cells' borders, the stage is drained between cells and inside long ones (with the chunk
@@ -6492,7 +6211,7 @@ mod tests {
         assert!(cases.left.iter().all(|&n| n > 0), "{cases:?}");
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     // Cells of 1 to 5 hits at consecutive subject offsets, where about half the hits of a cell
     // continue a hit of the cell before on its diagonal (q + 1 at s + 1): eight staged hits then
     // often hold hits of several cells on one entry, and the window is tested in parts, cut before
@@ -6699,7 +6418,7 @@ mod tests {
         scan_cross_with_bounds(true, 5, 21, 20);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
     // LOSAT_X_BXCROSSDEFER's two rare paths, on tables made for them, against the per-hit test
     // (every mode, both chunks, [`same_in_every_mode`]), counted by the test probe of the deferred
     // arm: cells at subject offsets 5 apart on the same diagonals (q at s, q + 5 at s + 5), each

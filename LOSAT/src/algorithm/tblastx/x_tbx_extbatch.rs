@@ -3,31 +3,6 @@
 //! of x_pair_par.rs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605
-//! ```c
-//! score = s_BlastAaExtendTwoHit(matrix, subject, query,
-//!                               last_hit + wordsize,
-//!                               subject_offset, query_offset,
-//!                               cutoffs->x_dropoff,
-//!                               &hsp_q, &hsp_s,
-//!                               &hsp_len, use_pssm,
-//!                               wordsize, &right_extend,
-//!                               &s_last_off);
-//! ...
-//! if (score >= cutoffs->cutoff_score)
-//!     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//!                      query_offset, subject_offset, hsp_len,
-//!                      score);
-//! ...
-//! if (right_extend) {
-//!     diag_array[diag_coord].flag = 1;
-//!     diag_array[diag_coord].last_hit =
-//!         s_last_off - (wordsize - 1) + diag_offset;
-//! }
-//! else {
-//!     diag_array[diag_coord].last_hit =
-//!         subject_offset + diag_offset;
-//! }
-//! ```
 //! `x_hit` runs an extension as soon as a hit passes the two-hit test, and the extension starts
 //! with loads at the hit's query position, a random position of the query group. When the group's
 //! frames do not fit the core's caches, those loads wait on memory. Here a hit that passes the
@@ -312,13 +287,7 @@ unsafe fn resolve_early<M: TbxScore, const SENT: usize>(
     unsafe { resolve::<_, SENT>(b.c.get_unchecked_mut(slot), diag_ptr, h) };
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:599-602
-// ```c
-// if (score >= cutoffs->cutoff_score)
-//     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//                      query_offset, subject_offset, hsp_len,
-//                      score);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
 // The batch, slot by slot: the candidates not resolved yet, then the init HSPs in slot order
 // (module doc, item 3), by the push statement of `x_hit`.
 /// Resolves every candidate of the batch, saves their init HSPs in slot order and empties it.
@@ -908,6 +877,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

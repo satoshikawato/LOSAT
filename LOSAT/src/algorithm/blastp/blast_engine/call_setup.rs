@@ -13,13 +13,6 @@
 //! lookup table:
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:132-136
-//! ```c++
-//! BlastSetupPreliminarySearchEx(CRef<IQueryFactory> qf,
-//!                               CRef<CBlastOptions> options,
-//!                               CConstRef<CPssmWithParameters> pssm,
-//!                               BlastSeqSrc* seqsrc,
-//!                               size_t num_threads)
-//! ```
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReport`, `BlastpRanges`, `BlastpReports`, `PrelimOnly`, `BlastpRuntimeLookup`,
@@ -84,11 +77,6 @@ use crate::utils::threading::SearchPool;
 /// `prelim`), whose borrow ends with the last call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:132-134
-/// ```c++
-///     CRef<SBlastSetupData> setup_data =
-///         BlastSetupPreliminarySearchEx(query_factory, options, pssm, seqsrc,
-///                                       num_threads);
-/// ```
 pub(super) struct CallSetup<'s, 'a> {
     pub(super) args: &'s ResolvedBlastpArgs,
     pub(super) query_records: &'a [FastaRecord],
@@ -116,22 +104,11 @@ pub(super) struct CallSetup<'s, 'a> {
 /// BLASTP's only), and what they need beyond outfmt 0, 6 and 7 (`ReportNeeds`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2795-2798
-/// ```c++
-/// CFormattingArgs::ParseFormattingString(const CArgs& args,
-///                                        EOutputFormat& fmt_type,
-///                                        string& custom_fmt_spec,
-///                                        string& custom_delim) const
-/// ```
 pub(super) fn requested_reports(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
 ) -> Result<(Vec<BlastpReport>, ReportNeeds)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-    // ```c
-    // if (args[kArgOutputFormat]) {
-    //     string fmt_choice =
-    //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
     // Each requested output format is parsed exactly as the single CLI `-outfmt` was.
     let requested_formats = outputs
         .formats
@@ -201,12 +178,6 @@ pub(super) struct BlastpQueryMeta {
 /// NCBI writes in each query's preamble, and the query IDs of the tabular formats.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1492-1495
-/// ```c++
-///     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
-///                                             m_Outfile, m_BelieveQuery,
-///                                             m_IsHTML, kIsTabularOutput,
-///                                             results.GetRID());
-/// ```
 pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     // (`s_ReplaceLocalId`)
@@ -237,19 +208,10 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
 /// rounds' (`psi_round`), or the queries' own.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-152
-/// ```c++
-///     // 1. Initialize the query data (borrow it from the factory)
-///     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
-///     retval->m_InternalData->m_Queries = query_data->GetSequenceBlk();
-///     retval->m_InternalData->m_QueryInfo = query_data->GetQueryInfo();
-/// ```
 ///
 /// NCBI masks the queries (SEG) later, when it makes the score block.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158
-/// ```c++
-///     Int2 status = BLAST_MainSetUp(opts_memento->m_ProgramType,
-/// ```
 pub(super) fn query_frames_of<'a>(
     setup: &CallSetup<'_, 'a>,
     x_prebuilt: &mut Option<XAheadLookup>,
@@ -290,10 +252,6 @@ pub(super) fn query_frames_of<'a>(
 /// (`call_subjects`).
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/setup_factory.hpp:337-338
-/// ```c++
-///     /// The source of subject sequence data
-///     CRef<TBlastSeqSrc> m_SeqSrc;
-/// ```
 pub(super) struct BlastpCallSubjects<'a> {
     pub(super) subjects: &'a [EncodedProtein],
     pub(super) x_meta: Option<&'a XSubjectMeta>,
@@ -306,10 +264,6 @@ pub(super) struct BlastpCallSubjects<'a> {
 /// subjects' titles (none for a call of the preliminary stage only).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_query_factory.cpp:101-102
-/// ```c++
-///     SetupSubjects_OMF(*m_QuerySource, program, &m_SeqBlkVector, &m_MaxLength);
-///     m_NumSeqs = static_cast<Uint4>(m_QuerySource->Size());
-/// ```
 pub(super) fn call_subjects<'a>(
     setup: &CallSetup<'_, 'a>,
     x_owned_subjects: &'a mut Vec<EncodedProtein>,
@@ -327,15 +281,7 @@ pub(super) fn call_subjects<'a>(
         blastp_num_threads,
         ..
     } = *setup;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
-    // ```c
-    // /* iterate over all subject sequences */
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //        continue;
-    //    }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search encodes the subjects once
     // (`x_query_blocks::XBlockSubjects`), and so does the search of all queries whose preliminary
     // stage runs in blocks (`PrelimOnly::Block`); the same values.
@@ -390,15 +336,7 @@ pub(super) fn call_subjects<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-769
-// ```c
-// kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839
-// ```c
-// kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-// hsp->evalue = BLAST_KarlinStoE_simple(hsp->score, kbp[hsp->context],
-//                                       hsp_list->hspcnt ? searchsp : 1);
-// ```
 /// The one owner of the Karlin block of the search's statistics for a context (decision D3 of
 /// task O4b): the call's shared gapped block (`shared`: the matrix's gap costs row) in a gapped
 /// search, and in an ungapped one the context's own `kbp_std` (`QueryContext::karlin_params`, with
@@ -425,7 +363,7 @@ pub(super) fn context_block<'b>(
 /// `context_block` for a search whose mode is known at compile time (`UNGAPPED` is
 /// `args.ungapped`): the block that a loop of one mode reads, without a test of the mode.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839 (cited at
 /// `context_block`)
 #[inline(always)]
 pub(super) fn block_of<'b, const UNGAPPED: bool>(
@@ -443,10 +381,6 @@ pub(super) fn block_of<'b, const UNGAPPED: bool>(
 /// and its gapped X-drops in raw score, preliminary and final (`call_scoring`).
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/setup_factory.hpp:324-325
-/// ```c++
-///     /// BLAST score block structure
-///     CRef<TBlastScoreBlk> m_ScoreBlk;
-/// ```
 pub(super) struct BlastpScoring {
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) gapped_params: KarlinParams,
@@ -455,16 +389,6 @@ pub(super) struct BlastpScoring {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
-// ```c
-//        if (scoring_options->gapped_calculation) {
-//        ...
-//        } else {
-//           ASSERT(sbp->kbp_gap == NULL);
-//           /* for ungapped cases we do not have gbp filled */
-//           if (sbp->gbp) {
-//               sfree(sbp->gbp);
-//               sbp->gbp=NULL;
-// ```
 /// The matrix's gapped Karlin block for the gap costs of `args`, or none for an ungapped search:
 /// NCBI makes no `kbp_gap` for it and does not read its gap costs, which therefore need not be in
 /// the matrix's table (`lookup_protein_params` stops for costs outside it). The owner for the
@@ -478,21 +402,8 @@ pub(super) fn gapped_block(args: &ResolvedBlastpArgs) -> Option<KarlinParams> {
 /// cannot size before the search.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:422-424
-/// ```c
-/// Int2 BlastExtensionParametersNew(EBlastProgramType program_number,
-///         const BlastExtensionOptions* options, BlastScoreBlk* sbp,
-///         BlastQueryInfo* query_info, BlastExtensionParameters* *parameters)
-/// ```
 pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
-    // ```c
-    // Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
-    // {
-    //    Blast_ResFreqStdComp(sbp, stdrfp);
-    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2832-2852
     // BLOSUM62's block is computed once per process; another matrix's is the one its lookup
     // table's query preparation computes (`ideal_karlin_params_of`). The redo reads its λ only.
     let ideal_ungapped_lambda = if args.scoring.matrix == ScoringMatrix::Blosum62 {
@@ -503,12 +414,7 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     } else {
         crate::algorithm::tblastx::lookup::ideal_karlin_params_of(args.scoring.matrix).lambda
     };
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1833-1839
-    // ```c
-    // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    // hsp->evalue = BLAST_KarlinStoE_simple(hsp->score, kbp[hsp->context],
-    //                                       hsp_list->hspcnt ? searchsp : 1);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839
     // An ungapped search has no gapped Karlin block (`-gapopen` and `-gapextend` are ignored,
     // blast_setup.c:517-527), and so no gapped X-drops: its statistics are those of each
     // context's own block (`context_block`).
@@ -520,14 +426,7 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
             x_drop_gapped_final: 0,
         });
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
-    // ```c
-    // params->gap_x_dropoff = (Int4)
-    //     (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-    // params->gap_x_dropoff_final = (Int4)
-    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
-    //         params->gap_x_dropoff);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463
     // The X-drops in bits are `-xdrop_gap` and `-xdrop_gap_final` or BLASTP's defaults
     // (`ResolvedBlastpArgs`), converted as the protein programs convert them (`core::x_drop`); the
     // contexts of a batch share the matrix's gapped Lambda, the smallest one. An X-drop that NCBI's
@@ -562,11 +461,6 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
 /// offset, which queries are valid and which batches are not searched (`call_lookup`).
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/setup_factory.hpp:327-329
-/// ```c++
-///     /// Lookup table, usually only needed in the preliminary stage of the
-///     /// search, but for PHI-BLAST it's also needed in the traceback stage.
-///     CRef<TLookupTableWrap> m_LookupTable;
-/// ```
 pub(super) struct BlastpCallLookup {
     pub(super) query_batches: Vec<RangedBatch>,
     pub(super) x_blocks: Option<Vec<Range<usize>>>,
@@ -587,15 +481,6 @@ pub(super) struct BlastpCallLookup {
 /// queries' validity.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:47-53
-/// ```c
-/// Int2 LookupTableWrapInit(BLAST_SequenceBlk* query,
-///         const LookupTableOptions* lookup_options,
-///         const QuerySetUpOptions* query_options,
-///         BlastSeqLoc* lookup_segments, BlastScoreBlk* sbp,
-///         LookupTableWrap** lookup_wrap_ptr, const BlastRPSInfo *rps_info,
-///         Blast_Message* *error_msg,
-///         BlastSeqSrc* seqsrc)
-/// ```
 pub(super) fn call_lookup(
     setup: &CallSetup<'_, '_>,
     query_frames: &[Vec<QueryFrame>],
@@ -632,12 +517,7 @@ pub(super) fn call_lookup(
     } else {
         None
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
-    // ```c
-    // Boolean check_ideal =
-    //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
-    //     program == eBlastTypeRpsTblastn);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2746-2748
     // Exact blastp (`AaLookupTable`) builds no compressed table: LOSAT_X_BPCLUT does not act.
     if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable) && x_bpclut_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
@@ -669,12 +549,7 @@ pub(super) fn call_lookup(
                 None => blastp_aa_lookup(args, query_frames, query_chunk, blastp_parallel_pool),
             },
         },
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
-        // ```c
-        // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-        //                                 query, locations);
-        // s_CompressedLookupFinalize(lookup);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1354
         // `blastp_compressed_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`).
         BlastpLookupTableType::CompressedAaLookupTable => match x_prebuilt.take() {
@@ -723,32 +598,13 @@ pub(super) fn call_lookup(
         };
         x_seed_fused::XContextTable::new(&frame_bases, concatenated_query.len())
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
-    // ```c
-    //     int status = m_PrelimSearch->CheckInternalData();
-    //     if (status != 0)
-    //     {
-    //          // Search was not run, but we send back an empty CSearchResultSet.
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
     // A query whose Karlin-Altschul parameters cannot be computed is invalid
     // (`is_valid`); a query batch (`GetQueryBatchSize`) of invalid queries only is not
     // searched, and its reports show -1 parameters.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
-    // ```c
-    //         } catch (const CException& e) {
-    //             ...
-    //             CRef<CSearchMessage> m
-    //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-    //             messages[index].push_back(m);
-    //             s_InvalidateQueryContexts(qinfo, index);
-    //         }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2771-2772
-    // ```c
-    //       if ( !contexts[context].is_valid )
-    //           continue;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
     // A query without letters (`Sequence contains no data`, blast_setup.hpp:190-198) is
     // invalidated when the queries are set up, before its Karlin-Altschul parameters would
     // be computed: it is never searched and has no message of its own about them.
@@ -758,19 +614,7 @@ pub(super) fn call_lookup(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
-    // ```c
-    //    else if (num_values > 0) {
-    //      (*alpha) = alpha_arr[0];
-    //      (*beta) = beta_arr[0];
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:814-819
-    // ```c
-    //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-    //                             scoring_options->gapped_calculation,
-    //                             scoring_options->gap_open,
-    //                             scoring_options->gap_extend,
-    //                             sbp->kbp_std[index]);
-    // ```
     // An ungapped search's effective lengths use each context's own block (`context_block`) with
     // the matrix's ungapped alpha and beta, the first row of its table (the contexts' blocks hold
     // their lambda, K and H only).
@@ -813,11 +657,6 @@ pub(super) fn call_lookup(
 /// the effective lengths and the shortest subject length of the cutoffs (`min_subject_length`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-906
-/// ```c
-///    Uint4 min_subject_length;
-///    Int8 total_length = -1;
-///    Int4 num_seqs = -1;
-/// ```
 pub(super) struct BlastpDbExtent<'a> {
     /// NCBI's `Int8` (`BlastpDatabase::total_letters`, or the sum of the subject set's records).
     pub(super) total_db_len: i64,
@@ -840,38 +679,14 @@ pub(super) struct BlastpDbExtent<'a> {
 /// error writes NCBI's prolog first).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:888-889
-/// ```c
-/// BLAST_GapAlignSetUp(EBlastProgramType program_number,
-///     const BlastSeqSrc* seq_src,
-/// ```
 pub(super) fn db_extent<'a>(
     args: &ResolvedBlastpArgs,
     database: Option<&'a BlastpDatabase>,
     subjects: &[EncodedProtein],
 ) -> Result<BlastpDbExtent<'a>> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
-    // ```c
-    // kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-769
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
-    // ```c++
-    //     if(dbscan_mode)
-    //     {
-    // 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
-    // 	{
-    //             m_iTotalLength += (Int8) (*iter)->length;
-    // 	}
-    //     }
-    // ```
     // The total length of a database is the one of its index files, not a sum over
     // sequences read; NCBI's `Int8` on every target (an alias file's `LENGTH` is not bounded by
     // the letters LOSAT holds). A subject set's lengths are in memory (at most `isize::MAX`).
@@ -888,33 +703,13 @@ pub(super) fn db_extent<'a>(
         .filter(|_| args.rps_search.is_some())
         .and_then(BlastpDatabase::rps_units);
     let rps_setup = rps_units.map(rps_hooks::RpsSetup::of);
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
-    // ```c
-    // /* Set the database length for new FSC */
-    // if (sbp->gbp) {
-    //     sbp->gbp->db_length =
-    //         (Blast_SubjectIsTranslated(program_number)) ? dbl/3 : dbl;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:914-921
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:913-923
-    // ```c
-    //       /* Set the database length for new FSC */
-    //       if (sbp->gbp) {
-    //           Int8 dbl = total_length;
-    //           /* Override the database length or set one (e.g., blast2seq). */
-    //           if (eff_len_options->db_length) {
-    //               dbl = eff_len_options->db_length;
-    //           }
-    //           sbp->gbp->db_length =
-    //               (Blast_SubjectIsTranslated(program_number))?
-    //               dbl/3 : dbl;
-    //       }
-    // ```
     // `-dbsize` (any value but 0) replaces the total length in the Gumbel block. A database's
     // length is the setup's total before its fallback to the length of OID 0
     // (`DbStatistics::gumbel_db_length`): 0 for a `LENGTH` of 0, negative for one of 2^63 or
     // more, where every Spouge e-value is negative (written 0; line RG D1a-3).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (cited at
     // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
     // FASTA subject set that finds hits has letters.
     // (RPS-BLAST's traceback sorts before its filters whatever the length, blast_traceback.c:1306,
@@ -939,27 +734,7 @@ pub(super) fn db_extent<'a>(
         None
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:163-168
-    // ```c++
-    // static Int4
-    // s_SeqDbGetNumSeqs(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetNumSeqs();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938 (`BLAST_GapAlignSetUp`)
-    // ```c
-    //       if (total_length > 0) {
-    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
-    //           if (num_seqs <= 0)
-    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-    //       } else {
-    //           /* Not a database search; each subject sequence is considered
-    //              individually */
-    //           ...
-    //           num_seqs = 1;
-    //       }
-    // ```
     // A subject set of no letters at all (every record empty) is not a database search to
     // NCBI: it counts one sequence, whatever the number of records (visible only with
     // `-dbsize`, the effective search space of the XML statistics and the outfmt 0 footer).
@@ -978,14 +753,6 @@ pub(super) fn db_extent<'a>(
         (rps.setup_total, rps.setup_count)
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
-    // ```c
-    //    /* use overriding value from effective lengths options or the real value
-    //       from effective lengths parameters. */
-    //    if (eff_len_options->db_length > 0)
-    //       db_length = eff_len_options->db_length;
-    //    else
-    //       db_length = eff_len_params->real_db_length;
-    // ```
     // `-dbsize` above 0 replaces the total length behind the effective lengths.
     let eff_db_length: i64 = if let Some(rps) = &rps_setup {
         rps.eff_db_length
@@ -995,23 +762,12 @@ pub(super) fn db_extent<'a>(
         total_db_len
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
-    // ```c++
-    //             m_NumSeqs     = x_GetNumSeqs();
-    //             m_TotalLength = x_GetTotalLength();
-    //             m_MaxLength   = x_GetMaxLength();
-    //             m_MinLength   = x_GetMinLength();
-    //
-    //             // Do not bother scanning the db... it would be slow
-    //             // FIXME: future implementation should probably have the
-    //             // shortest length encoded in index file...
-    //             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
-    // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
     // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
-    // NCBI's `min_subject_length` (blast_setup.c:969-976, quoted at its check in `run_call`),
+    // NCBI's `min_subject_length` (c++/src/algo/blast/core/blast_setup.c:969-976, cited at its check in `run_call`),
     // which the hit-saving parameters read: the shortest length with the Gumbel block, else
     // (`-searchsp`, `OLD_FSC`) the statistics' average, which only psiblast's `-sum_stats true`
     // reads (its cutoff, `sum_stats_hit_cutoff`; the cutoffs without the block read the search
@@ -1040,71 +796,60 @@ pub(super) fn db_extent<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 // (`CBlastPrelimSearch::CheckInternalData`, api/prelim_stage.cpp:322-327, is
 // `BlastScoreBlkCheck`, core/blast_stat.c:853-877: 1 where no context has a Karlin block, so a
 // batch without a valid query never reaches `BLAST_GapAlignSetUp`, core/blast_setup.c:969-975,
 // whose average divides by the count.)
 /// Whether LOSAT refuses a setup that divides by 0 sequences (`check_setup_count`): without the
 /// Gumbel block (`!has_gumbel`: `-searchsp`, `OLD_FSC`, an ungapped search) NCBI's shortest subject
-/// length is the statistics' average (blast_setup.c:975, quoted at `setup_fails`), whose division
-/// by a count of 0 crashes (SIGFPE, DECISIONS 14 of line RG). `setup_count` is the setup's count of
-/// the search (`BlastpDbExtent::setup_numbers`): a database's statistics' count, 0 where they read
-/// 0 sequences of a positive total (`SeqDb::statistics_count_is_zero`), or an RPS search's first
-/// unit's, which is the one unit that can count 0 (`RpsUnit::check_setup_count`: a unit of one
-/// volume with an alias file's `NSEQ 0`; the bare volumes of several count their profiles), so this
-/// one test is every unit's (review D of line RG D1a-4, N2). Where the total is not positive NCBI
-/// counts 1 (blast_setup.c:929-937, quoted at `SeqDb::statistics_total_length`): a database whose
-/// statistics count 0 of no letters has no OID 0 to read, NCBI's failed read, which `run_call`
-/// reports before this test (`SeqDb::first_oid_read_fails`); a FASTA subject set counts at least 1
-/// (`db_extent`), so only a database search reaches 0 (review E of D1a-4, N2). The one test of the
-/// refusal: `check_setup_count` makes it in the call, and the block search (`x_query_block_plan`)
-/// leaves a search it would refuse to the call of all queries, which refuses before any output
-/// (review D of D1a-4, SF1).
-pub(super) fn setup_count_refused(args: &ResolvedBlastpArgs, setup_count: i32) -> bool {
-    !args.has_gumbel() && setup_count == 0
+/// length is the statistics' average (blast_setup.c:975, cited at `setup_fails`), whose division
+/// by a count of 0 crashes (SIGFPE, DECISIONS 14 of line RG; the one test of every program,
+/// `common::database::setup_count_refused`). `setup_numbers` are the setup's total and count of the
+/// search (`BlastpDbExtent::setup_numbers`): a database's statistics' numbers, whose count is 0
+/// where they read 0 sequences of a positive total, or an RPS search's first unit's, which is the
+/// one unit that can count 0 (`RpsUnit::check_setup_count`: a unit of one volume with an alias
+/// file's `NSEQ 0`; the bare volumes of several count their profiles), so this one test is every
+/// unit's (review D of line RG D1a-4, N2). Where the total is not positive NCBI counts 1
+/// (blast_setup.c:929-937, cited at `SeqDb::statistics_total_length`): a database whose statistics
+/// count 0 of no letters has no OID 0 to read, NCBI's failed read, which `run_call` reports before
+/// this test (`SeqDb::first_oid_read_fails`); a FASTA subject set counts at least 1 (`db_extent`),
+/// so only a database search reaches 0 (review E of D1a-4, N2). The one test of the refusal:
+/// `check_setup_count` makes it in the call, and the block search (`x_query_block_plan`) leaves a
+/// search it would refuse to the call of all queries, which refuses before any output (review D of
+/// D1a-4, SF1).
+pub(super) fn setup_count_refused(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> bool {
+    let (setup_total, setup_count) = setup_numbers;
+    crate::algorithm::common::database::setup_count_refused(
+        setup_total,
+        setup_count,
+        args.has_gumbel(),
+    )
 }
 
 /// LOSAT's refusal of `setup_count_refused`. `setup_fails` makes it only where a query of the call
 /// is valid: a call of invalid queries only is reported as NCBI reports such a batch (exit 0;
 /// review C of line RG D1a-4, MF1: probes e1 and e6). A call is NCBI's query batches of the run
 /// (blastp and rpsblast; blastp's block search runs a block of them as a call only where this
-/// test passes) or one query's round (psiblast, which searches one query per batch). The one owner
-/// of blastp's, psiblast's and rpsblast's check (rpstblastn: `RpsUnit::check_setup_count` per unit
-/// in its batches, the same gate).
-fn check_setup_count(args: &ResolvedBlastpArgs, setup_count: i32) -> Result<()> {
-    if setup_count_refused(args, setup_count) {
-        return Err(crate::algorithm::common::database::refusal(
-            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-            args.app.name(),
-        ));
-    }
-    Ok(())
+/// test passes) or one query's round (psiblast, which searches one query per batch). blastp's,
+/// psiblast's and rpsblast's call of every program's refusal (`common::database::check_setup_count`;
+/// rpstblastn: `RpsUnit::check_setup_count` per unit in its batches, the same gate).
+fn check_setup_count(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> Result<()> {
+    let (setup_total, setup_count) = setup_numbers;
+    crate::algorithm::common::database::check_setup_count(
+        setup_total,
+        setup_count,
+        args.has_gumbel(),
+        args.app.name(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-// ```c
-//    if (sbp->gbp) {
-//    ...
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
 /// Whether the setup of the call's first searched batch fails with NCBI's
 /// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (`setup_subject_length` of the extent's setup
 /// numbers; rpsblast: every unit's, `RpsUnit::setup_subject_length`, one owner with rpstblastn's,
 /// the first unit's numbers being the set-up's), after LOSAT's refusal of its division by a count
 /// of 0 (`check_setup_count`): both only where a query of the call is valid (`contexts`), as NCBI
-/// meets them in a batch (`CLocalBlast::Run`, quoted at `setup_count_refused`).
+/// meets them in a batch (`CLocalBlast::Run`, cited at `setup_count_refused`).
 pub(super) fn setup_fails(
     args: &ResolvedBlastpArgs,
     extent: &BlastpDbExtent<'_>,
@@ -1114,7 +859,7 @@ pub(super) fn setup_fails(
         return Ok(false);
     }
     let (setup_total, setup_count) = extent.setup_numbers;
-    check_setup_count(args, setup_count)?;
+    check_setup_count(args, extent.setup_numbers)?;
     let gumbel = args.has_gumbel();
     Ok(extent.rps_units.map_or_else(
         || {
@@ -1134,10 +879,6 @@ pub(super) fn setup_fails(
 /// blocks by reference, as `run_call`'s closures read them.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:894-895
-/// ```c
-///     BlastQueryInfo* query_info,
-///     BlastScoreBlk* sbp,
-/// ```
 #[derive(Clone, Copy)]
 pub(super) struct CallStatistics<'s> {
     pub(super) args: &'s ResolvedBlastpArgs,
@@ -1158,10 +899,6 @@ pub(super) struct CallStatistics<'s> {
 /// spaces where it reads them, and its own spaces where they differ from the setup's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:699-700
-/// ```c
-/// Int2 BLAST_CalcEffLengths (EBlastProgramType program_number,
-///    const BlastScoringOptions* scoring_options,
-/// ```
 pub(super) struct BlastpSearchSpaces<F> {
     pub(super) search_spaces: Vec<SearchSpace>,
     pub(super) exact_search_spaces: Vec<Option<i64>>,
@@ -1175,10 +912,6 @@ pub(super) struct BlastpSearchSpaces<F> {
 /// options' spaces and the preliminary stage's own spaces.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-947
-/// ```c
-///    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
-///                      *eff_len_params, sbp, query_info, NULL)) != 0)
-/// ```
 pub(super) fn call_search_spaces<'s>(
     statistics: &CallStatistics<'s>,
 ) -> Result<BlastpSearchSpaces<impl Fn(&QueryContext) -> Result<i64, SearchSpaceOverflow> + 's>> {
@@ -1196,22 +929,11 @@ pub(super) fn call_search_spaces<'s>(
     // The effective search space of a database or a FASTA subject set is computed in NCBI's
     // `Int8` (`blastp_database_search_space`, the one owner `stats::setup::calc_eff_lengths`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
-    // ```c
-    //          } else {
-    //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-    //          }
-    // ```
     // Without the Gumbel block (`!has_gumbel`: `-searchsp`, `OLD_FSC` or an ungapped search) the
     // hit cutoffs read each context's search space, which the exact computation hands them
     // (`exact_search_spaces`; `blastp_cutoff_score_max`).
     let options_searchsp = args.searchsp.unwrap_or(0);
-    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
-    // ```c
-    //    if (db_length == 0 &&
-    //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-    //       return 0;
-    //    }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
     // When every subject is empty, NCBI leaves each query's effective search space and
     // length adjustment at 0 (the outfmt 0 footers print 0).
     let mut exact_search_spaces: Vec<Option<i64>> = Vec::new();
@@ -1220,16 +942,6 @@ pub(super) fn call_search_spaces<'s>(
         .enumerate()
         .map(|(context_index, ctx)| -> Result<SearchSpace> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
-            // ```c
-            //     if (eff_len_options->num_searchspaces == 0) {
-            //         retval = 0;
-            //     } else if (eff_len_options->num_searchspaces == 1) {
-            //         ...
-            //         retval = eff_len_options->searchsp_eff[0];
-            //     } else if (eff_len_options->num_searchspaces > 1) {
-            //         ASSERT(context_index < eff_len_options->num_searchspaces);
-            //         retval = eff_len_options->searchsp_eff[context_index];
-            // ```
             // A query chunk's search takes its batch's search spaces as options
             // (`search_split_query_batches`), by the context's index in the chunk, unless the
             // user's `-searchsp` is set (`SplitQuery_SetEffectiveSearchSpace` leaves it).
@@ -1239,11 +951,6 @@ pub(super) fn call_search_spaces<'s>(
             };
             if given_searchsp != 0 {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
-                // ```c
-                //          if (effective_search_space == 0) {
-                //          ...
-                //       query_info->contexts[index].eff_searchsp = effective_search_space;
-                // ```
                 exact_search_spaces.push(Some(given_searchsp));
                 return Ok(SearchSpace {
                     effective_space: given_searchsp as f64,
@@ -1282,7 +989,7 @@ pub(super) fn call_search_spaces<'s>(
             Ok(space)
         })
         .collect::<Result<Vec<_>>>()?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (cited at
     // `stats::setup::preliminary_option_space`): the preliminary stage's setup reads the options'
     // search spaces of the statistics before their fallback to OID 0, which differ from the
     // setup's own only for a total length that is not positive, and which the statistics of each
@@ -1372,21 +1079,7 @@ pub(super) fn call_search_spaces<'s>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:203-209
-// ```c++
-// s_SeqDbGetAvgLength(void* seqdb_handle, void* ignoreme)
-// {
-//    Int8 total_length = s_SeqDbGetTotLen(seqdb_handle, ignoreme);
-//    Int4 num_seqs = MAX(1, s_SeqDbGetNumSeqs(seqdb_handle, ignoreme));
-//
-//    return (Int4) (total_length/num_seqs);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
-// ```c
-//     BlastInitialWordParametersNew(program_number, word_options,
-//       hit_params, lookup_wrap, sbp, query_info,
-//       BlastSeqSrcGetAvgSeqLen(seq_src), &word_params);
-// ```
 /// `BlastSeqSrcGetAvgSeqLen` of the call's subjects, the subject length of the word cutoffs of an
 /// ungapped search (`blastp_prelim_cutoffs`): a database's (`SeqDb::average_length`), a FASTA
 /// subject set's total over its records (the multi-sequence source's average).
@@ -1401,11 +1094,6 @@ fn average_subject_length(statistics: &CallStatistics<'_>) -> i32 {
 /// hit-saving cutoff of the valid contexts, the size of the hit lists and the preliminary e-value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:734-738
-/// ```c
-/// BlastHitSavingParametersNew(EBlastProgramType program_number,
-/// ...
-///    Int4 avg_subj_length,
-/// ```
 pub(super) struct BlastpCallCutoffs {
     pub(super) hit_cutoff_scores: Vec<i32>,
     pub(super) word_cutoff_scores: Vec<i32>,
@@ -1418,10 +1106,6 @@ pub(super) struct BlastpCallCutoffs {
 /// The call's `BlastpCallCutoffs` with the preliminary stage's exact search spaces.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:982-983
-/// ```c
-///    if ((status = BlastHitSavingParametersNew(program_number, hit_options, sbp,
-///                                              query_info, min_subject_length,
-/// ```
 pub(super) fn prelim_cutoffs(
     statistics: &CallStatistics<'_>,
     preliminary_exact_spaces: &[Option<i64>],
@@ -1458,19 +1142,6 @@ pub(super) fn prelim_cutoffs(
         gapped_gumbel.as_ref(),
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:979-990
-    // ```c
-    //       /* scale up the computed cutoffs, and find the smallest one */
-    //       for (context = query_info->first_context;
-    //                              context <= query_info->last_context; ++context) {
-    //
-    //          if (query_info->contexts[context].is_valid) {
-    // ...
-    //             cutoff_min = MIN(cutoff_min,
-    //                              params->cutoffs[context].cutoff_score);
-    //          }
-    //       }
-    //       params->cutoff_score_min = cutoff_min;
-    // ```
     // `hit_params->cutoff_score_min`, which the redo reads with sum statistics.
     let hit_cutoff_score_min = contexts
         .iter()
@@ -1492,20 +1163,9 @@ pub(super) fn prelim_cutoffs(
         .ok()
         .filter(|&size| size > 0)
         .context("BLASTP preliminary hit list size is not positive")?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1008-1018
-    // ```c
-    // BLAST_OneSubjectUpdateParameters(..., subject_length, ...);
-    // BlastHitSavingParametersUpdate(program_number, sbp, query_info,
-    //                                subject_length, 0, hit_params);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926-940
-    // ```c
-    // params->prelim_evalue = evalue;  /* evalue and prelim_evalue same if no CBS. */
-    // ...
-    // int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-    // params->prelim_evalue = cbs_stretch*evalue;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
     // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
     let prelim_evalue = if gapped_gumbel.is_some() {
         blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
@@ -1527,10 +1187,6 @@ pub(super) fn prelim_cutoffs(
 /// with letters (`per_subject`) and notes its error, an overflow of NCBI's `Int8` search space.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1002
-/// ```c
-/// Int2 BLAST_OneSubjectUpdateParameters(EBlastProgramType program_number,
-///                     Uint4 subject_length,
-/// ```
 pub(super) fn subject_parameters<'s>(
     statistics: &CallStatistics<'s>,
     preliminary_option_spaces: &'s Option<Vec<i64>>,
@@ -1541,19 +1197,6 @@ pub(super) fn subject_parameters<'s>(
     let statistics_of_call = *statistics;
     let args = statistics_of_call.args;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1025
-    // ```c
-    //    /* Update cutoff scores in hit saving parameters */
-    //    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
-    //                                   hit_params);
-    //
-    //    if (word_params) {
-    //       /* Update cutoff scores in initial word parameters */
-    //       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
-    //            subject_length, word_params);
-    //       /* Update the parameters for linking HSPs, if necessary. */
-    //       BlastLinkHSPParametersUpdate(word_params, hit_params, scoring_options->gapped_calculation);
-    //    }
-    // ```
     // The statistics of one subject (`per_subject`): each context's effective lengths
     // (`stats::setup::subject_eff_lengths`) and, through the setup's own `blastp_prelim_cutoffs`,
     // the hit-saving cutoffs of `BlastHitSavingParametersUpdate` with the subject's length and a
@@ -1660,10 +1303,6 @@ fn one_subject<const UNGAPPED: bool>(
 /// the preliminary hit lists (full and compact) and the diagnostic counters at their start.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:286-287
-/// ```c++
-/// CSetupFactory::CreateHspStream(const CBlastOptionsMemento* opts_memento,
-///                                size_t number_of_queries,
-/// ```
 pub(super) struct BlastpPrelimSinks {
     pub(super) culling: Option<culling::PrelimCulling>,
     pub(super) subject_space_overflow: crate::stats::setup::SubjectSpaceOverflow,
@@ -1679,11 +1318,6 @@ pub(super) struct BlastpPrelimSinks {
 /// preliminary stage does not run in blocks, `x_blocks`, LOSAT_X_BPQBLOCK).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:291-293
-/// ```c++
-///     return BlastHSPStreamNew(opts_memento->m_ProgramType,
-///                              opts_memento->m_ExtnOpts, TRUE,
-///                              static_cast<Int4>(number_of_queries), writer);
-/// ```
 pub(super) fn prelim_sinks(
     args: &ResolvedBlastpArgs,
     x_blocks: Option<&[Range<usize>]>,
@@ -1702,12 +1336,6 @@ pub(super) fn prelim_sinks(
     // `x_prelim_free.rs`.
     let x_prelim_freed = 0usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3074-3077
-    // ```c
-    //     inclusion_ethresh = (psiOptions /* this can be NULL for CBl2Seq */
-    //                          ? psiOptions->inclusion_ethresh
-    //                          : PSI_INCLUSION_ETHRESH);
-    //     ASSERT(inclusion_ethresh != 0.0);
-    // ```
     // The heaps hold psiblast's larger hit lists (`traceback_hitlist_size`).
     let redone_matches = build_redone_match_heaps(query_count, || args.redone_match_heap());
     let preliminary_hit_lists: Vec<Option<BlastpHitList>> =
@@ -1736,11 +1364,6 @@ pub(super) fn prelim_sinks(
 /// subjects' scan ranges of `-lcase_masking`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:110-112
-/// ```c
-/// Int2 BlastExtendWordNew(Uint4 query_length,
-///                         const BlastInitialWordParameters * word_params,
-///                         Blast_ExtendWord ** ewp_ptr)
-/// ```
 pub(super) struct BlastpScanShape<'a> {
     pub(super) x_dropoff_per_context: Vec<i32>,
     pub(super) window: i32,
@@ -1757,10 +1380,6 @@ pub(super) struct BlastpScanShape<'a> {
 /// the scan ranges that this call makes are written to `x_owned_soft_subjects` and borrowed.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:159-160
-/// ```c
-/// BlastInitialWordParametersNew(EBlastProgramType program_number,
-///    const BlastInitialWordOptions* word_options,
-/// ```
 pub(super) fn scan_shape<'a>(
     setup: &CallSetup<'_, 'a>,
     lookup: &BlastpRuntimeLookup,
@@ -1775,28 +1394,9 @@ pub(super) fn scan_shape<'a>(
         x_block_inputs,
         ..
     } = *setup;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:195-221
-    // ```c
-    // for (context = query_info->first_context;
-    //                  context <= query_info->last_context; ++context) {
-    //    ...
-    //    kbp= sbp->kbp[context];
-    //    ...
-    //    p->cutoffs[context].x_dropoff_init =
-    //        (Int4)(sbp->scale_factor *
-    //               ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:195-221
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:318-323,417-420
-    // ```c
-    // sbp->kbp_std[index] = (Blast_KarlinBlk*)
-    //     BlastMemDup(sbp->kbp_gap_std[0], sizeof(Blast_KarlinBlk));
-    // sbp->kbp = sbp->kbp_std;
-    // ...
-    // Blast_KarlinBlkCopy(sbp->kbp_std[context], sbp->kbp_ideal);
-    // sbp->kbp = sbp->kbp_std;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:318-323,417-420
     //
     // Default blastp uses the score-block ungapped Karlin blocks (`sbp->kbp`
     // / `sbp->kbp_std`), not per-query lookup composition estimates.
@@ -1836,12 +1436,7 @@ pub(super) fn scan_shape<'a>(
     let query_length = blastp_concatenated_query_length(contexts);
     crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP")?;
     let (diag_array_size, diag_mask) = compute_diag_table_shape(query_length, window);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:369-372
-    // ```c
-    // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-    //                               0, (subject_length > 0 ? subject_length :
-    //                               subject_blk->length / CODON_LENGTH) + 1);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:369-373
     let total_query_span = query_length + 1;
     // `-lcase_masking`: the scan ranges of each subject of a FASTA set (`-db` subjects have no
     // case; `database` masks are other options). Empty for a subject without lower case.

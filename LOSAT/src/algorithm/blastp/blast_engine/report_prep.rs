@@ -53,11 +53,6 @@ use crate::report::query_warnings::SubjectReads;
 /// (`pssm_made`, `pssm_reads`) come last.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-758
-/// ```c++
-/// void BlastFormatter_PreFetchSequenceData(const blast::CSearchResultSet& results,
-/// 		                                 CRef<CScope> scope,
-/// 		                                 blast::CFormattingArgs::EOutputFormat format_type)
-/// ```
 pub(super) struct ReportPrep<'a, 'o> {
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) outputs: &'a ReportOutputs<'o>,
@@ -95,18 +90,13 @@ pub(super) struct ReportPrep<'a, 'o> {
 /// for rpsblast over several volumes).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:283-291
-/// ```c++
-///     string retval(m_Errors.GetQueryId());
-///     if ( !retval.empty() ) {    // in case the query id is not known
-///         retval += ": ";
-///     }
-///     ITERATE(TQueryMessages, iter, m_Errors) {
-///         if ((**iter).GetSeverity() == eBlastSevWarning) {
-///             retval += (*iter)->GetMessage(false) + " ";
-///         }
-///     }
-/// ```
-pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
+///
+/// Also returned: by query, the queries' own messages that a structured first format does not
+/// write, kept for the later formats that do (`Posts::later`, `ReportOutputs::later_warnings`);
+/// `None` where they are not kept (`ReportOutputs::keeps_later_query_warnings`).
+pub(super) fn query_warning_lines(
+    prep: &ReportPrep<'_, '_>,
+) -> (Vec<Vec<u8>>, Option<Vec<Vec<u8>>>) {
     let ReportPrep {
         args,
         outputs,
@@ -120,13 +110,12 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
         ..
     } = *prep;
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
-    // the warnings go with the first format.
-    let result_warnings = outputs
-        .formats
-        .first()
-        .and_then(crate::api::local_blast::FormatOutput::report_format)
-        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
-    query_records
+    // the warnings go with the first format, or, where it is structured, they are kept for the
+    // later formats that write them (`later`).
+    let result_warnings = outputs.first_writes_query_warnings();
+    let later = outputs.keeps_later_query_warnings();
+    let mut later_lines = Vec::new();
+    let lines = query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -146,8 +135,8 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
                 .get(q_idx)
                 .cloned()
                 .unwrap_or_default();
-            if result_warnings {
-                lines.extend(if let Some(psi) = args.psi_search.as_deref() {
+            if result_warnings || later {
+                let text = if let Some(psi) = args.psi_search.as_deref() {
                     // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id;
                     // the messages add those of `PsiBlastSetupScoreBlock`.
                     pssm_hooks::pssm_query_warning(args.app.ncbi_name(), psi, record, &messages)
@@ -160,11 +149,16 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
                         record,
                         &messages,
                     )
-                });
+                };
+                match result_warnings {
+                    true => lines.extend(text),
+                    false => later_lines.push(text),
+                }
             }
             lines
         })
-        .collect()
+        .collect();
+    (lines, later.then_some(later_lines))
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
@@ -193,14 +187,6 @@ pub(super) struct ReportedPrefetch {
 /// (`ListedTitles::hit_loads`), for the writer.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-772
-/// ```c++
-///     try {
-///        CScope::TIds ids;
-///        vector<TSeqRange> ranges;
-///        s_ExtractSeqidsAndRanges(results, ids, ranges);
-///        _TRACE("Prefetching " << ids.size() << " sequence lengths");
-///        LoadSequencesToScope(ids, ranges, scope);
-/// ```
 pub(super) fn prefetch_reported_subjects(
     prep: &ReportPrep<'_, '_>,
     query_warning_lines: &mut [Vec<u8>],
@@ -231,7 +217,7 @@ pub(super) fn prefetch_reported_subjects(
     } = *prep;
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (quoted below)
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
     // The first batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops
     // the run in its prefetch (`shared::batch_prefetch`, below): NCBI reads none of that batch's
     // reports, nor any of the batches after it, so the checks of the reports are of the batches
@@ -289,19 +275,6 @@ pub(super) fn prefetch_reported_subjects(
         // 13 to 16 join the hits of matching Seq-align ids, which LOSAT does for copies of one
         // record; 13 to 16 and the tables of taxonomy fields write their taxids).
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
-        // ```c++
-        //     CSeq_loc seqloc(const_cast<CSeq_id&>(*ds.GetIds().back()), subj_start,
-        //                     subj_start+subjlen-1);
-        //
-        //     try {
-        //         CSeqVector sv(seqloc, scope);
-        //         sv.SetCoding(CSeq_data::e_Ncbistdaa);
-        //         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
-        //     } catch (const CException&) {
-        //         sequence_data.erase();
-        //         ERR_POST(Warning << "Failed to retrieve sequence " <<
-        //                  seqloc.GetInt().GetId().AsFastaString());
-        // ```
         // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
         // round) reads the letters of each included subject by its Seq-align id, as those formats
         // do (review 1 of line DBID tabfields, H1). `ListedTitles::pssm_reads` reads those, before
@@ -329,13 +302,6 @@ pub(super) fn prefetch_reported_subjects(
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     // Before the reports of a batch NCBI fetches every subject that the batch reports, and with
     // `taxdb.bti` on the search path the taxonomy database writes its messages there
     // (`database::prefetch_messages`: the texts of opening it at the run's first lookup, a
@@ -346,14 +312,9 @@ pub(super) fn prefetch_reported_subjects(
     // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
     // cannot read is refused before any byte; without `taxdb.bti` nothing is read.
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
-    // ```c++
-    //                    results = psiblast->Run();
-    //                    BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
-    // ```
     // psiblast's batches, of one query each (`read_psiblast_query_batches`), prefetch the same
     // way, the subjects of the traceback hit lists (`psiblast_prefetched`).
-    // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, quoted at
+    // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, cited at
     // `shared::prefetch_may_be_off`), each query's report fetches the subjects it shows, after
     // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
@@ -381,7 +342,7 @@ pub(super) fn prefetch_reported_subjects(
     // `-in_pssm` (`PsiSearch::query_scope`); else the input records that NCBI's reader added for
     // the batch (`RangedBatch::input`: the records that `-query_loc` drops included, numbered in
     // the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
-    // (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those of the batches before.
+    // (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those of the batches before.
     let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
         outputs.formats.iter().map(|format| format.outfmt),
     );
@@ -438,9 +399,9 @@ pub(super) fn prefetch_reported_subjects(
         })
     };
     let xml_cuts = crate::algorithm::common::database::XmlCuts::of(xml_first, &xml_cut);
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted at
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (cited at
     // `shared::batch_loads`)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813 (cited at
     // `shared::BatchLoads`: the tabular report reads the Seq-aligns after the cut to the hitlist
     // size)
     // The subjects, by rank, that NCBI's BLAST database data loader loaded for the call's batches
@@ -689,19 +650,10 @@ pub(super) fn prefetch_reported_subjects(
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-264
-        // ```c++
-        //             while (itr) {
-        //
-        //                 SavePssmToFile(pssm, &itr);
-        //     ...
-        //                    results = psiblast->Run();
-        //                    BlastFormatter_PreFetchSequenceData(*results, scope,
-        //                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
-        // ```
         // Every round prefetches into the one scope of the query's batch, which the formatter
         // resets after the batch (`ResetScopeHistory`, psiblast_app.cpp:513), and into the one
         // BLAST database data loader of the run, which keeps every Seq-id it registered
-        // (`RegisterIds`, quoted at `shared::stop_lookup_unsure`).
+        // (`RegisterIds`, cited at `shared::stop_lookup_unsure`).
         // psiblast's round of a query is a call of its own: the run's record of what its prefetch
         // (the traceback hit lists, `psiblast_prefetched`), or where it is off its reports and its
         // PSSM's reads, loaded (`loaded`), for the stop of a later round's or query's prefetch
@@ -728,10 +680,6 @@ pub(super) fn prefetch_reported_subjects(
 /// where the call has not made every row before (`pairwise_hits`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1412
-/// ```c++
-/// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-///                         CConstRef<blast::CBlastQueryVector> queries,
-/// ```
 pub(super) fn refuse_unreportable(
     prep: &ReportPrep<'_, '_>,
     rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
@@ -962,11 +910,6 @@ use crate::stats::KarlinParams;
 /// `total_db_len` is the letters of the searched subjects, NCBI's `Int8`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:283-285
-/// ```c++
-///     return BlastBuildSearchResultSet(query_ids,
-///                                      m_InternalData->m_ScoreBlk->GetPointer(),
-///                                      m_InternalData->m_QueryInfo,
-/// ```
 /// NCBI makes its result set of the Seq-aligns of the final hit lists and the queries' ids, which
 /// its formatter reads; LOSAT reads what its reports need of the final hit lists with these values.
 pub(super) struct ReportSetup<'a> {
@@ -994,12 +937,6 @@ pub(super) struct ReportSetup<'a> {
 /// once for this read and the read of the titles after it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1110-1113
-/// ```c++
-/// void
-/// LoadSequencesToScope(CScope::TIds& ids, vector<TSeqRange>& ranges, CRef<CScope> & scope)
-/// {
-/// 	CScope::TBioseqHandles bhs = scope->GetBioseqHandles(ids);
-/// ```
 /// NCBI loads the subjects of the Seq-aligns into the formatter's scope, from which its reports
 /// read them. It loads them there when it prefetches (blast_app_util.cpp:764-772), after its read
 /// of `PRE_FETCH_SEQS_LIMIT`, and otherwise when a report reads each subject; LOSAT reads them
@@ -1067,11 +1004,6 @@ pub(super) fn read_shown_residues(
 /// request to `outputs`), and NCBI's error is returned.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:732-734
-/// ```c++
-/// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-/// 		if (pre_fetch_limit_str) {
-/// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-/// ```
 pub(super) fn refuse_prefetch_environment(
     setup: &ReportSetup<'_>,
     outputs: &mut ReportOutputs<'_>,
@@ -1084,14 +1016,6 @@ pub(super) fn refuse_prefetch_environment(
         ..
     } = *setup;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-285
-    // ```c++
-    //             if (fmt_args->ArchiveFormatRequested(args)) {
-    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
-    //                 m_Bah.ResetMessages();
-    //             } else {
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    // ```
     // The prefetch before a batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's search
     // and the read of its definition lines (in `run_call`): a value that NCBI cannot convert stops the
     // first batch here, after the outfmt 0 prolog and the messages of its records, before any of
@@ -1194,11 +1118,6 @@ pub(super) struct ReportValues {
 /// (`recount_shown_identities`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1551
-/// ```c++
-/// CRef<CSeq_align_set>
-/// BlastHitList2SeqAlign_OMF(const BlastHitList     * hit_list,
-///                           EBlastProgramType        prog,
-/// ```
 pub(super) fn report_values(
     setup: &ReportSetup<'_>,
     listed_subjects: &Option<database::ListedSubjects>,
@@ -1224,22 +1143,12 @@ pub(super) fn report_values(
         hit_list_to_seqalign_order(hit_list);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:804-813
-    // ```c++
-    //             tabinfo.PrintHeader(strProgVersion, *(bhandle.GetBioseqCore()),
-    //                                 dbname, results.GetRID(), itr_num, aln_set,
-    //                                 subject_bioseq);
-    //         }
-    //
-    //         if (results.HasAlignments()) {
-    //     	    CSeq_align_set copy_aln_set;
-    //             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-    // ```
     // psiblast's Seq-aligns are those of its larger traceback hit lists (`traceback_hitlist_size`):
     // the `# N hits found` line of -outfmt 7 counts them all, and the formatter keeps the first
     // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
     // numbers of descriptions and alignments).
     // NCBI's cut counts the Seq-aligns of subjects whose Seq-align ids match as those of one
-    // subject (`PruneSeqalign`, quoted at `joined_cut`): a copy of one record that follows
+    // subject (`PruneSeqalign`, cited at `joined_cut`): a copy of one record that follows
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
@@ -1265,14 +1174,6 @@ pub(super) fn report_values(
             .first()
             .is_some_and(|outfmt| !outfmt.reads_subjects());
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
-    // ```c++
-    //     ITERATE(blast::CSearchResultSet, result, results) {
-    //         if ( !(*result)->HasAlignments() ) {
-    //             continue;
-    //         }
-    //         ITERATE(CSeq_align_set::Tdata, aln, (*result)->GetSeqAlign()->Get()) {
-    //             CConstRef<CSeq_id> subj(&(*aln)->GetSeq_id(kSubjRow));
-    // ```
     // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
     // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
     // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
@@ -1291,22 +1192,6 @@ pub(super) fn report_values(
                 .collect()
         });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:291-309
-    // ```c++
-    //                 CSearchResults& results_1st_query = (*results)[0];
-    //                 if ( !results_1st_query.HasAlignments() ) {
-    //                     break;
-    //                 }
-    //
-    //                 if (run_token & 2)
-    //                 {
-    //                         CConstRef<CSeq_align_set> aln(results_1st_query.GetSeqAlign());
-    //                         ...
-    //                         if (itr || m_CmdLineArgs->GetSaveLastPssm()) {
-    //                         ...
-    //                         pssm =
-    //                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
-    //                                      results_1st_query.GetAncillaryData());
-    // ```
     // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
     // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
     // reports (`run_call`'s `output_result`). A refusal between here and the reports
@@ -1468,10 +1353,6 @@ pub(super) fn report_values(
 /// tabular reports.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:138-139
-/// ```c++
-/// 	CBlastFormatUtil::FillScanModeBlastDbInfo(m_DbInfo, m_DbIsAA,
-///                 num_seqs, total_length, m_SubjectTag);
-/// ```
 pub(super) struct ReportLabels {
     pub(super) subject_input_label: String,
     pub(super) shown_num_sequences: i64,
@@ -1485,11 +1366,6 @@ pub(super) struct ReportLabels {
 /// `shown_of`'s), and the context of the tabular reports, with their `# Database:` line.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:120-122
-/// ```c++
-///     m_DbName = db_adapter.GetDatabaseName();
-///     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
-///     m_IsDbScan = db_adapter.IsDbScanMode();
-/// ```
 pub(super) fn report_labels(
     setup: &ReportSetup<'_>,
     shown_records: &[FastaRecord],
@@ -1523,13 +1399,6 @@ pub(super) fn report_labels(
     let context = ReportContext {
         subject_name: Some(subject_name_label.clone()),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
-        // ```c++
-        // 	    string dbname;
-        // 	    if (m_IsDbScan)
-        // 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
-        // 	    else
-        // 		dbname = m_DbName;
-        // ```
         // The `# Database:` line of outfmt 7 shows the `-db` value as NCBI keeps it.
         database_name: Some(match database {
             Some(database) => database.name().to_string(),

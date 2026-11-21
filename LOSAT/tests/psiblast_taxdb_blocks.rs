@@ -8,11 +8,6 @@
 //! search's) of the 8 subjects of `tm_psi`, all with taxid 9606 (`tests/db_search/README.md`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
-//! ```c++
-//!                    results = psiblast->Run();
-//!                    BlastFormatter_PreFetchSequenceData(*results, scope,
-//!                            m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
-//! ```
 
 use std::process::{Command, Output};
 

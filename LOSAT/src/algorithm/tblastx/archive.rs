@@ -2,12 +2,6 @@
 //! each query batch from the batch's report data, and the error archive.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
-//! ```c++
-//!                 if (fmt_args->ArchiveFormatRequested(args)) {
-//!                     formatter.WriteArchive(*queries, *opts_hndl, *results, 0, m_Bah.GetMessages());
-//!                     m_Bah.ResetMessages();
-//!                 } else {
-//! ```
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 10002 by default),
 //! written after the batch's search. LOSAT's TBLASTX searches the batches first and writes every
 //! format at the end, from the hits of all of them (`write_tblastx_outputs`), so the archives are
@@ -53,7 +47,8 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, ...) are never recorded.
+/// accept (`-best_hit_overhang`, ...) are never recorded. `-strand` is not an option of the request:
+/// NCBI keeps it in the queries' Seq-locs (the query reader's strand, `with_strand`).
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
@@ -68,50 +63,22 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
     // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.matrix = args.matrix.clone();
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-    // ```c++
-    //     if (args[kArgLookupTableMaskingOnly]) {
-    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-    //     }
-    // ```
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:321-323
-    // ```c++
-    //     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
-    //         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2043-2052
-    // ```c++
-    // CBlastOptions::SetSumStatisticsMode(bool m)
-    // ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_SumStatisticsMode, m);
-    //     }
-    // ```
     // `SumStatistics` is recorded only when `-sum_stats` is given, with its value.
     inputs.sum_stats = args.sum_stats;
     inputs.window_size = args.window_size;
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
+    inputs.subject_besthit = args.subject_besthit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
-    // ```c++
-    //     opt.SetLongestIntronLength(args[kArgMaxIntronLength].AsInteger());
-    // ```
     // The argument has a default, so the list always holds it; a value other than 0 stops the run
     // before any archive (`check_ncbi_options`).
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
@@ -156,23 +123,7 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) ->
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
-// ```c++
-// inline Int8
-// CBlastOptionsLocal::GetEffectiveSearchSpace() const
-// {
-//     if (m_EffLenOpts->num_searchspaces == 0)
-//         return 0;
-//
-//     return m_EffLenOpts->searchsp_eff[0];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 /// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
 /// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
 /// of context 0 and that context's length in residues (`archive::RequestLength::space`), when NCBI
@@ -432,9 +383,10 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI does not
-    // record, is read since line RG X1, and `-sum_stats` since line RG X3): the list that NCBI
-    // would record is what the archive's model knows about them, pinned here.
+    // (`-parse_deflines`; `-xdrop_ungap`, which NCBI does not record, is read since line RG X1,
+    // `-sum_stats` since line RG X3, `-strand`, which NCBI does not record either, since line NP
+    // O2b, and `-subject_besthit` since line NP O6b): the list that NCBI would record is what the
+    // archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
@@ -529,16 +481,9 @@ mod tests {
     /// (they stop at the command line) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
-        let mut subject_besthit = false;
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-subject_besthit" => {
-                    subject_besthit = true;
-                    index += 1;
-                }
-                // Not recorded (the strand is not an option of the request).
-                "-strand" => index += 2,
                 "-parse_deflines" => index += 1,
                 other => {
                     parsed.push(other);
@@ -553,9 +498,7 @@ mod tests {
         let Commands::Tblastx(args) = cli.command else {
             return None;
         };
-        let mut inputs = option_inputs(&args);
-        inputs.subject_besthit = subject_besthit;
-        Some(inputs)
+        Some(option_inputs(&args))
     }
 
     // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as

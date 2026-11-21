@@ -151,14 +151,7 @@ def load_manifest(path: Path, repo_root: Path) -> list[Case]:
     return cases
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-# ```c++
-# const string kArgQuery("query");
-# const string kArgSubject("subject");
-# const string kArgQueryGeneticCode("query_gencode");
-# const string kArgDbGeneticCode("db_gencode");
-# const string kArgNumThreads("num_threads");
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 def build_commands(
     case: Case,
     oracle: Path,
@@ -226,12 +219,7 @@ def run_command(command: list[str], log_path: Path, *, native: bool = False) -> 
     return CommandResult(completed.returncode, completed.stderr)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
-# ```c++
-# const char* kDfltArgTabularOutputFmt =
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
-# ```
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-45
 def parse_outfmt6(path: Path) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):

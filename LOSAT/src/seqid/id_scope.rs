@@ -176,36 +176,7 @@ fn name_kind_key(name: &[u8], accession: bool) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
-// ```c++
-// SSeqMatch_Scope CDataSource_ScopeInfo::x_GetSeqMatch(const CSeq_id_Handle& idh)
-// {
-//     SSeqMatch_Scope ret = x_FindBestTSE(idh);
-//     if ( !ret && idh.HaveMatchingHandles() ) {
-//         CSeq_id_Handle::TMatches ids;
-//         idh.GetMatchingHandles(ids, eAllowWeakMatch);
-//         ITERATE ( CSeq_id_Handle::TMatches, it, ids ) {
-//             ...
-//             if ( SSeqMatch_Scope match = x_FindBestTSE(*it) ) {
-//                 ret = match;
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1494-1507
-// ```c++
-//         if ( tid->IsSetAccession() ) {
-//             x_FindMatchByAcc(id_list, tid->GetAccession(), tid);
-//         }
-//         if ( tid->IsSetName() ) {
-//             x_FindMatchByName(id_list, tid->GetName(), tid);
-//         }
-//         // special case for PIR and PRF ids - matching accesstion to name
-//         // the id should have only accession and no other fields (version, name, release)
-//         if ( (type == CSeq_id::e_Pir || type == CSeq_id::e_Prf) &&
-//              tid->IsSetAccession() &&
-//              !tid->IsSetVersion() && !tid->IsSetName() && !tid->IsSetRelease() &&
-//              !m_ByName.empty() ) {
-//             x_FindMatchByName(id_list, tid->GetAccession(), nullptr, eOnlyName);
-//         }
-// ```
 // `x_FindMatchByAcc` takes every version of an accession without one (and the packed path at
 // 1469-1479 alike), `x_FindMatchByName` with an accession only the name-only ids (1367-1372),
 // and without one any id of that name.

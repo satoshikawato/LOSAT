@@ -183,7 +183,7 @@ mod tests {
     use crate::blastinput::seq_range::RecordPlacement;
     use crate::common::Hit;
 
-    /// A HSP of subject `s_idx` whose query range is `q` and subject range `s` (1-based, closed;
+    /// An HSP of subject `s_idx` whose query range is `q` and subject range `s` (1-based, closed;
     /// `(n + 1, n)` is the range of length 0 at offset `n`).
     fn hsp(q: (usize, usize), s: (usize, usize), s_idx: u32) -> BlastpHsp {
         BlastpHsp::from_hit(Hit {

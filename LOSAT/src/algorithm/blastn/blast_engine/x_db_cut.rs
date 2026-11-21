@@ -25,7 +25,7 @@
 //! - the cut only moves where blocks end: `SeqDb::next_block` gives the consecutive sequences of a
 //!   volume that fit the size, at least one (a longer sequence is a block of its own), and the
 //!   blocks follow each other in ordinal order, so every sequence is searched once, in the order of
-//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1426, quoted above
+//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1426, cited above
 //!   `search_blocks`);
 //! - the result of a sequence does not depend on what the worker's scratch searched before it: the
 //!   rounds of 1 MiB blocks at two threads or more already rely on it (`map_init` hands a scratch a
@@ -50,7 +50,7 @@
 //!
 //! No NCBI counterpart for the cut itself: NCBI's search threads take chunks of
 //! MAX(sequences / 100, 1) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,
-//! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
+//! blast_engine.c:1409; seqdbimpl.cpp:328-350, cited above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
 //! With LOSAT_X_BNDBSTREAM (`x_db_stream.rs`, in the strict set) the parallel stage has no rounds:
@@ -133,7 +133,7 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize, largest: u6
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The bytes of the database's sequences in its sequence files without their ambiguity data: four
 /// letters per byte and the last byte of each sequence, which holds the count of its letters
-/// (seqdbvol.cpp:1805-1838, quoted above `block_subject`). A sequence of `n` letters takes
+/// (seqdbvol.cpp:1805-1838, cited above `block_subject`). A sequence of `n` letters takes
 /// `n / 4 + 1` bytes, so this is the sum up to 3 / 4 byte per sequence. The sequences are the
 /// included ones (`SeqDb::included_length`); an index that cannot be read counts as the largest
 /// database, whose blocks are the cut's largest (`BLOCK_BYTES`, or `X_BNDBSMALL_BLOCK_BYTES` with
@@ -161,19 +161,6 @@ pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
-// ```c
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-//        Int4 stat_length;
-//        if (seq_arg.oid == BLAST_SEQSRC_ERROR) {
-//            status = BLASTERR_SEQSRC;
-//            break;
-//        }
-// ...
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//            continue;
-// ```
 // The one-thread loop of `search_blocks_of` reads its blocks of `BLOCK_BYTES` in ordinal order and
 // stops at the first block that cannot be read or the first sequence whose length is rejected
 // (`block_subject`); the kernel itself returns no error. The parallel rounds of the same blocks
@@ -199,20 +186,7 @@ pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Er
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1413
-// ```c
-//     db_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// EXPERIMENT (LOSAT_X_BNDBCUT): `search_blocks` with the blocks of the cut
 /// (`x_db_cut_block_bytes`) and, on failure, the error of the one-thread order.
 ///

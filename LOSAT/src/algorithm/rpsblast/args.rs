@@ -214,6 +214,9 @@ impl RpsblastArgs {
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             culling_limit: None,
+            // rpsblast has no `-best_hit_*` (NCBI's parser neither).
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
             subject_besthit: false,
             ungapped: false,
             // rpsblast's X-drops are its RPS engine's (`rps`).

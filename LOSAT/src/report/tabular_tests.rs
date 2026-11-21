@@ -1255,3 +1255,16 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
         assert!(refuses(fields, Program::Blastx, 5, false), "{fields}");
     }
 }
+
+/// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's
+/// object manager converts it to the coding 1).
+#[test]
+fn the_sequence_exception_names_the_codings_of_the_query() {
+    for coding in [2, 8, 10] {
+        let message = query_sequence_exception(coding).get_msg().to_vec();
+        assert_eq!(
+            message,
+            format!("Incompatible sequence codings: {coding} -> 1").into_bytes()
+        );
+    }
+}

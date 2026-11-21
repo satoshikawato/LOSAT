@@ -27,9 +27,14 @@ const PROGRAMS: &[(&str, &str)] = &[
     ("dustmasker", include_str!("ncbi_xmlhelp/dustmasker.xml")),
     ("segmasker", include_str!("ncbi_xmlhelp/segmasker.xml")),
     (
+        "windowmasker",
+        include_str!("ncbi_xmlhelp/windowmasker.xml"),
+    ),
+    (
         "convert2blastmask",
         include_str!("ncbi_xmlhelp/convert2blastmask.xml"),
     ),
+    ("makembindex", include_str!("ncbi_xmlhelp/makembindex.xml")),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.

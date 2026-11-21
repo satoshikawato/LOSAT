@@ -106,6 +106,10 @@ class BlastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     ungapped: bool
     """Perform ungapped alignment only"""
     xdrop_ungap: float
@@ -613,3 +617,9 @@ class PsiblastOptions(TypedDict, total=False):
     save_each_pssm: bool
     """Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm
     options)"""
+    msa_master_idx: int
+    """Ordinal number (1-based index) of the sequence to use as a master in the multiple
+    sequence alignment. If not provided, the first sequence in the multiple sequence alignment
+    will be used"""
+    ignore_msa_master: bool
+    """Ignore the master sequence when creating PSSM"""

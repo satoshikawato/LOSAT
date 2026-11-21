@@ -120,6 +120,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
         window_size: 40,
         gapped_karlin: Default::default(),
         gumbel: None,
+        gapped: true,
         num_descriptions: 500,
         num_alignments: 250,
     };

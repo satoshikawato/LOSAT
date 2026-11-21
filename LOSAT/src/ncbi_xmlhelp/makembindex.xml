@@ -1,0 +1,162 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>makembindex</name>
+<version>2.17.0</version>
+<description>Create a BLAST database index.</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="conffile" type="File_In" optional="true">
+<description>Program&apos;s configuration (registry) data file</description>
+<synopsis>File_Name</synopsis>
+</key>
+<key name="db_mask" type="String" optional="true">
+<description>use the specified filtering algorithm from BLAST DB</description>
+<synopsis>filtering_algorithm</synopsis>
+</key>
+<key name="idmap" type="Boolean" optional="true">
+<description>generate id map for the sequences in the index</description>
+<synopsis>generate_idmap</synopsis>
+<default>false</default>
+</key>
+<key name="iformat" type="String" optional="true">
+<description>type of input used (default is &quot;blastdb&quot; for new style index, &quot;fasta&quot; for old style index)</description>
+<synopsis>input_format</synopsis>
+<constraint>
+<description>`blastdb&apos;, `fasta&apos;</description>
+<Strings case_sensitive="true">
+<value>blastdb</value>
+<value>fasta</value>
+</Strings>
+</constraint>
+</key>
+<key name="input" type="String" optional="true">
+<description>input file name</description>
+<synopsis>input_file_name</synopsis>
+</key>
+<key name="legacy" type="Boolean" optional="true">
+<description>use legacy (0-terminated offset lists) dbindex format</description>
+<synopsis>use_legacy_index_format</synopsis>
+<default>true</default>
+</key>
+<key name="logfile" type="File_Out" optional="true">
+<description>File to which the program log should be redirected</description>
+<synopsis>File_Name</synopsis>
+</key>
+<key name="nmer" type="Integer" optional="true">
+<description>length of the indexed words</description>
+<synopsis>nmer_size</synopsis>
+<constraint>
+<description>8..15</description>
+<Integers>
+<min>8</min>
+<max>15</max>
+</Integers>
+</constraint>
+</key>
+<key name="old_style_index" type="Boolean" optional="true">
+<description>Use old style index (deprecated)</description>
+<synopsis>boolean</synopsis>
+<default>false</default>
+</key>
+<key name="output" type="String" optional="true">
+<description>output file name</description>
+<synopsis>output_file_name</synopsis>
+</key>
+<key name="stat" type="String" optional="true">
+<description>write index statistics into file with that name (for testing and debugging purposes only).</description>
+<synopsis>statistics_file</synopsis>
+</key>
+<key name="stride" type="Integer" optional="true">
+<description>distance between stored database positions</description>
+<synopsis>stride</synopsis>
+<constraint>
+<description>greater or equal to 1</description>
+<Integers>
+<min>1</min>
+<max>2147483647</max>
+</Integers>
+</constraint>
+</key>
+<key name="verbosity" type="String" optional="true">
+<description>how much to report</description>
+<synopsis>reporting_level</synopsis>
+<constraint>
+<description>`normal&apos;, `quiet&apos;, `verbose&apos;</description>
+<Strings case_sensitive="true">
+<value>normal</value>
+<value>quiet</value>
+<value>verbose</value>
+</Strings>
+</constraint>
+<default>normal</default>
+</key>
+<key name="volsize" type="Integer" optional="true">
+<description>size of an index volume in MB</description>
+<synopsis>volume_size</synopsis>
+<constraint>
+<description>greater or equal to 1</description>
+<Integers>
+<min>1</min>
+<max>2147483647</max>
+</Integers>
+</constraint>
+</key>
+<key name="ws_hint" type="Integer" optional="true">
+<description>most likely word size used in searches</description>
+<synopsis>word_size_hint</synopsis>
+<constraint>
+<description>greater or equal to 1</description>
+<Integers>
+<min>1</min>
+<max>2147483647</max>
+</Integers>
+</constraint>
+</key>
+<flag name="dryrun" optional="true">
+<description>Dry run the application: do nothing, only test all preconditions</description>
+</flag>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="show_filters" optional="true">
+<description>show the info about available database filtering algorithms and exit</description>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<flag name="version-full" optional="true">
+<description>Print extended version data;  ignore other arguments</description>
+</flag>
+<flag name="version-full-json" optional="true">
+<description>Print extended version data in JSON format;  ignore other arguments</description>
+</flag>
+<flag name="version-full-xml" optional="true">
+<description>Print extended version data in XML format;  ignore other arguments</description>
+</flag>
+<flag name="xmlhelp" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other parameters</description>
+</flag>
+<dependencies>
+<first_requires_second>
+<arg1>db_mask</arg1>
+<arg2>input</arg2>
+</first_requires_second>
+<first_excludes_second>
+<arg1>output</arg1>
+<arg2>show_filters</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>show_filters</arg1>
+<arg2>output</arg2>
+</first_excludes_second>
+</dependencies>
+</arguments>
+</ncbi_application>

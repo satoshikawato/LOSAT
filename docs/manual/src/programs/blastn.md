@@ -50,6 +50,7 @@ With reward 0 and penalty 0 (`-task rmblastn`, or `-reward 0 -penalty 0` with an
 | `-max_hsps` | no limit | Keep at most this many alignments per subject |
 | `-perc_identity` | 0 (off) | Drop alignments below this percent identity |
 | `-qcov_hsp_perc` | 0 (off) | Drop alignments that cover less than this percent of the query |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-word_size` | by task | Length of the exact match that starts an alignment |
 | `-reward`, `-penalty` | by task | Score of a match and of a mismatch |
 | `-gapopen`, `-gapextend` | by task | Gap costs |
@@ -93,7 +94,7 @@ LOSAT stops with an error for these `blastn` settings instead of running somethi
 
 - `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
 - `-ungapped` together with `-outfmt 17` (SAM).
-- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-import_search_strategy`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
 - `-index_name`. `-use_index true` on a database that has a MegaBLAST index (`makembindex`).
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.
 - Extreme `-xdrop_gap`, `-xdrop_gap_final` or `-xdrop_ungap` values for which NCBI BLAST+ overflows its 32-bit arithmetic.

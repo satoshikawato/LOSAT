@@ -161,10 +161,12 @@ impl BlastpDbMasking<'_> {
 /// The hard chunks of a sequence with masks (`masked.stored`), searched one by one into the HSPs
 /// of the sequence, and its HSP lists per query in `subject_result`. A chunk shorter than the
 /// word finds nothing in NCBI's one-hit and two-hit scans alike and is passed over
-/// (`SubjectPlan::next_searched_chunk`). The sequences that LOSAT refuses never come here: a mask
-/// that runs to the end after the chunk from the start (`HardMaskShape::TailMask`), a mask past
-/// the sequence's end (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN`
-/// (`HardMaskShape::LongRange`).
+/// (`SubjectPlan::next_searched_chunk`). Every chunk is searched over its own letters, the chunk
+/// from the start before a mask that runs to the end included, which NCBI scans past its end (its
+/// "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 18, the Owner's
+/// answer Q1 = B of M4b). The sequences that LOSAT refuses never come here: that chunk after an
+/// empty mask at 0 (`HardMaskShape::FrameStartMask`), a mask past the sequence's end
+/// (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,

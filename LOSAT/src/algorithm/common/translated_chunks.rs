@@ -211,15 +211,20 @@ fn soft_chunk_scan_ranges(
 // mask kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and
 // each frame is cut by them as a protein subject is: with soft masks, the ranges are the scan
 // ranges of the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its
-// own (cut again past `MAX_DBSEQ_LEN`) that scans its letters from its start, except NCBI's "no
-// chunking" branch, where the chunk from the frame's start scans the whole frame.
+// own (cut again past `MAX_DBSEQ_LEN`) that scans its letters from its start. NCBI's "no chunking"
+// branch scans the whole frame from the chunk at the frame's start (blast_engine.c:264-268), also
+// where that chunk ends before the frame's end at a mask: there LOSAT scans the chunk alone, as
+// NCBI's normal chunks do for the near input with the mask one letter shorter (an approved NCBI
+// defect, PD-LOSAT-NCBI-DEFECTS exception 18: the Owner's answers Q1 = B and Q2 = B of M4b,
+// 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
+// the same row once for each word it reads in the mask, or a crash).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with
 /// `-db_hard_mask` (`hard`) or `-db_soft_mask`. `negative_first_length` is the number of residues
 /// of frame -1; `split` is the chunker, whose buffer of ranges is reused. A chunk of a hard range
 /// may end one residue past a frame that is one residue shorter than its strand's first frame (the
-/// frame's end sentinel), as NCBI's does.
+/// frame's end sentinel), as NCBI's does. Every hard chunk scans its own letters, `[0, length)`.
 pub(crate) fn translated_db_mask_chunks(
     nucleotide_ranges: &[(i32, i32)],
     hard: bool,
@@ -240,11 +245,7 @@ pub(crate) fn translated_db_mask_chunks(
     split.start(frame_length, frame_ranges, false);
     while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
         // The protein programs' chunks have no residual: the scan starts at the chunk's start.
-        let right = if chunk.full_range {
-            frame_length
-        } else {
-            chunk.length
-        };
+        let right = chunk.length;
         calls.push((
             TranslatedChunk {
                 offset: chunk.offset,

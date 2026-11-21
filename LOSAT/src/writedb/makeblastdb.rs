@@ -10,7 +10,7 @@ use super::build_db::BuildDatabase;
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
-use super::metadata::{db_files_metadata, write_metadata_file, DbMetadata};
+use super::metadata::{db_files_metadata, metadata_user_path, write_metadata_file, DbMetadata};
 use super::platform::Platform;
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
 use super::time::LocalTime;
@@ -63,6 +63,9 @@ pub struct MakedbArgs {
     /// Maximum file size for BLAST database files
     #[arg(long, default_value = "3GB", value_name = "number_of_bytes")]
     pub max_file_sz: String,
+    /// Path prefix for location of database files in metadata
+    #[arg(long, value_name = "String")]
+    pub metadata_output_prefix: Option<String>,
     /// File to which the program log should be redirected
     #[arg(long, value_name = "File_Name")]
     pub logfile: Option<String>,
@@ -98,16 +101,10 @@ pub struct MakedbArgs {
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`
-/// and `-mask_desc` are read. `-gi_mask` and `-gi_mask_name` write GI-indexed mask files
-/// (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 5] = [
-    "randomize",
-    "gi_mask",
-    "gi_mask_name",
-    "metadata_output_prefix",
-    "oid_masks",
-];
+/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
+/// `-mask_desc` and `-metadata_output_prefix` are read. `-gi_mask` and `-gi_mask_name` write
+/// GI-indexed mask files (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 4] = ["randomize", "gi_mask", "gi_mask_name", "oid_masks"];
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
@@ -710,6 +707,7 @@ fn build_database_with_log(
         &mut db,
         &names,
         from_stdin.then_some(stdin_map),
+        &metadata_user_path(args.metadata_output_prefix.as_deref()),
         is_protein,
         registry_blastdb,
         stdin,
@@ -741,12 +739,14 @@ fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> V
 
 /// The rest of `x_BuildDatabase`: the input files, `EndBuild` and the metadata file.
 /// `from_stdin` is `Some(map)` for `-in -`, `map` being `Some(failed)` when `-taxid_map -`
-/// read the standard input first (`failed`: whether it left the stream failed).
+/// read the standard input first (`failed`: whether it left the stream failed). `user_path`
+/// comes before the names of the metadata's files (`metadata_user_path`).
 #[allow(clippy::too_many_arguments)]
 fn add_input_and_close(
     db: &mut BuildDatabase<'_>,
     names: &[&str],
     from_stdin: Option<Option<bool>>,
+    user_path: &str,
     is_protein: bool,
     registry_blastdb: Option<&str>,
     stdin: &mut dyn Read,
@@ -810,7 +810,7 @@ fn add_input_and_close(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(db, is_protein, registry_blastdb, err)?;
+        open_new_database(db, user_path, is_protein, registry_blastdb, err)?;
     }
     Ok(())
 }
@@ -855,6 +855,7 @@ fn add_input_and_close(
 /// database and writes its metadata file.
 fn open_new_database(
     db: &BuildDatabase<'_>,
+    user_path: &str,
     is_protein: bool,
     registry_blastdb: Option<&str>,
     err: &mut dyn Write,
@@ -908,7 +909,7 @@ fn open_new_database(
         &located.alias_files,
         &lmdb,
         is_protein,
-        "",
+        user_path,
     );
     let metadata = DbMetadata {
         dbname: dbname.as_bytes().to_vec(),

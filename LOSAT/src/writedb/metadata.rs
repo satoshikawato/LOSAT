@@ -218,10 +218,10 @@ fn file_length(path: impl AsRef<Path>) -> Option<i64> {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1610-1702
 // `volumes` and `alias_files` are `FindVolumePaths(paths, alias, true)`: each path once.
-// makeblastdb gives no `-metadata_output_prefix` (LOSAT refuses the option), so its
-// `user_path` is empty, and its `lmdbs` is the one LMDB file of the version 5 database it
-// wrote, `<db>.pdb`; blastdbcmd's are those of its `-metadata_output_prefix` and the LMDB
-// files of the database's volumes (`GetLMDBFileNames`, one per `CSeqDBLMDBEntry`).
+// `user_path` is the `-metadata_output_prefix` of makeblastdb and of blastdbcmd
+// (`metadata_user_path`). makeblastdb's `lmdbs` is the one LMDB file of the version 5 database
+// it wrote, `<db>.pdb`; blastdbcmd's are the LMDB files of the database's volumes
+// (`GetLMDBFileNames`, one per `CSeqDBLMDBEntry`).
 // `file.GetDir() + file.GetBase()` is the LMDB file's path without its extension. A file
 // the earlier database of the same name left (a `<db>.pjs` that the removal of a database
 // of several volumes does not take) is listed and counted as NCBI lists it.
@@ -280,6 +280,21 @@ pub(crate) fn db_files_metadata(
     }
     db_files.sort();
     (disk_bytes, cached_bytes, db_files)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1301-1305
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1208-1212
+/// The `user_path` of `-metadata_output_prefix`, which makeblastdb and blastdbcmd read alike: the
+/// value with the path separator added when it is not empty and does not end with one, and
+/// empty without the option. makeblastdb 2.17.0 writes the value before each name of `files`
+/// (`x`, `/data/blast/`, a quote, a backslash, a tab, UTF-8, escaped as the JSON of every
+/// string), and an empty value adds nothing (line RG item D3a probes `P_*`).
+pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
+    let mut user_path = prefix.unwrap_or("").to_string();
+    if !user_path.is_empty() && !user_path.ends_with(std::path::MAIN_SEPARATOR) {
+        user_path.push(std::path::MAIN_SEPARATOR);
+    }
+    user_path
 }
 
 /// `CIOException::EErrCode` of the serializer's buffer.

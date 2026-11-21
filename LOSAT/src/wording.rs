@@ -486,6 +486,28 @@ pub(crate) mod tests {
         );
     }
 
+    /// `text` with each `{db_dir}` token written as the path of `tests/db_search/rps/db_dir_len.txt`
+    /// characters that it stands for in the frozen rows.
+    fn expand_db_dir(text: &[u8]) -> Vec<u8> {
+        const TOKEN: &[u8] = b"{db_dir}";
+        let length: usize = include_str!("../tests/db_search/rps/db_dir_len.txt")
+            .trim()
+            .parse()
+            .unwrap();
+        let mut out = Vec::with_capacity(text.len() + length);
+        let mut i = 0;
+        while i < text.len() {
+            if text[i..].starts_with(TOKEN) {
+                out.resize(out.len() + length, b'd');
+                i += TOKEN.len();
+            } else {
+                out.push(text[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
     // `asn_text::visible_string_line` writes each message of the frozen archives as NCBI wrote
     // it: the wraps of a message mapped by `losat_output_bytes` are the writer's.
     #[test]
@@ -512,12 +534,15 @@ pub(crate) mod tests {
                     continue;
                 };
                 search = end;
+                // A frozen `{db_dir}` stands for a path of the length the rows were frozen with
+                // (`db_search_fixtures.py` `inflate_rps`): the wraps of NCBI's bytes are those of
+                // the whole path.
                 assert_eq!(
                     crate::report::serial::asn_text::visible_string_line(
                         &data[line_start..quote],
-                        &value
+                        &expand_db_dir(&value)
                     ),
-                    &data[line_start..end],
+                    expand_db_dir(&data[line_start..end]),
                     "{} byte {at}",
                     path.display()
                 );

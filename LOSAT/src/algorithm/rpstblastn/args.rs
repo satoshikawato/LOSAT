@@ -195,10 +195,7 @@ impl RpstblastnArgs {
     pub fn into_blastx_args(self) -> Result<BlastxArgs> {
         let search = self.rps_search()?;
         let requested_cbs = search.search.requested_cbs;
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastxArgs {
             query: self.query,
             subject: None,
@@ -439,12 +436,12 @@ mod tests {
     fn options_of_later_items_are_refused() {
         for (extra, text) in [
             (
-                &["-outfmt", "5"][..],
-                "output format 5 is not supported by LOSAT's RPSTBLASTN",
+                &["-outfmt", "8"][..],
+                "output format 8 is not supported by LOSAT's RPSTBLASTN",
             ),
             (
-                &["-outfmt", "11"],
-                "output format 11 is not supported by LOSAT's RPSTBLASTN",
+                &["-outfmt", "12"],
+                "output format 12 is not supported by LOSAT's RPSTBLASTN",
             ),
             (
                 &["-outfmt", "20"],

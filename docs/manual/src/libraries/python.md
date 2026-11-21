@@ -141,7 +141,7 @@ All errors derive from `LosatError` and carry the command line's message for the
 - `InputError`: a FASTA input that the reader refuses or cannot open.
 - `SearchError`: a search, database or tool that fails.
 
-`error.message_bytes` is the message as bytes, made from what the command line writes to its standard error for the failure: a search's message of NCBI's (`BLAST engine error: ...`) keeps its newlines; LOSAT's own refusals have no `Error: ` and no last newline; `InputError`, the errors of the tools and that of a start that ends the program (`Critical: ...`) are the command line's text without its last newlines. Text that a search writes before the failure, such as a warning, is not in the message. `str(error)` is the message as text, with one U+FFFD per maximal ill-formed subpart of its bytes.
+`error.message_bytes` is the message as bytes, made from what the command line writes to its standard error for the failure: a search's message of NCBI's (such as the engine's error) keeps its newlines; LOSAT's own refusals have no `Error: ` and no last newline; `InputError`, the errors of the tools and that of a start that ends the program (`Critical: ...`) are the command line's text without its last newlines. Text that a search writes before the failure, such as a warning, is not in the message. `str(error)` is the message as text, with one U+FFFD per maximal ill-formed subpart of its bytes.
 
 ## What `pylosat` promises, and what it does not
 

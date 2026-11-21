@@ -23,7 +23,7 @@ use super::id::DebugBytes;
 /// diagnostics quote), by these rules:
 ///
 /// - A message of NCBI's that a search reports (the command line's text for a failure of the
-///   search that NCBI BLAST+ reports, such as `BLAST engine error: ...` or `BLAST failed to write
+///   search that NCBI BLAST+ reports, such as the engine's error or `BLAST failed to write
 ///   output`, an [`Error::Search`]; and NCBI's text for an `-outfmt` value that its reading
 ///   refuses, an [`Error::Argv`]) is its bytes, with its trailing newline or newlines.
 /// - LOSAT's own refusals, and the other errors that the command line writes after `Error: `, are
@@ -35,11 +35,12 @@ use super::id::DebugBytes;
 ///   library has no `-outfmt` (the formats are an argument of the call), so it does not name
 ///   `-outfmt <SPEC>` where the command line's does.
 /// - The other messages, NCBI's too, are the command line's text without its last newlines:
-///   [`Error::Input`] (the reader's, such as `BLAST query/options error: ...`); the error of a
-///   tool ([`run_makeblastdb`](super::run_makeblastdb) and the others), which is what the tool
-///   wrote to its standard error, held by the call's `diagnostics` too; and that of NCBI's
-///   application start that ends the program (`Critical: ...`: a `-conffile` that does not open
-///   or does not parse), which a search call's `diagnostics` do not hold and a tool's do.
+///   [`Error::Input`] (the reader's, such as that of an input that does not start with a
+///   definition line); the error of a tool ([`run_makeblastdb`](super::run_makeblastdb) and the
+///   others), which is what the tool wrote to its standard error, held by the call's
+///   `diagnostics` too; and that of NCBI's application start that ends the program
+///   (`Critical: ...`: a `-conffile` that does not open or does not parse), which a search call's
+///   `diagnostics` do not hold and a tool's do.
 ///
 /// Text that a search writes to its standard error before the failure (warnings, notices) is not
 /// in the message. It is in the diagnostics where the call returns them: [`run`](super::run()) and

@@ -372,12 +372,6 @@ impl MaskAlgorithms {
         }
     }
 
-    /// Whether the masks are indexed by GI (the files that the alias file's `MASKLIST` names)
-    /// instead of mask columns.
-    pub fn indexed_by_gi(&self) -> bool {
-        self.gi_masks().is_some()
-    }
-
     /// The GI masks, where the database has them instead of mask columns.
     pub(super) fn gi_masks(&self) -> Option<&GiMasks> {
         match &self.kind {

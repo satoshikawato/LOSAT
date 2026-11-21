@@ -842,15 +842,8 @@ impl BlastnDatabase {
     }
 
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
-    /// whose scan reads words of `scanned_word` letters, on `threads` threads
-    /// (`ResolvedMask::check_gi_mask_threads`).
-    pub(super) fn check_mask_limits(
-        &self,
-        mask: &ResolvedMask,
-        scanned_word: usize,
-        threads: usize,
-    ) -> Result<()> {
-        mask.check_gi_mask_threads(&self.db, PROGRAM, threads)?;
+    /// whose scan reads words of `scanned_word` letters.
+    pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
         mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
     }
 

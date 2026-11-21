@@ -253,9 +253,9 @@
   exception 18 and the rejection Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.59, line RG item X4-excl);
   1.61 2026-11-21 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
-  databases reproduced, rule 2; the explicit rejection of blastn's GI-indexed masks on more than one
-  thread, where NCBI stops or crashes in some runs, rule 3; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.60)
+  databases reproduced, rule 2, with blastn's GI-indexed masks on more than one thread, where NCBI
+  stops or crashes in some runs, giving NCBI's `-num_threads 1` output as every `-db` search does
+  (PD-LOSAT-DATABASE-SEARCH, the Owner's decision DB-3 of 2026-10-13); numbered after 1.60)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1297,7 +1297,15 @@ file would differ, and NCBI's programs still could not open the database).
   NCBI's memory-map text with the empty name (`To be memory mapped the file must exist: ''`);
   the algorithm ids and names are those of `MASKLIST`, with NCBI's names table in the errors of
   an unknown id or name. A protein in FASTA with such masks is approved difference 5 of
-  PD-LOSAT-BLASTDBCMD-DEVIATIONS, as with mask columns. Fixtures `LOSAT/tests/seqdb/gi_mask_read`
+  PD-LOSAT-BLASTDBCMD-DEVIATIONS, as with mask columns. With `-db_soft_mask` or `-db_hard_mask`
+  and more than one thread, NCBI's search threads read the masks of the sequences they fetch
+  (`seqsrc_seqdb.cpp:316-321`, `seqdbgimask.cpp:65-112`), and in some runs NCBI stops with
+  `BLAST engine error: Database memory map file error` (exit status 3) or crashes (SIGSEGV, and
+  at 8 threads glibc's double-free abort): 4 to 18 of 60 runs at 2, 4 and 8 threads of the
+  fixtures' masked searches failed, the others gave the one-thread bytes; with one thread, and
+  with mask columns at any thread count, 60 of 60 runs gave the same bytes. LOSAT writes NCBI's
+  `-num_threads 1` output at every thread count, as every `-db` search does
+  (PD-LOSAT-DATABASE-SEARCH, DB-3). Fixtures `LOSAT/tests/seqdb/gi_mask_read`
   (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0), tests `LOSAT/tests/gi_mask_read.rs` and
   `LOSAT/src/seqdb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
@@ -1837,18 +1845,6 @@ file would differ, and NCBI's programs still could not open the database).
   sequence with a GI (and so write nothing) the input is refused all the same. Unit tests in
   `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04` of
   `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`).
-- blastn `-db_soft_mask` and `-db_hard_mask` on a database whose masks are indexed by GI, with
-  `-num_threads` above 1 (version 1.61, 2026-11-21, line NP item M4c-2, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07). Each search thread of NCBI reads the masks of the
-  sequences it fetches (`seqsrc_seqdb.cpp:316-321`, `seqdbgimask.cpp:65-112`); NCBI BLAST+ 2.17.0
-  then gives the one-thread result in most runs and in the others stops with `BLAST engine error:
-  Database memory map file error` (exit status 3) or crashes (SIGSEGV): in 20 runs with 4 threads
-  of each of eight masked searches of the fixtures, five searches failed once each (four the error, one
-  the crash), and the runs with one thread always gave the same bytes. LOSAT refuses the search
-  where NCBI starts it, after NCBI's checks (exit 1, "-db_soft_mask
-  with -num_threads above 1 on a database whose masks are indexed by GI ... is not supported by
-  LOSAT's BLASTN"); with one thread the search is NCBI's. Test `LOSAT/tests/gi_mask_read.rs`
-  (every masked search of the fixtures again with `-num_threads 4`).
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

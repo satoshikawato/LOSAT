@@ -7208,7 +7208,7 @@ fn search(
         } else {
             super::super::coordination::determine_effective_word_size(&args)
         };
-        database.check_mask_limits(mask, scanned_word, args.num_threads)?;
+        database.check_mask_limits(mask, scanned_word)?;
     }
     app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).

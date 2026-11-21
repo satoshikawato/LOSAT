@@ -187,7 +187,7 @@ holds the databases (the root `<R>` in their text files), `gi_mask_read/expected
 (the root as `<R>`), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
 difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's
 own FASTA in `bdc_m09_msw_0.ncbi_stdout`. `tests/gi_mask_read.rs` runs every case through the `losat` binary
-(searches also with `-num_threads 4`, where a search that reads GI-indexed masks is LOSAT's refusal) and on
+(searches also with `-num_threads 4`, whose reference is NCBI's `-num_threads 1` output, Owner decision DB-3) and on
 databases that `losat makeblastdb` builds;
 `src/seqdb/gi_mask_tests.rs` reads every GI of `gi_mask/db/big*` (1 to 1,100 GIs, one and four data volumes).
 

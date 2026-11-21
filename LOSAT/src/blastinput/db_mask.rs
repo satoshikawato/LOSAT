@@ -288,30 +288,6 @@ impl ResolvedMask {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:316-321
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:65-112
-    // Each search thread of NCBI reads the masks of the sequences it fetches. With masks indexed
-    // by GI and more than one thread, NCBI BLAST+ 2.17.0's blastn stops in some runs with its
-    // memory-map error (exit status 3) or crashes, and gives the one-thread result in the others
-    // (line NP, M4c-2, probe 2): no result of its own to match, so LOSAT refuses the search.
-    /// LOSAT's refusal of the search masked with GI-indexed masks (`makeblastdb -gi_mask`: the
-    /// masks that the alias file's `MASKLIST` names) on more than one thread (`threads`, NCBI's
-    /// number of threads), where NCBI starts the search; `program` names the program.
-    pub fn check_gi_mask_threads(&self, db: &SeqDb, program: &str, threads: usize) -> Result<()> {
-        if threads > 1 && db.mask_algorithms()?.indexed_by_gi() {
-            let option = match self.kind {
-                MaskKind::Soft => "-db_soft_mask",
-                MaskKind::Hard => "-db_hard_mask",
-            };
-            anyhow::bail!(
-                "{option} with -num_threads above 1 on a database whose masks are indexed by GI \
-                 (makeblastdb -gi_mask), with which NCBI BLAST+ 2.17.0 stops or crashes in some \
-                 runs, is not supported by LOSAT's {program}"
-            );
-        }
-        Ok(())
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516
     /// The program options of the BLAST archive and of the search strategy (after the list's).
     /// An empty name is no key (`algo_key != kEmptyStr`): the id it was translated to is written.

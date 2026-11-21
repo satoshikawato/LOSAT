@@ -155,7 +155,6 @@ Strategy files:
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
-| `-db_soft_mask` or `-db_hard_mask` with `-num_threads` above 1 on a database whose masks are indexed by GI (made with `makeblastdb -gi_mask`) | Refused. NCBI stops or crashes in some runs. With one thread the search is NCBI's. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
 
 The message for `-reward 0` with the default penalty of `-task megablast` is:

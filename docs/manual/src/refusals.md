@@ -174,7 +174,7 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 - No e-value, percent identity, query coverage, `-max_hsps`, `-max_target_seqs`, `-culling_limit` or `-subject_besthit` limit drops such an alignment first. LOSAT drops it where NCBI does.
 - Where its query coordinates leave the query on the left (a start below 1), NCBI's report stops with an exception (exit status 255). Where they pass the query's end, NCBI's reports show them. LOSAT reproduces neither yet and stops before the rows of the query batch.
 - Where the part outside the context is below the cutoff, or the greedy extension comes back into the context, LOSAT reports the alignment as NCBI does.
-- `-db_hard_mask` is refused on a database that has a searched sequence (of at least the word size times 3 plus 2 bases) whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part. NCBI searches each of the six reading frames in parts: it maps each stretch between the sequence's masks (or its ends) to the frame by dividing its positions by 3, counting the minus frames back from the end of frame -1, and searches each mapped stretch as a part, one that maps to no letter included. It searches the last part that starts at the frame's first letter as the whole frame when that part has at most 5,000,000 letters and no part follows it or the next part starts exactly at the frame's end. A frame is refused when that part ends before the frame's last letter: NCBI then scans the masked letters of the frame past the part, giving alignments that differ from those of a near input or with the number of threads, and `tblastn` can crash. Masks at or near either end of a sequence can do this, a mask of the sequence's third base alone too (frame -1). A frame is refused as well when that part follows an empty part at the frame's start, as after a mask within the sequence's first two bases or within the one or two bases after its last whole codon (for example [1200, 1202) of 1,202 bases) with no other mask in the frame: NCBI then frees memory that it did not allocate and crashes in every run. The message names the sequence, the mask and the frame.
+- `-db_hard_mask` is refused on a database that has a searched sequence of at least the word's letters whose first mask with letters runs to its end, when the word has fewer than 11 letters (`-task blastn-short`). That is a sequence that is all masked, or has a masked tail such as a poly-A tail.
 - Further conditions for that refusal: at most 5,000,000 letters before the mask, and no other mask before it except masks of no letters at the start. NCBI then scans the masked letters past its first piece and can crash.
 - With a word of 11 letters or more, such a sequence is searched before its mask; see [Differences](differences.md).
 - `-db_hard_mask` is also refused for a database whose masks are stored out of order or overlap.
@@ -199,15 +199,13 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastp-fast`) | Refused. NCBI crashes. |
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused. See Rare inputs. |
-| `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example) | Refused. NCBI can crash. See Rare inputs. |
 | `-db_hard_mask` on a database with more than 5,000,000 letters between two masks | Refused. NCBI searches them in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
+| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
 
 <details>
 <summary>Rare inputs</summary>
 
 - `-outfmt 1` to `4` with `-parse_deflines` and a query record that is also a subject is refused in the case described under `blastn`.
-- `-db_hard_mask` is refused on a database that has a searched sequence whose first mask with letters runs to its end, at every word size. That is a sequence with a masked tail, after unmasked letters at its start and no mask before it except masks of no letters. NCBI then scans the masked letters past the unmasked ones; it crashes on some such sequences and gives alignments that differ from those of a near input on others.
 - A volume without the algorithm can come from an alias or a `-db` list whose databases name the algorithm with different texts. NCBI numbers the algorithms over all volumes and can crash with composition-based statistics there.
 - `-matrix` with gap costs: every matrix with any gap costs of NCBI's table for the matrix works. `IDENTITY` is refused with the compressed lookup table.
 - A gapped X-drop whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers is refused. With BLOSUM62 11/1 this is from about 4.14e8 to 8.27e8 bits.
@@ -235,7 +233,7 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database with a sequence whose first mask runs to its end, and the mask checks of `blastn` | Refused, as in `blastp`. |
+| `-db_hard_mask` on a database with more than 5,000,000 letters between two masks, and the mask checks of `blastn` | Refused, as in `blastp`. |
 
 The error names the sequence and exits with status 1: `Error: subject sequence N has M residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX` for the N-th record of `-subject` (counted from 1), and the same sentence starting with `database sequence N` for a database sequence (N is its position in the database, counted from 0).
 
@@ -265,7 +263,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
-| `-db_hard_mask` on a database with a sequence whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part (masks at or near either end of a sequence, for example) | Refused. See Rare inputs. |
+| `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example) | Refused. NCBI crashes. See Rare inputs. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
 | `-in_pssm` | See the next section. |
 
@@ -280,7 +278,8 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - With `-in_pssm` and a PSSM whose `-` column scores above NCBI's minimum, a one-hit alignment whose gapped start lies past the end of NCBI's translation of the subject (after its last frame). NCBI's gapped alignment reads the byte after its end, which it never sets, or past it.
 - A one-hit alignment whose gapped start lies after the end of its frame's translation and that reaches NCBI's traceback. NCBI reads a byte its translation does not set there.
 - The report of a one-hit alignment whose traceback starts on the end marker. NCBI places its column past the subject's end, and LOSAT does not reproduce that result yet. Such alignments that NCBI drops before its reports give NCBI's output (apart from the version line, which names LOSAT).
-- `-db_hard_mask` is refused on a database that has a searched sequence (of at least the word size times 3 plus 2 bases) whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part. NCBI searches each of the six reading frames in parts: it maps each stretch between the sequence's masks (or its ends) to the frame by dividing its positions by 3, counting the minus frames back from the end of frame -1, and searches each mapped stretch as a part, one that maps to no letter included. A frame is refused when the last part that starts at its first letter ends before its last letter (and has at most 5,000,000 letters), and no part follows, or the next part starts exactly at the frame's end. Masks at or near either end of a sequence can do this, a mask of the sequence's third base alone too (frame -1); the message names the sequence, the mask and the frame. NCBI then scans the masked letters of that frame past the part: it gives alignments that differ from those of a near input or with the number of threads, and `tblastn` can crash.
+- `-db_hard_mask` is refused on a database that has a searched sequence (of at least the word size times 3 plus 2 bases) whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame. NCBI searches each of the six reading frames in parts: it maps each stretch between the sequence's masks (or its ends) to the frame by dividing its positions by 3, counting the minus frames back from the end of frame -1, and searches each mapped stretch as a part, one that maps to no letter included. It searches the last part that starts at the frame's first letter as the whole frame when that part has at most 5,000,000 letters and no part follows it or the next part starts exactly at the frame's end. After an empty part at the frame's start, as after a mask within the sequence's first two bases or within the one or two bases after its last whole codon (for example [1200, 1202) of 1,202 bases), NCBI then frees memory that it did not allocate and crashes in every run. The message names the sequence, the mask and the frame.
+- Where that part, from the frame's first letter, ends before the frame's last letter instead (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).
 
 </details>
 
@@ -291,7 +290,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See Rare inputs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
-| `-db_hard_mask` on a database with a sequence whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part | Refused. NCBI writes some alignments many times or crashes. See Rare inputs. |
+| `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example) | Refused. NCBI crashes. See Rare inputs. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
 | `-outfmt 1` to `4` with `-parse_deflines` | See "All five search programs" above. |
 
@@ -305,7 +304,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - In the cases checked, NCBI keeps such an alignment in the frame where it started, with query coordinates outside that frame. It writes coordinates past the query or leaves the alignment out of every report.
 - LOSAT writes the results of the query batches before and then stops with the error.
 - An extension that passes into the next frame without scoring higher there gives NCBI's output (apart from the version line, which names LOSAT).
-- `-db_hard_mask` is refused for the sequences described under `tblastn`. In `tblastx` NCBI also writes the same alignment once for each word it finds in the masked letters of that frame, all ending where the mask starts.
+- `-db_hard_mask` is refused for the sequences described under `tblastn`. A part that ends before its frame's end is searched alone, as in `tblastn`; see [Differences](differences.md).
 
 </details>
 

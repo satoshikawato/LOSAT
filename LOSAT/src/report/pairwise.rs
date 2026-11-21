@@ -2521,7 +2521,8 @@ pub(crate) fn blastp_section_frees(
     if view == PairwiseView::Pairwise {
         return Ok(false);
     }
-    let Some(group) = blastp_report_group(view.report_sort(sort), q_idx, rows, subject_titles, joins)
+    let Some(group) =
+        blastp_report_group(view.report_sort(sort), q_idx, rows, subject_titles, joins)
     else {
         return Ok(false);
     };

@@ -287,10 +287,14 @@ mod tests {
             gap_info: Some(vec![GapEditOp::Sub(0)]),
             num_positives: 0,
         };
-        let view = build_alignment_view_with_matrix(&[1, 2, 3, 4], &[1, 2], &hit, ScoringMatrix::Blosum62)
-            .expect("alignment");
+        let view =
+            build_alignment_view_with_matrix(&[1, 2, 3, 4], &[1, 2], &hit, ScoringMatrix::Blosum62)
+                .expect("alignment");
         assert_eq!(view.query_aln, "");
         assert_eq!(view.subject_aln, "");
-        assert_eq!((view.num_ident, view.num_positives, view.alignment_len), (0, 0, 0));
+        assert_eq!(
+            (view.num_ident, view.num_positives, view.alignment_len),
+            (0, 0, 0)
+        );
     }
 }

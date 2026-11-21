@@ -10493,7 +10493,8 @@ fn run_call(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     if let Some(exception) = subject_start_exception {
-        output_result = output_result.and(Err(crate::cli::NativeError::exception(&exception).into()));
+        output_result =
+            output_result.and(Err(crate::cli::NativeError::exception(&exception).into()));
     }
     output_result?;
     pssm_posts_after.write(&mut *outputs.diagnostics, args.archive.as_ref())?;

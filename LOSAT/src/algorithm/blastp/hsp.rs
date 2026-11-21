@@ -353,7 +353,10 @@ pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
 /// HSP of length 0, whose offset equals its end, as NCBI's HSP holds it.
 #[inline(always)]
 pub(crate) fn subject_offset_end(s_start: usize, s_end: usize) -> (usize, usize) {
-    debug_assert!(s_start <= s_end + 1, "a protein HSP's subject start is at most one past its end");
+    debug_assert!(
+        s_start <= s_end + 1,
+        "a protein HSP's subject start is at most one past its end"
+    );
     (s_start.saturating_sub(1), s_end)
 }
 

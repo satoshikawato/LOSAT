@@ -32,7 +32,9 @@ use crate::report::query_warnings::QueryWarnings;
 pub(super) const UNPORTED_ANCHORED_FREE: &str = "BLASTP -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs), which LOSAT does not support";
 
 /// The HSPs that a final hit list shows (its first `hsplist_count` lists).
-fn shown_hsps(hit_list: &BlastpHitList) -> impl Iterator<Item = &crate::algorithm::blastp::hsp::BlastpHsp> {
+fn shown_hsps(
+    hit_list: &BlastpHitList,
+) -> impl Iterator<Item = &crate::algorithm::blastp::hsp::BlastpHsp> {
     hit_list
         .hsplist_array
         .iter()
@@ -83,9 +85,7 @@ pub(super) fn subject_start_exception(
         .iter()
         .flatten()
         .flat_map(shown_hsps)
-        .any(|hsp| {
-            hsp.length == 0 && hsp.s_start - 1 == placements.offset(hsp.s_idx as usize)
-        })
+        .any(|hsp| hsp.length == 0 && hsp.s_start - 1 == placements.offset(hsp.s_idx as usize))
         .then(bad_alignment)
 }
 
@@ -107,9 +107,15 @@ pub(super) fn write_exception_prolog(
     rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
 ) -> Result<()> {
     match outfmt {
-        BlastpReport::Pairwise(pairwise) => {
-            write_pairwise(view, pairwise, format, warnings, probe, pairwise_shown, rows_of)
-        }
+        BlastpReport::Pairwise(pairwise) => write_pairwise(
+            view,
+            pairwise,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+        ),
         BlastpReport::CustomTabular(spec) => {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::algorithm::blastp::tabular::write_tabular_prolog(spec, &mut writer)?;

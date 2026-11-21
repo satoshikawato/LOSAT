@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use losat::api::{
     read_input_file, read_input_records, run, run_blastdbcmd, run_convert2blastmask,
     run_dustmasker, run_makeblastdb, run_makembindex, run_segmasker, run_to_file, validate, Error,
-    Inputs, Program, Role, Role,
+    Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {

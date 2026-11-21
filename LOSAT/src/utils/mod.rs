@@ -23,6 +23,10 @@ pub(crate) mod process_id;
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-674 (`-randomize`, cited
+// at `writedb::raw_source::RawSeqDbSource::new`): `std::shuffle` with a `std::mt19937`, in the
+// order observed of NCBI's Linux builds.
+pub(crate) mod std_shuffle;
 // libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, cited in the module): the order
 // in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
 // ptrmap.hpp:171 of the 2025-05-13 package).

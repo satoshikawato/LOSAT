@@ -572,6 +572,7 @@ impl SeqDb {
             &mut block,
         );
         match block.ranges(vol_oid) {
+            Ok(BlockMasks::NoMaskData) => return Ok(MaskRanges::Ranges(Vec::new())),
             Ok(BlockMasks::Ranges(ranges)) => return Ok(MaskRanges::Ranges(ranges.to_vec())),
             Ok(BlockMasks::AlgorithmNotInVolume) => {
                 return Ok(MaskRanges::AlgorithmNotInVolume {
@@ -732,8 +733,9 @@ impl SeqDb {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let masks = match block.ranges(vol_oid) {
                     Ok(BlockMasks::Ranges(masks)) => masks,
-                    // Refused before (`check_search_masks`).
-                    Ok(BlockMasks::AlgorithmNotInVolume) => continue,
+                    // No masks; an algorithm not in the volume is refused before
+                    // (`check_search_masks`).
+                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => continue,
                     Err(_) => return None,
                 };
                 if masks.is_empty() {
@@ -835,7 +837,10 @@ pub struct MaskBlock {
 /// The masks of a sequence of a [`MaskBlock`].
 #[derive(Debug)]
 pub enum BlockMasks<'a> {
-    /// The ranges, as stored (none for a sequence without mask data).
+    /// The sequence has no mask data (its volume has no mask column, or the sequence's blob is
+    /// empty): no ranges, and NCBI does not look the algorithm up in the volume.
+    NoMaskData,
+    /// The ranges of the sequence's mask data, as stored.
     Ranges(&'a [(u32, u32)]),
     /// The sequence has mask data but its volume does not know the algorithm
     /// ([`MaskRanges::AlgorithmNotInVolume`]).
@@ -871,11 +876,11 @@ impl MaskBlock {
             return Err(BlockMaskError::Read(error));
         }
         if !self.column {
-            return Ok(BlockMasks::Ranges(&[]));
+            return Ok(BlockMasks::NoMaskData);
         }
         let blob = self.blobs.blob(vol_oid).map_err(BlockMaskError::Read)?;
         if blob.is_empty() {
-            return Ok(BlockMasks::Ranges(&[]));
+            return Ok(BlockMasks::NoMaskData);
         }
         let Some(volume_algo) = self.volume_algo else {
             return Ok(BlockMasks::AlgorithmNotInVolume);

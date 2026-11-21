@@ -135,6 +135,7 @@ impl SubjectMasks {
             .ranges(range.first + (ordinal - range.first_ordinal))
         {
             Ok(BlockMasks::Ranges(stored)) => Ok(stored),
+            Ok(BlockMasks::NoMaskData) => Ok(&[]),
             Ok(BlockMasks::AlgorithmNotInVolume) => Err(anyhow::anyhow!(
                 "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm \
                  {algo_id}"

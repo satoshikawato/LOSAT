@@ -627,3 +627,9 @@ class PsiblastOptions(TypedDict, total=False):
     save_each_pssm: bool
     """Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm
     options)"""
+    msa_master_idx: int
+    """Ordinal number (1-based index) of the sequence to use as a master in the multiple
+    sequence alignment. If not provided, the first sequence in the multiple sequence alignment
+    will be used"""
+    ignore_msa_master: bool
+    """Ignore the master sequence when creating PSSM"""

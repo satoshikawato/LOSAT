@@ -2870,6 +2870,14 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
     )?)
 }
 
+/// Whether rpsblast recounts the identities of its HSPs for the reports of the call: none of them is
+/// a custom table, whose spec reads them its own way (`PrelimRun::rps_recount_identities`).
+fn recounts_rps_identities(reports: &[BlastpReport]) -> bool {
+    reports
+        .iter()
+        .all(|report| !matches!(report, BlastpReport::CustomTabular(_)))
+}
+
 /// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
 /// outfmt 0, and BLASTP's query-anchored 1 to 4 (`Program::writes`; psiblast and rpsblast refuse
 /// those, line RG PS15). NCBI's application writes 0 to 4 through one frame (`PrintProlog`, the
@@ -11349,9 +11357,7 @@ fn run_call(
             query_batches: &query_batches,
             query_batch_skipped: &query_batch_skipped,
             query_chunk,
-            rps_recount_identities: requested_formats
-                .iter()
-                .all(|report| !matches!(report, BlastpReport::CustomTabular(_))),
+            rps_recount_identities: recounts_rps_identities(&requested_formats),
             database,
             subjects,
             x_soft_subjects,

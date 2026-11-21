@@ -10,7 +10,7 @@
 //! a publication are made anew for each value)
 
 use crate::report::serial::asn_types::table::named;
-use crate::report::serial::asn_types::{member_index, members, resolved, Kind, Value};
+use crate::report::serial::asn_types::{member_index, members, resolved, Kind, TextRun, Value};
 
 /// A database tag's value (`Object-id`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +69,7 @@ struct MolInfo {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct GbBlock {
-    extra_accessions: Option<Vec<Vec<u8>>>,
+    extra_accessions: Option<Vec<TextRun>>,
     keywords: Option<Vec<Vec<u8>>>,
 }
 
@@ -138,7 +138,7 @@ pub(crate) struct Content {
     /// `Seq-inst.topology`.
     pub(crate) topology: Option<&'static str>,
     /// The ids that `secondary-accession` sets as `Seq-inst.hist.replaces`.
-    pub(crate) replaces: Option<Vec<crate::seqid::ParsedSeqId>>,
+    pub(crate) replaces: Option<Vec<TextRun>>,
     preserve_taxid: bool,
 }
 
@@ -170,17 +170,19 @@ fn choice(ty: u16, name: &str, value: Value) -> Value {
     Value::Choice(member_index(ty, name) as u16, Box::new(value))
 }
 
-/// The ENUMERATED value `name` of the member `member` of `ty`.
+/// The ENUMERATED value `name` of the member `member` of `ty`. Every name that reaches it was
+/// checked against the enumeration when the modifier was applied (`mods::checked`, which ends the
+/// run with an error where a table of LOSAT's names a value that NCBI's type does not have), so
+/// no run can end here.
 fn enum_value(ty: u16, member: &str, name: &str) -> Value {
-    let Kind::Enumerated { values, .. } = &resolved(child(ty, member)).kind else {
-        panic!("{member} of the type {ty} is not an enumeration");
+    let found = match &resolved(child(ty, member)).kind {
+        Kind::Enumerated { values, .. } => values.values().iter().find(|value| value.name() == name),
+        _ => None,
     };
-    let found = values
-        .values()
-        .iter()
-        .find(|value| value.name() == name)
-        .unwrap_or_else(|| panic!("{member} has no value {name}"));
-    Value::Enum(found.value)
+    match found {
+        Some(found) => Value::Enum(found.value),
+        None => unreachable!("{member} has no value {name}: checked when the modifier was applied"),
+    }
 }
 
 /// `Object-id`: `id` or `str`.
@@ -412,7 +414,7 @@ impl Item {
                 let block_ty = child(ty, "genbank");
                 let mut fields = Vec::new();
                 if let Some(extra) = &block.extra_accessions {
-                    fields.push(("extra-accessions", str_list(extra)));
+                    fields.push(("extra-accessions", Value::Texts(extra.clone())));
                 }
                 if let Some(keywords) = &block.keywords {
                     fields.push(("keywords", str_list(keywords)));
@@ -736,7 +738,7 @@ impl Content {
         self.genbank().keywords = Some(keywords);
     }
 
-    pub(crate) fn set_extra_accessions(&mut self, ids: Vec<Vec<u8>>) {
+    pub(crate) fn set_extra_accessions(&mut self, ids: Vec<TextRun>) {
         self.genbank().extra_accessions = Some(ids);
     }
 
@@ -967,14 +969,7 @@ impl Content {
                 "replaces",
                 seq(
                     rec_ty,
-                    vec![(
-                        "ids",
-                        Value::List(
-                            ids.iter()
-                                .map(|id| Value::SeqId(Box::new(id.clone())))
-                                .collect(),
-                        ),
-                    )],
+                    vec![("ids", Value::Texts(ids.clone()))],
                 ),
             )],
         ))

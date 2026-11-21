@@ -76,10 +76,6 @@ fn find_char_outside_comment(c: u8, line: &[u8], open: &mut i32, start: usize) -
     None
 }
 
-fn is_c_space(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
-}
-
 fn erase_ranges(line: &mut Vec<u8>, limits: &[(usize, usize)]) {
     for &(first, last) in limits.iter().rev() {
         let end = (last + 1).min(line.len());
@@ -149,7 +145,7 @@ fn strip_comments_outside_command(line: &mut Vec<u8>, open: &mut i32, in_command
             if *open == 0 {
                 limits.push((start, index));
             }
-        } else if *open == 0 && !is_c_space(c) {
+        } else if *open == 0 && !crate::ncbi_str::is_space(c) {
             *in_command = true;
         }
     }

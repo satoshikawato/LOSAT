@@ -26,10 +26,10 @@ pub(crate) mod descr;
 mod fasta_gap;
 mod format_guess;
 mod lines;
-mod mods;
+pub(crate) mod mods;
 mod multalign;
-mod nexus;
-mod phylip;
+pub(crate) mod nexus;
+pub(crate) mod phylip;
 mod sequin;
 
 #[cfg(test)]

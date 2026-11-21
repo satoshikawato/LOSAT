@@ -115,6 +115,12 @@ pub struct PsiSearch {
     /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
     /// refusals that name the option name that one.
     pub(crate) from_msa: bool,
+    /// The query's Seq-inst has the molecule `other` (psiblast only). NCBI searches it as a
+    /// protein and writes the report of outfmt 0 whole; the tabular formats read the query's
+    /// letters through the object manager for the fields `qseq`, `sseq`, `btop`, `positive`,
+    /// `ppos`, `nident`, `mismatch` and `pident` (the default fields among them), which throws
+    /// `CSeqVectorException` at the first row (`blast_engine::tabular_seq_vector_error`).
+    pub(crate) query_mol_other: bool,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -424,6 +430,7 @@ impl PsiSearch {
             round_query: None,
             split_setup: None,
             from_msa: false,
+            query_mol_other: false,
         }
     }
 

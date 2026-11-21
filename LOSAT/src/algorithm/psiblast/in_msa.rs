@@ -243,7 +243,7 @@ const SHORT_ROW_SWAPPED: &str = "a row that holds the query is shorter than the 
 
 /// The cause of the refusal of a row shorter than the first row where the first row has a
 /// letter beyond the end of the shorter one: NCBI reads that row's string past its end.
-const SHORT_ROW_READ: &str = "a row of the alignment is shorter than the first row and the first row has a letter past its end, and NCBI BLAST+ 2.17.0 reads the shorter row's string past its end for it";
+pub(crate) const SHORT_ROW_READ: &str = "a row of the alignment is shorter than the first row and the first row has a letter past its end, and NCBI BLAST+ 2.17.0 reads the shorter row's string past its end for it";
 
 /// The first row after the swap that has a letter of the first row past the end of its own
 /// string plus one (the string's terminator is a readable NUL, the bytes after it are not).

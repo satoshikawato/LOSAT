@@ -558,6 +558,24 @@ impl TabularSpec {
         ]) || (self.has(NumIdentical) && *num_ident > 0)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
+    /// Whether NCBI's formatter reads the query's and the subject's letters for a row of this field
+    /// list (`CAlnVec::GetWholeAlnSeqString`) in psiblast, whose formatter fetches sequences
+    /// (`kNoFetchSequence` is false): `qseq`, `sseq`, `positive`, `ppos`, `btop`, `nident`,
+    /// `mismatch` and `pident`, and so the default fields.
+    pub fn reads_sequences(&self) -> bool {
+        self.has_any(&[
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+            NumIdentical,
+            Mismatches,
+            PercentIdentical,
+        ])
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837,973-980 and 973-980
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908,915,1078-1082
     /// Which of `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
@@ -1564,6 +1582,35 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 }
 
 const NA: &[u8] = b"N/A";
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:548
+/// The exception that ends a tabular report at its first row when the query's Bioseq has the
+/// molecule `other` (psiblast's `-in_msa` with `[molecule=other]`, or `-in_pssm` of such a PSSM):
+/// the object manager reads the query's iupacaa letters as the coding of a nucleotide sequence
+/// (`Incompatible sequence codings: 2 -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
+/// are read ([`TabularSpec::reads_sequences`]). The report's text before the row stays; the run
+/// ends with NCBI's exception (exit status 255).
+pub fn query_sequence_exception() -> crate::ncbi_exception::NcbiException {
+    crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/objmgr/seq_vector_ci.cpp",
+            line: 548,
+            kind: "CSeqVectorException::eCodingError",
+            function: Some("ncbi::objects::CSeqVector_CI::x_FillCache"),
+        },
+        "Incompatible sequence codings: 2 -> 1",
+    )
+}
+
+/// The end of a report at a row that reads the letters of a query whose molecule is `other`
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
+/// flushed, and the exception is the run's error.
+pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8]) -> anyhow::Error {
+    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    crate::cli::NativeError::exception(&query_sequence_exception()).into()
+}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)

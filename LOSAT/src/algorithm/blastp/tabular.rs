@@ -76,6 +76,9 @@ pub(super) struct BlastpTabular<'a> {
     /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
     /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
     pub engine_counts: &'a super::seqalign::EngineCounts,
+    /// The query's molecule is `other` (`PsiSearch::query_mol_other`): the first row that reads
+    /// the query's letters ends the run (`report::tabular::query_sequence_end`).
+    pub query_mol_other: bool,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -744,6 +747,9 @@ fn write_tabular_rows<const RPS: bool>(
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
             for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
+                if tab.query_mol_other && spec.reads_sequences() {
+                    return Err(crate::report::tabular::query_sequence_end(writer, &buf));
+                }
                 // The Seq-align's `num_ident` (the engine's count where the reports' recount
                 // replaced it, `BlastpTabular::engine_counts`).
                 let seqalign_num_ident = tab.engine_counts.num_ident(
@@ -1012,6 +1018,7 @@ mod tests {
             taxdb_found: false,
             names: None,
             engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
+            query_mol_other: false,
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let before = [crate::report::diag_log::Posts::of_lines(

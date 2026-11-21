@@ -13,8 +13,8 @@ use super::lines::PeekAheadStream;
 use crate::ncbi_str::{string_to_int, truncate_spaces};
 use crate::utils::format_guess::split_in_two;
 
-/// The cause of the refusal of a count of 0 (`dataLineCount % mSequenceCount`).
-const ZERO_COUNT: &str =
+/// The cause of the refusal of a count of 0 (the remainder of the data line count by the sequence count).
+pub(crate) const ZERO_COUNT: &str =
     "NCBI BLAST+ 2.17.0 stops with an integer division by zero in the alignment reader";
 
 /// `xImportAlignmentData`, `xVerifyAlignmentData` and the base verification.
@@ -33,7 +33,7 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Scan<Scanned> {
     // The sequence of the first row, to its length: `mSequences[0]` summed over its data lines.
     let mut data_line_count = 0usize;
     let mut block_line_length = 0usize;
-    // `mSequenceCount` is `int`; `dataLineCount % mSequenceCount` needs it non-zero.
+    // The sequence count is an `int`, and the remainder of the data line count by it needs it non-zero.
     let count_u = count as usize;
     while let Some((raw, _)) = input.read_line() {
         let line = truncate_spaces(raw);

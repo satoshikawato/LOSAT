@@ -2340,6 +2340,7 @@ fn write_blastp_tabular_hit_lists(
     epilog: bool,
     queries_before: usize,
     iteration: Option<u32>,
+    query_mol_other: bool,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
@@ -2386,6 +2387,11 @@ fn write_blastp_tabular_hit_lists(
                 warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
             }
             for hsp in &hsp_list.hsps {
+                // The default fields read the letters of the query (`pident`, `mismatch`): a query
+                // whose molecule is `other` ends the run at the first row.
+                if query_mol_other {
+                    return Err(crate::report::tabular::query_sequence_end(writer, &[]));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // One row per HSP; the probe marks the row without changing its bytes.
                 if let Some(probe) = probe.as_mut() {

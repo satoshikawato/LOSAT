@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.65
+- Version: 1.66
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -273,7 +273,12 @@
   2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」
   and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
   PR #1440 ready for review, as the PR asked; numbered after 1.63);
-  1.65 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
+  1.65 2026-11-21 (`losat blastn -use_index true`, line RG item D5b-1: the explicit rejections,
+  rule 3, of an empty first MegaBLAST index volume, whose header NCBI reads through a null
+  pointer, of a new-style index volume whose sequence count NCBI reads from words its stream never
+  set, and of an `-index_name` range of volumes whose loop NCBI never ends; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.66 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
   of a Seq-id on which NCBI's accession guide posts a warning under the key, which NCBI posts again at
   each read of the header that its cache does not answer; the rejection of 1.61 extended to an old
   style `losat makembindex` index of a sequence whose every definition line the key erases;
@@ -282,7 +287,7 @@
   as NCBI's decoder writes its error for them before they are removed; the rejection of 1.56
   extended to a reported RPS profile of a database of several volumes whose lines the key removes,
   in the classes of 1.10 and 1.37; Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07)
+  2026-10-07; numbered after 1.65)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2030,7 +2035,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`; for `OIDLIST` `db.ol.rps.rej.no2w`, `db.ol.rps.rej.only2w`,
   `db.ol.rtbn.rej.no2w` and `db.ol.rps.only2w.mts1.6`).
 - RPSBLAST and RPSTBLASTN over an alias file whose `OID_MASK_TYPE` removes a definition line of a
-  profile, in a database of several volumes (version 1.65, 2026-11-21, line RG item D1b-2,
+  profile, in a database of several volumes (version 1.66, 2026-11-21, line RG item D1b-2,
   Owner-delegated, the form above): NCBI searches the volumes bare (`rpsblast_local.cpp:380-399`),
   so its Seq-aligns keep a profile that the key leaves without a line under its stored Seq-id,
   while its formatter, over the `-db` name with the key, does not find it (probe xp3v of D1b-2,
@@ -2137,7 +2142,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
   taxonomy lookup for it.
 - `losat makembindex -old_style_index true -iformat blastdb` of an alias file whose `OID_MASK_TYPE`
-  erases every definition line of a sequence (version 1.65, 2026-11-21, line RG item D1b-2,
+  erases every definition line of a sequence (version 1.66, 2026-11-21, line RG item D1b-2,
   Owner-delegated): `CSeqDBVol::GetBioseq` gives no Bioseq for it either (`seqdbvol.cpp:1362-1366`),
   dereferenced as above (probe `mk_old_ntall` of D1b-2: exit status 3, a stack trace). LOSAT refuses
   (exit 1) at that sequence; a new style index reads no alias key, as NCBI's. NCBI's dustmasker stops
@@ -2174,6 +2179,25 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+
+- `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
+  D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
+  loader of the MegaBLAST database index meets one of these. LOSAT refuses each (exit 1) before
+  the search:
+  - The first index volume (`<name>.NN.idx`, new or old style) is a file of 0 bytes. NCBI maps it
+    as no memory and reads its header through a null pointer when it checks the word size
+    (SIGSEGV, exit status 139, also without read access; fixture row `used_old_empty` of
+    `tests/blastn_mb_index`). A first volume that is not a regular file, does not open or has a
+    word size field above 15 gives NCBI's warning and its search without the index (rows
+    `failread_*`); one shorter than its header reads zeros past its end, as NCBI's mapping does.
+  - A new-style index volume of 36 to 39 bytes, or one NCBI cannot open: NCBI's count of its
+    sequences reads a word that its stream never set, an uninitialized value (row
+    `undefined_idx38`, where NCBI printed 42,008,582). Shorter volumes give NCBI's exception
+    (`at start oid`, `at end oid`), reproduced.
+  - An `-index_name` range whose last volume converts to the largest `unsigned long` (a last
+    volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
+    is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
+    negative ones too, end and are reproduced.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

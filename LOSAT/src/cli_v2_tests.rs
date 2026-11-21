@@ -2522,10 +2522,8 @@ fn use_index_parses_as_an_ncbi_boolean() {
         assert!(parse("blastn", &["-use_index", value]).is_ok(), "{value}");
     }
     assert!(parse("blastn", &["-use_index", "maybe"]).is_err());
-    // NCBI's other programs have no -use_index; `-index_name` stays unported.
+    // NCBI's other programs have no -use_index nor -index_name.
     assert!(parse("blastp", &["-use_index", "false"]).is_err());
-    let error = parse("blastn", &["-index_name", "x"])
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+    assert!(parse("blastp", &["-index_name", "x"]).is_err());
+    assert!(parse("blastn", &["-index_name", "x"]).is_ok());
 }

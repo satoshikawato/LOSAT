@@ -1552,10 +1552,6 @@ fn show_gis_is_a_flag_of_every_search_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-// ```c++
-//         // Produce HTML?
-//         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
-// ```
 // `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
 #[test]
 fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {

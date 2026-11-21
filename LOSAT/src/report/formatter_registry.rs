@@ -103,16 +103,7 @@ pub(crate) fn tax_browser_template(registry: Option<&RegistryRead>) -> &[u8] {
 /// `CAlignFormatUtil::MapTemplate` on bytes: every `<@name@>` of `input` replaced by `value`,
 /// left to right; the text put in is not searched again by this call.
 ///
-/// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
-/// ```c++
-/// string CAlignFormatUtil::MapTemplate(string inpString,string tmplParamName,string templParamVal)
-/// {
-///     string outString;
-///     string tmplParam = "<@" + tmplParamName + "@>";
-///     NStr::Replace(inpString,tmplParam,templParamVal,outString);
-///     return outString;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
 pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
     let token = [b"<@", name.as_bytes(), b"@>"].concat();
     let mut out = Vec::with_capacity(input.len());
@@ -132,16 +123,7 @@ pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
 /// `NStr::URLEncode(text)` (`eUrlEnc_SkipMarkChars`, table `s_Encode`): letters, digits and
 /// `!$'()*,-._` stay, a space becomes `+`, every other byte `%XX` (upper-case hex).
 ///
-/// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5614-5619, 6066-6067 (`s_Encode`, rows of 0x20-0x3F)
-/// ```c++
-///     "+",   "!",   "%22", "%23", "$",   "%25", "%26", "'",
-///     "(",   ")",   "*",   "%2B", ",",   "-",   ".",   "%2F",
-///     "0",   "1",   "2",   "3",   "4",   "5",   "6",   "7",
-///     "8",   "9",   "%3A", "%3B", "%3C", "%3D", "%3E", "%3F",
-/// ...
-///     case eUrlEnc_SkipMarkChars:
-///         encode_table = s_Encode;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5614-5619, 6066-6067 (`s_Encode`, rows of 0x20-0x3F)
 /// The other rows keep `A`-`Z`, `a`-`z` and `_` only (`%40`, `%5B`-`%5E`, `%60`, `%7B`-`%7F`).
 pub(crate) fn url_encode(text: &[u8]) -> Vec<u8> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -165,39 +147,7 @@ pub(crate) fn url_encode(text: &[u8]) -> Vec<u8> {
 /// is a file (`CFile::Exists`, links followed), else `$NCBI` (not empty) with `/` added where it
 /// does not end in one, then that name, where it is a file; `None`: no file.
 ///
-/// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3383-3418
-/// ```c++
-/// void CAlignFormatUtil::InitConfig()
-/// {
-///     string l_cfg_file_name;
-///     bool   l_dbg = CAlignFormatUtil::m_geturl_debug_flag;
-///     if( getenv("GETURL_DEBUG") ) CAlignFormatUtil::m_geturl_debug_flag = l_dbg = true;
-///     if( !m_Reg ) {
-///         ...
-///         if( NULL !=  getenv("NCBI")   ) l_ncbi_env = getenv("NCBI");
-///         if( NULL !=  getenv("FMTCFG") ) l_fmtcfg_env = getenv("FMTCFG");
-///         // config file name: value of FMTCFG or  default ( .ncbirc )
-///         if( l_fmtcfg_env.empty()  )
-///             l_cfg_file_name = ".ncbirc";
-///         else
-///             l_cfg_file_name = l_fmtcfg_env;
-///         // checkinf existance of configuration file
-///         CFile  l_fchecker( l_cfg_file_name );
-///         cfgExists = l_fchecker.Exists();
-///         if( (!cfgExists) && (!l_ncbi_env.empty()) ) {
-///             if( l_ncbi_env.rfind("/") != (l_ncbi_env.length() -1 ))
-///             l_ncbi_env.append("/");
-///             l_cfg_file_name = l_ncbi_env + l_cfg_file_name;
-///             CFile  l_fchecker2( l_cfg_file_name );
-///             cfgExists = l_fchecker2.Exists();
-///         }
-///         if(cfgExists) {
-///             CNcbiIfstream l_ConfigFile(l_cfg_file_name.c_str() );
-///             m_Reg.reset(new CNcbiRegistry(l_ConfigFile));
-///             if( l_dbg ) fprintf(stderr,"REGISTRY: %s\n",l_cfg_file_name.c_str());
-///         }
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3383-3418
 fn init_config_path(
     fmtcfg: Option<&std::ffi::OsStr>,
     ncbi: Option<&std::ffi::OsStr>,
@@ -361,20 +311,7 @@ impl InitConfig {
     /// of every id (`GetIDUrlGen`), so a malformed file fails at the first id of any kind (probes
     /// `cfg.*.{L,A,D}.h`).
     ///
-    /// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3661-3671
-    /// ```c++
-    /// string CAlignFormatUtil::MapProtocol(string url_link)
-    /// {
-    ///     if(m_Protocol.empty()){
-    ///         if(!m_Reg) {
-    ///             InitConfig();
-    ///         }
-    ///         m_Protocol = (m_Reg && m_Reg->HasEntry("BLASTFMTUTIL","PROTOCOL")) ? m_Protocol = m_Reg->Get("BLASTFMTUTIL","PROTOCOL") : "https:";
-    ///     }
-    ///     url_link = CAlignFormatUtil::MapTemplate(url_link,"protocol",m_Protocol);
-    ///     return url_link;
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3661-3671
     pub(crate) fn map_protocol(
         &self,
         url: &[u8],
@@ -394,29 +331,7 @@ impl InitConfig {
     /// they name), whose result NCBI never uses: LOSAT reads none of them. `TOOL_URL_ALIGN` is read
     /// only with `addCssInfo`, which no NCBI application sets.
     ///
-    /// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3816-3838
-    /// ```c++
-    ///         } else if (wid->Which() == CSeq_id::e_Local){
-    ///
-    ///             string url_holder = CAlignFormatUtil::GetURLFromRegistry("LOCAL_ID");
-    ///
-    ///             string user_url;
-    ///             if (m_Reg) {
-    ///                 user_url = (seqUrlInfo->addCssInfo) ? m_Reg->Get("LOCAL_ID","TOOL_URL_ALIGN") : m_Reg->Get("LOCAL_ID","TOOL_URL");
-    ///             }
-    ///             string id_string;
-    ///             wid->GetLabel(&id_string, CSeq_id::eContent);
-    ///             url_link = CAlignFormatUtil::MapTemplate(user_url,"seq_id", NStr::URLEncode(id_string));
-    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"db_name", NStr::URLEncode(seqUrlInfo->database));
-    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"taxid", TAX_ID_TO(int, seqUrlInfo->taxid));
-    ///             temp_class_info = (!seqUrlInfo->defline.empty())? CAlignFormatUtil::MapTemplate(temp_class_info,"defline",seqUrlInfo->defline):temp_class_info;
-    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"cssInf",(seqUrlInfo->addCssInfo) ? temp_class_info.c_str() : "");
-    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"title", id_string);
-    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"target",seqUrlInfo->new_win ? "TARGET=\"EntrezView\"" : "");
-    ///         }
-    ///     }
-    ///     url_link = CAlignFormatUtil::MapProtocol(url_link);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3816-3838
     pub(crate) fn local_id_url(
         &self,
         label: &[u8],

@@ -552,10 +552,6 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-// ```c++
-//         // Produce HTML?
-//         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
-// ```
 /// LOSAT's refusal of `-html` with the format `number` when it is 1 to 4 (the query-anchored
 /// alignments), until item T4b of line RG writes their HTML: one check for the five programs, made
 /// where each one's formatting handler checks the format (`formatting_handler_check`), with the

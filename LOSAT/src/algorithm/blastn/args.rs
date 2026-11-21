@@ -124,10 +124,6 @@ pub struct BlastnArgs {
     )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-    // ```c++
-    //         // Produce HTML?
-    //         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
-    // ```
     // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
     // not write it yet (`blastinput::app::html_format_check`).
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]

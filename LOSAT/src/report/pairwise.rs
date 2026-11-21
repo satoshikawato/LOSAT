@@ -804,7 +804,7 @@ fn write_heading_lines<W: Write>(
 
 /// The HSPs `part` of a subject (`hits`, `hsp_indices`) after its heading: each by `write_hsp`,
 /// or NCBI's line in place of each where the heading was not made (`skipped`, the Seq-id text of
-/// the line; showalign.cpp:1976-1981, quoted at `write_subject_alignments_part`). NCBI sets
+/// the line; showalign.cpp:1976-1981, cited at `write_subject_alignments_part`). NCBI sets
 /// `previousId` only after a heading, so each alignment of a skipped subject makes its heading
 /// again: with `-html` the next one's attempt is `retry` (its id links, whose registry posts
 /// again where it throws).
@@ -2221,16 +2221,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
     // The ID of a local query is not shown (`believe_query` false), so the line is the
     // title, raw (no decoding), without the white space at its ends.
-    // NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:724-731
-    // ```c++
-    //     if (html) {
-    //         out << "<b>" << label << "=</b> ";
-    //     } else if (tabular) {
-    //         out << "# " << label << ": ";
-    //     } else {
-    //         out << label << "= ";
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:724-731
     // `-html` (D4 of the T4 survey): the label in bold and the line HTML-encoded and wrapped
     // with `fWrap_HTMLPre` (`x_WrapOutputLine`, `report::html::write_html_wrapped`).
     if html {
@@ -3595,25 +3586,7 @@ impl DescriptionLabel {
     /// text, `</a>` after a link, then the cut title `HTMLEncode`d; the cut and the padding count
     /// the raw bytes (`line_length`).
     ///
-    /// NCBI reference (2.17.0): c++/src/objtools/align_format/showdefline.cpp:883-885, 909-931
-    /// ```c++
-    ///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
-    ///             out << sdl->id_url;
-    ///         }
-    ///     ...
-    ///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
-    ///             out << "</a>";
-    ///         }
-    ///     ...
-    ///         if (m_Option & eHtml) {
-    ///             out << CHTMLHelper::HTMLEncode(actual_line_component);
-    ///         } else {
-    ///             out << actual_line_component;
-    ///         }
-    ///         line_length += actual_line_component.size();
-    ///         //pad the short lines
-    ///         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:883-885, 909-931
     fn write_html<W: Write>(&self, writer: &mut W, link: &[u8]) -> io::Result<()> {
         let (id, title, cut) = self.cut();
         writer.write_all(link)?;
@@ -3646,19 +3619,7 @@ impl HtmlRows<'_> {
     /// with the label `label` and the bit score `bits` (in a column of `max_score`): the label
     /// (`DescriptionLabel::write_html`), two spaces, then the bit score inside the score link.
     ///
-    /// NCBI reference (2.17.0): c++/src/objtools/align_format/showdefline.cpp:932-939
-    /// ```c++
-    ///         out << kTwoSpaceMargin;
-    ///
-    ///         if((m_Option & eHtml) && (sdl->score_url != NcbiEmptyString)) {
-    ///             out << sdl->score_url;
-    ///         }
-    ///         out << (*iter)->bit_string;
-    ///         if((m_Option & eHtml) && (sdl->score_url != NcbiEmptyString)) {
-    ///             out << "</a>";
-    ///         }
-    ///         CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - (*iter)->bit_string.size());
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:932-939
     fn write_start<W: Write>(
         self,
         writer: &mut W,
@@ -5317,9 +5278,6 @@ impl BlastxSections<'_> {
                     DatabaseHeading::Title(&titles[s_idx as usize], stored_source(sources, s_idx)),
                 ),
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
-                // ```c++
-                // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-                // ```
                 (None, None) => SubjectHeading::Record(
                     self.record_titles
                         .get(s_idx as usize)

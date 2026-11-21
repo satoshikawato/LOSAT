@@ -1381,7 +1381,7 @@ impl ParsedSubject {
     /// `x_PrintDefLine` writes a Bioseq without definition lines), then always a space and the
     /// HTML-encoded title wrapped; a heading with more than 8 lines (NCBI's `maxNumBdl`: the
     /// definition lines, or the strings of the positive list) hides those after the third in the
-    /// "more sequence titles" box (`html_ids::more_titles`, quoted there). The id link precedes
+    /// "more sequence titles" box (`html_ids::more_titles`, cited there). The id link precedes
     /// the title of each line (`x_FillAlnDispParams`); where the registry throws, `Err` with the
     /// Seq-id text too (`HtmlHeading::skips`). The outer error is the report's.
     pub fn heading(

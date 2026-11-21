@@ -51,16 +51,7 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
 /// them with or without the suffix `_<index>` and never uses what it builds of them
 /// (`GetIDUrlGen` of a local id, `formatter_registry`): they change no output either.
 ///
-/// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3453-3456, 3462-3463
-/// ```c++
-///   if( index >=0) {
-///     l_key_ndx = url_name + l_host_port_suffix + "_" + NStr::IntToString( index );
-///     l_subst_pattern="<@"+l_key_ndx+"@>";
-///     l_host_port = m_Reg->Get(l_secion_name, l_key_ndx); // try indexed
-/// ...
-///   l_key = url_name + l_fmt_suffix ; //"_FORMAT";
-///   l_key_ndx = l_key + "_" + NStr::IntToString( index );
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3453-3456, 3462-3463
 const LOCAL_ID_URL_ENTRIES: &[&str] = &["LOCAL_ID_HOST_PORT", "LOCAL_ID_FORMAT"];
 
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI

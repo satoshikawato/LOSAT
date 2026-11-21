@@ -163,12 +163,7 @@ impl<'h> QueryGroup<'h> {
         })
     }
 
-    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:1929, 2307
-    // ```c++
-    //     m_cur_align = m_currAlignSeqListIndex - 1;
-    //     ...
-    //         m_cur_align++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1929, 2307
     /// The rank of subject `s_idx`'s alignment heading (NCBI's `m_cur_align`, the `blast_rank` of
     /// its `-html` links, from 1 for each query): `x_PrintDefLine` counts each heading it starts,
     /// which is once for a subject and once for each alignment of a subject whose heading throws

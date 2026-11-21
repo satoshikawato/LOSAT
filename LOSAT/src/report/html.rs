@@ -5,14 +5,8 @@
 
 use std::io::{self, Write};
 
-// NCBI reference (2.17.0): c++/src/html/htmlhelper.cpp:146-149
-// ```c++
-// string CHTMLHelper::HTMLEncode(const string& str, THTMLEncodeFlags flags)
-// {
-//     return s_HTMLEncode(str, "\"&<>", flags);
-// }
-// ```
-// NCBI reference (2.17.0): c++/src/html/htmlhelper.cpp:58-130 (`s_HTMLEncode`): `"` -> `&quot;`,
+// NCBI reference (598d8ae6): c++/src/html/htmlhelper.cpp:146-149
+// NCBI reference (598d8ae6): c++/src/html/htmlhelper.cpp:58-130 (`s_HTMLEncode`): `"` -> `&quot;`,
 // `&` -> `&` + `amp;` (the default `fEncodeAll` sets no `fSkipEntities`), `<` -> `&lt;`,
 // `>` -> `&gt;`; every other byte (`'` too) is copied.
 /// `CHTMLHelper::HTMLEncode(text)` with its default flags (`fEncodeAll`), appended to `out`.
@@ -40,22 +34,9 @@ pub(crate) fn html_encode(text: &[u8]) -> Vec<u8> {
     out
 }
 
-// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5038-5052
-// ```c++
-// static SIZE_TYPE s_EndOfReference(const string& str, SIZE_TYPE start)
-// {
-//     SIZE_TYPE pos = str.find_first_not_of
-//         ("#0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-//          start + 1);
-//     if (pos != NPOS  &&  str[pos] == ';') {
-//         return pos;
-//     } else {
-//         return start;
-//     }
-// }
-// ```
-/// The `;` that ends the character reference starting with the `&` at `start`, or `start` when it
-/// is not one.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5038-5052
+/// The `;` that ends the character reference starting with the `&` at `start` (the first byte
+/// after it that is not a letter, a digit or `#`), or `start` when it is not one.
 fn end_of_reference(text: &[u8], start: usize) -> usize {
     match text[start + 1..]
         .iter()
@@ -82,24 +63,7 @@ enum Score {
     Newline,
 }
 
-// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:279-294
-// ```c++
-// void CAlignFormatUtil::x_WrapOutputLine(string str, size_t line_len,
-//                                         CNcbiOstream& out, bool html)
-// {
-//     list<string> string_l;
-//     NStr::TWrapFlags flags = NStr::fWrap_FlatFile;
-//     if (html) {
-//         flags = NStr::fWrap_HTMLPre;
-//         str = CHTMLHelper::HTMLEncode(str);
-//     }
-//     NStr::Wrap(str, line_len, string_l, flags);
-//     list<string>::iterator iter = string_l.begin();
-//     while(iter != string_l.end())
-//     {
-//        out << *iter;
-//        out << "\n";
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:279-294
 /// `x_WrapOutputLine(text, width, out, true)`: `text` HTML-encoded and wrapped by `NStr::Wrap`
 /// with `fWrap_HTMLPre` (`wrap_html_pre`), each line followed by `\n`.
 pub(crate) fn write_html_wrapped<W: Write + ?Sized>(
@@ -113,86 +77,14 @@ pub(crate) fn write_html_wrapped<W: Write + ?Sized>(
     crate::cli::insert(writer, &out)
 }
 
-// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5127-5339 (`NStr::WrapIt`), the branches
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5127-5339 (`NStr::WrapIt`), the branches
 // that `fWrap_HTMLPre` without `fWrap_FlatFile` and without `fWrap_Hyphenate`, with an empty
-// prefix, takes:
-// ```c++
-//         for (SIZE_TYPE pos2 = pos0;  pos2 < len  &&  column <= width;
-//             ++pos2, ++column) {
-//             EScore    score = eForced;
-//             SIZE_TYPE score_pos = pos2;
-//             const char      c = str[pos2];
-//             if (c == '\n') {
-//                 best_pos = pos2;
-//                 best_score = eNewline;
-//                 best_link = latest_link;
-//                 break;
-//             }
-//             else if (_isspace((unsigned char)c)) {
-//                 if (!do_flat  &&  pos2 > 0 &&
-//                     _isspace((unsigned char)str[pos2 - 1])) {
-//                     if (pos2 < len - 1 && str[pos2 + 1] == '\b') {
-//                         thisPartHasBackspace = true;
-//                     }
-//                     continue; // take the first space of a group
-//                 }
-//                 score = eSpace;
-//             }
-//             else if (is_html && c == '<') { ... tags as zero-width ... }
-//             else if (is_html && c == '&') {
-//                 // ...and references as single characters
-//                 pos2 = s_EndOfReference(str, pos2);
-//                 if (pos2 == NPOS) {
-//                     break;
-//                 }
-//             }
-//             else if (c == ','  && column < width && score_pos < len - 1) {
-//                 score = eComma;
-//                 ++score_pos;
-//             }
-//             else if (do_flat ? c == '-' : ispunct((unsigned char)c)) {
-//                 switch (c) {
-//                 case '(': case '[': case '{': case '<': case '`':
-//                     score = ePunct;
-//                     break;
-//                 default:
-//                     if (score_pos < len - 1 && column < width) {
-//                         score = ePunct;
-//                         ++score_pos;
-//                     }
-//                     break;
-//                 }
-//             }
-//             if (score >= best_score  &&  score_pos > pos0) {
-//                 best_pos = score_pos;
-//                 best_score = score;
-//                 best_link = latest_link;
-//             }
-//             while (pos2 < len - 1 && str[pos2 + 1] == '\b') {
-//                 ++pos2;
-//                 if (column > column0) {
-//                     --column;
-//                 }
-//                 thisPartHasBackspace = true;
-//             }
-//         }
-//         if (best_score != eNewline  &&  column <= width) {
-//             if (best_pos != len) {
-//                 best_pos = len;
-//                 best_link = latest_link;
-//                 thisPartHasBackspace = true;
-//             }
-//         }
-//         ... (the part [pos, best_pos), backspaces eaten, :5274-5302) ...
-//         pos = best_pos;
-//         ...
-//             if (best_score == eSpace || best_score == eNewline) {
-//                 ++pos;
-//             }
-//         while (pos < len  &&  str[pos] == '\b') {
-//             ++pos;
-//         }
-// ```
+// prefix, takes. Each line looks for its break within `width` columns: a newline ends it; else
+// the best-scored break point (`Score`) wins, the last one of that score: a space (not one after
+// a space), a comma (the break after it), other punctuation (before an opening bracket or a
+// backquote, after the rest); none gives a forced break at the width. A backspace takes back a
+// column, and a line that reaches the end of the text within the width takes the rest. A space
+// or newline at the break is dropped, as are backspaces at the start of the next line.
 // The text is HTML-encoded (`x_WrapOutputLine`), so it holds no `<`: the tag and link branches
 // (:5186-5216, :5142-5146, :5306-5308) never run. A reference (`&amp;`) is one column and no
 // break point.
@@ -277,27 +169,7 @@ pub(crate) fn wrap_html_pre(encoded: &[u8], width: usize, out: &mut Vec<u8>) {
     }
 }
 
-// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5277-5301
-// ```c++
-//             if (thisPartHasBackspace) {
-//                 string::const_iterator bs; // position of next backspace
-//                 while ((bs = find(begin, end, '\b')) != end) {
-//                     if (bs != begin) {
-//                         temp_back.append(begin, bs - 1);
-//                     }
-//                     else {
-//                         SIZE_TYPE size = temp_back.size();
-//                         if (size > prefix1->size()) { // current size > prefix size
-//                             temp_back.resize(size - 1);
-//                         }
-//                     }
-//                     begin = bs + 1;
-//                 }
-//             }
-//             if (begin != end) {
-//                 temp_back.append(begin, end);
-//             }
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5277-5301
 /// The part of a line, each backspace eating the byte before it (`line_start` is where the line
 /// starts in `out`, NCBI's empty prefix).
 fn append_eating_backspaces(

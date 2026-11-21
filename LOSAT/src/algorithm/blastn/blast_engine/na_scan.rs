@@ -30,8 +30,9 @@ use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
     blastn_trace, diag_hash_insert_window, extend_hit_ungapped_approx_ncbi,
-    extend_hit_ungapped_exact_ncbi, scan_subject_kmers_with_ranges, select_mb_scan_kind,
-    x_bnctxlate, x_push_ungapped, DiagHashTable, DiagStruct, SubjectChunk, UngappedHit,
+    extend_hit_ungapped_exact_ncbi, mask_lookup_index, packed_kmer_at_seed_mask,
+    scan_subject_kmers_with_ranges, select_mb_scan_kind, type_of_word, x_push_ungapped,
+    DiagHashTable, DiagStruct, SubjectChunk, UngappedHit,
 };
 
 /// What the scan of one subject chunk with a table that is not two-stage reads: the batch's word
@@ -106,20 +107,7 @@ pub(super) struct NaScanState<'s> {
 /// of line, it moves the instructions of no measured case by 0.1 % (callgrind, n1; SW7 bn-10, whose
 /// move of the two-stage scan ended the register spill this was `#[inline(always)]` for). The
 /// scan's callback stays a function of its own, as it was.
-///
-/// LOSAT_X_BNCTXLATE (`super::x_bnctxlate`, on unless `0`): a lookup hit's context and cutoffs
-/// are read once the hit is ready for its extension, as NCBI reads them (`LATE`); `=0` reads them
-/// for every lookup hit, before the diagonal test, as before.
 pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) {
-    if x_bnctxlate() {
-        scan_na_lookup_impl::<true>(x, state)
-    } else {
-        scan_na_lookup_impl::<false>(x, state)
-    }
-}
-
-/// `scan_na_lookup`; `LATE`: LOSAT_X_BNCTXLATE.
-fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) {
     let &NaScanInputs {
         scan,
         search_seq_packed,
@@ -193,7 +181,7 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
         subject_seq_ranges,
         subject_masked,
         mb_scan_kind,
-        |kmer_start, _s_range, current_kmer| {
+        |kmer_start, s_range, current_kmer| {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
             if debug_enabled {
                 *dbg_total_s_positions += 1;
@@ -224,21 +212,14 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1412
                 let q_off0 = q_off_1 as usize - 1;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:900-903
-                // NCBI finds the hit's context and reads its cutoffs once the hit is ready
-                // (`LATE`, below). `=0`, the debug window and the traces read them here, for
-                // every lookup hit (the window and the traces print the hit's place in its
-                // context). The cutoff is computed once per query-subject pair.
-                let early: Option<(usize, i32)> =
-                    if !LATE || blastn_trace_enabled || debug_window.is_some() {
-                        let context_idx = query_context_index.context_for_offset(q_off0);
-                        Some((context_idx, cutoff_scores[context_idx]))
-                    } else {
-                        None
-                    };
-                // The hit's offset in its context (read only where `early` is set).
-                let q_pos_usize = early.map_or(0, |(context_idx, _)| {
-                    q_off0 - query_contexts[context_idx].query_offset as usize
-                });
+                let context_idx = query_context_index.context_for_offset(q_off0);
+                let ctx = &query_contexts[context_idx];
+                let q_idx = context_idx as u32;
+
+                let q_pos_usize = q_off0 - ctx.query_offset as usize;
+
+                // Use pre-computed cutoff score (computed once per query-subject pair)
+                let cutoff_score = cutoff_scores[context_idx];
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:663-664
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-829
@@ -269,12 +250,10 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                 }
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-                if blastn_trace_enabled {
-                    // `early` is set when the traces are on.
-                    let context_idx = early.map_or(0, |(context_idx, _)| context_idx);
-                    if blastn_trace::should_trace_range(
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
                         "seed",
-                        context_idx as u32,
+                        q_idx,
                         s_idx,
                         s_id,
                         q_pos_usize as i32,
@@ -283,25 +262,25 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                         kmer_start
                             .saturating_add(safe_k)
                             .saturating_add(chunk.offset),
-                        query_contexts[context_idx].len,
-                        query_contexts[context_idx].frame,
-                    ) {
-                        blastn_trace::log(
-                            "seed",
-                            format!(
-                                "subject={}({}) context={} q_off={} s_off={} word_length={} lookup_index={} diag={} hits_for_lookup={}",
-                                s_id,
-                                s_idx,
-                                context_idx,
-                                q_pos_usize,
-                                s_pos,
-                                safe_k,
-                                current_kmer,
-                                diag,
-                                matches_slice.len()
-                            ),
-                        );
-                    }
+                        ctx.len,
+                        ctx.frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "seed",
+                        format!(
+                            "subject={}({}) context={} q_off={} s_off={} word_length={} lookup_index={} diag={} hits_for_lookup={}",
+                            s_id,
+                            s_idx,
+                            q_idx,
+                            q_pos_usize,
+                            s_pos,
+                            safe_k,
+                            current_kmer,
+                            diag,
+                            matches_slice.len()
+                        ),
+                    );
                 }
 
                 // NCBI BLAST does NOT check mask_array/mask_hash at seed level
@@ -354,19 +333,17 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                     continue;
                 }
 
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-726
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
-                // `s_TypeOfWord` returns a single word with nothing extended when the word length
-                // is the lookup word length, as here (both `safe_k`: the table is not two-stage),
-                // whether or not the double word is checked: the word keeps the hit's offsets,
-                // and the masks and the length of the hit's context are not read. In two-hit mode
-                // a single word then gets the off-diagonal search.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-683
+                // After two-hit check, call type_of_word for two-hit mode
+                //     word_type = s_TypeOfWord(...);
                 let two_hits = window_size > 0;
-                let s_off = kmer_start;
-                let s_end = kmer_start + safe_k;
-                let s_end_pos = s_end + diag_offset as usize;
+                let mut q_off = q_pos_usize;
+                let mut s_off = kmer_start;
+                let mut s_end = kmer_start + safe_k;
+                let mut s_end_pos = s_end + diag_offset as usize;
                 let mut off_found = false;
                 let mut hit_ready = true;
+                let query_mask = ctx.masks.as_slice();
                 let diag_hash_window = if !use_array_indexing {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
                     diag_hash_insert_window(window_size, scan_range, safe_k)
@@ -374,34 +351,124 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                     0
                 };
 
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:459-489
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:121-133
+                #[expect(
+                    clippy::manual_contains,
+                    reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
+                )]
+                let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+                    if s_pos + safe_k > s_len {
+                        return true;
+                    }
+                    let kmer = mask_lookup_index(
+                        packed_kmer_at_seed_mask(search_seq_packed, s_pos, safe_k),
+                        safe_k,
+                    );
+                    let hits: &[u32] = if use_direct_lookup {
+                        pv_direct_lookup_ref
+                            .map(|pv_dl| pv_dl.get_hits_checked(kmer))
+                            .unwrap_or(&[])
+                    } else {
+                        na_lookup_ref
+                            .map(|na_lt| na_lt.get_hits_checked(kmer))
+                            .unwrap_or(&[])
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+                    let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
+                    !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
+                };
+
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-676
                 let s_end_pos_i32 = s_end_pos as i32;
                 let window_end = last_hit + window_size as i32;
                 if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:677-680
+                    // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
+                    let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
+                        q_off,
+                        s_off,
+                        !query_mask.is_empty(),
+                        ctx.len,
+                        s_range,
+                        safe_k, // word_length
+                        safe_k, // lut_word_length (same for non-two-stage)
+                        true,   // check_double = TRUE
+                        &mut is_seed_masked,
+                    );
+                    let word_type = wt;
+                    let extended = ext;
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
+                    q_off = q_off_adj;
+                    s_off = s_off_adj;
+
+                    // NCBI: if (!word_type) return 0;
+                    if word_type == 0 {
+                        // Non-word, skip this hit
+                        continue;
+                    }
+
+                    // NCBI: s_end += extended;
+                    // NCBI: s_end_pos += extended;
+                    s_end += extended;
+                    s_end_pos += extended;
+
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:685-717 (the diagonal array's,
                     // `s_BlastnDiagTableExtendInitialHit`) and :852-886 (the hash's,
                     // `s_BlastnDiagHashExtendInitialHit`) - off-diagonal search
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-687,853-854
-                    off_found = pair_extend::off_diagonal_found(pair_extend::OffDiagonal {
-                        use_array_indexing,
-                        window_size,
-                        scan_range,
-                        word_length: safe_k,
-                        diag_array_length,
-                        diag_mask,
-                        diag_array_size,
-                        hit_level_array,
-                        hit_len_array,
-                        diag_hash,
-                        diag,
-                        s_off_pos,
-                        s_end_pos,
-                    });
+                    if word_type == 1 {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-687,853-854
+                        off_found = pair_extend::off_diagonal_found(pair_extend::OffDiagonal {
+                            use_array_indexing,
+                            window_size,
+                            scan_range,
+                            word_length: safe_k,
+                            diag_array_length,
+                            diag_mask,
+                            diag_array_size,
+                            hit_level_array,
+                            hit_len_array,
+                            diag_hash,
+                            diag,
+                            s_off_pos,
+                            s_end_pos,
+                        });
 
-                    if !off_found {
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:713-716
-                        hit_ready = false;
+                        if !off_found {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:713-716
+                            hit_ready = false;
+                        }
                     }
+                } else {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-726
+                    // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
+                    let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
+                        q_off,
+                        s_off,
+                        !query_mask.is_empty(),
+                        ctx.len,
+                        s_range,
+                        safe_k, // word_length
+                        safe_k, // lut_word_length (same for non-two-stage)
+                        false,  // check_double = FALSE (not in two-hit block)
+                        &mut is_seed_masked,
+                    );
+                    if wt == 0 {
+                        // Non-word, skip this hit
+                        continue;
+                    }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
+                    q_off = q_off_adj;
+                    s_off = s_off_adj;
+                    // NCBI: s_end += extended;
+                    // NCBI: s_end_pos += extended;
+                    s_end += ext;
+                    s_end_pos += ext;
+                    // hit_ready remains true (default) - extension will proceed
                 }
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:728-766
@@ -427,20 +494,14 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                     continue;
                 }
 
-                // Now do ungapped extension from the word's offsets
+                // Now do ungapped extension from the adjusted position
+                // Use q_off and s_off (adjusted by type_of_word if called)
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-749
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:268-269
                 // NCBI's `query` is the concatenated query and `q_off` an offset in it
                 // (na_ungapped.c:164-206 too): a walk that does not stop at the context's
-                // sentinel (a raw X-drop of 2^30 or more) reads the contexts before it. The word
-                // keeps the lookup hit's offsets, so `q_off` is the hit's `q_off0`.
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:900-903
-                // The ready hit's context and cutoffs (`LATE`: found here).
-                let (context_idx, cutoff_score) = early.unwrap_or_else(|| {
-                    let context_idx = query_context_index.context_for_offset(q_off0);
-                    (context_idx, cutoff_scores[context_idx])
-                });
-                let q_off_concat = q_off0;
+                // sentinel (a raw X-drop of 2^30 or more) reads the contexts before it.
+                let q_off_concat = ctx.query_offset as usize + q_off;
                 let x_dropoff = x_dropoff_scores[context_idx];
                 let reduced_cutoff = reduced_cutoff_scores[context_idx];
                 let ungapped_start = if timing_enabled {
@@ -493,12 +554,11 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                     // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): the hit's
                     // context-relative range, NCBI's `Int4` one (below 0 for a hit that starts
                     // left of its context), computed only for the trace.
-                    let ctx = &query_contexts[context_idx];
                     let qs = (ungapped.q_start as isize - ctx.query_offset as isize) as i32;
                     let qe = qs + ungapped.length as i32;
                     if blastn_trace::should_trace_range(
                         "ungapped",
-                        context_idx as u32,
+                        q_idx,
                         s_idx,
                         s_id,
                         qs,
@@ -514,8 +574,8 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                             "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
                             s_id,
                             s_idx,
-                            context_idx,
-                            q_pos_usize,
+                            q_idx,
+                            q_off,
                             s_off.saturating_add(chunk.offset),
                             qs,
                             qe,
@@ -598,13 +658,7 @@ fn scan_na_lookup_impl<const LATE: bool>(x: &NaScanInputs<'_>, state: &mut NaSca
                 // for a hit that starts left of its context).
                 x_push_ungapped(
                     ungapped_hits,
-                    UngappedHit::saved(
-                        context_idx as u32,
-                        &query_contexts[context_idx],
-                        q_off_concat,
-                        s_off,
-                        &ungapped,
-                    ),
+                    UngappedHit::saved(q_idx, ctx, q_off_concat, s_off, &ungapped),
                 );
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772

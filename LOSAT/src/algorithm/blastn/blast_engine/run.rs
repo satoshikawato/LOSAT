@@ -3060,17 +3060,6 @@ pub(super) fn x_bn_ext_first() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNEXTFIRST"))
 }
 
-/// No NCBI counterpart: LOSAT_X_BNCTXLATE (in the strict set: on unless it is `0`) the scan of a
-/// table that is not two-stage (`na_scan::scan_na_lookup`) and the fold of LOSAT_X_PAIRPARNA
-/// (`x_pair_seed_na.rs`) read a lookup hit's context and cutoffs once the hit is ready for its
-/// ungapped extension, as NCBI reads them (na_ungapped.c:900-903), instead of for every lookup hit
-/// before the diagonal test: a hit that the diagonal skips reads no row of its context. The hits,
-/// their extensions and every value are the same.
-pub(super) fn x_bnctxlate() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCTXLATE"))
-}
-
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNRANKONCE, in the strict set: on unless it is `0`)
 /// the scans of a contiguous table laid out as CSR take each word's run from the element of the
 /// head that the ring hands over with the word (`x_dc_csr::XRing`): a word of a packed head is

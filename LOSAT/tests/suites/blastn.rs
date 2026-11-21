@@ -10,8 +10,6 @@
 mod blastn_bn_csr;
 #[path = "../blastn_bn_seed_lists.rs"]
 mod blastn_bn_seed_lists;
-#[path = "../blastn_ctx_late.rs"]
-mod blastn_ctx_late;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_hard_long.rs"]

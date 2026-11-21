@@ -302,24 +302,22 @@ impl TblastnDatabase {
     /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
     /// first read of each subject that writes one, with its rank, where a query's report reads
     /// its subjects one by one: in the order of the hit lists, or, for the pairwise report
-    /// (`pairwise`, its `-sorthits` and `-sorthsps`), in the order of its sorted groups
-    /// (`QueryGroup::read_order` of the rows' hits: each list's HSPs in the reports' order,
-    /// `stage_d_results::evalue_order`, with the values of their rows,
-    /// `stage_e_report::hsp_scores`).
+    /// (`pairwise`: how it reads them), those that it shows in the order that it reads them
+    /// (`pairwise_read_order`, `PairwiseReads::subjects`).
     pub(super) fn subject_read_texts(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         rows: SubjectFetch,
         rows_open: bool,
-        pairwise: Option<crate::report::hit_sort::ReportSort>,
+        pairwise: Option<crate::report::pairwise::PairwiseReading>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let lists = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| reads_subject(list, rows));
         let ranks: Vec<u32> = match pairwise {
-            Some(sort) => pairwise_read_order(
+            Some(reading) => pairwise_read_order(
                 lists,
                 |rank| Ok(reported.lengths[rank]),
                 |previous, rank| {
@@ -329,8 +327,12 @@ impl TblastnDatabase {
                         rank as usize,
                     )
                 },
-                sort,
-            )?,
+                reading,
+            )?
+            .subjects()
+            .into_iter()
+            .map(|rank| rank as u32)
+            .collect(),
             None => lists.map(|list| list.oid as u32).collect(),
         };
         // A subject whose load throws loads nothing, nor does one that no report reaches after
@@ -798,32 +800,27 @@ fn parsed_shown(
 }
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
-/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads), with what a pairwise report
-/// shows of each query (`shown`).
+/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
 fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    shown: crate::report::db_subject::Shown,
 ) -> Option<crate::report::db_subject::RunThrow> {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
-        shown,
     )
 }
 
-/// The subjects (by the key that `lists` names them by, a rank or an ordinal id) that one
-/// query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, in the order of its
-/// sorted groups (`QueryGroup::read_order` of the rows' hits: each list's HSPs in the reports'
-/// order, `stage_d_results::evalue_order`, with the values of their rows,
-/// `stage_e_report::hsp_scores`, of the subject of `length(key)` nucleotides; `joins`: a copy
-/// joins the hit before; `-sorthits` and `-sorthsps` `sort`): its description lines and
-/// alignments read them in that order.
+/// What one query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, by the key
+/// that `lists` names the subjects by, a rank or an ordinal id (`QueryGroup::read_order` of the
+/// rows' hits as the writer reads them, `reading`: each list's HSPs in the reports' order,
+/// `stage_d_results::evalue_order`, with the values of their rows, `stage_e_report::hsp_scores`,
+/// of the subject of `length(key)` nucleotides; `joins`: a copy joins the hit before).
 fn pairwise_read_order<'l>(
     lists: impl IntoIterator<Item = &'l KappaResultList>,
     length: impl Fn(usize) -> Result<usize>,
     joins: impl Fn(u32, u32) -> bool,
-    sort: crate::report::hit_sort::ReportSort,
-) -> Result<Vec<u32>> {
+    reading: crate::report::pairwise::PairwiseReading,
+) -> Result<crate::report::db_subject::PairwiseReads> {
     let mut hits = Vec::new();
     for list in lists {
         let key = usize::try_from(list.oid).context("negative TBLASTN subject key")?;
@@ -847,8 +844,9 @@ fn pairwise_read_order<'l>(
         hits,
         |scores| *scores,
         joins,
-        sort,
+        reading,
         false,
+        None,
     ))
 }
 
@@ -865,8 +863,8 @@ fn pairwise_read_order<'l>(
 /// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
 /// whether every format writes a `Hit` that throws as NCBI does, `writes_thrown`, for the one
-/// answer of what the reports load, `hit_loads`, with what the pairwise reports show of each
-/// query and their sort, `pairwise`). The packed
+/// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
+/// subjects, `pairwise`). The packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
 #[allow(clippy::too_many_arguments)]
@@ -877,10 +875,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    pairwise: (
-        crate::report::db_subject::Shown,
-        Option<crate::report::hit_sort::ReportSort>,
-    ),
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -909,12 +904,11 @@ pub(super) fn reported_subjects(
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,
     };
-    let after = after_throw(formats, pairwise.0);
-    // A pairwise report reads its subjects in the order of its sorted groups, of the subjects'
-    // lengths (`pairwise_read_order`), where its batch reads them one by one.
-    let pairwise_keys = |query: usize| -> Result<Option<Vec<Option<usize>>>> {
-        let Some(sort) = pairwise
-            .1
+    let after = after_throw(formats);
+    // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
+    // batch reads them one by one.
+    let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
+        let Some(reading) = pairwise
             .filter(|_| after.is_some_and(|run| run.after.is_pairwise()))
             .filter(|_| prefetch.reads_one_by_one(query))
         else {
@@ -932,16 +926,14 @@ pub(super) fn reported_subjects(
                 }
                 _ => false,
             },
-            sort,
+            reading,
         )?;
-        Ok(Some(
-            order.into_iter().map(|key| Some(key as usize)).collect(),
-        ))
+        Ok(Some(order))
     };
     let pairwise_order = (0..hitlists.len())
         .map(pairwise_keys)
         .collect::<Result<Vec<_>>>()?;
-    let loads = hit_loads(hitlists, &prefetch, after, &pairwise_order, titled);
+    let loads = hit_loads(hitlists, &prefetch, after, pairwise_order, titled);
     ordinals.sort_unstable();
     ordinals.dedup();
     for hitlist in hitlists.iter_mut() {
@@ -1071,22 +1063,21 @@ pub(super) fn reported_subjects(
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
 /// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
-/// pairwise report's in the order of its reads (`pairwise_order[query]`, where given).
+/// pairwise report's reads (`pairwise_reads[query]`, where given).
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
     after: Option<crate::report::db_subject::RunThrow>,
-    pairwise_order: &[Option<Vec<Option<usize>>>],
+    pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
+    let mut pairwise_reads = pairwise_reads.into_iter();
     HitLoads::of(
         after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
-            let keys = pairwise_order
-                .get(query)
-                .cloned()
-                .flatten()
-                .unwrap_or_else(|| {
+            let keys = match pairwise_reads.next().flatten() {
+                Some(reads) => crate::report::db_subject::ReportKeys::Pairwise(reads),
+                None => crate::report::db_subject::ReportKeys::Entries(
                     hitlist
                         .lists()
                         .iter()
@@ -1095,8 +1086,9 @@ fn hit_loads<'p>(
                                 .then(|| usize::try_from(list.oid).ok())
                                 .flatten()
                         })
-                        .collect()
-                });
+                        .collect(),
+                ),
+            };
             (prefetch.reads_one_by_one(query), keys)
         }),
         parsed,
@@ -1251,7 +1243,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 letters,
                 &[],
-                (crate::report::db_subject::Shown::EVERY, None),
+                None,
                 &[],
             )
             .unwrap()
@@ -1307,7 +1299,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 true,
                 &[],
-                (crate::report::db_subject::Shown::EVERY, None),
+                None,
                 &[],
             )
             .unwrap();

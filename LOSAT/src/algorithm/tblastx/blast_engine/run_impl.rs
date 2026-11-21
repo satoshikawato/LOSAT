@@ -3808,16 +3808,21 @@ fn run_batch_loop(
         .and_then(crate::api::local_blast::FormatOutput::report_format);
     let places_reads =
         first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-    // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its `-sorthits`.
-    let pairwise = first_report
+    // The pairwise reports (outfmt 0 to 4) read the subjects that they show as their writers read
+    // them (for the loads); the first format places the texts in the order of its reads.
+    let pairwise = super::super::database::pairwise_reading(
+        &outputs.formats,
+        args.formatting.report_sort(),
+        args.report_counts,
+    );
+    let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .map(|view| view.report_sort(args.formatting.report_sort()));
+        .is_some();
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::report_loads`).
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
-        args.report_counts,
     ));
     let (query_code, db_code) = (
         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
@@ -4398,13 +4403,21 @@ fn run_batch_loop(
                             query_fetches.push(if shown.is_empty() {
                                 Vec::new()
                             } else if places_reads {
+                                let titles = reports.titles.borrow();
+                                let ordinals = super::super::database::read_ordinals(
+                                    &shown,
+                                    &ordered[from..to],
+                                    &titles,
+                                    pairwise.filter(|_| pairwise_first),
+                                    &loads,
+                                );
                                 let texts = super::super::database::subject_read_texts(
                                     database,
-                                    shown,
-                                    &reports.titles.borrow(),
+                                    ordinals,
+                                    &titles,
                                     plural_names,
-                                    pairwise,
                                 )?;
+                                drop(titles);
                                 let mut reads = reports.reads.borrow_mut();
                                 let index = start + query as usize;
                                 if reads.len() <= index {
@@ -4782,15 +4795,13 @@ impl BatchReports<'_> {
                     (
                         super::super::database::after_throw(
                             outputs.formats.iter().map(|format| format.outfmt),
+                        ),
+                        // The pairwise reports' reads (as `run_batch_loop`'s).
+                        super::super::database::pairwise_reading(
+                            &outputs.formats,
+                            self.args.formatting.report_sort(),
                             self.args.report_counts,
                         ),
-                        // The pairwise report's reads (as `run_batch_loop`'s).
-                        outputs
-                            .formats
-                            .first()
-                            .and_then(crate::api::local_blast::FormatOutput::report_format)
-                            .and_then(crate::report::pairwise::PairwiseView::of)
-                            .map(|view| view.report_sort(self.args.formatting.report_sort())),
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(

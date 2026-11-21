@@ -1479,7 +1479,7 @@ fn write_pairwise(
             |q_idx| {
                 Ok(crate::report::pairwise::blastp_described_subjects(
                     view.report_sort(options.report_sort()),
-                    false,
+                    None,
                     options.num_descriptions as usize,
                     q_idx,
                     hits,

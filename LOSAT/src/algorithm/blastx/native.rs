@@ -1604,17 +1604,9 @@ pub(super) fn reported_batch(
         asks.prefetch_runs && !unfetched,
         unfetched,
         (
-            crate::report::db_subject::FormatThrow::of_run(
-                [asks.throw],
-                crate::report::db_subject::Shown {
-                    descriptions: usize::try_from(options.num_descriptions).unwrap_or(0),
-                    alignments: usize::try_from(options.num_alignments).unwrap_or(0),
-                },
-            ),
-            // The pairwise report reads its subjects in the order of its sorts.
-            options
-                .pairwise_view()
-                .map(|view| view.report_sort(options.report_sort())),
+            crate::report::db_subject::FormatThrow::of_run([asks.throw]),
+            // The pairwise report reads the subjects that it shows as its writer reads them.
+            options.pairwise_reading(),
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1695,11 +1687,9 @@ pub(super) fn reported_batch(
             let rows_open = options
                 .tabular
                 .is_some_and(|spec| spec.looks_up_every_taxid());
-            // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
-            // `-sorthits`.
-            let pairwise = first_report
-                .and_then(crate::report::pairwise::PairwiseView::of)
-                .map(|view| view.report_sort(options.report_sort()));
+            // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
+            // reads them.
+            let pairwise = options.pairwise_reading();
             reported.fetch_by_query(
                 database,
                 results,

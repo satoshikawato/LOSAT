@@ -10581,10 +10581,8 @@ fn run_in_pool(
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
-    let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
-        &output_formats,
-        args.report_counts,
-    ));
+    let run_loads =
+        crate::report::db_subject::RunLoads::new(database::after_throw(&output_formats));
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
     // ```c
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -11422,8 +11420,8 @@ fn run_in_pool(
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
                 // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
-                // query's warnings; the pairwise report (outfmt 0 to 4) reads its subjects in the
-                // order of its `-sorthits`.
+                // query's warnings; the pairwise report (outfmt 0 to 4) reads those that it shows
+                // as its writer reads them (`database::pairwise_reading`).
                 let first_report = outputs
                     .formats
                     .first()
@@ -11435,9 +11433,14 @@ fn run_in_pool(
                     places: first_report
                         .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads),
                     plural_names,
-                    pairwise: first_report
+                    pairwise: database::pairwise_reading(
+                        &output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
+                    pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
-                        .map(|view| view.report_sort(args.formatting.report_sort())),
+                        .is_some(),
                     gapped: !args.ungapped,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
@@ -11549,7 +11552,7 @@ fn run_in_pool(
                                 &titles,
                                 &hit_lists,
                                 &batch_spans,
-                                database::after_throw(&output_formats, args.report_counts),
+                                database::after_throw(&output_formats),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &prefetch_queries,
@@ -12191,8 +12194,12 @@ fn write_reports_untimed(
                 letters,
                 database::parsed_shown(output_formats),
                 (
-                    database::after_throw(output_formats, args.report_counts),
-                    database::pairwise_sort(output_formats, args.formatting.report_sort()),
+                    database::after_throw(output_formats),
+                    database::pairwise_reading(
+                        output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
                 ),
                 results.batches,
                 written.queries,

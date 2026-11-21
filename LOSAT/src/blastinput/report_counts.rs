@@ -144,8 +144,8 @@ pub struct ReportCounts {
 }
 
 impl ReportCounts {
-    /// What the pairwise reports show of each query (`db_subject::Shown`): the description lines
-    /// of the first `num_descriptions` hits, the alignments of the first `num_alignments`.
+    /// The counts of what the pairwise reports show of each query (`db_subject::Shown`):
+    /// `num_descriptions` description lines, the alignments of the first `num_alignments` hits.
     pub fn shown(self) -> crate::report::db_subject::Shown {
         crate::report::db_subject::Shown {
             descriptions: self.num_descriptions,

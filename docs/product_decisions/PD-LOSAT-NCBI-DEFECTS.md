@@ -178,10 +178,12 @@
   numbered after 1.49);
   1.51 2026-11-18 (outfmt 0 to 4 of such a sequence are written as NCBI writes them: its
   description line is the Seq-align id and `Unknown`; outfmt 0 stops with `BLAST Database error`
-  where the first alignment shown is of such a sequence, else writes the skipped line for each of
-  its HSPs; outfmt 1 to 4 stop where any alignment shown is; the refusal of 1.31 no longer
-  covers outfmt 0 to 4; line DBID item pfoff-3, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07; numbered after 1.50)
+  where the first alignment shown is of such a sequence under a Seq-align id that is not local,
+  else writes the skipped line for each of its HSPs; outfmt 1 to 4 stop where any alignment shown
+  is; the description lines load the sequences that they show, in psiblast's rounds after the
+  first those of the two-part table of the first `-num_descriptions` HSPs; the refusal of 1.31
+  no longer covers outfmt 0 to 4; line DBID item pfoff-3, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.50)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1130,9 +1132,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and the names and tax ids are looked up only for the sequences that a report loads; refused at
   the first row of a query's report with `sacc`, `saccver` or `staxid`, below) or outfmt 0 to 4
   (since version 1.51, line DBID item pfoff-3: the description line of the Seq-align id and
-  `Unknown`, then the stop at outfmt 0's first alignment or any of outfmt 1 to 4 that loads such a
-  sequence, or outfmt 0's skipped line for each of its HSPs; the description lines load the
-  sequences that they show, then the alignments theirs up to the stop), a
+  `Unknown`, then the stop at outfmt 0's first alignment that loads such a sequence under a
+  Seq-align id that is not local, or at any alignment of outfmt 1 to 4 that loads one, or outfmt
+  0's skipped line for each of its HSPs; the description lines load the sequences that they show,
+  in psiblast's rounds after the first those of the two-part table of the first
+  `-num_descriptions` HSPs, then the alignments theirs up to the stop), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

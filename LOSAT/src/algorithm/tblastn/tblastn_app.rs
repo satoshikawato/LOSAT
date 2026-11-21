@@ -1446,26 +1446,27 @@ fn write_first_batch_prologs(
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
 /// the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
-/// What a pairwise report of `formats` shows (`-num_descriptions`, `-num_alignments`) and the
-/// sorts in whose order it reads its subjects (the first report's, as the writer's), for the
-/// loads of a subject whose lookup throws (line DBID item pfoff-3).
-fn pairwise_shown(
+/// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
+/// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
+/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
+/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
+/// texts of its reads (line DBID item pfoff-3); `None` without one.
+fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> (
-    crate::report::db_subject::Shown,
-    Option<crate::report::hit_sort::ReportSort>,
-) {
-    let shown = crate::report::db_subject::Shown {
-        descriptions: resolved.num_descriptions,
-        alignments: resolved.num_alignments,
-    };
-    let sort = formats
-        .first()
-        .and_then(crate::api::local_blast::FormatOutput::report_format)
-        .and_then(crate::report::pairwise::PairwiseView::of)
-        .map(|view| view.report_sort(resolved.formatting.report_sort()));
-    (shown, sort)
+) -> Option<crate::report::pairwise::PairwiseReading> {
+    let view = formats.iter().find_map(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::pairwise::PairwiseView::of)
+    })?;
+    Some(view.reading(
+        resolved.formatting.report_sort(),
+        crate::report::db_subject::Shown {
+            descriptions: resolved.num_descriptions,
+            alignments: resolved.num_alignments,
+        },
+    ))
 }
 
 fn search(
@@ -2465,7 +2466,7 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     &outputs.formats,
-                    pairwise_shown(&resolved, &outputs.formats),
+                    pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2556,7 +2557,7 @@ fn search(
                 // `-sorthits`.
                 let pairwise = first_report
                     .and_then(crate::report::pairwise::PairwiseView::of)
-                    .map(|view| view.report_sort(resolved.formatting.report_sort()));
+                    .and(pairwise_reading(&resolved, &outputs.formats));
                 let plural_names = taxdb_found
                     && first_spec
                         .as_ref()

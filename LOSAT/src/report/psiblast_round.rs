@@ -140,11 +140,11 @@ pub(crate) fn write_psiblast_round_report(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
-            // The first aligned subject's load may end the run (`BlastpSections`'s
-            // `x_pairwise_par::alignment_end`).
+            // An aligned subject's load may end the run where the view's answer says
+            // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
             let aligned = group.aligned(report.num_alignments);
             let end = crate::report::x_pairwise_par::aligned_end(
-                crate::report::db_subject::AfterThrow::SkipsAlignment,
+                config.view.after_throw(),
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );
@@ -337,11 +337,11 @@ impl RoundSections<'_> {
     // ```
     /// The two-part table: the Seq-aligns (HSPs) in the report's order, each in the part of its
     /// subject, counted after it is put there, up to `-num_descriptions` (so the bound counts
-    /// HSPs, and `-num_descriptions 0` keeps the first: `QueryGroup::first_hsps`, which also
-    /// gives the subjects whose description lines the table shows,
-    /// `pairwise::blastp_described_subjects`); each part is a table of its own over its HSPs (its
-    /// own column widths), whose rows are its subjects; then the blank line of
-    /// `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
+    /// HSPs, and `-num_descriptions 0` keeps the first: `x_pairwise_par::two_part_lines`, which
+    /// also gives the subjects whose description lines the table shows to the refusals and the
+    /// loads decided before it, `x_pairwise_par::described_subjects`); each part is a table of its
+    /// own over its HSPs (its own column widths), whose rows are its subjects; then the blank line
+    /// of `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
     /// descriptions, so neither part leaves its header out.
     fn write_two_part_table<W: Write>(
         &self,
@@ -350,23 +350,16 @@ impl RoundSections<'_> {
         found_before: &[bool],
         read: SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
-        let mut repeated: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        let mut new: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        for (shown, hit) in group.first_hsps(self.report.num_descriptions) {
-            let part = if found_before
-                .get(hit.hit.s_idx as usize)
-                .copied()
-                .unwrap_or(false)
-            {
-                &mut repeated
-            } else {
-                &mut new
-            };
-            match part.last_mut() {
-                Some((last, hits)) if *last == shown => hits.push(hit),
-                _ => part.push((shown, vec![hit])),
-            }
-        }
+        let [repeated, new] = crate::report::x_pairwise_par::two_part_lines(
+            group.hsps(),
+            self.report.num_descriptions,
+            |hit: &&PairwiseHit| {
+                found_before
+                    .get(hit.hit.s_idx as usize)
+                    .copied()
+                    .unwrap_or(false)
+            },
+        );
         self.write_part(writer, group, &repeated, true, &mut *read)?;
         writeln!(writer)?;
         self.write_part(writer, group, &new, false, read)?;

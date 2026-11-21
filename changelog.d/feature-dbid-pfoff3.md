@@ -8,4 +8,5 @@
   first alignment it shows is of such a sequence under a parsed Seq-id (not a local one), and otherwise writes
   `Sequence with id NP_100001 no longer exists in database...alignment skipped` for each of its alignments and goes
   on; `-outfmt 1` to `4` stop there where any alignment they show is of such a sequence. The taxonomy database's texts
-  are those of the sequences that the report reads before it stops.
+  are those of the sequences that the report reads before it stops (in psiblast's rounds after the first, those of
+  the two-part description table, which counts the first `-num_descriptions` HSPs, not sequences).

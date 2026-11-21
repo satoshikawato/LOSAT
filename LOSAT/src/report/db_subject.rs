@@ -249,6 +249,15 @@ impl LookupFailure {
     /// the format decides (DECISIONS 53 (1) of line DBID).
     pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
 
+    /// What NCBI does where it reads a subject whose lookup throws NCBI's exception at a place
+    /// LOSAT knows ([`LookupFailure::exception`]), and why LOSAT refuses it in this run: LOSAT
+    /// writes each format's failure as NCBI does (`FormatThrow::of`) but for the formats whose
+    /// writers it does not make so, and a call of the library that mixes formats that stop at
+    /// other places after it (`FormatThrow::and`): NCBI's reference for such a call is one run of
+    /// each format, which stop at different places with different exit statuses and standard
+    /// errors, where the call is one search with one result (review 2 of line DBID pfoff-3, M2).
+    pub const NCBI_THROWS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it and stop or go on as each format does; LOSAT writes that for outfmt 0 to 4, 6, 7, 10, 13 to 16, 18 and 20, but not for outfmt 5 or 17, nor in a call of LOSAT's library that mixes outfmt 0, outfmt 1 to 4 and the other formats, which NCBI writes in runs of their own that stop at different places, where the call is one search with one result";
+
     /// What NCBI does where its lookup reads a file that it crashes on (an ISAM whose header does
     /// not fit its files, as an empty `.psi` or `.psd`: SIGSEGV; review 4 of line DBID loadord):
     /// a run whose lookups never reach it (the sequence was loaded before by another id) goes on.
@@ -305,9 +314,11 @@ impl LookupFailure {
     }
 
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
+    /// [`LookupFailure::NCBI_THROWS`] where its exception is known,
     /// [`LookupFailure::NCBI_CRASHES`]), for the reason of LOSAT's refusal.
     pub fn what_ncbi_does(&self) -> &'static str {
         match self.ncbi {
+            NcbiFailure::Message if self.exception().is_some() => Self::NCBI_THROWS,
             NcbiFailure::Message | NcbiFailure::Other => Self::NCBI_READS,
             NcbiFailure::Crashes => Self::NCBI_CRASHES,
         }
@@ -1554,7 +1565,10 @@ impl ParsedSubject {
     /// (`HitLoad::Throws`): the `catch` keeps the Seq-align id and the title `Unknown`, and the
     /// GI of a GI id; the line's start is made of them as of any other (`description_id`: the bare
     /// id and a space, or with `-show_gis` the FASTA form of an id that is not a GI, which no space
-    /// follows: `ref|NP_100001.1|Unknown`).
+    /// follows: `ref|NP_100001.1|Unknown`). A GI Seq-align id goes the same way (`description_id`,
+    /// which the probes check with the loaded lines and the thrown accession, gnl, lcl and giim
+    /// ones), though no database makes it throw: NCBI finds a GI by its ISAM index, never by the
+    /// accession table whose absence throws (review 2 of pfoff-3, L3).
     pub fn thrown_description(&self) -> (Vec<u8>, Defline) {
         let mut start = Vec::new();
         let gi = self.alignment_id.gi().unwrap_or(0);
@@ -2371,7 +2385,7 @@ pub enum AfterThrow {
 
 impl AfterThrow {
     /// Whether the writer is the pairwise report's (outfmt 0 to 4: `SkipsAlignment`,
-    /// `EndsAtAlignment`), whose description lines and alignments [`RunThrow::shown`] counts.
+    /// `EndsAtAlignment`), whose reports read what their writers show ([`PairwiseReads`]).
     pub fn is_pairwise(self) -> bool {
         matches!(
             self,
@@ -2404,22 +2418,61 @@ impl AfterThrow {
     }
 }
 
-/// The description lines and the alignments that a pairwise report (outfmt 0 to 4) shows of each
-/// query: its first `descriptions` and first `alignments` subjects in the report's order
-/// (`-num_descriptions`, `-num_alignments`; `report::x_pairwise_par::QueryGroup::described`,
-/// `aligned`).
+/// The counts of the description lines and the alignments that a pairwise report (outfmt 0 to 4)
+/// shows of each query (`-num_descriptions`, `-num_alignments`;
+/// `report::x_pairwise_par::described_subjects`, `QueryGroup::aligned`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shown {
     pub descriptions: usize,
     pub alignments: usize,
 }
 
-impl Shown {
-    /// Every subject in both (the formats that show no description line, where it is not read).
-    pub const EVERY: Shown = Shown {
-        descriptions: usize::MAX,
-        alignments: usize::MAX,
-    };
+/// What one query's pairwise report (outfmt 0 to 4) reads where its batch's prefetch is off, as
+/// its writer reads it (`report::x_pairwise_par::QueryGroup::read_order`, for [`HitLoads::of`] and
+/// the texts of its reads): its hits in its order, each the subjects that it shows (its own
+/// first, then those of the copies of its record shown in it, each once), the hits whose
+/// description lines it shows (indices of `hits`, in the order of the lines:
+/// `x_pairwise_par::described_subjects`), and the number of its first hits whose alignments it
+/// shows (`QueryGroup::aligned`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PairwiseReads {
+    pub hits: Vec<Vec<usize>>,
+    pub described: Vec<usize>,
+    pub aligned: usize,
+}
+
+impl PairwiseReads {
+    /// The subjects in the order that the report reads them, each once: those of its description
+    /// lines, then those of its alignments (the texts of the reads one by one,
+    /// `common::database::subject_read_texts`). A subject of a hit that neither shows is never read.
+    pub fn subjects(&self) -> Vec<usize> {
+        let mut read = vec![false; self.hits.len()];
+        let mut subjects = Vec::new();
+        for hit in self.described.iter().copied().chain(0..self.aligned) {
+            if !std::mem::replace(&mut read[hit], true) {
+                subjects.extend(&self.hits[hit]);
+            }
+        }
+        subjects
+    }
+}
+
+/// The subjects of one query's report for [`HitLoads::of`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReportKeys {
+    /// The subject key of each of the report's entries (HSP lists or HSPs) in its order (`None`
+    /// for an entry that shows nothing), of which the entries make `Hit`s as the XML writers make
+    /// them (`blast_xml::hit_ranges`); of a pairwise report (outfmt 0 to 4), those of a batch that
+    /// prefetches, which loads every subject, in any order.
+    Entries(Vec<Option<usize>>),
+    /// The reads of a pairwise report whose batch reads one by one ([`PairwiseReads`]).
+    Pairwise(PairwiseReads),
+}
+
+impl From<Vec<Option<usize>>> for ReportKeys {
+    fn from(entries: Vec<Option<usize>>) -> Self {
+        ReportKeys::Entries(entries)
+    }
 }
 
 /// What the reports of a run do after a subject whose lookup throws where its batch's prefetch is
@@ -2432,9 +2485,6 @@ impl Shown {
 pub struct RunThrow {
     pub after: AfterThrow,
     pub rows: super::tabular::SubjectFetch,
-    /// What the pairwise reports show of each query (`AfterThrow::is_pairwise`; the run's
-    /// counts, [`FormatThrow::of_run`]).
-    pub shown: Shown,
 }
 
 impl RunThrow {
@@ -2443,7 +2493,6 @@ impl RunThrow {
         RunThrow {
             after,
             rows: super::tabular::SubjectFetch::Every,
-            shown: Shown::EVERY,
         }
     }
 }
@@ -2533,23 +2582,20 @@ impl FormatThrow {
                     } else {
                         SubjectFetch::Every
                     },
-                    shown: one.shown,
                 })
             }
         }
     }
 
     /// What the reports of a run do after a subject whose lookup throws ([`FormatThrow::and`] of
-    /// its formats), with what its pairwise reports show of each query (`shown`, the run's
-    /// `-num_descriptions` and `-num_alignments`): `None` where a format refuses it or no format
-    /// reads it, so that every subject is loaded ([`HitLoads::of`]). The one answer of every
-    /// program.
-    pub fn of_run(formats: impl IntoIterator<Item = Self>, shown: Shown) -> Option<RunThrow> {
+    /// its formats): `None` where a format refuses it or no format reads it, so that every subject
+    /// is loaded ([`HitLoads::of`]). The one answer of every program.
+    pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<RunThrow> {
         match formats
             .into_iter()
             .fold(FormatThrow::Unread, FormatThrow::and)
         {
-            FormatThrow::Writes(run) => Some(RunThrow { shown, ..run }),
+            FormatThrow::Writes(run) => Some(run),
             FormatThrow::Refused | FormatThrow::Unread => None,
         }
     }
@@ -2558,13 +2604,11 @@ impl FormatThrow {
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
-        shown: Shown,
     ) -> Option<RunThrow> {
         Self::of_run(
             outfmts
                 .into_iter()
                 .map(|outfmt| Self::of_outfmt(outfmt, program)),
-            shown,
         )
     }
 }
@@ -2629,19 +2673,20 @@ impl HitLoads {
     /// - `EndsRun` (outfmt 13 and 14, a table that reads the subject after its subject block):
     ///   nothing after it in the run loads (`ended`, carried from the reports before: see
     ///   [`HitLoads::after`]);
-    /// - `SkipsAlignment` and `EndsAtAlignment` (outfmt 0 to 4, whose reports give their subjects
-    ///   in the order of their sorted hits, `x_pairwise_par::QueryGroup::read_order`): each
-    ///   description line loads its subject or throws, then the alignments load theirs up to the
-    ///   one that ends the run, if any (`pairwise_report`).
+    /// - `SkipsAlignment` and `EndsAtAlignment` (outfmt 0 to 4): a report that reads one by one
+    ///   gives its reads as its writer makes them (`ReportKeys::Pairwise`,
+    ///   `x_pairwise_par::QueryGroup::read_order`): each description line loads its subject or
+    ///   throws, then the alignments load theirs up to the one that ends the run, if any
+    ///   (`pairwise_report`); one whose batch prefetches gives its entries in any order.
     ///
     /// A report whose batch prefetches loads every subject (a lookup that throws stops the
     /// prefetch first, `common::database::batch_prefetch_stop`). A subject is loaded where some
     /// report loads it; one that throws in a report throws in every report that reaches it.
     /// `run` `None`: a format of the run refuses the throw or none reads the subjects, and every
     /// subject is loaded (`ParsedSubject::fetched` refuses such a subject where a format reads it).
-    pub fn of<'p>(
+    pub fn of<'p, K: Into<ReportKeys>>(
         run: Option<RunThrow>,
-        reports: impl IntoIterator<Item = (bool, Vec<Option<usize>>)>,
+        reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> Self {
@@ -2657,10 +2702,10 @@ impl HitLoads {
     /// [`HitLoads::of`] of the reports `reports` that follow those whose loads ended the run where
     /// `ended` holds true (an `EndsRun` subject that threw), which it holds after these reports
     /// too ([`RunLoads::loads`]).
-    fn after<'p>(
+    fn after<'p, K: Into<ReportKeys>>(
         ended: &std::cell::Cell<bool>,
         run: Option<RunThrow>,
-        reports: impl IntoIterator<Item = (bool, Vec<Option<usize>>)>,
+        reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> Self {
@@ -2670,7 +2715,33 @@ impl HitLoads {
         };
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
-        for (report, (one_by_one, subjects)) in reports.into_iter().enumerate() {
+        for (report, (one_by_one, keys)) in reports.into_iter().enumerate() {
+            let subjects = match keys.into() {
+                ReportKeys::Pairwise(reads) => {
+                    debug_assert!(one_by_one && run.after.is_pairwise());
+                    loads.pairwise_report(
+                        run.after,
+                        &reads,
+                        &parsed,
+                        ended,
+                        (&mut loaded, &mut passed),
+                    );
+                    continue;
+                }
+                ReportKeys::Entries(subjects) => subjects,
+            };
+            if run.after.is_pairwise() {
+                // A pairwise report whose batch prefetches loads every subject that it shows,
+                // unless the run ended before.
+                debug_assert!(!one_by_one);
+                let keys = subjects.into_iter().flatten();
+                if ended.get() {
+                    passed.extend(keys);
+                } else {
+                    loaded.extend(keys);
+                }
+                continue;
+            }
             // A table and the organism report look each row's Seq-align id up.
             let hits = if run.after == AfterThrow::WritesRow {
                 (0..subjects.len()).map(|entry| entry..entry + 1).collect()
@@ -2684,17 +2755,6 @@ impl HitLoads {
                     },
                 )
             };
-            if run.after.is_pairwise() {
-                loads.pairwise_report(
-                    run,
-                    one_by_one,
-                    (&subjects, &hits),
-                    &parsed,
-                    ended,
-                    (&mut loaded, &mut passed),
-                );
-                continue;
-            }
             // The report ended at a `Hit` that threw (`EndsReport`), or the run did (`EndsRun`).
             let mut thrown = ended.get();
             for range in hits {
@@ -2723,15 +2783,9 @@ impl HitLoads {
                     continue;
                 }
                 loads.throws.insert(first, exception);
-                match run.after {
-                    AfterThrow::WritesRow => {}
-                    AfterThrow::EndsReport => thrown = true,
-                    AfterThrow::EndsRun => {
-                        thrown = true;
-                        ended.set(true);
-                    }
-                    // Not reached: `pairwise_report` takes the pairwise afters.
-                    AfterThrow::SkipsAlignment | AfterThrow::EndsAtAlignment => {}
+                thrown = run.after != AfterThrow::WritesRow;
+                if run.after == AfterThrow::EndsRun {
+                    ended.set(true);
                 }
                 passed.extend(keys.filter(|&key| key != first));
             }
@@ -2743,26 +2797,24 @@ impl HitLoads {
         loads
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700 (quoted at
-    // `report::pairwise::blastp_described_subjects`: the description lines of the first
-    // `m_NumToShow` hits)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700
+    // The description lines load the subjects that they show, in their order: those of
+    // `x_pairwise_par::described_subjects` (psiblast's later rounds, `two_part_lines`).
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (`PruneSeqalign` keeps the alignments of the first `m_NumAlignments` hits, quoted at
     // `report::x_pairwise_par::QueryGroup::aligned`)
-    /// The loads of one pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`) whose `Hit`s are
-    /// `hits` of `subjects` (the report's subject keys in its order, sorted by `-sorthits`, the
-    /// copies shown in a hit after its subject; `hit_ranges`), in a batch whose prefetch is off
-    /// where `one_by_one`: unless the run ended before (`ended`), its description lines load the
-    /// subjects of its first `shown.descriptions` hits in order, then its alignments those of its
-    /// first `shown.alignments` up to the one whose load ends the run (`AfterThrow::alignment_end`,
-    /// which `ended` then records). A subject whose lookup throws (`lookup_throws`) loads nothing
-    /// there, nor do the copies in its hit; every subject that neither loads is passed. A batch
-    /// that prefetches loads all of them (before the run's end).
+    /// The loads of one pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`, whose run does
+    /// `after` after a throw) in a batch whose prefetch is off, whose reads are `reads` (its
+    /// writer's own answers, `x_pairwise_par::QueryGroup::read_order`): unless the run ended
+    /// before (`ended`), its description lines load the subjects of the hits that they show, then
+    /// its alignments those of its first `reads.aligned` hits up to the one whose load ends the
+    /// run (`AfterThrow::alignment_end`, which `ended` then records). A subject whose lookup throws
+    /// (`lookup_throws`) loads nothing there, nor do the copies in its hit; every subject that
+    /// neither loads is passed.
     fn pairwise_report<'p>(
         &mut self,
-        run: RunThrow,
-        one_by_one: bool,
-        (subjects, hits): (&[Option<usize>], &[std::ops::Range<usize>]),
+        after: AfterThrow,
+        reads: &PairwiseReads,
         parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
         ended: &std::cell::Cell<bool>,
         (loaded, passed): (
@@ -2770,38 +2822,26 @@ impl HitLoads {
             &mut std::collections::HashSet<usize>,
         ),
     ) {
-        let first = |hit: usize| subjects[hits[hit].start];
-        let throws = |hit: usize| {
-            first(hit)
-                .filter(|_| one_by_one)
-                .and_then(parsed)
-                .and_then(ParsedSubject::lookup_throws)
-        };
-        // A batch that prefetches loads every subject that its reports show.
-        let mut reached = vec![!one_by_one && !ended.get(); hits.len()];
+        let first = |hit: usize| reads.hits[hit].first().copied().and_then(parsed);
+        let throws = |hit: usize| first(hit).and_then(ParsedSubject::lookup_throws);
+        let mut reached = vec![false; reads.hits.len()];
         if !ended.get() {
-            let aligned = hits.len().min(run.shown.alignments);
-            let end = run.after.alignment_end(
-                0..aligned,
+            let end = after.alignment_end(
+                0..reads.aligned,
                 |hit| throws(hit).is_some(),
-                |hit| {
-                    first(hit)
-                        .and_then(parsed)
-                        .is_some_and(ParsedSubject::alignment_id_is_local)
-                },
+                |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
             );
-            let described = 0..hits.len().min(run.shown.descriptions);
-            for hit in described.chain(0..end.map_or(aligned, |end| end + 1)) {
+            let aligned = 0..end.map_or(reads.aligned, |end| end + 1);
+            for hit in reads.described.iter().copied().chain(aligned) {
                 reached[hit] = true;
             }
             ended.set(end.is_some());
         }
-        for (hit, range) in hits.iter().enumerate() {
-            let keys = subjects[range.clone()].iter().flatten().copied();
-            match (reached[hit], throws(hit), first(hit)) {
-                (true, Some(exception), Some(first)) => {
+        for (hit, keys) in reads.hits.iter().enumerate() {
+            match (reached[hit], throws(hit), keys.split_first()) {
+                (true, Some(exception), Some((&first, copies))) => {
                     self.throws.insert(first, exception);
-                    passed.extend(keys.filter(|&key| key != first));
+                    passed.extend(copies);
                 }
                 (true, None, _) => loaded.extend(keys),
                 _ => passed.extend(keys),
@@ -2887,9 +2927,9 @@ impl RunLoads {
 
     /// [`HitLoads::of`] of the reports `reports` after those of the run before (none after its
     /// end), which records where these reports end the run.
-    pub fn loads<'p>(
+    pub fn loads<'p, K: Into<ReportKeys>>(
         &self,
-        reports: impl IntoIterator<Item = (bool, Vec<Option<usize>>)>,
+        reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> HitLoads {
@@ -3595,7 +3635,6 @@ mod tests {
             FormatThrow::Writes(RunThrow {
                 after: AfterThrow::EndsRun,
                 rows: super::super::tabular::SubjectFetch::WithIdentities,
-                shown: Shown::EVERY,
             })
         );
         assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
@@ -3624,9 +3663,8 @@ mod tests {
             );
         }
         // A run's answer: a refusal refuses, a format that reads nothing leaves the other's.
-        let after = |outfmts: &[&str]| {
-            FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp, Shown::EVERY)
-        };
+        let after =
+            |outfmts: &[&str]| FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp);
         assert_eq!(
             after(&["6", "8"]),
             Some(RunThrow::every_row(AfterThrow::WritesRow))
@@ -3677,7 +3715,6 @@ mod tests {
         let nident = Some(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
-            shown: Shown::EVERY,
         });
         // The identities of each report's entries: 1's rows have none, 3's have some.
         let identities = |report: usize, entry: usize| [[5, 0, 7], [2, 4, 0]][report][entry];
@@ -4661,40 +4698,152 @@ mod tests {
         );
     }
 
-    // DBID pfoff-3 (DECISIONS 62 (13), probe `R/pfoff/p3`): outfmt 0 ends the run where the first
-    // shown alignment's subject throws (`GetDbType`), else skips each throwing one; outfmt 1 to 4
-    // end it at the first shown alignment that throws. A local Seq-align id is not looked up
-    // there.
+    // DBID pfoff-3 (DECISIONS 62 (13); review 2 of the item, L7): where a pairwise report ends the
+    // run is decided on the alignments that it shows, after the sort and the cut: NCBI's probe
+    // `R/pfoff/p3` `bp.U1.b1.dflt.0` ends (exit 2) where `bp.U1.b1.sh4.0`, whose `-sorthits 4` puts
+    // a loaded subject first, writes skipped lines (exit 0), and `bp.U2.b1.dflt.3` (outfmt 3) ends
+    // where `bp.U2.b1.dflt.0` does not; a local Seq-align id is not looked up there, and
+    // `-num_alignments 0` shows none. The model of the loads (`HitLoads::of` of the reads that
+    // `QueryGroup::read_order` makes before the rows) and the writer (`aligned_end` on its group
+    // and the loads) end at the same alignment: the subjects aligned before it load, it throws,
+    // those after it are never read (with `-num_descriptions 0`, no description line reads them).
     #[test]
-    fn the_pairwise_reports_end_the_run_at_their_alignments() {
-        let throws = [false, true, false, true];
-        let ends = |after: AfterThrow, aligned: &[usize], local: bool| {
-            after.alignment_end(aligned.iter().copied(), |s| throws[s], |_| local)
+    fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
+        use crate::report::hit_sort::ReportSort;
+        use crate::report::x_pairwise_par::{aligned_end, writer_reads, QueryGroup};
+        let throws = || {
+            Some(FoundInstead::Failed(LookupFailure::ncbi(
+                crate::seqdb::tax_files::NO_ACCESSION_INFO,
+            )))
         };
-        assert_eq!(ends(AfterThrow::SkipsAlignment, &[1, 0, 2], false), Some(0));
-        assert_eq!(ends(AfterThrow::SkipsAlignment, &[1, 0, 2], true), None);
-        assert_eq!(ends(AfterThrow::SkipsAlignment, &[0, 1, 3], false), None);
-        assert_eq!(ends(AfterThrow::SkipsAlignment, &[], false), None);
+        let plain =
+            |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+        let local = ParsedSubject::new(one_defline(vec![ParsedSeqId::Local(ObjectId::Str(
+            b"ENST1".to_vec(),
+        ))]))
+        .unwrap();
+        // Subject 0 throws and comes first by E-value; 1 loads and comes first by bit score; 2
+        // throws. With `local_first`, 0's Seq-align id is a local one.
+        let parsed = |local_first: bool| {
+            vec![
+                if local_first {
+                    local.clone().found_instead(throws())
+                } else {
+                    plain("AAA00001").found_instead(throws())
+                },
+                plain("AAA00002"),
+                plain("AAA00003").found_instead(throws()),
+            ]
+        };
+        let rows: Vec<crate::report::pairwise::PairwiseHit> =
+            [(0, 30.0, 1e-20), (1, 90.0, 1e-10), (2, 20.0, 1e-5)]
+                .into_iter()
+                .map(|(s_idx, bit_score, e_value)| {
+                    crate::report::pairwise::PairwiseHit::from(crate::common::Hit {
+                        identity: 100.0,
+                        length: 10,
+                        mismatch: 0,
+                        gapopen: 0,
+                        q_start: 1,
+                        q_end: 10,
+                        s_start: 1,
+                        s_end: 10,
+                        e_value,
+                        bit_score,
+                        num_ident: 10,
+                        query_frame: 1,
+                        query_length: 0,
+                        q_idx: 0,
+                        s_idx,
+                        raw_score: 25,
+                        sort_query_offset: 0,
+                        sort_query_end: 0,
+                        sort_subject_offset: 0,
+                        sort_subject_end: 0,
+                        has_sort_offsets: false,
+                        gap_info: None,
+                        num_positives: 10,
+                    })
+                })
+                .collect();
+        let exception = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO)
+            .exception()
+            .unwrap();
+        // Where the model and the writer end the run, as the position among the shown alignments.
+        let end = |after: AfterThrow, hits: Option<u8>, alignments: usize, local_first: bool| {
+            let parsed = parsed(local_first);
+            let reading = crate::report::pairwise::PairwiseReading {
+                sort: ReportSort { hits, hsps: None },
+                shown: Shown {
+                    descriptions: 0,
+                    alignments,
+                },
+            };
+            let reads = QueryGroup::read_order(
+                rows.iter().map(|row| (row.hit.s_idx, row)),
+                |row| crate::report::hit_sort::HspScores::of(row),
+                |_, _| false,
+                reading,
+                false,
+                None,
+            );
+            let run = RunLoads::new(Some(RunThrow::every_row(after)));
+            let loads = run.loads(
+                [(true, ReportKeys::Pairwise(reads))],
+                |key| parsed.get(key),
+                |_, _| 0,
+            );
+            let writer = writer_reads(&rows, |_, _| false, reading, false, None);
+            let aligned: Vec<u32> = (0..writer.aligned)
+                .map(|hit| writer.hits[hit][0] as u32)
+                .collect();
+            let writer_end = aligned_end(after, &aligned, |s_idx| {
+                loads
+                    .thrown(s_idx as usize)
+                    .map(|_| (&exception, parsed[s_idx as usize].alignment_id_is_local()))
+            })
+            .map(|(at, _)| at);
+            assert_eq!(run.ended(), writer_end.is_some());
+            for (position, &s_idx) in aligned.iter().enumerate() {
+                let expected = match writer_end {
+                    Some(at) if position > at => HitLoad::Unread,
+                    _ if parsed[s_idx as usize].lookup_throws().is_some() => HitLoad::Throws,
+                    _ => HitLoad::Loaded,
+                };
+                assert_eq!(loads.load(s_idx as usize), expected, "{s_idx}");
+            }
+            writer_end
+        };
+        let every = usize::MAX;
+        // Outfmt 0 ends at its first alignment where it throws, not after `-sorthits` moves a
+        // loaded one first, nor with no alignment shown.
+        assert_eq!(end(AfterThrow::SkipsAlignment, None, every, false), Some(0));
+        assert_eq!(end(AfterThrow::SkipsAlignment, Some(1), every, false), None);
+        assert_eq!(end(AfterThrow::SkipsAlignment, None, 0, false), None);
+        assert_eq!(end(AfterThrow::SkipsAlignment, None, every, true), None);
+        // Outfmt 1 to 4 end at the first shown alignment that throws, a local one too, unless
+        // the cut leaves none.
         assert_eq!(
-            ends(AfterThrow::EndsAtAlignment, &[0, 2, 3, 1], false),
-            Some(2)
+            end(AfterThrow::EndsAtAlignment, Some(1), every, false),
+            Some(1)
         );
-        assert_eq!(ends(AfterThrow::EndsAtAlignment, &[0, 2], false), None);
+        assert_eq!(end(AfterThrow::EndsAtAlignment, None, every, true), Some(0));
+        assert_eq!(end(AfterThrow::EndsAtAlignment, Some(1), 1, false), None);
         for other in [
             AfterThrow::EndsRun,
             AfterThrow::EndsReport,
             AfterThrow::WritesRow,
         ] {
-            assert_eq!(ends(other, &[1], false), None);
             assert!(!other.is_pairwise());
+            assert_eq!(other.alignment_end([0], |_| true, |_| false), None);
         }
-        assert!(AfterThrow::SkipsAlignment.is_pairwise());
-        assert!(AfterThrow::EndsAtAlignment.is_pairwise());
     }
 
     // DBID pfoff-3: the description lines load each shown subject in order (one that throws
     // loads nothing), then the alignments load theirs up to the one that ends the run; after the
-    // run's end nothing loads, in a later report either; a batch that prefetches loads all.
+    // run's end nothing loads, in a later report either; a batch that prefetches loads all; a
+    // subject that neither the description lines nor the alignments show is never read (review 1
+    // of pfoff-3, H1: psiblast's later round shows the subjects of its first HSPs).
     #[test]
     fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         let throws = || {
@@ -4715,82 +4864,131 @@ mod tests {
         ];
         let subject = |key: usize| parsed.get(key);
         let none = |_: usize, _: usize| 0;
-        let run = |after, descriptions, alignments| {
-            Some(RunThrow {
-                shown: Shown {
-                    descriptions,
-                    alignments,
-                },
-                ..RunThrow::every_row(after)
-            })
+        let run = |after| Some(RunThrow::every_row(after));
+        // A report of one subject per hit whose description lines show its first `descriptions`
+        // hits and whose alignments its first `alignments`; a batch that prefetches gives its
+        // subjects alone.
+        let report = |one_by_one: bool, keys: &[usize], descriptions: usize, alignments: usize| {
+            let keys = if one_by_one {
+                ReportKeys::Pairwise(PairwiseReads {
+                    hits: keys.iter().map(|&key| vec![key]).collect(),
+                    described: (0..keys.len().min(descriptions)).collect(),
+                    aligned: keys.len().min(alignments),
+                })
+            } else {
+                ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect())
+            };
+            (one_by_one, keys)
         };
-        let loads = |run, reports: &[(bool, &[usize])]| {
-            let loads = HitLoads::of(
-                run,
-                reports.iter().map(|(one_by_one, keys)| {
-                    (*one_by_one, keys.iter().map(|&k| Some(k)).collect())
-                }),
-                subject,
-                none,
-            );
+        let loads = |run, reports: Vec<(bool, ReportKeys)>| {
+            let loads = HitLoads::of(run, reports, subject, none);
             (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
         };
         use HitLoad::{Loaded as L, Throws as T, Unread as U};
         let every = usize::MAX;
+        let three = |descriptions, alignments, keys: [&[usize]; 3]| {
+            keys.iter()
+                .map(|keys| report(true, keys, descriptions, alignments))
+                .collect::<Vec<_>>()
+        };
         // Outfmt 0: the second report's first alignment throws; its description lines loaded 4
         // before; the third report loads nothing.
-        let ends_second: [(bool, &[usize]); 3] =
-            [(true, &[0, 1, 2]), (true, &[3, 4]), (true, &[5])];
+        let ends_second: [&[usize]; 3] = [&[0, 1, 2], &[3, 4], &[5]];
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, every, every), &ends_second),
+            loads(
+                run(AfterThrow::SkipsAlignment),
+                three(every, every, ends_second)
+            ),
             [L, T, L, T, L, U]
         );
         // A first alignment that loads: the throwing ones are skipped and the run goes on.
-        let skips: [(bool, &[usize]); 3] = [(true, &[0, 1, 2]), (true, &[4, 3]), (true, &[5])];
+        let skips: [&[usize]; 3] = [&[0, 1, 2], &[4, 3], &[5]];
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, every, every), &skips),
+            loads(run(AfterThrow::SkipsAlignment), three(every, every, skips)),
             [L, T, L, T, L, L]
         );
         // `-num_alignments 0`: no alignment section, nothing ends.
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, every, 0), &ends_second),
+            loads(
+                run(AfterThrow::SkipsAlignment),
+                three(every, 0, ends_second)
+            ),
             [L, T, L, T, L, L]
         );
         // Outfmt 1 to 4: the first report's second alignment ends the run.
         assert_eq!(
-            loads(run(AfterThrow::EndsAtAlignment, every, every), &skips),
+            loads(run(AfterThrow::EndsAtAlignment), three(every, every, skips)),
             [L, T, L, U, U, U]
         );
         // `-num_alignments 1`: only the first alignment is shown, which loads; 3 throws in the
         // description lines alone.
         assert_eq!(
-            loads(run(AfterThrow::EndsAtAlignment, every, 1), &skips),
+            loads(run(AfterThrow::EndsAtAlignment), three(every, 1, skips)),
             [L, T, L, T, L, L]
         );
         // `-num_descriptions 0`: only the alignments up to the end load, and 2 is never reached.
         assert_eq!(
-            loads(run(AfterThrow::EndsAtAlignment, 0, every), &skips),
+            loads(run(AfterThrow::EndsAtAlignment), three(0, every, skips)),
             [L, T, U, U, U, U]
+        );
+        // The description lines that a report shows are its writer's (`PairwiseReads::described`,
+        // in the order of the lines): psiblast's later round shows those of its first HSPs, here
+        // 4 alone (the part of the subjects found before) then 2, so 0 and 5, which neither the
+        // lines nor the alignments (`-num_alignments 0`) show, are never read.
+        let two_part = (
+            true,
+            ReportKeys::Pairwise(PairwiseReads {
+                hits: vec![vec![0], vec![2], vec![4], vec![5]],
+                described: vec![2, 1],
+                aligned: 0,
+            }),
+        );
+        assert_eq!(
+            loads(run(AfterThrow::SkipsAlignment), vec![two_part]),
+            [U, U, L, U, L, U]
         );
         // A batch that prefetches loads every subject it shows, where `-num_descriptions 0
         // -num_alignments 1` reads the first alignment alone of a batch that does not.
-        let prefetched: [(bool, &[usize]); 2] = [(false, &[0, 2, 4]), (true, &[5, 1, 3])];
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, 0, 1), &prefetched),
+            loads(
+                run(AfterThrow::SkipsAlignment),
+                vec![
+                    report(false, &[0, 2, 4], 0, 1),
+                    report(true, &[5, 1, 3], 0, 1)
+                ]
+            ),
             [L, U, L, U, L, L]
         );
         // After the run's end a batch that prefetches loads nothing either.
-        let after_end: [(bool, &[usize]); 2] = [(true, &[1, 0]), (false, &[2, 3, 4, 5])];
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, every, every), &after_end),
+            loads(
+                run(AfterThrow::SkipsAlignment),
+                vec![
+                    report(true, &[1, 0], every, every),
+                    report(false, &[2, 3, 4, 5], every, every)
+                ]
+            ),
             [L, T, U, U, U, U]
         );
+        // A hit that shows copies of its record: a thrown first subject loads none of them.
+        let copies = (
+            true,
+            ReportKeys::Pairwise(PairwiseReads {
+                hits: vec![vec![4, 5], vec![3, 0]],
+                described: vec![0, 1],
+                aligned: 0,
+            }),
+        );
+        assert_eq!(
+            loads(run(AfterThrow::SkipsAlignment), vec![copies]),
+            [U, U, U, T, L, L]
+        );
         // A later call's reports read nothing after the end (`RunLoads`).
-        let calls = RunLoads::new(run(AfterThrow::SkipsAlignment, every, every));
-        let first = calls.loads([(true, vec![Some(3), Some(4)])], subject, none);
+        let calls = RunLoads::new(run(AfterThrow::SkipsAlignment));
+        let first = calls.loads([report(true, &[3, 4], every, every)], subject, none);
         assert_eq!(first.load(3), HitLoad::Throws);
         assert!(calls.ended());
-        let later = calls.loads([(true, vec![Some(5)])], subject, none);
+        let later = calls.loads([report(true, &[5], every, every)], subject, none);
         assert_eq!(later.load(5), HitLoad::Unread);
     }
 
@@ -4820,11 +5018,18 @@ mod tests {
         );
         assert_eq!(refseq.skipped_id(), b"NP_100001");
         assert!(!refseq.alignment_id_is_local());
-        // A GI Seq-align id (read in showdefline.cpp:886-913 and `GetBareId`, not probed): the
-        // bare id of a GI is its FASTA form; `-show_gis` puts `gi|N|` before it and two spaces
-        // before the title.
+        // A GI Seq-align id is a reading of the model, not NCBI's bytes: no database makes a GI's
+        // lookup throw (NCBI finds a GI by its ISAM index, not by the accession table whose
+        // absence throws; review 1 of pfoff-3, L3), so no probe or fixture shows the line. What
+        // can be tested is that it is made as the line of a loaded subject of that id
+        // (`description_start`, which the probes check), then `Unknown`, after two spaces where
+        // `-show_gis` wrote `gi|N|`.
         let gi = ParsedSubject::new(one_defline(vec![ParsedSeqId::Gi(1234)])).unwrap();
-        assert_eq!(line(&gi), "gi|1234 Unknown");
-        assert_eq!(line(&gi.showing_gis(true)), "gi|1234|gi|1234   Unknown");
+        for subject in [gi.clone(), gi.showing_gis(true)] {
+            let (start, title) = subject.thrown_description();
+            assert_eq!(start, subject.description_start());
+            let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
+            assert_eq!(title.text, [gap, b"Unknown"].concat());
+        }
     }
 }

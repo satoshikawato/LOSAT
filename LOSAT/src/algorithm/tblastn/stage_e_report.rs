@@ -575,7 +575,7 @@ pub(super) fn render(
                 |q_idx| {
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(formatting.report_sort()),
-                        false,
+                        None,
                         report_counts.num_descriptions,
                         q_idx,
                         rows,

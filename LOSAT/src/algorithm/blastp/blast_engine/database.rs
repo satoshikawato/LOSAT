@@ -2202,14 +2202,14 @@ impl ListedTitles<'_> {
     /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
     /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded), at the rows
     /// that load it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
-    /// A pairwise run (outfmt 0 to 4) reads query `query`'s subjects in the ranks' order
-    /// `pairwise_order(query)` (its sorted groups), asked where its batch reads one by one.
+    /// A pairwise run (outfmt 0 to 4) reads of query `query` what its writer reads,
+    /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one.
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         run: Option<crate::report::db_subject::RunThrow>,
-        pairwise_order: impl Fn(usize) -> Vec<usize>,
+        pairwise_reads: impl Fn(usize) -> crate::report::db_subject::PairwiseReads,
     ) -> HitLoads {
         let lists = |query: usize| {
             hit_lists[query].as_ref().map_or(&[][..], |hit_list| {
@@ -2224,12 +2224,14 @@ impl ListedTitles<'_> {
                 // A batch that prefetches loads every subject, in any order.
                 let one_by_one = prefetch.reads_one_by_one(query);
                 let subjects = if pairwise && one_by_one {
-                    pairwise_order(query).into_iter().map(Some).collect()
+                    crate::report::db_subject::ReportKeys::Pairwise(pairwise_reads(query))
                 } else {
-                    lists(query)
-                        .iter()
-                        .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
-                        .collect()
+                    crate::report::db_subject::ReportKeys::Entries(
+                        lists(query)
+                            .iter()
+                            .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
+                            .collect(),
+                    )
                 };
                 (one_by_one, subjects)
             }),

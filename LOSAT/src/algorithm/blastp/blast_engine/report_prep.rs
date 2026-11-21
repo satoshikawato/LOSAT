@@ -169,16 +169,17 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// The ranks of the subjects that query `query`'s pairwise report (outfmt 0 to 4) of its hit
-/// list `shown` reads, in the order of its sorted groups (`QueryGroup::read_order` of the rows'
-/// hits, `-sorthits` `sort`): its description lines and alignments read them in that order.
+/// What query `query`'s pairwise report (outfmt 0 to 4) of its hit list `shown` reads, by rank
+/// (`QueryGroup::read_order` of the rows' hits as the writer reads them, `reading`; psiblast's
+/// later round's two-part table, `found_before`).
 fn pairwise_read_order(
     titles: &database::ListedTitles<'_>,
     shown: &[Option<BlastpHitList>],
     query: usize,
     engine_counts: &EngineCounts,
-    sort: crate::report::hit_sort::ReportSort,
-) -> Vec<usize> {
+    reading: crate::report::pairwise::PairwiseReading,
+    found_before: Option<&[bool]>,
+) -> crate::report::db_subject::PairwiseReads {
     let hits = collect_hits_and_methods_from_hit_lists(shown, query, engine_counts);
     crate::report::x_pairwise_par::QueryGroup::read_order(
         hits.into_iter()
@@ -193,12 +194,10 @@ fn pairwise_read_order(
                 s_idx as usize,
             )
         },
-        sort,
+        reading,
         false,
+        found_before,
     )
-    .into_iter()
-    .map(|rank| rank as usize)
-    .collect()
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
@@ -261,8 +260,26 @@ pub(super) fn prefetch_reported_subjects(
         pssm_made,
         pssm_reads,
         query_records,
+        psi_found_before,
         ..
     } = *prep;
+    // How the call's pairwise reports (outfmt 0 to 4) read each query's subjects, as their
+    // writers read them (`PairwiseView::reading`; the formats of a run whose loads they make share
+    // one view's order, `FormatThrow::and`), and psiblast's later round's previous set (its
+    // two-part table, `psiblast_round`).
+    let pairwise_reading = format_plans.iter().find_map(|outfmt| match outfmt {
+        BlastpReport::Pairwise(view) => Some(view.reading(
+            args.sort,
+            crate::report::db_subject::Shown {
+                descriptions: args.num_descriptions,
+                alignments: args.num_alignments,
+            },
+        )),
+        _ => None,
+    });
+    let found_before = psi_found_before
+        .as_ref()
+        .map(|found| found.found.as_slice());
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (quoted below)
@@ -312,19 +329,18 @@ pub(super) fn prefetch_reported_subjects(
                 crate::report::db_subject::FormatThrow::of_outfmts(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
-                    crate::report::db_subject::Shown {
-                        descriptions: args.num_descriptions,
-                        alignments: args.num_alignments,
-                    },
                 ),
                 |query| {
-                    pairwise_read_order(
-                        titles,
-                        std::slice::from_ref(&reported_lists[query]),
-                        query,
-                        engine_counts,
-                        args.sort,
-                    )
+                    pairwise_reading.map_or_else(Default::default, |reading| {
+                        pairwise_read_order(
+                            titles,
+                            std::slice::from_ref(&reported_lists[query]),
+                            query,
+                            engine_counts,
+                            reading,
+                            found_before,
+                        )
+                    })
                 },
             )
         });
@@ -608,23 +624,26 @@ pub(super) fn prefetch_reported_subjects(
                                 // The first format writes the texts where it reads each
                                 // subject (`places_subject_reads`), else before the report.
                                 if places_reads {
-                                    // The pairwise report reads its subjects in the order of
-                                    // its sorted groups (`QueryGroup::read_order` of the rows'
-                                    // hits, `-sorthits`), the other formats in their rows' order.
-                                    let ranks: Vec<usize> = if pairwise_first {
-                                        pairwise_read_order(
-                                            titles,
-                                            shown,
-                                            query,
-                                            engine_counts,
-                                            args.sort,
-                                        )
-                                        .into_iter()
-                                        .filter(loaded)
-                                        .collect()
-                                    } else {
-                                        fetched.collect()
-                                    };
+                                    // The pairwise report reads the subjects that it shows as
+                                    // its writer reads them (`QueryGroup::read_order`,
+                                    // `PairwiseReads::subjects`), the other formats in their
+                                    // rows' order.
+                                    let ranks: Vec<usize> =
+                                        match pairwise_reading.filter(|_| pairwise_first) {
+                                            Some(reading) => pairwise_read_order(
+                                                titles,
+                                                shown,
+                                                query,
+                                                engine_counts,
+                                                reading,
+                                                found_before,
+                                            )
+                                            .subjects()
+                                            .into_iter()
+                                            .filter(loaded)
+                                            .collect(),
+                                            None => fetched.collect(),
+                                        };
                                     subject_reads.set(
                                         query,
                                         titles.subject_read_texts(database, ranks, plural_names)?,
@@ -873,7 +892,9 @@ pub(super) fn refuse_unreportable(
             }
             for s_idx in crate::report::pairwise::blastp_described_subjects(
                 view.report_sort(args.sort),
-                psi_found_before.is_some(),
+                psi_found_before
+                    .as_ref()
+                    .map(|found| found.found.as_slice()),
                 args.num_descriptions,
                 q_idx,
                 &rows,

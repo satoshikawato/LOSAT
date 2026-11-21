@@ -163,6 +163,20 @@ impl PairwiseView {
         }
     }
 
+    /// How a report of this view reads its subjects (`PairwiseReading`): `sort` as it reads it
+    /// (`report_sort`) and what it shows of each query (`shown`, `-num_descriptions` and
+    /// `-num_alignments`).
+    pub fn reading(
+        self,
+        sort: super::hit_sort::ReportSort,
+        shown: crate::report::db_subject::Shown,
+    ) -> PairwiseReading {
+        PairwiseReading {
+            sort: self.report_sort(sort),
+            shown,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
     // ```c++
     //     if(args.Exist(kArgSortHSPs) && args[kArgSortHSPs])
@@ -185,6 +199,17 @@ impl PairwiseView {
             },
         }
     }
+}
+
+/// How a pairwise report (outfmt 0 to 4) reads the subjects of each query, for the models of its
+/// reads made before it is written (`x_pairwise_par::QueryGroup::read_order`): the order of its
+/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`) and what it
+/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`), as its view's writer reads
+/// them (`PairwiseView::reading`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PairwiseReading {
+    pub sort: super::hit_sort::ReportSort,
+    pub shown: crate::report::db_subject::Shown,
 }
 
 impl PairwiseConfig {
@@ -3389,34 +3414,24 @@ fn blastp_report_group<'h>(
 // ```
 /// The subjects (by subject index) whose description lines the report of query `q_idx` of a
 /// BLASTP search shows (outfmt 0 to 4, psiblast's rounds), `rows` the rows of the call's hits in
-/// the final order: the first `num_descriptions` subjects of the report's group
-/// (`QueryGroup::described`), grouped by `joins` and sorted by `sort` as the writer's, or with
-/// `two_part` (a psiblast round with the previous round's set, `psiblast_round`) the subjects of
-/// the HSPs that its two-part table shows (`QueryGroup::first_hsps`). The description line of
-/// each looks its title up again by its display id
-/// (`common::database::refuse_display_id_of_a_query`); asked before any format of the call is
-/// written, only for a query that reports a sequence whose display id a query of its batch has.
+/// the final order, in the order of the lines: `QueryGroup::described_subjects` of the report's
+/// group, grouped by `joins` and sorted by `sort` as the writer's (the first `num_descriptions`
+/// subjects, or with `found_before`, a psiblast round with the previous round's set,
+/// `psiblast_round`, those of the lines of its two-part table). The description line of each
+/// looks its title up again by its display id (`common::database::refuse_display_id_of_a_query`);
+/// asked before any format of the call is written, only for a query that reports a sequence whose
+/// display id a query of its batch has.
 pub(crate) fn blastp_described_subjects(
     sort: super::hit_sort::ReportSort,
-    two_part: bool,
+    found_before: Option<&[bool]>,
     num_descriptions: usize,
     q_idx: usize,
     rows: &[PairwiseHit],
     joins: impl Fn(u32, u32) -> bool,
 ) -> Vec<u32> {
-    let Some(group) = blastp_report_group(sort, q_idx, rows, &[], joins) else {
-        return Vec::new();
-    };
-    if !two_part {
-        return group.described(num_descriptions).to_vec();
-    }
-    let mut described: Vec<u32> = Vec::new();
-    for (shown, _) in group.first_hsps(num_descriptions) {
-        if !described.contains(&shown) {
-            described.push(shown);
-        }
-    }
-    described
+    blastp_report_group(sort, q_idx, rows, &[], joins).map_or_else(Vec::new, |group| {
+        group.described_subjects(num_descriptions, found_before)
+    })
 }
 
 impl BlastpSections<'_> {
@@ -3607,8 +3622,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.config.view != PairwiseView::Pairwise
+    fn view(&self) -> PairwiseView {
+        self.config.view
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -4872,8 +4887,8 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         thrown_load(self.loads, &self.report.parsed_subjects, s_idx)
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.config.view != PairwiseView::Pairwise
+    fn view(&self) -> PairwiseView {
+        self.config.view
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -5605,8 +5620,8 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         thrown_load(self.loads, &self.report.parsed_subjects, s_idx)
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.config.view != PairwiseView::Pairwise
+    fn view(&self) -> PairwiseView {
+        self.config.view
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -7050,8 +7065,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.config.view != PairwiseView::Pairwise
+    fn view(&self) -> PairwiseView {
+        self.config.view
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -7686,8 +7701,8 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         thrown_load(self.loads, parsed, s_idx)
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.config.view != PairwiseView::Pairwise
+    fn view(&self) -> PairwiseView {
+        self.config.view
     }
 
     // Each HSP's Dense-seg is made after its subject's read, before the section's first byte and

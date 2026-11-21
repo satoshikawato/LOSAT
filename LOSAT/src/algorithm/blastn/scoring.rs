@@ -9,6 +9,7 @@ use crate::blastinput::report_counts::{run_report_counts_with, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{ungapped_beta, KarlinParams, NuclValues};
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 
 fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
@@ -112,7 +113,7 @@ fn check_scoring_options_with(
     let footer = crate::wording::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
+        message: format!("{QUERY_OPTIONS_ERROR} {message}\n{footer}\n").into(),
     }
     .into())
 }
@@ -223,7 +224,7 @@ pub(crate) fn karlin_error(
     message: &str,
     empty_queries: impl IntoIterator<Item = bool>,
 ) -> anyhow::Error {
-    let mut text = String::from("BLAST engine error: ");
+    let mut text = format!("{ENGINE_ERROR} ");
     for empty in empty_queries {
         text.push_str("Error: ");
         text.push_str(message);

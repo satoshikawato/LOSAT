@@ -27,7 +27,7 @@ fn without_sam_cl(document: &[u8]) -> Vec<u8> {
             .position(|window| window == needle)
             .map(|at| at + from)
     };
-    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let head: &[u8] = concat!("\n@PG\tID:0\tVN:LOSAT ", env!("CARGO_PKG_VERSION")).as_bytes();
     let Some(at) = find(document, &[head, b"\tCL:"].concat(), 0) else {
         return document.to_vec();
     };
@@ -40,12 +40,24 @@ fn without_sam_cl(document: &[u8]) -> Vec<u8> {
 
 #[test]
 fn the_sam_cl_rule_hides_the_command_line_and_nothing_else() {
-    let with: &[u8] =
-        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:/x/blastn -a \tPN:blastn\nr\t0\n";
-    let without: &[u8] =
-        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tPN:blastn\nr\t0\n";
-    let other_cl: &[u8] =
-        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:losat blastn -b \tPN:blastn\nr\t0\n";
+    let with: &[u8] = concat!(
+        "@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\tCL:/x/blastn -a \tPN:blastn\nr\t0\n"
+    )
+    .as_bytes();
+    let without: &[u8] = concat!(
+        "@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\tPN:blastn\nr\t0\n"
+    )
+    .as_bytes();
+    let other_cl: &[u8] = concat!(
+        "@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\tCL:losat blastn -b \tPN:blastn\nr\t0\n"
+    )
+    .as_bytes();
     assert_eq!(without_sam_cl(with), without);
     assert_eq!(without_sam_cl(other_cl), without);
     assert_eq!(without_sam_cl(without), without);
@@ -153,7 +165,7 @@ impl Inputs {
 #[test]
 fn the_cli_writes_a_cl_tag_and_the_library_none() {
     let inputs = Inputs::new();
-    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let head: &[u8] = concat!("\n@PG\tID:0\tVN:LOSAT ", env!("CARGO_PKG_VERSION")).as_bytes();
     let tag = |document: &[u8]| -> Option<String> {
         let at = document
             .windows(head.len())

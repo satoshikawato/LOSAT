@@ -622,7 +622,7 @@ fn a_missing_database_gives_an_error_archive() {
     let line = stderr.trim_end();
     assert!(
         line.starts_with(
-            "BLAST Database error: No alias or index file found for nucleotide database ["
+            "LOSAT database error: No alias or index file found for nucleotide database ["
         ),
         "{line}"
     );

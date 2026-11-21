@@ -24,6 +24,7 @@ use super::{
     gap_trigger_raw_score, ErrorAfterBatchReports, KarlinParams, QueryContext, QueryFrame,
     SubjectSetNumbers, Subjects, TblastxQueryStats, BLAST_GAP_DECAY_RATE, GAP_TRIGGER_BIT_SCORE,
 };
+use crate::wording::ENGINE_ERROR;
 use anyhow::{Context, Result};
 
 /// What `context_cutoffs` reads.
@@ -107,7 +108,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             crate::cli::NativeError {
                 exit: 3,
                 message: format!(
-                    "BLAST engine error: {}\n",
+                    "{ENGINE_ERROR} {}\n",
                     crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
                 )
                 .into(),

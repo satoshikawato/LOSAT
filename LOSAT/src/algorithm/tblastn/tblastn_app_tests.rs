@@ -15,7 +15,7 @@ fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        b"BLAST engine error: Database memory map file error\n"
+        b"LOSAT engine error: Database memory map file error\n"
     );
     let refusal = batch_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
     assert_eq!(refusal.to_string(), "refused");
@@ -34,7 +34,7 @@ fn a_short_average_subject_length_fails_the_batch_with_the_engine_error() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        b"BLAST engine error: The average subject length is too short\n"
+        b"LOSAT engine error: The average subject length is too short\n"
     );
 }
 

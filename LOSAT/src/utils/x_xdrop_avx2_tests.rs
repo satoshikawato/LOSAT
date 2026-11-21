@@ -64,13 +64,16 @@ unsafe fn run(
         }
         (Kern::V256 | Kern::V256Z, true, None) => {
             if sc.x_nib {
-                align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                align16::<true, true, 0>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            } else if k == Kern::V256Z {
+                // EXPERIMENT (s19): the diagonal from the previous block's load
+                align16::<true, false, 1>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             } else {
-                align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                align16::<true, false, 0>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256 | Kern::V256Z, false, None) => {
-            align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            align16::<false, false, 0>(q, s, scores, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::V256Z, true, Some(m)) => {
             if sc.x_nib {

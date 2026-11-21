@@ -110,6 +110,20 @@ pub(super) fn emask_on() -> bool {
     crate::utils::xswitch::on("LOSAT_X_DPEMASK")
 }
 
+/// EXPERIMENT (v4-BPF s19 probe, not for dev): `LOSAT_BPF_S19` (decimal bits, read once), the arms
+/// of `align16`'s traceback instance (`V`): bit 1 = the diagonal H from the previous block's load
+/// (no load at `b - 1`); bit 2 = the scores of the row's band in a pass of their own before the
+/// blocks (`srow`); bit 4 = four identity operations on `hh` (a latency slope, not a candidate).
+pub(crate) fn bpf_s19() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S19")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
 /// No NCBI counterpart: AVX2 and the features of the 128-bit AVX build (LOSAT_X_DPNOAVX, which
 /// turns that build off, turns these kernels off too).
 pub(super) fn available() -> bool {
@@ -228,7 +242,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, None) if sc.x_nib => align16::<true, true>(
+        (true, None) if sc.x_nib => align16::<true, true, 0>(
             q,
             s,
             scores,
@@ -240,7 +254,30 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, None) => align16::<true, false>(
+        (true, None) if bpf_s19() & 7 != 0 => {
+            let f = match bpf_s19() & 7 {
+                1 => align16::<true, false, 1>,
+                2 => align16::<true, false, 2>,
+                3 => align16::<true, false, 3>,
+                4 => align16::<true, false, 4>,
+                5 => align16::<true, false, 5>,
+                6 => align16::<true, false, 6>,
+                _ => align16::<true, false, 7>,
+            };
+            f(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+        (true, None) => align16::<true, false, 0>(
             q,
             s,
             scores,
@@ -252,7 +289,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, None) => align16::<false, false>(
+        (false, None) => align16::<false, false, 0>(
             q,
             s,
             scores,
@@ -304,6 +341,20 @@ unsafe fn nibs32(v: W) -> X {
 unsafe fn nibs16(v: X) -> X {
     let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
     _mm_packus_epi16(m, m)
+}
+/// EXPERIMENT (s19): `v` through four dependent identity operations (+4 cycles of latency).
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn lat4(mut v: W) -> W {
+    core::arch::asm!(
+        "vpor {0}, {0}, {0}",
+        "vpor {0}, {0}, {0}",
+        "vpor {0}, {0}, {0}",
+        "vpor {0}, {0}, {0}",
+        inout(ymm_reg) v,
+        options(pure, nomem, nostack)
+    );
+    v
 }
 /// 16 bytes to both 128-bit halves.
 #[inline(always)]
@@ -525,7 +576,7 @@ struct Row {
 /// `F` = `score_gap_row`, `H` = `score`, the same lane operations as the 128-bit `block`, with the
 /// row gap as described at the head of this file. Returns (drop mask, script).
 #[inline(always)]
-unsafe fn block16<const TB: bool>(
+unsafe fn block16<const TB: bool, const V: u32>(
     c: &C16,
     rs: &mut Row,
     hr: *const i16,
@@ -535,9 +586,19 @@ unsafe fn block16<const TB: bool>(
     s: W,
     lane_mask: Option<W>,
     hpm: W,
+    prev: &mut W,
 ) -> (W, W) {
-    // `hpm`: lanes with no diagonal (the first lane of the band), as a 0 in the H row
-    let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
+    let hp = if V & 1 != 0 {
+        // EXPERIMENT (s19): lanes b..b+16 of the H row, moved up one lane with lane b-1 from the
+        // previous block's load (`prev`, 0 before the row's first block: no diagonal there)
+        let cur = ld(hr.add(b));
+        let t = _mm256_permute2x128_si256::<0x03>(cur, *prev);
+        *prev = cur;
+        _mm256_alignr_epi8::<14>(cur, t)
+    } else {
+        // `hpm`: lanes with no diagonal (the first lane of the band), as a 0 in the H row
+        _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)))
+    };
     let ep = ld(e.add(b));
     let d = _mm256_adds_epi16(hp, s);
     let h0 = _mm256_max_epi16(d, ep);
@@ -548,6 +609,10 @@ unsafe fn block16<const TB: bool>(
     let mut hh = _mm256_max_epi16(h0, f);
     if let Some(m) = lane_mask {
         hh = _mm256_and_si256(hh, m);
+    }
+    if V & 4 != 0 {
+        // EXPERIMENT (s19): +4 cycles on the block's chain after `hh` (latency slope)
+        hh = lat4(hh);
     }
     let hg = _mm256_subs_epu16(hh, c.goe);
     let fs = _mm256_subs_epu16(f, c.ge1);
@@ -590,7 +655,7 @@ unsafe fn block16<const TB: bool>(
 // then per row: column residues, fence, row table, rebase, blocks, band update). None for a
 // problem the lanes do not hold (the caller then runs the 128-bit dispatch).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align16<const TB: bool, const NIB: bool>(
+unsafe fn align16<const TB: bool, const NIB: bool, const V: u32>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -688,6 +753,8 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     };
     let ncols = scores.ncols();
     let mut cells: u64 = 0;
+    // EXPERIMENT (s19, V & 2): the scores of the band's lanes of one row, lane `first + k` at `k`
+    let mut srow: Vec<i16> = Vec::new();
 
     let mut base: i32 = 0;
     let mut best_rel: i32 = 0;
@@ -767,9 +834,34 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
             base += best_rel;
             best_rel = 0;
         }
+        // EXPERIMENT (s19, V & 2): the scores of every block the band loops take (the two blocks
+        // of each 32-lane step, and the first single block below `bend`) before the blocks; the
+        // blocks past `bend` (the row-gap extension) look theirs up as before
+        let sp: *mut i16 = if V & 2 != 0 {
+            let need = bend - first + 64;
+            if srow.len() < need {
+                srow.resize(need.next_power_of_two(), 0);
+            }
+            let sp = srow.as_mut_ptr();
+            let mut k = first;
+            while k < bend + 16 {
+                let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(k)));
+                let i0 = _mm256_add_epi8(idx, k70);
+                let i1 = _mm256_sub_epi8(idx, k10);
+                let lo = lut32(t0lo, t1lo, i0, i1);
+                let hi = lut32(t0hi, t1hi, i0, i1);
+                st(sp.add(k - first), _mm256_unpacklo_epi8(lo, hi));
+                st(sp.add(k - first + 16), _mm256_unpackhi_epi8(lo, hi));
+                k += 32;
+            }
+            sp
+        } else {
+            core::ptr::null_mut()
+        };
         // no diagonal into the first lane of the band: lane 0 of the row's first block (`hpm`);
         // a store of 0 into the H row would sit right under the first block's load
         let mut hpm = lane0;
+        let mut hprev = zero;
 
         let tr = if TB {
             // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
@@ -796,11 +888,16 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
         // result is the same.
         while b0 + 16 < bend {
             // scores of lanes b0..b0+32 (lane b reads column b-1)
-            let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
-            let i0 = _mm256_add_epi8(idx, k70);
-            let i1 = _mm256_sub_epi8(idx, k10);
-            let lo = lut32(t0lo, t1lo, i0, i1);
-            let hi = lut32(t0hi, t1hi, i0, i1);
+            let (s0, s1) = if V & 2 != 0 {
+                (ld(sp.add(b0 - first)), ld(sp.add(b0 - first + 16)))
+            } else {
+                let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
+                let i0 = _mm256_add_epi8(idx, k70);
+                let i1 = _mm256_sub_epi8(idx, k10);
+                let lo = lut32(t0lo, t1lo, i0, i1);
+                let hi = lut32(t0hi, t1hi, i0, i1);
+                (_mm256_unpacklo_epi8(lo, hi), _mm256_unpackhi_epi8(lo, hi))
+            };
             // the first block lies inside the band (b0 + 16 < bend <= limit); the second may
             // reach past the band and past `limit`
             let mask1 = if b0 + 32 <= limit {
@@ -808,28 +905,30 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
             } else {
                 Some(ld(LANE_MASK16.as_ptr().add(32 - (limit - b0))))
             };
-            let (d0, r0) = block16::<TB>(
+            let (d0, r0) = block16::<TB, V>(
                 &c,
                 &mut rs,
                 hr,
                 hw,
                 e,
                 b0,
-                _mm256_unpacklo_epi8(lo, hi),
+                s0,
                 None,
                 hpm,
+                &mut hprev,
             );
             hpm = zero;
-            let (d1, r1) = block16::<TB>(
+            let (d1, r1) = block16::<TB, V>(
                 &c,
                 &mut rs,
                 hr,
                 hw,
                 e,
                 b0 + 16,
-                _mm256_unpackhi_epi8(lo, hi),
+                s1,
                 mask1,
                 zero,
+                &mut hprev,
             );
             if TB {
                 let v = _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1));
@@ -860,26 +959,32 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
                     break;
                 }
             }
-            let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
-            let i0 = _mm256_add_epi8(idx, k70);
-            let i1 = _mm256_sub_epi8(idx, k10);
-            let lo = lut32(t0lo, t1lo, i0, i1);
-            let hi = lut32(t0hi, t1hi, i0, i1);
+            let s0 = if V & 2 != 0 && b0 < bend {
+                ld(sp.add(b0 - first))
+            } else {
+                let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
+                let i0 = _mm256_add_epi8(idx, k70);
+                let i1 = _mm256_sub_epi8(idx, k10);
+                let lo = lut32(t0lo, t1lo, i0, i1);
+                let hi = lut32(t0hi, t1hi, i0, i1);
+                _mm256_unpacklo_epi8(lo, hi)
+            };
             let mask = if b0 + 16 <= limit {
                 None
             } else {
                 Some(ld(LANE_MASK16.as_ptr().add(16 - (limit - b0))))
             };
-            let (d0, r0) = block16::<TB>(
+            let (d0, r0) = block16::<TB, V>(
                 &c,
                 &mut rs,
                 hr,
                 hw,
                 e,
                 b0,
-                _mm256_unpacklo_epi8(lo, hi),
+                s0,
                 mask,
                 hpm,
+                &mut hprev,
             );
             hpm = zero;
             if TB {

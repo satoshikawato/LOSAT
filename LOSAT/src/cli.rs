@@ -750,10 +750,10 @@ fn render_rpsbproc_text(text: &str) -> String {
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
 // (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
-// NP M4a-2) and `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
+// NP M4a-2), `-filtering_db` (`algorithm::blastn::repeat_filter`, line RG item D4) and
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "entrez_query",
-    "filtering_db",
     "gilist",
     "html",
     "import_search_strategy",

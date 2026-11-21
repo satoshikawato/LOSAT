@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.62
+- Version: 1.64
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -250,18 +250,27 @@
   and of a stride of 32768 or more, whose offsets NCBI computes by shifting an `int` past its
   width; the explicit rejection, rule 2, of an index volume of more than 4 GiB of packed
   sequences, whose sizes NCBI writes wrapped at 32 bits; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07);
-  1.61 2026-11-20 (makeblastdb `-gi_mask`, line NP item M4c-1: exception 18, the alias file of a
+  2026-09-29, restated 2026-10-07)
+  1.61 2026-11-21 (`losat makembindex`, line RG item D5a-t: the explicit rejection, rule 3, of a
+  database sequence without letters, whose null Bioseq NCBI dereferences; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
+  1.62 2026-11-21 (makeblastdb, an index file that a failed write left empty or cut short: the
+  outcomes NCBI reaches through its mapping of the file reproduced, rule 2, and the explicit
+  rejections, rule 3, of an index file of no bytes, which NCBI maps as a null pointer and crashes
+  on, and of a header field that reaches past the file's last page, where NCBI's result depends
+  on its memory map; line LIB-O item O1e, PR #1433; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.61);
+  1.63 2026-11-20 (makeblastdb `-gi_mask`, line NP item M4c-1: exception 18, the alias file of a
   database of one volume, which names the volume where NCBI's names the database itself, the
   Owner's decision of 2026-11-20 (Q6=B); the explicit rejection of two masking algorithms whose
   GI-mask files are the same files, which NCBI writes through two streams whose flushing decides
   the bytes, rule 3; the GI-mask writer's other defects reproduced under rule 2; the form of
   exception 18 and the rejection Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07; numbered after 1.60, line RG item D5a);
-  1.62 2026-11-21 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
+  2026-10-07; numbered after 1.62, line LIB-O item O1e);
+  1.64 2026-11-21 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
   databases reproduced, rule 2, with blastn's GI-indexed masks on more than one thread, where NCBI
   stops or crashes in some runs, giving NCBI's `-num_threads 1` output as every `-db` search does
-  (PD-LOSAT-DATABASE-SEARCH, the Owner's decision DB-3 of 2026-10-13); numbered after 1.61)
+  (PD-LOSAT-DATABASE-SEARCH, the Owner's decision DB-3 of 2026-10-13); numbered after 1.63)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1003,9 +1012,9 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
     (`LOSAT/src/algorithm/blastp/hsp.rs`).
 
-## Approved exception 18 (makeblastdb `-gi_mask`, a database of one volume, version 1.61)
+## Approved exception 18 (makeblastdb `-gi_mask`, a database of one volume, version 1.63)
 
-Version 1.61, line NP item M4c-1. The Owner answered on 2026-11-20 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A
+Version 1.63, line NP item M4c-1. The Owner answered on 2026-11-20 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A
 Q8=OK」. Q6 was the question Q-GIMASK 「makeblastdb -gi_mask が 1 volume の DB を作る時、NCBI と同じにしますか」
 (when `makeblastdb -gi_mask` builds a database of one volume, should LOSAT do as NCBI does?), and its option
 B read 「LOSAT だけが 1 volume でも読める DB を書く。NCBI と違う file になり、新しい例外が 1 つ増える。」 (LOSAT
@@ -1272,7 +1281,14 @@ file would differ, and NCBI's programs still could not open the database).
   NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
-- makeblastdb `-gi_mask` (version 1.61, 2026-11-20, line NP item M4c-1): the GI-mask writer
+- makeblastdb, an index file that a failed write left cut short (version 1.62, 2026-11-21, line LIB-O
+  item O1e, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07). NCBI opens the
+  database it wrote and reads the index through its mapping, where bytes the file lacks read as
+  zeros to the end of its last page. LOSAT reproduces these outcomes: "Not a valid version 4 or 5
+  database.", "requested sequence type does not match DB.", a header-less database and, for a date
+  that was cut, the exception of CTime (exit status 255, no metadata file). The rule-3 refusals of
+  an index file of no bytes and of a header field past the last page are in the list below.
+- makeblastdb `-gi_mask` (version 1.63, 2026-11-20, line NP item M4c-1): the GI-mask writer
   (`seqdb_writer/writedb_gimask.cpp`, `writedb_impl.cpp:338-342, 405-438, 1453-1456`) is ported
   with its defects, which give deterministic files, messages and exit statuses, but for the alias
   file of a database of one volume (approved exception 18). An alias file of that kind that NCBI's
@@ -1290,7 +1306,7 @@ file would differ, and NCBI's programs still could not open the database).
   268,435,455 ranges) is computed without overflow. Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
-- The readers of GI-indexed masks (version 1.62, 2026-11-21, line NP item M4c-2): `blastdbcmd`
+- The readers of GI-indexed masks (version 1.64, 2026-11-21, line NP item M4c-2): `blastdbcmd`
   (`-info`, `-outfmt %m`, `-mask_sequence_with`) and `blastn` (`-db_soft_mask`, `-db_hard_mask`)
   read the masks that an alias file's `MASKLIST` names as NCBI's reader does
   (`seqdbalias.cpp:117-139`, `seqdbgimask.cpp`), with its deterministic defects: the masks apply
@@ -1836,7 +1852,16 @@ file would differ, and NCBI's programs still could not open the database).
   and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
   `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
   `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
-- makeblastdb `-gi_mask` (version 1.61, 2026-11-20, line NP item M4c-1, Owner-delegated, standing
+- makeblastdb, an index file that a failed write left empty or cut short (version 1.62, 2026-11-21,
+  line LIB-O item O1e, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; the
+  outcomes that NCBI reaches and LOSAT reproduces, rule 2, are in the list above). An index file of
+  no bytes is mapped as a null pointer, and NCBI crashes with SIGSEGV (76 of the 1,592 cases of
+  O1a's sweep); LOSAT refuses it (exit 1, "NCBI crashes on it"). A header field that reaches past
+  the last page of the file reads whatever memory follows, so what NCBI does there depends on its
+  memory; LOSAT refuses that too ("depends on its memory map"). Tests:
+  `LOSAT/tests/makeblastdb_failed_index.rs` (fixture `fsize_rows.txt`) and
+  `LOSAT/src/seqdb/damaged_files_tests.rs`.
+- makeblastdb `-gi_mask` (version 1.63, 2026-11-20, line NP item M4c-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): two masking algorithms whose GI-mask files are the
   same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`, or a name
   that reaches the same directory through a link; on Windows and macOS also two names that differ
@@ -2173,6 +2198,14 @@ file would differ, and NCBI's programs still could not open the database).
   same file on a rerun). Computed in a wider type, the offsets no longer fit the index's 32-bit
   words, so no valid index can be defined. LOSAT refuses (exit 1) at the first sequence of an
   index volume.
+- `losat makembindex` of a database with a sequence without letters (version 1.61, 2026-11-21, line
+  RG item D5a-t, Owner-delegated): `CSeqDB::GetBioseq` gives a null Bioseq for it
+  (`seqdbvol.cpp:1380-1386`) and `CSequenceIStreamBlastDB::next` dereferences it
+  (`sequence_istream_bdb.cpp:105-107`): `CCoreException::eNullPtr`, exit status 3, with a stack
+  trace of the run's memory addresses (probe `remaining-gaps-20261112/D/d5/probe/zero`, a database
+  whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
+  (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
+  taxonomy lookup for it.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

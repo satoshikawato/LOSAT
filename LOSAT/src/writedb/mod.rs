@@ -26,9 +26,9 @@
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
 //! `-parse_seqids`. With `-gi_mask` (and `-gi_mask_name`) the masks go instead to the GI-indexed
 //! files of each algorithm (`gi_mask`), and the database gets an alias file that names them.
-//! `losat makeblastdb` refuses `-oid_masks` and the other options of
-//! `makeblastdb::UNSUPPORTED_OPTIONS`; `-metadata_output_prefix` names the files of the metadata
-//! file (`metadata::metadata_user_path`).
+//! `losat makeblastdb` refuses the options of `makeblastdb::UNSUPPORTED_OPTIONS`; `-oid_masks`
+//! writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the files of the
+//! metadata file (`metadata::metadata_user_path`).
 
 pub mod bioseq;
 pub mod build_db;
@@ -52,6 +52,7 @@ pub(crate) mod mask_info;
 pub(crate) mod mdb;
 pub(crate) mod metadata;
 pub(crate) mod ofstream;
+pub(crate) mod oid_list;
 pub mod platform;
 pub mod taxid_set;
 pub mod time;

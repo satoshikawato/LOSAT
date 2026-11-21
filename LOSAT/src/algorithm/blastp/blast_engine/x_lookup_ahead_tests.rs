@@ -617,6 +617,7 @@ fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         subject: Some(PathBuf::from("subject.faa")),
         db: None,
         db_filter: Default::default(),
+        db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,

@@ -1,0 +1,16 @@
+ x
+>
+> y
+gb||
+gb|A|B|C|D
+gi|abc
+gi|0
+café
+AB000001.1.2
+ref|NC_000099.x|
+pdb|
+pat|US
+gnl|
+gnl|db
+tr|
+lcl|

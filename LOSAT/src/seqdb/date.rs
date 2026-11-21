@@ -21,6 +21,7 @@
 
 use std::fmt;
 
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::{is_space, string_to_int8};
 
 /// Error of `database_date`: NCBI's CTime rejects one of two differing volume dates.
@@ -30,6 +31,8 @@ pub struct DateError {
     pub date: String,
     /// The message of the `CTimeException` that NCBI throws for it.
     pub reason: String,
+    /// The exception itself, with the place that NCBI's report names.
+    pub exception: Box<NcbiException>,
 }
 
 impl fmt::Display for DateError {
@@ -63,10 +66,26 @@ const DAYS_IN_MONTH: [u32; 12] = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:2074
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParseFailure {
-    /// `NStr::StringToLong` threw `CStringException`: a number has no digit.
-    StringException,
-    /// `CTime::x_Init` threw `CTimeException` with this message.
-    TimeException(String),
+    /// `NStr::StringToLong` threw this `CStringException`: a number has no digit.
+    StringException(NcbiException),
+    /// `CTime::x_Init` threw this `CTimeException`.
+    TimeException(NcbiException),
+}
+
+impl ParseFailure {
+    /// `CTime::x_Init` throws `CTimeException` `kind` (`eFormat`, `eArgument` or `eConvert`) at
+    /// `line` of `ncbitime.cpp`.
+    fn time(kind: &'static str, line: u32, reason: String) -> Self {
+        ParseFailure::TimeException(NcbiException::new(
+            ThrowSite {
+                file: "src/corelib/ncbitime.cpp",
+                line,
+                kind,
+                function: Some("ncbi::CTime::x_Init"),
+            },
+            reason,
+        ))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:537-540
@@ -155,15 +174,19 @@ fn read_number(s: &[u8], sss: &mut usize, len: usize) -> Result<i64, ParseFailur
     while *sss - start < len && byte_at(s, *sss).is_ascii_digit() {
         *sss += 1;
     }
-    string_to_int8(&s[start..*sss], 0).map_err(|_| ParseFailure::StringException)
+    string_to_int8(&s[start..*sss], 0).map_err(ParseFailure::StringException)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:149-156
-fn check_range(value: i64, what: &str, min: i64, max: i64) -> Result<(), ParseFailure> {
+// `line` is the line of the macro's use in `x_Init` (751 for the year, 772, 782, 788:
+// ncbitime.cpp).
+fn check_range(value: i64, what: &str, min: i64, max: i64, line: u32) -> Result<(), ParseFailure> {
     if value < min || value > max {
-        return Err(ParseFailure::TimeException(format!(
-            "{what} value '{value}' is out of range"
-        )));
+        return Err(ParseFailure::time(
+            "CTimeException::eArgument",
+            line,
+            format!("{what} value '{value}' is out of range"),
+        ));
     }
     Ok(())
 }
@@ -256,7 +279,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:166,177
                 b'Y' => {
                     let value = read_number(s, &mut sss, 4)?;
-                    check_range(value, "Year", 1583, i64::from(i32::MAX))?;
+                    check_range(value, "Year", 1583, i64::from(i32::MAX), 751)?;
                     time.year = (value & 0xFFF) as u32;
                 }
 
@@ -264,7 +287,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:168,179
                 b'd' => {
                     let value = read_number(s, &mut sss, 2)?;
-                    check_range(value, "Day", 1, 31)?;
+                    check_range(value, "Day", 1, 31, 772)?;
                     time.day = (value & 0x1F) as u32;
                 }
 
@@ -272,7 +295,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:170,180
                 b'H' => {
                     let value = read_number(s, &mut sss, 2)?;
-                    check_range(value, "Hour", 0, 12)?;
+                    check_range(value, "Hour", 0, 12, 782)?;
                     time.hour = ((value % 12) & 0x1F) as u32;
                     is_12hour = true;
                 }
@@ -281,7 +304,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:171,181
                 b'm' => {
                     let value = read_number(s, &mut sss, 2)?;
-                    check_range(value, "Minute", 0, 59)?;
+                    check_range(value, "Minute", 0, 59, 788)?;
                     time.min = (value & 0x3F) as u32;
                 }
 
@@ -312,14 +335,18 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     // therefore "too long".
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:857-859,863-872
     if !format_matched {
-        return Err(ParseFailure::TimeException(format!(
-            "Time string '{text}' is too short for time format '{fmt}'"
-        )));
+        return Err(ParseFailure::time(
+            "CTimeException::eFormat",
+            865,
+            format!("Time string '{text}' is too short for time format '{fmt}'"),
+        ));
     }
     if byte_at(s, sss) != 0 {
-        return Err(ParseFailure::TimeException(format!(
-            "Time string '{text}' is too long for time format '{fmt}'"
-        )));
+        return Err(ParseFailure::time(
+            "CTimeException::eFormat",
+            870,
+            format!("Time string '{text}' is too long for time format '{fmt}'"),
+        ));
     }
 
     // A completed loop has set year, month, day and time, so `ptcache` is 2222 and no field
@@ -327,9 +354,11 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:880-884
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:932-934
     if !time.is_valid() {
-        return Err(ParseFailure::TimeException(format!(
-            "Unable to convert string '{text}' to CTime"
-        )));
+        return Err(ParseFailure::time(
+            "CTimeException::eConvert",
+            933,
+            format!("Unable to convert string '{text}' to CTime"),
+        ));
     }
     Ok(time)
 }
@@ -359,18 +388,23 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
         } else if d != date {
             let t1 = match parse_blast_db_date(&date) {
                 Ok(time) => time,
-                Err(ParseFailure::StringException) => continue,
-                Err(ParseFailure::TimeException(reason)) => {
-                    return Err(DateError { date, reason });
+                Err(ParseFailure::StringException(_)) => continue,
+                Err(ParseFailure::TimeException(exception)) => {
+                    return Err(DateError {
+                        date,
+                        reason: String::from_utf8_lossy(exception.get_msg()).into_owned(),
+                        exception: Box::new(exception),
+                    });
                 }
             };
             let t2 = match parse_blast_db_date(d) {
                 Ok(time) => time,
-                Err(ParseFailure::StringException) => continue,
-                Err(ParseFailure::TimeException(reason)) => {
+                Err(ParseFailure::StringException(_)) => continue,
+                Err(ParseFailure::TimeException(exception)) => {
                     return Err(DateError {
                         date: d.to_owned(),
-                        reason,
+                        reason: String::from_utf8_lossy(exception.get_msg()).into_owned(),
+                        exception: Box::new(exception),
                     });
                 }
             };
@@ -393,19 +427,37 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
 /// `blastdbcmd -metadata`: `YYYY-MM-DDThh:mm:00`. `Err` with NCBI's message where the
 /// constructor throws (`CTimeException`, or `CStringException` for a number without digits).
 pub fn iso8601_date_time(date: &str) -> Result<String, String> {
-    if date.is_empty() {
-        return Ok(String::new());
-    }
-    match parse_blast_db_date(date) {
-        Ok(time) => Ok(format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:00",
-            time.year, time.month, time.day, time.hour, time.min
-        )),
-        Err(ParseFailure::TimeException(reason)) => Err(reason),
-        Err(ParseFailure::StringException) => {
+    match iso8601(date) {
+        Ok(text) => Ok(text),
+        Err(ParseFailure::TimeException(exception)) => {
+            Err(String::from_utf8_lossy(exception.get_msg()).into_owned())
+        }
+        Err(ParseFailure::StringException(_)) => {
             Err(format!("a number of the date '{date}' has no digit"))
         }
     }
+}
+
+/// [`iso8601_date_time`] with NCBI's exception, as `CSeqDB::GetDBMetaData` lets it leave
+/// (`CTime`'s constructor throws `CTimeException`, or `CStringException` for a number without
+/// digits): NCBI's applications end with it, exit status 255.
+pub fn iso8601_date_time_exception(date: &str) -> Result<String, NcbiException> {
+    iso8601(date).map_err(|failure| match failure {
+        ParseFailure::TimeException(exception) | ParseFailure::StringException(exception) => {
+            exception
+        }
+    })
+}
+
+fn iso8601(date: &str) -> Result<String, ParseFailure> {
+    if date.is_empty() {
+        return Ok(String::new());
+    }
+    let time = parse_blast_db_date(date)?;
+    Ok(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:00",
+        time.year, time.month, time.day, time.hour, time.min
+    ))
 }
 
 #[cfg(test)]

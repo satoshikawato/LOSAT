@@ -35,6 +35,11 @@ pub struct Registered {
     /// CLI's reader gives that argv (the ids of the deflines, the deflines that its archive shows),
     /// and only that run takes them. `None` for the records of `register`.
     pub run: Option<Vec<String>>,
+    /// Whether the reader read the records with NCBI's data loaders on: then it refused a first
+    /// line that NCBI would fetch as a Seq-id, and the records are those of a reader with them off
+    /// too; read with them off, such a line is data, which a run with them on refuses
+    /// (`with_inputs`).
+    pub data_loaders: bool,
 }
 
 #[derive(Default)]
@@ -79,8 +84,29 @@ pub fn record_id(title: &[u8]) -> String {
     String::from_utf8_lossy(&title[..end]).into_owned()
 }
 
+/// The reader of `program`'s input of `role` (`reader_of`), with NCBI's data loaders on or off
+/// (`data_loaders`: the run's `ApplicationSettings::data_loaders`, which *validation* reports):
+/// what `register` reads with and `scan_begin` scans with.
+pub fn reader_config(program: Program, role: u32, data_loaders: bool) -> ReaderConfig {
+    let (name, protein) = reader_of(program, role);
+    if role == ROLE_QUERY {
+        ReaderConfig::query(name, protein, data_loaders)
+    } else {
+        ReaderConfig::subject(name, protein, data_loaders)
+    }
+}
+
+/// The name of an input role (`ROLE_QUERY`, `ROLE_SUBJECT`), or the error of another number.
+pub fn role_name(role: u32) -> Result<&'static str, String> {
+    match role {
+        ROLE_QUERY => Ok("query"),
+        ROLE_SUBJECT => Ok("subject"),
+        other => Err(format!("unknown input role {other}")),
+    }
+}
+
 /// An error of the engine's reader as the CLI reports it, without the CLI's line end.
-fn reader_error(error: ReadError) -> String {
+pub(crate) fn reader_error(error: ReadError) -> String {
     format!("{:#}", error.into_app_error())
         .trim_end_matches('\n')
         .to_string()
@@ -158,41 +184,37 @@ fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines,
     Ok(deflines)
 }
 
-/// Reads `bytes` with the program's reader for `role`, checks the records against the
-/// index scan of the same bytes (plan TD-8), keeps them, and returns the handle and the
+/// Reads `bytes` with the program's reader for `role`, with NCBI's data loaders on or off
+/// (`data_loaders`, the run's setting: `[BLAST] DATA_LOADERS` of its registry), checks the records
+/// against the index scan of the same bytes (plan TD-8), keeps them, and returns the handle and the
 /// *register* JSON.
 ///
-/// The scan (kind 1 or 2, `scan/ncbi.rs`) comes first: it rejects what LOSAT Web cannot
-/// index (a `>?` gap line, maintainer decision 3; lines that NCBI's line reader joins), a
-/// first line that NCBI's data loaders would fetch as a Seq-id, and fails on the reader's
-/// own error (`CheckDataLine`), which `register` reports with the CLI's text
-/// (`BLAST query error: ...`). The engine's reader then reads the records with its data
-/// loaders on (port plan Q3, as the CLI without `.ncbirc` or `DATA_LOADERS`).
+/// The scan (`scan/ncbi.rs`, with the same reader) comes first: it fails on the reader's own error
+/// (`CheckDataLine`), which `register` reports with the CLI's text (`BLAST query error: ...`), and
+/// on the reader's refusals, in the CLI's words (a first line that NCBI's data loaders would fetch
+/// as a Seq-id, a record longer than LOSAT reads), before the reader holds such a record. The
+/// engine's reader then reads the records.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:78-80
-pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String), String> {
+pub fn register(
+    program: &str,
+    role: u32,
+    data_loaders: bool,
+    bytes: &[u8],
+) -> Result<(u32, String), String> {
     let program = Program::parse(program)?;
-    let role_name = match role {
-        ROLE_QUERY => "query",
-        ROLE_SUBJECT => "subject",
-        other => return Err(format!("unknown input role {other}")),
-    };
-    let (name, protein) = reader_of(program, role);
-    let config = if role == ROLE_QUERY {
-        ReaderConfig::query(name, protein, true)
-    } else {
-        ReaderConfig::subject(name, protein, true)
-    };
+    let role_name = role_name(role)?;
+    let config = reader_config(program, role, data_loaders);
     let read = || {
         read_all(
             &mut FastaInputSource::from_bytes(bytes, config),
             &mut |_| Ok(()),
         )
     };
-    let scanned = match scan::scan_ncbi(bytes, protein) {
+    let scanned = match scan::scan_ncbi(bytes, config) {
         Ok(scanned) => scanned,
         // The scan stops at the reader's error with the reader's message: the CLI's text.
-        Err(error) => {
+        Err(scan::ScanError::Reader(error)) => {
             return Err(match read() {
                 Err(parse @ ReadError::Parse { .. }) if parse.to_string() == error => {
                     reader_error(parse)
@@ -200,6 +222,9 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
                 _ => error,
             })
         }
+        // The reader's refusal, in its words: the reader refuses there too, after it held what
+        // it read of the record (a record of 2^31 letters does not fit in the browser).
+        Err(scan::ScanError::Refused { message, .. }) => return Err(message),
     };
     let records = read().map_err(reader_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:211-216
@@ -225,6 +250,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             records,
             deflines,
             run: None,
+            data_loaders,
         },
     );
     Ok((handle, response))
@@ -325,22 +351,28 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 /// read here before the run, so a reader's error in a later query batch of the CLI (two records of
 /// one Seq-id under `-parse_deflines`, for example) ends the run before the searches of the batches
 /// before it, where the CLI ends with the first error of those (a refusal of outfmt 0 in batch 1;
-/// review of line WQA's D7, L1, 2026-11-19, open). The scans come first: LOSAT Web's refusals and
-/// the reader's own errors, as in `register`. A scan that fails gives the error of the reading when the
-/// reading fails (the CLI fails with that error, whatever the scan refused), and its own error
-/// otherwise. A subject without records ends the run with NCBI's `Empty CBlastQueryVector` before
-/// the query is read, as it ends the CLI (`register` registers it, and the run gives the error).
+/// review of line WQA's D7, L1, 2026-11-19, open). The reader has NCBI's data loaders on or off
+/// as the argv's registry sets them (`run::data_loaders`: `[BLAST] DATA_LOADERS` of `-conffile`).
+/// The scans come first: the reader's own errors and its refusals, as in `register`. A scan that
+/// fails gives the error of the reading when the reading fails (the CLI fails with that error,
+/// whatever the scan found), and its own error otherwise; where the scan refused a record (a
+/// Seq-id first line, a record longer than LOSAT reads), the reading stops before that record, as
+/// the CLI's reader does there (line WQA's D13, 2026-11-20). A subject without records ends the
+/// run with NCBI's `Empty CBlastQueryVector` before the query is read, as it ends the CLI
+/// (`register` registers it, and the run gives the error).
 pub fn register_inputs(
     words: &[&str],
     query: &[u8],
     subject: &[u8],
 ) -> Result<(u32, u32, String), String> {
     let (program, command) = crate::run::parse(words)?;
-    let read = || {
+    let data_loaders = crate::run::data_loaders(words)?;
+    let read = |query: &[u8], subject: &[u8]| {
         losat::web_adapter::read_search_inputs(
             program.api(),
             &command,
             Some(crate::run::writes_archive(words)),
+            data_loaders,
             query,
             subject,
         )
@@ -348,7 +380,7 @@ pub fn register_inputs(
     };
     let scan = |role: u32| {
         let bytes = if role == ROLE_QUERY { query } else { subject };
-        scan::scan_ncbi(bytes, reader_of(program, role).1)
+        scan::scan_ncbi(bytes, reader_config(program, role, data_loaders))
     };
     let subject_scan = scan(ROLE_SUBJECT);
     if subject_scan
@@ -359,12 +391,27 @@ pub fn register_inputs(
     }
     let (subject_scan, query_scan) = match (subject_scan, scan(ROLE_QUERY)) {
         (Ok(subject_scan), Ok(query_scan)) => (subject_scan, query_scan),
-        (subject_scan, query_scan) => {
-            let refusal = subject_scan.err().or(query_scan.err()).unwrap_or_default();
-            return Err(read().err().unwrap_or(refusal));
+        (Err(error), _) => {
+            // The CLI reads the subjects whole first: the query is not read.
+            let (read, refusal) = match error {
+                scan::ScanError::Reader(error) => (read(b"", subject), error),
+                scan::ScanError::Refused { message, record } => {
+                    (read(b"", &subject[..record as usize]), message)
+                }
+            };
+            return Err(read.err().unwrap_or(refusal));
+        }
+        (Ok(_), Err(error)) => {
+            let (read, refusal) = match error {
+                scan::ScanError::Reader(error) => (read(query, subject), error),
+                scan::ScanError::Refused { message, record } => {
+                    (read(&query[..record as usize], subject), message)
+                }
+            };
+            return Err(read.err().unwrap_or(refusal));
         }
     };
-    let (queries, subjects) = read()?;
+    let (queries, subjects) = read(query, subject)?;
     check_query_batch(query, &queries)?;
     check_scan("query", &query_scan, &queries)?;
     check_scan("subject", &subject_scan, &subjects)?;
@@ -401,6 +448,7 @@ pub fn register_inputs(
                 records,
                 deflines: Vec::new(),
                 run: Some(run.clone()),
+                data_loaders,
             },
         );
     }
@@ -461,11 +509,15 @@ pub fn release(handle: u32) -> Result<(), String> {
 /// The handles of `register_inputs` are the inputs of the run of their argv alone, both of them,
 /// and the records are as its reader gave them; a run that reads the ids of the deflines
 /// (`run::inputs_together`) takes no other: its report would be that of a search without the option.
+/// A run with NCBI's data loaders on (`data_loaders`, `run::data_loaders` of the argv) takes no
+/// records read with them off, which may hold a first line that its reader refuses as a Seq-id
+/// (line WQA's D13 and D16, 2026-11-20); `None` where the argv's start fails, which fails the run.
 pub fn with_inputs<R>(
     program: Program,
     query: u32,
     subject: u32,
     words: &[&str],
+    data_loaders: Option<bool>,
     work: impl FnOnce(&[FastaRecord], &[FastaRecord]) -> R,
 ) -> Result<R, String> {
     let mut store = store().lock().expect("input store");
@@ -483,6 +535,11 @@ pub fn with_inputs<R>(
                 "{name} handle {handle} was registered for {}, not {}",
                 entry.program.name(),
                 program.name()
+            ));
+        }
+        if data_loaders == Some(true) && !entry.data_loaders {
+            return Err(format!(
+                "{name} handle {handle} was read with the data loaders off (DATA_LOADERS=none), which this run has on"
             ));
         }
     }
@@ -550,7 +607,8 @@ mod tests {
             &mut |_| Ok(()),
         )
         .unwrap();
-        let scanned = scan::scan_ncbi(bytes, false).unwrap();
+        let scanned =
+            scan::scan_ncbi(bytes, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
         assert!(check_scan("query", &scanned, &records).is_ok());
 
         assert!(check_scan("query", &scanned[..1], &records).is_err());
@@ -567,7 +625,7 @@ mod tests {
 
     /// The `records` of a *register* response.
     fn records(program: &str, role: u32, bytes: &[u8]) -> String {
-        let (_, response) = register(program, role, bytes).unwrap();
+        let (_, response) = register(program, role, true, bytes).unwrap();
         let at = response.find("\"records\":").unwrap();
         response[at..].to_string()
     }
@@ -615,25 +673,170 @@ mod tests {
             r#""records":[]}"#
         );
         assert_eq!(
-            register("blastp", ROLE_QUERY, b";c\n\n").unwrap_err(),
+            register("blastp", ROLE_QUERY, true, b";c\n\n").unwrap_err(),
             "BLAST engine error: Empty CBlastQueryVector"
         );
     }
 
-    // LOSAT Web's rejections (the scan's) and the reader's error with the CLI's text.
+    // A `>?` gap line and the lines that NCBI's line reader joins are read as the CLI reads them,
+    // where the scan refused them (line WQA's D13 (a) and (b), 2026-11-20): the gap's letters are
+    // the record's (N for nucleotide input, X for protein input).
     #[test]
-    fn register_rejects_what_ncbi_rejects_and_what_web_cannot_index() {
-        let gap = register("blastn", ROLE_SUBJECT, b">s\nACGT\n>?10\nACGT\n").unwrap_err();
-        assert!(gap.starts_with("line 3 is a gap line ('>?')"), "{gap}");
-        assert!(gap.ends_with("not supported in the browser"), "{gap}");
-        let seq_id = register("tblastx", ROLE_QUERY, b"AB123456\nACGT\n").unwrap_err();
-        assert!(seq_id.contains("not supported in the browser"), "{seq_id}");
-        let reader =
-            register("blastp", ROLE_QUERY, b">q\n1234567890123456789012345\n").unwrap_err();
+    fn register_reads_gap_lines_and_joined_lines() {
+        assert_eq!(
+            records("blastn", ROLE_SUBJECT, b">s\nACGT\n>?10\nACGT\n"),
+            r#""records":[{"index":0,"id":"s","length":18}]}"#
+        );
+        assert_eq!(
+            records("blastp", ROLE_QUERY, b">?5\nMKT\n>p\n>?unk3\nAC\n"),
+            r#""records":[{"index":0,"id":"","length":8},{"index":1,"id":"p","length":5}]}"#
+        );
+        // The fixtures of NCBI's line reader whose lines it joins (`LOSAT/tests/fixtures/fasta_input`,
+        // which the CLI reads as NCBI BLAST+ 2.17.0 does): `register` checks the scan's records
+        // against the reader's.
+        let fixtures = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../LOSAT/tests/fixtures/fasta_input"
+        );
+        for (name, program, role) in [
+            ("eol_lfcr.q.nuc.fa", "blastn", ROLE_QUERY),
+            ("eol_lfcr_defline.s.prot.faa", "blastp", ROLE_SUBJECT),
+            ("eol_mixed_lf_cr.q.nuc.fa", "tblastx", ROLE_QUERY),
+            ("eol_mixed_crlf_cr.s.prot.faa", "blastx", ROLE_SUBJECT),
+            ("eol_mixed_lf_crlf_cr.q.prot.faa", "tblastn", ROLE_QUERY),
+        ] {
+            let bytes = std::fs::read(format!("{fixtures}/{name}")).unwrap();
+            let (handle, _) = register(program, role, true, &bytes)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            release(handle).unwrap();
+        }
+        // A CR line end that NCBI's line reader joins to the `!` line after it, in a file of LF line ends,
+        // within a record of six lines, which the scan refused ("NCBI BLAST+ reads two of its lines as one");
+        // the CLI drops the joined line's residues (210 of 240 letters).
+        assert_eq!(
+            records(
+                "blastn",
+                ROLE_QUERY,
+                b">q\nAAAAAAAAAA\nCCCCCCCCCC\r!x\nGGGGGGGGGG\nTTTTTTTTTT\nACGTA\n"
+            ),
+            records(
+                "blastn",
+                ROLE_QUERY,
+                b">q\nAAAAAAAAAA\nCCCCCCCCCC\nTTTTTTTTTT\nACGTA\n"
+            ),
+        );
+        let joined = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/d13/joined.nuc.fa"
+        );
+        assert_eq!(
+            records("blastn", ROLE_SUBJECT, &std::fs::read(joined).unwrap()),
+            r#""records":[{"index":0,"id":"q1","length":210}]}"#
+        );
+    }
+
+    // The reader's error with the CLI's text, and its refusals in the CLI's words, not LOSAT Web's
+    // (line WQA's D13 (c), 2026-11-20); with the data loaders off (`DATA_LOADERS=none`) a first line
+    // that may be a Seq-id is data, as the CLI reads it (D16).
+    #[test]
+    fn register_refuses_what_the_cli_refuses_in_its_words() {
+        let seq_id = register("tblastx", ROLE_QUERY, true, b"AB123456\nACGT\n").unwrap_err();
+        assert_eq!(
+            seq_id,
+            "the first line of the query (\"AB123456\") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's TBLASTX (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)"
+        );
+        let subject = register("blastp", ROLE_SUBJECT, true, b"2HHB\nMKTAYIAKQR\n").unwrap_err();
+        assert!(
+            subject.contains("the first line of the subject (\"2HHB\")")
+                && subject.contains("LOSAT's BLASTP"),
+            "{subject}"
+        );
+        let (handle, response) =
+            register("blastp", ROLE_SUBJECT, false, b"2HHB\nMKTAYIAKQR\n").unwrap();
+        assert!(
+            response.ends_with(r#""records":[{"index":0,"id":"","length":13}]}"#),
+            "{response}"
+        );
+        release(handle).unwrap();
+        let reader = register(
+            "blastp",
+            ROLE_QUERY,
+            true,
+            b">q\n1234567890123456789012345\n",
+        )
+        .unwrap_err();
         assert_eq!(
             reader,
             "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
         );
+        // With the loaders off the reader's check of the data line ends the run, as the CLI's.
+        assert_eq!(
+            register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap_err(),
+            "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+        );
+    }
+
+    // A run reads its inputs with the data loaders that its registry sets (`-conffile` with
+    // `[BLAST] DATA_LOADERS=none`; line WQA's D16, 2026-11-20): `register_inputs` reads such a first
+    // line as data, and a run with them on takes no records read with them off.
+    #[test]
+    fn a_run_reads_with_the_data_loaders_of_its_registry() {
+        let registry = b"[BLAST]\nDATA_LOADERS=none\n";
+        let file =
+            crate::files::begin(crate::files::KIND_REGISTRY, "d16-store.ini", registry.len())
+                .unwrap();
+        crate::files::chunk(file, registry).unwrap();
+        crate::files::end(file).unwrap();
+        let off = [
+            "blastp",
+            "-conffile",
+            "d16-store.ini",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+        ];
+        let on = [&off[..1], &off[3..]].concat();
+        let (query, subject) = (&b"2HHB\nMKTAYIAKQR\n"[..], &b">s\nMKTAYIAKQR\n"[..]);
+        assert_eq!(crate::run::data_loaders(&off), Ok(false));
+        assert_eq!(crate::run::data_loaders(&on), Ok(true));
+        let (query_handle, subject_handle, response) =
+            register_inputs(&off, query, subject).unwrap();
+        assert!(response.contains(r#""length":13"#), "{response}");
+        let error = register_inputs(&on, query, subject).unwrap_err();
+        assert!(
+            error.contains("the first line of the query (\"2HHB\")"),
+            "{error}"
+        );
+        release(query_handle).unwrap();
+        release(subject_handle).unwrap();
+        let (query_handle, _) = register("blastp", ROLE_QUERY, false, query).unwrap();
+        let (subject_handle, _) = register("blastp", ROLE_SUBJECT, false, subject).unwrap();
+        let plain = ["blastp", "-query", "q", "-subject", "s"];
+        let refused = with_inputs(
+            Program::Blastp,
+            query_handle,
+            subject_handle,
+            &plain,
+            Some(true),
+            |_, _| (),
+        )
+        .unwrap_err();
+        assert!(
+            refused.contains("read with the data loaders off"),
+            "{refused}"
+        );
+        assert!(with_inputs(
+            Program::Blastp,
+            query_handle,
+            subject_handle,
+            &plain,
+            Some(false),
+            |_, _| ()
+        )
+        .is_ok());
+        release(query_handle).unwrap();
+        release(subject_handle).unwrap();
     }
 
     // The handles of `register_inputs` are the inputs of the run of their argv alone, and a run with
@@ -662,7 +865,7 @@ mod tests {
             )
         };
         assert_eq!(
-            with_inputs(Program::Blastp, query, subject, &words, ids),
+            with_inputs(Program::Blastp, query, subject, &words, Some(true), ids),
             Ok((true, true))
         );
         let other = [
@@ -675,21 +878,36 @@ mod tests {
             "-seg",
             "yes",
         ];
-        let error = with_inputs(Program::Blastp, query, subject, &other, |_, _| ()).unwrap_err();
+        let error = with_inputs(
+            Program::Blastp,
+            query,
+            subject,
+            &other,
+            Some(true),
+            |_, _| (),
+        )
+        .unwrap_err();
         assert!(
             error.contains("are not the inputs that register_inputs read for this argv"),
             "{error}"
         );
-        let (plain_query, _) = register("blastp", ROLE_QUERY, query_bytes).unwrap();
-        let (plain_subject, _) = register("blastp", ROLE_SUBJECT, subject_bytes).unwrap();
-        let mixed =
-            with_inputs(Program::Blastp, plain_query, subject, &words, |_, _| ()).unwrap_err();
+        let (plain_query, _) = register("blastp", ROLE_QUERY, true, query_bytes).unwrap();
+        let (plain_subject, _) = register("blastp", ROLE_SUBJECT, true, subject_bytes).unwrap();
+        let mixed = with_inputs(
+            Program::Blastp,
+            plain_query,
+            subject,
+            &words,
+            Some(true),
+            |_, _| (),
+        )
+        .unwrap_err();
         assert!(
             mixed.contains("are not the inputs that register_inputs read for this argv"),
             "{mixed}"
         );
         assert_eq!(
-            with_inputs(Program::Blastp, plain_query, plain_subject, &words, |_, _| ()).unwrap_err(),
+            with_inputs(Program::Blastp, plain_query, plain_subject, &words, Some(true), |_, _| ()).unwrap_err(),
             "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
         );
         // Without the option the handles of `register` are the inputs, as before.
@@ -699,6 +917,7 @@ mod tests {
             plain_query,
             plain_subject,
             plain,
+            Some(true),
             |_, _| ()
         )
         .is_ok());
@@ -710,15 +929,31 @@ mod tests {
     // Another program's handle cannot bring a record to a run.
     #[test]
     fn a_handle_belongs_to_its_program() {
-        let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
-        let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
+        let (query, _) = register("blastp", ROLE_QUERY, true, b">q t\nACXGT\n").unwrap();
+        let (subject, _) = register("blastn", ROLE_SUBJECT, true, b">s\nACGT\n").unwrap();
         let words = ["blastn", "-query", "q", "-subject", "s"];
-        let error = with_inputs(Program::Blastn, query, subject, &words, |_, _| ()).unwrap_err();
+        let error = with_inputs(
+            Program::Blastn,
+            query,
+            subject,
+            &words,
+            Some(true),
+            |_, _| (),
+        )
+        .unwrap_err();
         assert!(
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
         let words = ["blastp", "-query", "q", "-subject", "s"];
-        assert!(with_inputs(Program::Blastp, query, subject, &words, |_, _| ()).is_err());
+        assert!(with_inputs(
+            Program::Blastp,
+            query,
+            subject,
+            &words,
+            Some(true),
+            |_, _| ()
+        )
+        .is_err());
     }
 }

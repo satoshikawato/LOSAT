@@ -47,6 +47,10 @@ pub(super) enum ShownSubjects<'a> {
         reported: &'a super::database::ReportedSubjects,
         /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
         oids: crate::seqdb::OidMap<'a>,
+        /// `-db_hard_mask` (series NP, M4b PR 2): the search read `B` over the masked bases
+        /// (`XDbStream::read_stage`), and the reports count the stored letters
+        /// (`recounts_shown_counts`).
+        hard_masked: bool,
     },
 }
 
@@ -59,6 +63,18 @@ impl ShownSubjects<'_> {
             }
             Self::Database { name, .. } => name.to_string(),
         }
+    }
+
+    /// Whether the search read other letters of the database sequences than the reports show
+    /// (`-db_hard_mask`: `ShownSubjects::Database::hard_masked`).
+    fn hard_masked(&self) -> bool {
+        matches!(
+            self,
+            Self::Database {
+                hard_masked: true,
+                ..
+            }
+        )
     }
 
     /// The `Database:` lines of a database search's pairwise report.
@@ -148,15 +164,17 @@ pub(super) fn is_structured_xml(outfmt: &str) -> bool {
 
 /// Whether the reports of `outputs` read the letters of the subjects
 /// (`formats_read_subject_letters`), for the PSSM query `pssm` (`-in_pssm`) when there is one
-/// (`recounts_shown_counts`). The one decision of whether the reported database sequences keep
-/// their letters (`database::reported_subjects`) and whether `render` counts again.
+/// and in a search with `-db_hard_mask` (`hard_masked`) (`recounts_shown_counts`). The one
+/// decision of whether the reported database sequences keep their letters
+/// (`database::reported_subjects`) and whether `render` counts again.
 pub(super) fn reads_subject_letters(
     outputs: &ReportOutputs<'_>,
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    hard_masked: bool,
 ) -> bool {
     formats_read_subject_letters(
         outputs.hits.is_some(),
-        recounts_shown_counts(pssm),
+        recounts_shown_counts(pssm, hard_masked),
         outputs.formats.iter().map(|format| format.outfmt),
     )
 }
@@ -317,7 +335,9 @@ pub(super) fn render(
     // counts are the rows' where its reports read other letters than its search and a report
     // reads the subjects' letters (`reads_subject_letters`; the Seq-aligns keep the search's).
     let query_bioseq = pssm.and_then(|psi| psi.bioseq_letters.as_deref());
-    if recounts_shown_counts(pssm) && reads_subject_letters(outputs, pssm) {
+    let hard_masked = shown.hard_masked();
+    if recounts_shown_counts(pssm, hard_masked) && reads_subject_letters(outputs, pssm, hard_masked)
+    {
         recount_shown_counts(
             query_records,
             query_bioseq,
@@ -325,6 +345,7 @@ pub(super) fn render(
             hitlists,
             genetic_code,
             scoring.matrix,
+            hard_masked,
         )?;
     }
     let hitlists: &[KappaResultHitList] = hitlists;
@@ -1491,15 +1512,19 @@ fn write_pairwise(
     Ok(())
 }
 
-/// Whether the reports of the PSSM query `pssm` (`-in_pssm`) read other letters than its search
-/// (`QueryLetters::shows_other_letters`: its Bioseq's letters in lower case, or its gap residue),
-/// so that they count its HSPs again from their rows (`recount_shown_counts`).
+/// Whether the reports read other letters than the search, so that they count its HSPs again
+/// from their rows (`recount_shown_counts`): the PSSM query `pssm` (`-in_pssm`) with
+/// `QueryLetters::shows_other_letters` (its Bioseq's letters in lower case, or its gap residue),
+/// or a search with `-db_hard_mask` (`hard_masked`, series NP, M4b PR 2), which read `B` over the
+/// masked bases of the database sequences where the reports read their stored bases.
 pub(super) fn recounts_shown_counts(
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    hard_masked: bool,
 ) -> bool {
-    pssm.is_some_and(|psi| {
-        QueryLetters::new(psi.query.seq(), psi.bioseq_letters.as_deref()).shows_other_letters()
-    })
+    hard_masked
+        || pssm.is_some_and(|psi| {
+            QueryLetters::new(psi.query.seq(), psi.bioseq_letters.as_deref()).shows_other_letters()
+        })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
@@ -1508,7 +1533,9 @@ pub(super) fn recounts_shown_counts(
 /// The report counts (`report_num_ident`, `report_num_positives`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
-/// letters `query_bioseq`, or its gap residue). Stage D counts on the searched NCBIstdaa codes;
+/// letters `query_bioseq`, or its gap residue), and for every query of a search with
+/// `-db_hard_mask` (`hard_masked`: the search read `B` over the masked bases, the rows read the
+/// stored bases; series NP, M4b PR 2). Stage D counts on the searched NCBIstdaa codes;
 /// NCBI's reports compare the rows' letters, where a lower-case letter is identical to no subject
 /// letter and the gap residue's `-` is identical to a gap of the subject (an identity and a gap,
 /// so the mismatches can be fewer than none). Every report then reads these counts: the default
@@ -1520,12 +1547,13 @@ fn recount_shown_counts(
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
     matrix: crate::config::ScoringMatrix,
+    hard_masked: bool,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut x_window = Vec::new();
     for (query, hitlist) in query_records.iter().zip(hitlists.iter_mut()) {
         let letters = QueryLetters::new(query.seq(), query_bioseq);
-        if !letters.shows_other_letters() {
+        if !hard_masked && !letters.shows_other_letters() {
             continue;
         }
         for list in hitlist.lists_mut() {

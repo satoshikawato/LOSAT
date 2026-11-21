@@ -29,6 +29,8 @@ mod blastx_library_db_hold;
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
 mod compressed_clut_pairs;
+#[path = "../database_sequence_without_letters.rs"]
+mod database_sequence_without_letters;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
@@ -51,6 +53,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../makeblastdb_failed_index.rs"]
+mod makeblastdb_failed_index;
 #[path = "../makeblastdb_gi_mask.rs"]
 mod makeblastdb_gi_mask;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]

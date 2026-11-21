@@ -12,8 +12,9 @@
 //!
 //! The text comes from an `AsnSource`: a slice (`SliceSource`, the PSSM file read whole) or a
 //! stream read in blocks (`StreamSource`, an archive of any size: only the bytes not yet read
-//! and those of the value being read are kept). The readers are generic over the source, so the
-//! slice reader is what it was before the stream existed.
+//! and those of the value being read are kept). The readers are generic over the source: both
+//! read the kept bytes that `AsnSource::rest` gives and ask `AsnSource::fill` for more at their
+//! end, so they share one code path.
 
 use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
@@ -310,7 +311,8 @@ impl<R: Read> StreamSource<R> {
 impl<R: Read> AsnSource for StreamSource<R> {
     #[inline]
     fn rest(&self, pos: usize) -> &[u8] {
-        // A released position wraps to past the buffer: `fill_to` stops at it.
+        // A released position wraps to past the buffer, so its slice is empty; `fill_to`'s assert
+        // then rejects it.
         &self.buf[pos.wrapping_sub(self.base).min(self.buf.len())..]
     }
 
@@ -703,6 +705,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// `SkipEndOfLine(c)` at `pos`, after the end-of-line byte `c`, without its line count:
     /// the position after the complement of `c` when it follows.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     #[inline]
     fn end_of_line_at(&mut self, pos: usize, c: u8) -> usize {
         let next = self.src.byte_at(pos).unwrap_or(0);

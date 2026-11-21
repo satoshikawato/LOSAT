@@ -219,9 +219,11 @@ fn fixture_texts() -> Vec<(String, Vec<u8>)> {
     texts
 }
 
-/// Every fixture whole in the three string modes, and the fixtures of up to 32 KiB cut at 24
-/// lengths over the text and at each of its last 8 lengths (one mode per cut, in turn). The
-/// digests are printed (`--nocapture`) to compare the walks of two builds.
+/// Every fixture whole in the three string modes, and the fixtures of up to 32 KiB cut at 23
+/// lengths over the text (k/24 of it for k = 1..23) and at each of its last 8 lengths, at most 31
+/// cuts (one mode per cut, in turn). The test checks that the three sources agree; it does not
+/// compare with another build. The digests are printed (`--nocapture`) so that the walks of two
+/// builds can be compared by hand; `literal_walks` holds results of dev's reader.
 #[test]
 fn every_source_reads_the_same() {
     let texts = fixture_texts();
@@ -263,4 +265,472 @@ fn values_split_at_every_byte() {
         walked.iter().any(|step| step.contains("123456789012")),
         "{walked:?}"
     );
+}
+
+/// One operation of a literal walk, named as in `LITERAL_WALKS`, and what it read. `blocks` and
+/// `members` are the blocks and SEQUENCEs open at that point.
+fn apply<S: AsnSource>(
+    r: &mut Reader<S>,
+    op: &'static str,
+    blocks: &mut Vec<bool>,
+    members: &mut Vec<Members>,
+) -> Result<String> {
+    let (name, arg) = op.split_once(':').unwrap_or((op, ""));
+    let names: Vec<&'static str> = arg.split(',').collect();
+    let values: Vec<(&'static str, i32)> = names
+        .iter()
+        .filter_map(|value| value.split_once('='))
+        .map(|(name, n)| (name, n.parse().unwrap()))
+        .collect();
+    Ok(match name {
+        "ws" => format!("ws {:?}", r.skip_white_space()? as char),
+        "int4" => format!("int4 {}", r.int4()?),
+        "uint4" => format!("uint4 {}", r.uint4()?),
+        "int8" => format!("int8 {}", r.int8()?),
+        "string" => format!("string {}", show(&r.string_as_read()?)),
+        "visible" => format!("visible {}", show(&r.string()?)),
+        "id" => match r.member_or_tag()? {
+            MemberId::Name(id) => format!("id {}", show(r.bytes(id))),
+            MemberId::Tag(id) => format!("tag {}", show(r.bytes(id))),
+        },
+        "type" => match r.type_id()? {
+            Some(id) => format!("type {}", show(r.bytes(id))),
+            None => "type none".into(),
+        },
+        "ptr" => format!("ptr {:?}", r.pointer_type()?),
+        "choice" => format!("choice {}", r.choice(&names)?),
+        "enum" => format!("enum {:?}", r.enumerated(&values)?),
+        "nint" => format!("nint {}", r.named_integer(&values)?),
+        "{" => {
+            blocks.push(r.start_block()?);
+            "{".into()
+        }
+        "next" => format!("next {}", r.next_element(blocks.last_mut().unwrap())?),
+        "}" => {
+            r.end_block()?;
+            blocks.pop();
+            "}".into()
+        }
+        "members" => {
+            members.push(r.begin_members()?);
+            "members".into()
+        }
+        "member" => {
+            let member = r.next_member(members.last_mut().unwrap(), &names)?;
+            if member.is_none() {
+                members.pop();
+            }
+            format!("member {member:?}")
+        }
+        "each" => {
+            let mut elements = Vec::new();
+            r.each(|r| {
+                elements.push(r.int4()?);
+                Ok(())
+            })?;
+            format!("each {elements:?}")
+        }
+        "skip" => {
+            r.skip_value()?;
+            "skip".into()
+        }
+        other => panic!("no operation {other}"),
+    })
+}
+
+/// The steps of the operations `ops` on `src` with the string rule `mode` (as `walk`), up to the
+/// first error.
+fn literal_walk<S: AsnSource>(src: S, mode: usize, ops: &'static str) -> Vec<String> {
+    let mut r = Reader::new(src, "text", "test reader");
+    if mode >= 1 {
+        r = r.refuse_invisible_bytes();
+    }
+    if mode == 2 {
+        r = r.defer_refusals();
+    }
+    let (mut blocks, mut members, mut log) = (Vec::new(), Vec::new(), Vec::new());
+    for op in ops.split_whitespace() {
+        match apply(&mut r, op, &mut blocks, &mut members) {
+            Ok(what) => note(&r, &mut log, what),
+            Err(error) => {
+                let what = format!("error {error:?} refusal {:?}", r.refusal);
+                note(&r, &mut log, what);
+                return log;
+            }
+        }
+    }
+    note(&r, &mut log, format!("end refusal {:?}", r.refusal));
+    log
+}
+
+/// Texts, string rules and operations, with the steps that the reader gave for them before its
+/// position moved into locals (recorded from dev's reader, not from this one): line ends of every form in white space, comments and
+/// strings, a comment and a `-` at the end of the text, the stop positions of the overflows,
+/// errors at their positions, and the readers of members, variants, enumerated values, pointer
+/// types, type names and lists. Each step is `what was read @position:line`.
+const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
+    (
+        b"{\n1,\r2,\r\n3,\n\r4,\r\r5,\t\n 6 }",
+        0,
+        "{ next int4 next int4 next int4 next int4 next int4 next int4 next }",
+        &[
+            "{ @1:1",
+            "next true @2:2",
+            "int4 1 @3:2",
+            "next true @4:2",
+            "int4 2 @6:3",
+            "next true @7:3",
+            "int4 3 @10:4",
+            "next true @11:4",
+            "int4 4 @14:5",
+            "next true @15:5",
+            "int4 5 @18:7",
+            "next true @19:7",
+            "int4 6 @23:8",
+            "next false @24:8",
+            "} @25:8",
+            "end refusal None @25:8",
+        ],
+    ),
+    (
+        b"{ -- a\n1 -- b -- , --\r\n2 --c-\n\r }",
+        0,
+        "{ next int4 next int4 next }",
+        &[
+            "{ @1:1",
+            "next true @7:2",
+            "int4 1 @8:2",
+            "next true @18:2",
+            "int4 2 @24:3",
+            "next false @32:4",
+            "} @33:4",
+            "end refusal None @33:4",
+        ],
+    ),
+    (
+        b"1 -- tail",
+        0,
+        "int4 ws",
+        &[
+            "int4 1 @1:1",
+            "error AsnTextError { line: 1, message: \"unexpected end of the text\", kind: Eof, ncbi: Some(WhiteSpaceEof) } refusal None @9:1",
+        ],
+    ),
+    (
+        b"1 \n-",
+        0,
+        "int4 ws",
+        &[
+            "int4 1 @1:1",
+            "error AsnTextError { line: 2, message: \"unexpected end of the text\", kind: Eof, ncbi: Some(WhiteSpaceEof) } refusal None @3:2",
+        ],
+    ),
+    (
+        b" \n-5 - 3",
+        0,
+        "int4 int4",
+        &[
+            "int4 -5 @4:2",
+            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @6:2",
+        ],
+    ),
+    (
+        b"\"a\nb\r\nc\n\rd\" \"e\"\"f\"",
+        0,
+        "string visible",
+        &[
+            "string \"abcd\" @11:4",
+            "visible \"e\\\"f\" @18:4",
+            "end refusal None @18:4",
+        ],
+    ),
+    (
+        b"\"abc\ndef",
+        0,
+        "string",
+        &[
+            "error AsnTextError { line: 2, message: \"unclosed string starts at line 1\", kind: Format, ncbi: Some(Stream(ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 869, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::UnendedString\") })) } refusal None @8:2",
+        ],
+    ),
+    (
+        b"\"a\x01b\"\n5",
+        1,
+        "visible int4",
+        &[
+            "error AsnTextError { line: 1, message: \"a string with the byte 0x1 (NCBI replaces it by '#' and posts an error) is not supported by LOSAT's test reader\", kind: Unsupported, ncbi: None } refusal None @3:1",
+        ],
+    ),
+    (
+        b"\"a\x01b\"\n5",
+        2,
+        "visible int4",
+        &[
+            "visible \"a\\u{1}b\" @5:1",
+            "int4 5 @7:2",
+            "end refusal Some(AsnTextError { line: 1, message: \"a string with the byte 0x1 (NCBI replaces it by '#' and posts an error) is not supported by LOSAT's test reader\", kind: Unsupported, ncbi: None }) @7:2",
+        ],
+    ),
+    (
+        b"2147483647 2147483648",
+        0,
+        "int4 int4",
+        &[
+            "int4 2147483647 @10:1",
+            "error AsnTextError { line: 1, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @21:1",
+        ],
+    ),
+    (
+        b"-2147483648\n-2147483649",
+        0,
+        "int4 int4",
+        &[
+            "int4 -2147483648 @11:1",
+            "error AsnTextError { line: 2, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @22:2",
+        ],
+    ),
+    (
+        b"4294967295 +7 4294967296",
+        0,
+        "uint4 uint4 uint4",
+        &[
+            "uint4 4294967295 @10:1",
+            "uint4 7 @13:1",
+            "error AsnTextError { line: 1, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @24:1",
+        ],
+    ),
+    (
+        b"\r-1",
+        0,
+        "uint4",
+        &[
+            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @1:2",
+        ],
+    ),
+    (
+        b"9223372036854775807 -9223372036854775808 9223372036854775808",
+        0,
+        "int8 int8 int8",
+        &[
+            "int8 9223372036854775807 @19:1",
+            "int8 -9223372036854775808 @40:1",
+            "error AsnTextError { line: 1, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @60:1",
+        ],
+    ),
+    (
+        b"12",
+        0,
+        "int4 ws",
+        &[
+            "int4 12 @2:1",
+            "error AsnTextError { line: 1, message: \"unexpected end of the text\", kind: Eof, ncbi: Some(WhiteSpaceEof) } refusal None @2:1",
+        ],
+    ),
+    (
+        b"{ 1\n 2 }",
+        0,
+        "{ next int4 next",
+        &[
+            "{ @1:1",
+            "next true @2:1",
+            "int4 1 @3:1",
+            "error AsnTextError { line: 2, message: \"',' or '}' expected\", kind: Format, ncbi: Some(Stream(ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1220, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::NextElement\") })) } refusal None @5:2",
+        ],
+    ),
+    (
+        b"{ a 1, c 2,\n b 3 }",
+        0,
+        "members member:a,b,c int4 member:a,b,c int4 member:a,b,c",
+        &[
+            "members @1:1",
+            "member Some(0) @3:1",
+            "int4 1 @5:1",
+            "member Some(2) @8:1",
+            "int4 2 @10:1",
+            "error AsnTextError { line: 2, message: \"member b out of order\", kind: Format, ncbi: None } refusal None @14:2",
+        ],
+    ),
+    (
+        b"{ a 1,\n x 2 }",
+        0,
+        "members member:a,b int4 member:a,b",
+        &[
+            "members @1:1",
+            "member Some(0) @3:1",
+            "int4 1 @5:1",
+            "error AsnTextError { line: 2, message: \"unexpected member x\", kind: Format, ncbi: None } refusal None @9:2",
+        ],
+    ),
+    (
+        b"{\n [1] 5 }",
+        0,
+        "members member:a",
+        &[
+            "members @1:1",
+            "error AsnTextError { line: 2, message: \"a member or variant named by its tag is not supported by LOSAT's test reader\", kind: Unsupported, ncbi: None } refusal None @6:2",
+        ],
+    ),
+    (
+        b"{ a 1\n}",
+        0,
+        "members member:a,b int4 member:a,b",
+        &[
+            "members @1:1",
+            "member Some(0) @3:1",
+            "int4 1 @5:1",
+            "member None @7:2",
+            "end refusal None @7:2",
+        ],
+    ),
+    (
+        b"b 5",
+        0,
+        "choice:a,b int4",
+        &[
+            "choice 1 @1:1",
+            "int4 5 @3:1",
+            "end refusal None @3:1",
+        ],
+    ),
+    (
+        b"\nz 5",
+        0,
+        "choice:a,b",
+        &[
+            "error AsnTextError { line: 2, message: \"unexpected variant z\", kind: Format, ncbi: None } refusal None @2:2",
+        ],
+    ),
+    (
+        b" }",
+        0,
+        "choice:a",
+        &[
+            "error AsnTextError { line: 1, message: \"choice variant id expected\", kind: Format, ncbi: None } refusal None @1:1",
+        ],
+    ),
+    (
+        b"red 2 green\n9",
+        0,
+        "enum:red=0,green=2 enum:red=0,green=2 enum:red=0,green=2 enum:red=0,green=2",
+        &[
+            "enum (\"red\", 0) @3:1",
+            "enum (\"green\", 2) @5:1",
+            "enum (\"green\", 2) @11:1",
+            "error AsnTextError { line: 2, message: \"invalid value of enumerated type: 9\", kind: Format, ncbi: Some(Plain(ThrowSite { file: \"src/serial/enumerated.cpp\", line: 156, kind: \"CSerialException::eInvalidData\", function: None })) } refusal None @13:2",
+        ],
+    ),
+    (
+        b"one -77\ntwo",
+        0,
+        "nint:one=1 nint:one=1 nint:one=1",
+        &[
+            "nint 1 @3:1",
+            "nint -77 @7:1",
+            "error AsnTextError { line: 2, message: \"invalid value of enumerated type: two\", kind: Format, ncbi: Some(Plain(ThrowSite { file: \"src/serial/enumerated.cpp\", line: 133, kind: \"CSerialException::eInvalidData\", function: None })) } refusal None @11:2",
+        ],
+    ),
+    (
+        b"NULL @ :\n5",
+        0,
+        "ptr ptr ptr ptr int4",
+        &[
+            "ptr Null @4:1",
+            "ptr Object @6:1",
+            "ptr Other @8:1",
+            "ptr This @9:2",
+            "int4 5 @10:2",
+            "end refusal None @10:2",
+        ],
+    ),
+    (
+        b"Seq-id x",
+        0,
+        "type",
+        &[
+            "type \"Seq-id\" @6:1",
+            "end refusal None @6:1",
+        ],
+    ),
+    (
+        b"[abc]",
+        0,
+        "type",
+        &[
+            "type \"ab\" @4:1",
+            "end refusal None @4:1",
+        ],
+    ),
+    (
+        b"[]",
+        0,
+        "type",
+        &[
+            "type none @1:1",
+            "end refusal None @1:1",
+        ],
+    ),
+    (
+        b"[x\ny]",
+        0,
+        "type",
+        &[
+            "error AsnTextError { line: 1, message: \"end of line: expected ']'\", kind: Format, ncbi: Some(Stream(ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 299, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::ReadTypeId\") })) } refusal None @0:1",
+        ],
+    ),
+    (
+        b"[name] [7] x-y-1 ab-",
+        0,
+        "id id id id",
+        &[
+            "id \"name\" @6:1",
+            "tag \"7\" @10:1",
+            "id \"x-y-1\" @16:1",
+            "error AsnTextError { line: 1, message: \"unexpected end of the text\", kind: Eof, ncbi: None } refusal None @17:1",
+        ],
+    ),
+    (
+        b"{ 1, -2 ,3 }",
+        0,
+        "each",
+        &[
+            "each [1, -2, 3] @12:1",
+            "end refusal None @12:1",
+        ],
+    ),
+    (
+        b"{ 1\n 2 }",
+        0,
+        "each",
+        &[
+            "error AsnTextError { line: 2, message: \"',' or '}' expected\", kind: Format, ncbi: Some(Stream(ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1220, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::NextElement\") })) } refusal None @5:2",
+        ],
+    ),
+    (
+        b"{ a { 1, \"}\" }, -- } --\n b 'FF'H } 7",
+        0,
+        "skip int4",
+        &[
+            "error AsnTextError { line: 2, message: \"unexpected end of the text\", kind: Eof, ncbi: Some(WhiteSpaceEof) } refusal None @36:2",
+        ],
+    ),
+];
+
+/// `LITERAL_WALKS`: each walk is the same from the three sources and gives dev's steps. On a
+/// difference the message lists every walk as read.
+#[test]
+fn literal_walks() {
+    let mut read = String::new();
+    let mut differ = Vec::new();
+    for (k, &(text, mode, ops, expected)) in LITERAL_WALKS.iter().enumerate() {
+        let slice = literal_walk(SliceSource::new(text), mode, ops);
+        let first = text.len().min(1);
+        let blocks = literal_walk(StreamSource::new(&text[first..], &text[..first]), mode, ops);
+        assert_eq!(slice, blocks, "walk {k}: slice and stream differ");
+        let bytes = literal_walk(StreamSource::new(OneByte(text), &[]), mode, ops);
+        assert_eq!(slice, bytes, "walk {k}: slice and one byte per read differ");
+        if slice != expected {
+            differ.push(k);
+        }
+        read += &format!("walk {k}: {slice:?}\n");
+    }
+    assert!(differ.is_empty(), "walks {differ:?} differ; read:\n{read}");
 }

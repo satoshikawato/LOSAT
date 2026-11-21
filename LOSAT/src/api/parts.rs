@@ -146,7 +146,7 @@ impl Parts {
                 self.parts.len()
             ));
         }
-        let inputs = match (&self.pssm_query, inputs.pssm) {
+        let inputs = match (&self.pssm_query, inputs.query_file) {
             (Some(query), Some(_)) => Inputs {
                 query: std::slice::from_ref(query),
                 ..inputs

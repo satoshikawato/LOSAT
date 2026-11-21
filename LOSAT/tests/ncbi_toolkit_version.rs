@@ -56,9 +56,9 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs (the first line of the `-version-full` of each is `<program>: LOSAT <version>`:
-/// NCBI's is `<program>: 2.17.0+`, probes `vf`, and its XML and JSON `version_info` have NCBI's
+/// NCBI's is `<program>: 2.17.0+` (rpsbproc `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON `version_info` have NCBI's
 /// numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 14] = [
+const PROGRAMS: [(&str, &str); 15] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -73,6 +73,7 @@ const PROGRAMS: [(&str, &str); 14] = [
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
     ("convert2blastmask", "-out"),
+    ("makembindex", "-input"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -266,7 +267,12 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
     for (program, value_option) in PROGRAMS {
         let tool = matches!(
             program,
-            "makeblastdb" | "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "makeblastdb"
+                | "blastdbcmd"
+                | "dustmasker"
+                | "segmasker"
+                | "convert2blastmask"
+                | "makembindex"
         );
         for word in [
             "-version",

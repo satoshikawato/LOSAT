@@ -445,8 +445,11 @@ cd LOSAT && cargo fmt
   `c++/src/algo/blast/unit_tests/`.
 - Port the NCBI unit-test cases of a ported function one case at a time, inside the parity
   sweep of the module that owns it (rule 10). The test lives next to the implementation, in
-  its `#[cfg(test)]` module or a sibling `<name>_tests.rs` declared with
-  `#[cfg(test)] mod <name>_tests;`, with the line
+  a sibling `<stem>_tests.rs` declared with
+  `#[cfg(test)] #[path = "<stem>_tests.rs"] mod tests;` (no inline `#[cfg(test)] mod tests { ... }`
+  in a `LOSAT/src` file: the published crate would carry it, and crates.io takes 10 MiB;
+  `python3 LOSAT/tests/check_inline_test_modules.py --root . [--fix]` checks it and moves
+  such a module, `--fix` after merging a dev that has one), with the line
   `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
   above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).

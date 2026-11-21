@@ -124,7 +124,7 @@ def summary(files: dict[str, FileCoverage], src: Path, commit: str, shards: list
     out = ["### Coverage of LOSAT (report, not a gate)", ""]
     head = f"Commit {commit[:9]}; " if commit else ""
     out += [f"{head}shards: {', '.join(shards)}.", "",
-            "Test files are left out; inline `#[cfg(test)]` modules of `src` files are counted.", ""]
+            "Test files are left out, the unit tests of `src` files (sibling `*_tests.rs` files) among them.", ""]
     if any(not s.endswith(": success") for s in shards):
         out += ["A shard did not pass its tests or gave no report (see its log): the numbers "
                 "count the tests that ran.", ""]

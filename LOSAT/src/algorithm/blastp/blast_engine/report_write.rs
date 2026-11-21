@@ -142,6 +142,7 @@ pub(super) fn write_seqalign(
     warnings: &mut Option<QueryWarnings<'_>>,
 ) -> Result<()> {
     let ReportView {
+        args,
         ranges,
         query_records,
         query_lengths,
@@ -174,6 +175,7 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
+        !args.ungapped,
         hit_lists,
         &crate::report::record::QueryNames {
             records: query_records,
@@ -246,6 +248,7 @@ pub(super) fn write_archive(
     let spans = batch_spans();
     let call = archive::ArchiveCall {
         handle,
+        gapped: !args.ungapped,
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,
@@ -709,6 +712,7 @@ pub(super) fn write_pairwise(
         window_size: args.window_size as i32,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
+        gapped: !args.ungapped,
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
         // or the -num_descriptions / -num_alignments / -max_target_seqs values
         // (`ReportCounts`).

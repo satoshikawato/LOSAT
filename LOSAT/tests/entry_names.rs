@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 14] = [
+const PROGRAMS: [&str; 15] = [
     "blastn",
     "blastp",
     "blastx",
@@ -60,6 +60,7 @@ const PROGRAMS: [&str; 14] = [
     "dustmasker",
     "segmasker",
     "convert2blastmask",
+    "makembindex",
     "rpsbproc",
 ];
 
@@ -94,7 +95,7 @@ fn a_shim_prints_what_the_subcommand_prints() {
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: LOSAT 0.2.0`, where NCBI's
         // is `blastn: 2.17.0+`; rpsbproc, dustmasker and segmasker write LOSAT's too, where NCBI's
-        // are `rpsbproc: 0.5.1`, `dustmasker: 1.0.0`, `segmasker: 1.0.0`).
+        // are `rpsbproc: 0.5.1`, `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
         let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
@@ -280,7 +281,13 @@ fn top_level_help_names_every_program() {
         assert!(text.contains("\nDESCRIPTION\n"), "{text}");
         assert!(text.contains("losat -install-shims [DIR]"), "{text}");
         // An "Other programs" line has a description.
-        for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+        for program in [
+            "blastdbcmd",
+            "dustmasker",
+            "segmasker",
+            "convert2blastmask",
+            "makembindex",
+        ] {
             let line = text
                 .lines()
                 .find(|line| line.split_whitespace().next() == Some(program))

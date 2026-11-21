@@ -90,6 +90,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    filtering_db: str
+    """BLAST database containing filtering elements (i.e.: repeats)"""
     window_masker_taxid: int
     """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str

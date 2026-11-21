@@ -18,7 +18,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use crate::library_examples::example_binary;
-use crate::masker_fixtures::shell_words;
+use crate::masker_fixtures::{shell_words, take_variables};
 use crate::ncbi_windows_paths::ncbi_paths_on_windows;
 
 /// `tests/makembindex`.
@@ -31,6 +31,8 @@ struct Case {
     name: String,
     words: Vec<String>,
     stdin: Option<String>,
+    /// The variables of the row's first `NAME=value` words (`masker_fixtures::take_variables`).
+    variables: Vec<(String, String)>,
     /// Whether the row reads `gen/`.
     generated: bool,
     /// Whether the row reads `spill/`.
@@ -46,11 +48,13 @@ fn cases() -> Vec<Case> {
             continue;
         }
         let (name, arguments) = line.split_once('\t').unwrap_or((line, ""));
-        let (words, stdin) = shell_words(arguments);
+        let (mut words, stdin) = shell_words(arguments);
+        let variables = take_variables(&mut words);
         cases.push(Case {
             name: name.to_string(),
             words,
             stdin,
+            variables,
             generated: arguments.contains("gen/"),
             spill: arguments.contains("spill/"),
         });
@@ -297,6 +301,7 @@ fn run(binary: &Path, case: &Case, tag: &str) -> (Run, PathBuf) {
         None => Stdio::null(),
     };
     let output = command(binary, &dir)
+        .envs(case.variables.iter().map(|(name, value)| (name, value)))
         .arg("makembindex")
         .args(&case.words)
         .stdin(stdin)

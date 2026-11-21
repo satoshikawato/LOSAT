@@ -243,6 +243,19 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/fixtures/blastn_regression/inputs/s60k.fa -dbtype nucl -out tests/db_search/wm_s60k \
         -title "s60k Sakai 2000001-2060000 mutated" -blastdb_version 4
 
+`rpt_d4` (rows `db.rpt.*` and the `rpt.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`, line RG item D4:
+blastn `-filtering_db`) is a database of repeats: pieces of the queries of `wm_query.fa` (some with changed letters
+or indels, some reverse-complemented, two 4 and 7 letters apart) and 500 random letters, written by
+`tests/db_search/make_rpt_d4.py` (a fixed pseudo-random generator, Python 3 only; it also writes the queries
+`rpt_query_lc.fa` and `rpt_edge.fa` of `tests/fixtures/blastn_regression/inputs/`), with only `.nin .nsq .nhr` kept:
+
+    python3 -I tests/db_search/make_rpt_d4.py
+    makeblastdb -in tests/db_search/rpt_d4.fna -dbtype nucl -out tests/db_search/rpt_d4 \
+        -title "rpt_d4 repeats" -blastdb_version 4
+
+`rpt_d4_badcount.nal` (row `db.rpt.badcount.6`) is an alias file of `rpt_d4` whose `STATS_NSEQ` (`2e1`) NCBI cannot
+convert to a number, written by hand.
+
 `txrand.fna` (rows `db.cnt.l0txr.*` through `dbcounts/l0txr.nal`, review 6 R6-M1 of D1a-3): two subjects of 12,000 random
 nucleotides each, with two to five pieces of `tests/db_search/taxfilter/q.fna` (60-250 letters, 20-35 % of them changed,
 half reverse-complemented) written over them (records `g2_3_12000` and `g5_2_12000` of review 6's generator; a fixed
@@ -1270,6 +1283,20 @@ has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -p
 without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after the early termination test of their
 match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
 the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
+
+## Alias files with OIDLIST (line RG, series D, D1b-1)
+
+`oidlist/` (`make_oidlist.py`): alias files with `OIDLIST` over taxfilter's `tfp` (23 proteins) and `tfn` (two volumes of
+12 and 4 nucleotides), and their OID list files (the big-endian index of the last OID, then one bit per OID, the most
+significant bit first, set for a kept OID): `k.msk` keeps 12 OIDs of `tfp`, `n.msk` six OIDs of each volume of `tfn`
+(read relative to each volume), `h1.msk` and `h2.msk` the bits past the header's last OID and past the file's end,
+`wrap.msk` the last OID 0xFFFFFFFF (no OID), `hdr.msk` the header alone and `empty.msk` no byte. `p_k`, `p_kn` (with
+`NSEQ`), `p_kr` (with `FIRST_OID` and `LAST_OID`), `p_ku` (`p_k` and `aliaskeys/p_range` over one volume) and `n_n` make
+NCBI's constructor scan the kept OIDs; `p_knl`, `n_nnl` (with `NSEQ` and `LENGTH`) and `p_kpn` (`NSEQ` above `p_knl`)
+do not. `p_miss`, `p_missl`, `n_miss` and `n_missl` name the absolute path of a file that does not exist (NCBI's error
+prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and `p_dir` the directory `/`. The rows are
+`db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
+`olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 

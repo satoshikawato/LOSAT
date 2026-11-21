@@ -127,6 +127,13 @@ describe('buildArgv', () => {
     }
   });
 
+  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
+    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
+      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
+    }
+  });
+
   it("lists the database masks in the engine's options of the modes that have them (describe)", () => {
     const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
     for (const program of PROGRAMS) {

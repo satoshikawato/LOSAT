@@ -116,14 +116,16 @@ impl TblastnArgs {
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
         // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
-        // file (`strategy::open_strategy_file`), which an error after it leaves empty.
+        // file (`strategy::open_strategy_file`), which an error after it leaves empty; with it a
+        // value that does not parse is left to the formatting handler
+        // (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
             "TBLASTN",
         )?;
-        let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
+        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let format = choice.report_format(app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
         // The run's options handle, which its archive and its search strategy share.
@@ -140,7 +142,7 @@ impl TblastnArgs {
                 anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                     file,
                     super::archive::option_inputs(&args),
-                    choice.number,
+                    choice.number(),
                     crate::report::archive::strategy::HitlistArgs {
                         max_target_seqs: args.max_target_seqs,
                         num_descriptions: args.num_descriptions,
@@ -322,10 +324,10 @@ impl TblastnArgs {
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
-        let outfmt = if choice.delimiter.is_empty() {
-            choice.normalized()
-        } else {
-            args.outfmt.clone()
+        // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
+        let outfmt = match choice.parsed() {
+            Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
+            _ => args.outfmt.clone(),
         };
         let strategy = args.strategy.clone();
         let result = {
@@ -339,7 +341,7 @@ impl TblastnArgs {
                 &subject_placements,
                 x_subject_stores.as_deref(),
                 &mut outputs,
-                &choice,
+                choice,
                 settings,
             )
         };
@@ -517,7 +519,11 @@ fn report_stream(
     tax_report: bool,
 ) -> Result<crate::cli::ReportStream> {
     Ok(match io {
-        RunIo::Files => crate::cli::ReportStream::of_cli(open_out_file(args)?, tax_report),
+        RunIo::Files => crate::cli::ReportStream::of_cli(
+            open_out_file(args)?,
+            tax_report,
+            args.strategy.as_ref(),
+        ),
         RunIo::Memory { report, .. } => crate::cli::ReportStream {
             inner: Box::new(MemoryReport(report.clone())),
             failed: false,
@@ -668,13 +674,15 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
-    choice: &crate::blastinput::app::FormatChoice,
+    choice: crate::blastinput::app::EarlyFormat,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     use crate::blastinput::fasta_reader::{
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
+    // The options' handlers have read a value that the early reading left to them (`Deferred`).
+    let choice = &choice.at_formatting_handler(&args.outfmt)?;
     let joins_scope = resolved
         .pssm
         .as_deref()
@@ -793,7 +801,7 @@ fn search_cli(
 /// then the messages of NCBI's object manager about the query's annotations and its exception
 /// (`PsiSearch::write_annot_posts`, `annot_abort`), the formatter's set-up of the subjects (a
 /// subject without letters) and the XInclude formats without a file, as for a FASTA query
-/// (`before_prolog`, `xinclude_checks`).
+/// (`before_prolog`, `ReportOutputs::xinclude_check`).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
 /// `-parse_deflines` its ids join `scope`, the scope of the `-subject` records (`IdScope::
@@ -814,8 +822,14 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    for &outfmt in outfmts {
-        super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
+    // An XInclude format without a file name ends the run with NCBI's error before the search
+    // (`ReportOutputs::xinclude_check` below): LOSAT's refusals of the search's reports wait for it (NCBI
+    // 2.17.0, line RG F/d36 probes tbnp.o13, tbnp.o14: `Please provide a file name for outfmt
+    // 14.`).
+    if outputs.xinclude_check(args.out.as_deref()).is_ok() {
+        for &outfmt in outfmts {
+            super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
+        }
     }
     // The query record's refusal comes before any output, in a run that searches.
     let searches = psi.searches(args.strategy.is_some(), database.is_some());
@@ -838,7 +852,7 @@ fn search_pssm_query(
     )?;
     let mut resolved = resolved;
     resolve_db_mask(args, &mut resolved, database, outputs.diagnostics)?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.pssm_query(&records[0]);
     }
@@ -978,19 +992,6 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270 (cited at `search_cli`)
-/// The XInclude formats written without a file fail after the formatter is made (after
-/// `Query is Empty!` and `before_prolog`), as the command line's `-outfmt` (`search_cli`).
-fn xinclude_checks(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    for format in &outputs.formats {
-        crate::blastinput::app::xinclude_check_for(
-            &crate::blastinput::app::parse_formatting_string(format.outfmt)?,
-            format.side_out(out),
-        )?;
-    }
-    Ok(())
-}
-
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
 /// `FormatOutput::side_out`).
@@ -1000,7 +1001,8 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
-        // the XInclude formats without a file come after `Query is Empty!` (`xinclude_checks`).
+        // the XInclude formats without a file come after `Query is Empty!`
+        // (`ReportOutputs::xinclude_check`).
         if app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
         }
@@ -1101,7 +1103,7 @@ fn search_database(
     let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
     let mut resolved = resolved;
     resolve_db_mask(&args, &mut resolved, Some(&database), outputs.diagnostics)?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     search(
         &args,
         resolved,
@@ -1183,7 +1185,7 @@ fn run_local_formats(
     }
     // The caller owns the records: their letters are read in place.
     let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     search(
         &args,
         resolved,

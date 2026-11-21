@@ -284,15 +284,22 @@ fn display_counts_of_the_pairwise_report() {
     );
 }
 
-/// The side files of outfmt 13 and 14 without a file name are refused before anything is written.
+/// Outfmt 13 and 14 without a file name or a receiver of their side files end with NCBI's error
+/// before anything is written, as on the command line (`ReportOutputs::xinclude_check`; line RG
+/// F/d36 review 2).
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query));
     let subjects = subjects(&Inputs::path(&inputs.subject));
     let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &["14"], &[]);
-    let error = result.expect_err("refused");
-    assert!(error.to_string().contains("not supported in"), "{error}");
+    let error = result.expect_err("NCBI's error");
+    assert!(
+        error
+            .to_string()
+            .contains("Please provide a file name for outfmt 14."),
+        "{error}"
+    );
     assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
 }
 

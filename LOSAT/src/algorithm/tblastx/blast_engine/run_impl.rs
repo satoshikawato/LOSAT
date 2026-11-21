@@ -833,15 +833,17 @@ pub fn run(
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
-    // file (`strategy::open_strategy_file`), which an error after it leaves empty.
+    // file (`strategy::open_strategy_file`), which an error after it leaves empty; with it a
+    // value that does not parse is left to the formatting handler
+    // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         "TBLASTX",
     )?;
-    let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
-    let format = crate::blastinput::app::report_format(
-        &choice,
+    let choice =
+        crate::blastinput::app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let format = choice.report_format(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
     )?;
@@ -861,7 +863,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::super::archive::option_inputs(&args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -939,14 +941,14 @@ pub fn run(
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
-    let outfmt = if choice.delimiter.is_empty() {
-        choice.normalized()
-    } else {
-        args.outfmt.clone()
+    // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers (`search_cli`).
+    let outfmt = match choice.parsed() {
+        Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
+        _ => args.outfmt.clone(),
     };
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -1011,7 +1013,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -1136,7 +1138,7 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
 /// TBLASTX has no cutoff score option, so an `-evalue` of 0 (or one that reads as 0) fails.
 fn check_ncbi_options(
     args: &TblastxArgs,
-    choices: &[crate::blastinput::app::FormatChoice],
+    choices: &[crate::blastinput::app::EarlyFormat],
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
@@ -1154,12 +1156,14 @@ fn check_ncbi_options(
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
     // Each requested format's (the library's `-outfmt` values are its outputs', not `args.outfmt`).
+    let mut outfmts = Vec::with_capacity(choices.len());
     for choice in choices {
-        formatting_handler_check(choice, Program::Tblastx)?;
+        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        formatting_handler_check(&choice, Program::Tblastx)?;
+        outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
-    let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "tblastx",
         &outfmts,
@@ -1209,21 +1213,25 @@ fn check_ncbi_options(
     Ok((query_range, counts))
 }
 
-/// The `-outfmt` of the command line (`check_ncbi_options`).
-fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::FormatChoice; 1]> {
-    Ok([crate::blastinput::app::parse_formatting_string(
+/// The `-outfmt` of the command line (`check_ncbi_options`), as `app::early_format_choice` reads
+/// it: with a search strategy file a value that does not parse is `check_ncbi_options`' to
+/// reject, at its formatting handler.
+fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::EarlyFormat; 1]> {
+    Ok([crate::blastinput::app::early_format_choice(
         &args.outfmt,
+        args.strategy.is_some(),
     )?])
 }
 
 /// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`).
-fn output_choices(
-    outputs: &ReportOutputs<'_>,
-) -> Result<Vec<crate::blastinput::app::FormatChoice>> {
+fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
     outputs
         .formats
         .iter()
-        .map(|format| crate::blastinput::app::parse_formatting_string(format.outfmt))
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .map(crate::blastinput::app::EarlyFormat::Parsed)
+        })
         .collect()
 }
 
@@ -1611,15 +1619,11 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        let out = format.side_out(out);
-        if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
-            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-            app::xinclude_check_for(&choice, out)?;
-        } else {
-            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-        }
+        app::report_format(&choice, app::Program::Tblastx, format.side_out(out))?;
+        app::formatting_handler_check(&choice, app::Program::Tblastx)?;
     }
-    Ok(())
+    // The XInclude formats without a file, the one check of every program (`ReportOutputs`).
+    outputs.xinclude_check(out)
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options and the
@@ -2876,7 +2880,6 @@ fn run_in_pool(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batch_size: u32,
 ) -> Result<()> {
-    check_report_formats(outputs, args.out.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // What the run writes before its query batches ends here.
     if let Some(observer) = outputs.observer.as_deref_mut() {

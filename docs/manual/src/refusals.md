@@ -144,6 +144,7 @@ Strategy files:
 | :--- | :--- |
 | `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
+| `-gapopen` or `-gapextend` above 32767 with `-task megablast` | Refused. |
 | `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-filtering_db`, `-index_name` | Refused. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
@@ -499,8 +500,9 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | Refused. The error names the option. |
+| `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks` | Refused. The error names the option. |
 | `-input_type blastdb`, `asn1_txt`, `asn1_bin` | Refused. Only `fasta` works. |
+| An option value that is not UTF-8 (a `-title`, `-out` or `-metadata_output_prefix` of other bytes) | Refused. NCBI keeps the bytes. |
 | A FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps, whose sequence NCBI builds from all those letters | Refused. NCBI counts the length of a record in 32 bits, which wrap there. |
 | `[BLAST] LONG_SEQID`, or a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids` | Refused. They change which ids are parsed. |
 | `DIAG_*` variables and other `NCBI_CONFIG_*` entries outside the accepted list | Refused. |

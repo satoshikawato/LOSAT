@@ -115,8 +115,8 @@ jobs:
   # the artifact `coverage`. Instrumented, the tests ran 6.3 times as long as without (2026-11-07,
   # 3,403 tests, 8 test threads on a loaded 32-core machine), so they run in four shards; each
   # exports lcov and `coverage report` adds them (LOSAT/tests/coverage_summary.py). cargo-llvm-cov
-  # leaves out the test files (tests/, examples/, tests.rs, *_tests.rs) and build.rs; inline
-  # #[cfg(test)] modules of src files are counted. No threshold, and `continue-on-error` keeps a
+  # leaves out the test files (tests/, examples/, tests.rs, *_tests.rs) and build.rs; the unit
+  # tests of src files live in such sibling files (check_inline_test_modules.py). No threshold, and `continue-on-error` keeps a
   # failure of these jobs (a test, the tool) out of the run's conclusion, which job `dev` and the
   # release gates read; ci.yml's `rust-tests` is the gate for the tests. Not on main: the scheduled
   # run tests main, which moves only when a dev commit is promoted, after dev's nightly ran the

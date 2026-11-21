@@ -854,6 +854,7 @@ impl BlastpArgs {
                         .is_some_and(|pssm| pssm.out_ascii_pssm.is_some()),
                 },
                 pssm_reader,
+                diagnostics,
             )?),
             None => None,
         };

@@ -348,9 +348,12 @@ These refusals apply to every search program that reads databases.
 | Option or value | What happens |
 | :--- | :--- |
 | `-phi_pattern` | Refused: not yet supported. |
-| `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format | Refused: not yet supported. Only Clustal alignments are read. |
+| `-in_msa` with a PHYLIP header of 0 sequences, or an empty command (a lone `;`) in a NEXUS file | Refused. NCBI crashes (a division by zero, a null pointer). |
+| `-in_msa` with a FASTA alignment whose rows have different lengths, where a row that holds the query is shorter than the first row, or the first row has a letter past the end of a shorter row | Refused. NCBI swaps or reads the shorter row past its end, and its result depends on the memory allocator. Make the rows the same length. |
+| `-in_msa` with a `secondary-accession` range that runs backwards (`AB000003-AB000001`) or has a number of more than 18 digits | Refused. NCBI loops without end on a backwards range and reads the numbers into a 32-bit integer that overflows; LOSAT reads 64 bits, so a number past 2147483647 is written with its digits, where NCBI's build wraps it. A range of any length is answered. |
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
+| `-outfmt 0` with a PSSM query (`-in_pssm` or `-in_msa`) whose molecule type is `other` | Refused: not yet supported. NCBI runs it as a protein search and writes a line (`Sequence with id <id> no longer exists in database...alignment skipped`) in place of each alignment. The tabular formats are as NCBI's. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |
@@ -665,7 +668,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 - The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
 - `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
-- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format.
+- `psiblast -phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`.
 - `-html`.

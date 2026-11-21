@@ -342,11 +342,6 @@ impl IndexFile {
         }
     }
 
-    /// `m_Letters`: the residues or bases of the volume.
-    pub(crate) fn letters(&self) -> u64 {
-        self.letters
-    }
-
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:228-236
     // The subtraction is unsigned: a limit under 12 bytes wraps and always
     // fits.

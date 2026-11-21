@@ -419,6 +419,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           subjectBestHit,
+          { flag: '-best_hit_overhang', label: 'Best hit overhang', ...decimal },
+          { flag: '-best_hit_score_edge', label: 'Best hit score edge', ...decimal },
         ],
       },
     ],

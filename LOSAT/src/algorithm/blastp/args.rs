@@ -41,13 +41,17 @@ impl BlastpApp {
     /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
     /// (`options::RequestKind::application`, the one table of the names).
     pub fn ncbi_name(self) -> &'static str {
+        self.request_kind().application()
+    }
+
+    /// The app's NCBI application (`options::RequestKind`).
+    pub fn request_kind(self) -> crate::report::archive::options::RequestKind {
         use crate::report::archive::options::RequestKind;
         match self {
             BlastpApp::Blastp => RequestKind::Blastp,
             BlastpApp::Psiblast => RequestKind::Psiblast,
             BlastpApp::Rpsblast => RequestKind::Rpsblast,
         }
-        .application()
     }
 
     /// Whether the app's Seq-aligns come from traceback hit lists longer than `max_target_seqs`
@@ -181,6 +185,9 @@ pub struct BlastpArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
@@ -354,6 +361,13 @@ pub struct BlastpArgs {
     /// files). Not a public option.
     #[arg(skip)]
     pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
+    /// The settings by which the options' resolution looks up the file of an ungapped search's
+    /// `-matrix` that NCBI's tables do not have (`ResolvedBlastpArgs::matrix_file`): the command
+    /// line's own settings (`search_cli`, `search_database`) and, for a search of the library with
+    /// `-subject`, the call's (`api::run`, from its application start); `None` in LOSAT Web, which
+    /// has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
@@ -464,6 +478,12 @@ pub struct ResolvedBlastpArgs {
     pub show_gis: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
+    /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
+    /// series NP, M4b).
+    pub db_mask: Option<crate::blastinput::db_mask::DbMaskOption>,
+    /// The database masking as the formatter resolved it (`DbMaskOption::resolve`, in
+    /// `search`); `None` before, and for a search without it.
+    pub db_mask_resolved: Option<crate::blastinput::db_mask::ResolvedMask>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
     pub dbsize: i64,
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
@@ -471,6 +491,7 @@ pub struct ResolvedBlastpArgs {
     pub searchsp: Option<i64>,
     /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
     /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
+    /// An ungapped search has none either, whatever this says (`has_gumbel`).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -526,6 +547,17 @@ pub struct ResolvedBlastpArgs {
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
     pub matrix_name: String,
+    /// An ungapped search whose `-matrix` NCBI's tables do not have (`scoring.matrix` is then
+    /// BLOSUM62, which no search scores with): NCBI's set-up of the first query batch fails with
+    /// "Unknown error code -1" (`blastx/query_setup.rs` `unknown_matrix_message`,
+    /// `preliminary_search_error`).
+    pub unknown_matrix: bool,
+    /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found with the settings' search of
+    /// the call (`BlastpArgs::matrix_search`) where the options are resolved, so for every entry of
+    /// a search alike; `None` without such a file and in LOSAT Web. The first query batch is
+    /// refused then (`blastx::query_setup::matrix_error_message`).
+    pub matrix_file: Option<PathBuf>,
     pub scoring: ProteinScoringSpec,
     /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
     /// IDENTITY resets it (`identity_cbs_reset`; the archive records the value as given).
@@ -584,6 +616,16 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
+    /// Whether the search has a Gumbel block (the finite-size correction): not with `-searchsp`
+    /// or `OLD_FSC` (`old_fsc`), and not in an ungapped search, whose score block frees it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527 (cited at
+    /// `blast_engine::call_setup::gapped_block`) and c++/src/algo/blast/core/blast_stat.c:921-923
+    /// (cited at `ResolvedBlastpArgs::old_fsc`'s resolution, `BlastpArgs::check_options`)
+    pub fn has_gumbel(&self) -> bool {
+        !self.ungapped && !self.old_fsc
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:92-93
     /// The hit list size of the traceback (`hitParams->options->hitlist_size`: the heaps and the
@@ -646,6 +688,17 @@ impl BlastpArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedBlastpArgs::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped
+            && self
+                .matrix
+                .as_deref()
+                .is_some_and(|name| name.parse::<ScoringMatrix>().is_err())
     }
 
     /// The options as `check_options` resolves them, without NCBI's warnings.
@@ -801,6 +854,7 @@ impl BlastpArgs {
                         .is_some_and(|pssm| pssm.out_ascii_pssm.is_some()),
                 },
                 pssm_reader,
+                diagnostics,
             )?),
             None => None,
         };
@@ -874,23 +928,46 @@ impl BlastpArgs {
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
         })?;
+        // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (cited at
+        // `blastx::args::blastx_matrix`)
         // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
         // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
         // fails at the score block of the first query batch ("BLAST engine error: Error: Unknown
-        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3); LOSAT
-        // refuses every ungapped BLASTP search before that (`blast_engine.rs`
-        // `validate_requested_blastp_support`), so no search scores with the BLOSUM62 below. The
-        // port of `-ungapped` (series NP, O4) gives NCBI's error, as BLASTX does
-        // (`blastx/query_setup.rs` `unknown_matrix_message`).
-        let matrix = match options.matrix_name.parse::<ScoringMatrix>() {
-            Ok(matrix) => matrix,
-            Err(_) => {
-                debug_assert!(
-                    self.ungapped,
-                    "validate_protein_options refuses an unknown matrix of a gapped search"
+        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3): the search
+        // reads `unknown_matrix` (`blast_engine.rs` `run_call`), as BLASTX does
+        // (`blastx/query_setup.rs` `unknown_matrix_message`), so no search scores with the
+        // BLOSUM62 below. NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY
+        // without IDENTITY's statistics table (`IDENTITYX`, exit 139): LOSAT refuses it, as BLASTX
+        // does (`blastx::args`, ungapped searches only: a gapped one stops at NCBI's matrix error
+        // first).
+        let matrix = options.matrix_name.parse::<ScoringMatrix>().ok();
+        let unknown_matrix = matrix.is_none();
+        if unknown_matrix {
+            debug_assert!(
+                self.ungapped,
+                "validate_protein_options refuses an unknown matrix of a gapped search"
+            );
+            if options
+                .matrix_name
+                .get(..8)
+                .is_some_and(|start| start.eq_ignore_ascii_case("identity"))
+            {
+                bail!(
+                    "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP",
+                    options.matrix_name
                 );
-                ScoringMatrix::Blosum62
             }
+        }
+        let matrix = matrix.unwrap_or(ScoringMatrix::Blosum62);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (cited at
+        // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+        // The file that NCBI reads for that name, looked up with the settings' search where every
+        // entry of a search resolves the options (`matrix_search`).
+        let matrix_file = match (&self.matrix_search, unknown_matrix) {
+            (Some(search), true) => search
+                .file(&options.matrix_name)
+                .map_err(anyhow::Error::msg)?,
+            _ => None,
         };
         let psi_pssm = self
             .psiblast_pssm
@@ -916,6 +993,8 @@ impl BlastpArgs {
                 .as_deref()
                 .map(crate::seqdb::db_argument_name)
                 .map(str::to_string),
+            db_mask: self.db_mask.option(),
+            db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
             // The options start with a database length of 0
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
@@ -967,6 +1046,8 @@ impl BlastpArgs {
             sum_stats: self.sum_stats,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
+            unknown_matrix,
+            matrix_file,
             scoring: ProteinScoringSpec {
                 matrix,
                 gap_open: options.gap_open,

@@ -26,7 +26,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 - **Query.** `-query` takes a protein FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you.
 - **Subject.** `-subject` takes a protein FASTA file in the same forms. LOSAT compares each query with each record, with no database to build first.
 - **Database.** `-db` searches a protein BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded databases such as `swissprot`. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data` (see [Masks](../databases.md#masks)).
 - **Locations.** `-query_loc START-STOP` searches part of the query, and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are 1-based and inclusive.
 - **Masking.** SEG is off by default (`-seg yes` or `-seg "WINDOW LOCUT HICUT"` turns it on). `-lcase_masking` treats lower-case letters of the query as masked.
 
@@ -48,6 +48,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3. A `u` or `U` after a mode other than 0 (`2u`) also combines each e-value with a P-value of the two sequences' compositions (unified P-values) |
 | `-use_sw_tback` | off | Align the final results again with Smith-Waterman (with `-comp_based_stats` 1 to 3) |
+| `-ungapped` | off | Search without gapped extension: report the ungapped alignments (with `-comp_based_stats 0`) |
 | `-seg` | `no` | Low-complexity filter |
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
@@ -86,13 +87,15 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`, and `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`).
+- `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`), and with `-ungapped`.
+- With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
+- With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
 - A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
-- `-db_soft_mask` and `-db_hard_mask`.
+- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 
 ## Examples
 

@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::pct::{apply_pct, PctSettings};
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str;
@@ -304,17 +305,41 @@ impl UnitCounts {
     /// `CSeqMaskerIstatFactory::create` for the two formats blastn accepts.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:317-340
-    /// The `-t_*_pct` settings of the windowmasker application are not ported (blastn passes
-    /// -1, `seq_masker.hpp:178-181`).
+    /// blastn passes no `-t_*_pct` setting (-1 each, `seq_masker.hpp:178-181`); the
+    /// windowmasker application's are [`UnitCounts::open_with_pct`].
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        let name = crate::utils::os_bytes::path_bytes(path).into_owned();
-        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
-        Self::read(&mut file, params)
+        Self::open_with_pct(path, params, &PctSettings::default(), &mut |_| {})
     }
 
     /// [`UnitCounts::open`] on an opened file or an in-memory copy of one.
     pub fn read<R: Read + Seek>(r: &mut R, params: &MaskerParams) -> Result<Self, WinMaskError> {
+        Self::read_with_pct(r, params, &PctSettings::default(), &mut |_| {})
+    }
+
+    /// [`UnitCounts::open`] with the windowmasker application's `-t_*_pct` settings `pct`
+    /// (`pct::apply_pct`); `warn` gets the warning that NCBI posts, at once, when the file has
+    /// no percentages.
+    pub fn open_with_pct(
+        path: &Path,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
+        let name = crate::utils::os_bytes::path_bytes(path).into_owned();
+        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
+        Self::read_with_pct(&mut file, params, pct, warn)
+    }
+
+    /// [`UnitCounts::open_with_pct`] on an opened file or an in-memory copy of one.
+    pub fn read_with_pct<R: Read + Seek>(
+        r: &mut R,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
         let found = discover(r)?;
+        check_pct_lines(&found.metadata, found.stat_type)?;
+        let params = &apply_pct(params, &found.metadata, found.stat_type, pct, warn)?;
         let mut counts = Self {
             unit_size: 0,
             threshold: params.cutoff_score,
@@ -331,7 +356,6 @@ impl UnitCounts {
             metadata: found.metadata,
             warnings: Vec::new(),
         };
-        check_pct_lines(&counts.metadata, found.stat_type)?;
         let start_line = counts.metadata.len();
         match found.stat_type {
             StatType::OBinary => counts.read_obinary(r, found.skip)?,
@@ -711,10 +735,9 @@ impl UnitCounts {
         }
         let mut entries = Vec::new();
         if datalen > 0 {
-            let words = s
-                .read_u32s(datalen as u64 / 4)
+            entries = s
+                .read_u32_pairs(datalen as u64 / 8)
                 .ok_or_else(|| WinMaskError::format(FormatSite::BinLength))?;
-            entries = words.chunks_exact(2).map(|e| (e[0], e[1])).collect();
         }
         s.read_into(&mut data);
         let t_low = data;
@@ -1007,33 +1030,33 @@ impl<R: Read> Stream<'_, R> {
     /// `is.read( (char *)array, n*sizeof( Uint4 ) )` into a new array; `None` when the read
     /// fails (checked against the file's length before the array is allocated).
     fn read_u32s(&mut self, n: u64) -> Option<Vec<u32>> {
-        let bytes = n.checked_mul(4)?;
-        if self.failed || bytes > self.left {
-            self.failed = true;
-            self.left = 0;
-            return None;
-        }
-        let mut out = Vec::with_capacity(n as usize);
-        let mut buf = vec![0u8; 1 << 16];
-        let mut todo = bytes as usize;
-        while todo > 0 {
-            let take = todo.min(buf.len());
-            if self.read(&mut buf[..take]) < take {
-                return None;
-            }
-            out.extend(
-                buf[..take]
-                    .chunks_exact(4)
-                    .map(|w| u32::from_ne_bytes([w[0], w[1], w[2], w[3]])),
-            );
-            todo -= take;
-        }
-        Some(out)
+        self.read_array(n, u32::from_ne_bytes)
     }
 
     /// `is.read( (char *)array, n*sizeof( Uint2 ) )` into a new array; `None` when it fails.
     fn read_u16s(&mut self, n: u64) -> Option<Vec<u16>> {
-        let bytes = n.checked_mul(2)?;
+        self.read_array(n, u16::from_ne_bytes)
+    }
+
+    /// `n` pairs of words (unit, count), each pair read into its entry at once.
+    fn read_u32_pairs(&mut self, n: u64) -> Option<Vec<(u32, u32)>> {
+        self.read_array(n, |pair: [u8; 8]| {
+            let [a, b, c, d, e, f, g, h] = pair;
+            (
+                u32::from_ne_bytes([a, b, c, d]),
+                u32::from_ne_bytes([e, f, g, h]),
+            )
+        })
+    }
+
+    /// `n` values of `W` bytes each, the vector of exactly `n` filled through a block
+    /// buffer; `None` (the stream failed) when the file has fewer bytes.
+    fn read_array<T, const W: usize>(
+        &mut self,
+        n: u64,
+        value: impl Fn([u8; W]) -> T,
+    ) -> Option<Vec<T>> {
+        let bytes = n.checked_mul(W as u64)?;
         if self.failed || bytes > self.left {
             self.failed = true;
             self.left = 0;
@@ -1043,14 +1066,14 @@ impl<R: Read> Stream<'_, R> {
         let mut buf = vec![0u8; 1 << 16];
         let mut todo = bytes as usize;
         while todo > 0 {
-            let take = todo.min(buf.len());
+            let take = todo.min(buf.len() / W * W);
             if self.read(&mut buf[..take]) < take {
                 return None;
             }
             out.extend(
                 buf[..take]
-                    .chunks_exact(2)
-                    .map(|w| u16::from_ne_bytes([w[0], w[1]])),
+                    .chunks_exact(W)
+                    .map(|w| value(w.try_into().expect("a chunk of W bytes"))),
             );
             todo -= take;
         }
@@ -1063,7 +1086,7 @@ impl<R: Read> Stream<'_, R> {
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
 /// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
-/// are used only by the application's `-t_*_pct` settings, which are not ported.
+/// are used only by the application's `-t_*_pct` settings (`pct::apply_pct`).
 fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
     let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let short = match stat_type {

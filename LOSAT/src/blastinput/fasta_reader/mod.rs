@@ -126,6 +126,35 @@ impl ReaderConfig {
     }
 }
 
+/// The longest record that LOSAT reads, gaps included: NCBI keeps positions in `TSeqPos` (32
+/// bits) and BLAST's sequence lengths in `Int4`.
+pub const MAX_RECORD_LETTERS: u64 = i32::MAX as u64;
+
+/// LOSAT's refusal of a record longer than [`MAX_RECORD_LETTERS`] letters, which the reader of
+/// `config` gives as it reads one (`FastaReader::check_length`) and LOSAT Web's index scan as it
+/// scans one (`web/adapter/src/scan/ncbi.rs`, which cannot read such a record into the reader).
+pub fn record_too_long(config: &ReaderConfig) -> ReadError {
+    ReadError::Unsupported(anyhow::anyhow!(
+        "a {} record longer than {MAX_RECORD_LETTERS} letters is not supported by LOSAT's {}",
+        config.role,
+        config.program
+    ))
+}
+
+/// The letters of the gap line `line` (`>?` and what follows on its line, after NCBI's
+/// `TruncateSpaces` and its change of `>?_` into `>`): the run of `N` or `X` that the reader puts
+/// in the record for it (`FastaReader::parse_gap_line`, `reader::gap_line_size`), without the
+/// line's warnings; `None` for a line that does not start with `>?`. LOSAT Web's index scan
+/// counts a gap line's letters with it, so that its lengths are the reader's
+/// (`web/adapter/src/scan/ncbi.rs`).
+pub fn gap_line_letters(line: &[u8]) -> Option<u32> {
+    if !line.starts_with(b">?") {
+        return None;
+    }
+    // Only the warnings can fail, and these are dropped.
+    reader::gap_line_size(line, 0, &mut |_| Ok(())).ok()
+}
+
 /// The parts of a record that only the BLAST archive writes.
 ///
 /// NCBI keeps the defline line as read in the Bioseq's `CFastaReader` user object, and the

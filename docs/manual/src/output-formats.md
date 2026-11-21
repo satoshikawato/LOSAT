@@ -37,7 +37,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `rpsblast` writes `0`, `5`, `6`, `7`, `10` and `11`; `rpstblastn` writes `0` to `7`, `10` and `11`.
 - `tblastn` with `-in_pssm` writes `0` to `4`, `6`, `7` and `10`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 
@@ -73,6 +73,8 @@ To change the separator, add `delim=` right after the number (before the field n
 ```bash
 losat blastn -query query.fna -subject genome.fna -outfmt "10 delim=@ qacc sacc score"
 ```
+
+As in NCBI BLAST+, `psiblast`, `rpsblast` and `rpstblastn` read and check `delim=` but keep the tab or comma. In every program, a separator that a listed field uses between its entries (`;` with `sallseqid`, `staxids`, `sscinames`, `scomnames`, `sblastnames` or `sskingdoms`, `/` with `frames`, `<>` with `salltitles`) gets NCBI's error.
 
 LOSAT ignores a word that is not a field name; a list with no known field gives the default columns.
 

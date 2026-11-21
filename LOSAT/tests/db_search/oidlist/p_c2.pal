@@ -1,0 +1,4 @@
+TITLE oidlist c2
+DBLIST ../taxfilter/tfp
+FIRST_OID 8
+LAST_OID 10

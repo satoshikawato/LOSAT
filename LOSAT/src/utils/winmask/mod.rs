@@ -116,11 +116,6 @@ pub enum WinMaskError {
     PctLine { line: String, why: PctWhy },
 }
 
-// The masker's count lookup (`UnitCounts::at`, for every unit of every window of blastn
-// `-window_masker_db`) returns `Result<u32, WinMaskError>`: a larger error makes every lookup
-// return a larger value and cost instructions (a 16-byte field here cost 0.16 %).
-const _: () = assert!(std::mem::size_of::<WinMaskError>() <= 32);
-
 impl WinMaskError {
     pub(crate) fn format(site: FormatSite) -> Self {
         Self::Format {

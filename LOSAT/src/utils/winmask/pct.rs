@@ -35,9 +35,11 @@ fn count_by_pct(pct: f64, count_map: &[f64]) -> u32 {
         .unwrap_or(count_map.len() - 1) as u32
 }
 
-/// Why LOSAT refuses a `##pct:` line. One byte, so that `WinMaskError` stays as small as the
-/// `Result` of the masker's count lookup (`UnitCounts::at`) needs: a `&'static str` here made
-/// every lookup of blastn `-window_masker_db` return a larger value.
+/// Why LOSAT refuses a `##pct:` line. One byte: with a `&'static str` here `PctLine` became the
+/// largest variant of `WinMaskError`, whose discriminant then moved into a niche of its `String`,
+/// so that every `Ok` of the masker's count lookup (`UnitCounts::at`, for each unit of each window
+/// of blastn `-window_masker_db`) was written and tested as a 64-bit constant instead of a tag
+/// byte: +0.16 % instructions in blastn with binary counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PctWhy {
     /// Its words are numbers that C++ libraries read differently.

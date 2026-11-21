@@ -1062,6 +1062,20 @@ impl ListedTitles<'_> {
         scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
         described: impl FnMut(usize) -> Result<Vec<u32>>,
     ) -> Result<()> {
+        self.refuse_generated_ids(hit_lists, &scope_of, shared::QUERY_ANCHORED_EFFECT)?;
+        self.refuse_display_ids(hit_lists, scope_of, true, described)
+    }
+
+    /// The Seq-align ids of the final hit lists `hit_lists` that are the generated id of a query
+    /// of the batch that reports them (`scope_of`, `refuse_generated_query_ids`), refused with
+    /// `effect` (what NCBI does with them in the formats asked for, `shared::XML_EFFECT` for
+    /// rpsblast's BLAST XML).
+    pub(super) fn refuse_generated_ids<'s>(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scope_of: &impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+        effect: &str,
+    ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
         }
@@ -1080,10 +1094,11 @@ impl ListedTitles<'_> {
                     self.oids.oid(self.listed.ordinals[rank]),
                     scope_of(query),
                     self.program,
+                    effect,
                 )?;
             }
         }
-        self.refuse_display_ids(hit_lists, scope_of, true, described)
+        Ok(())
     }
 
     /// With `-parse_deflines` (or a PSSM query shown with its ids) and a description table

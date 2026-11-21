@@ -177,7 +177,12 @@ fn query_stats(
     XmlStats {
         hsp_len: parameters.length_adjustment,
         eff_space: parameters.search_space,
-        kappa: karlin.k,
+        // RPSTBLASTN's footer K of a batch's first query (`BatchResults::gapped_k`, 1.2 times the
+        // profile's) is the XML's `Statistics_kappa` too: one `kbp_gap` block per query.
+        kappa: match &batch.gapped_k {
+            Some(gapped_k) if gapped => gapped_k[qidx],
+            _ => karlin.k,
+        },
         lambda: karlin.lambda,
         entropy: karlin.h,
     }
@@ -867,19 +872,27 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
 fn query_text(
+    program: &str,
     query: &FastaRecord,
     search_skipped: bool,
     filtered_empty: bool,
     has_hits: bool,
+    merged_volumes: bool,
 ) -> Result<QueryText> {
+    // RPSTBLASTN's results of several volumes keep no warning (`report::query_warning`).
+    let messages = if merged_volumes {
+        Vec::new()
+    } else {
+        query_messages(query, search_skipped, filtered_empty)
+    };
     names::query_text(
-        PROGRAM,
+        program,
         query.internal_id.as_bytes(),
         query.warning_id(),
         query.believed(),
         &query.title,
         false,
-        &query_messages(query, search_skipped, filtered_empty),
+        &messages,
         has_hits,
     )
     .map_err(|error| anyhow::Error::new(XmlRefusal(error.to_string())))
@@ -1045,7 +1058,15 @@ pub(super) fn scan_queries(
             check?;
         }
         for (index, query) in batch.iter().enumerate() {
-            let check = query_text(query, false, false, true).map(drop);
+            let check = query_text(
+                options.program().upper,
+                query,
+                false,
+                false,
+                true,
+                options.merged_volumes(),
+            )
+            .map(drop);
             if holds_back && index + 1 == batch.len() {
                 held = Some(check);
             } else {
@@ -1249,8 +1270,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         options.soft_masking,
     );
     let run = XmlRun {
-        program: "blastx",
-        version: concat!("BLASTX ", crate::ncbi_blast_version!()),
+        program: options.program().lower,
+        version: &format!(
+            "{} {}",
+            options.program().upper,
+            crate::ncbi_blast_version!()
+        ),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: &db_name,
         matrix: Some(&options.matrix),
@@ -1288,6 +1313,31 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Database { reported, .. } => reported.loads(),
         ShownSubjects::Fasta { .. } => &every_loaded,
     };
+    // RPSTBLASTN: an entry of the profile database whose Seq-align id is the generated id
+    // (`lcl|Query_N`) of a query of the batch that reports it is that query for NCBI's scope: its
+    // Seq-align conversion raises an exception after half a document. Refused before the reports
+    // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
+    // (`common::database::refuse_generated_query_id`).
+    let generated_scopes = match shown {
+        ShownSubjects::Database { .. } if options.rpstblastn.is_some() => {
+            let ids: Vec<(
+                &str,
+                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+            )> = queries
+                .iter()
+                .map(|query| (query.internal_id.as_str(), query.believed()))
+                .collect();
+            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+                &ids,
+                batches
+                    .iter()
+                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+                    .collect(),
+            );
+            scopes.generated().then_some(scopes)
+        }
+        _ => None,
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
     // Every document writes the lists of each query that the cut to the hit list size keeps
@@ -1300,13 +1350,34 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 break;
             }
             let lists = batch.shown_lists(qidx, options);
+            if let (
+                Some(scopes),
+                ShownSubjects::Database {
+                    reported: names, ..
+                },
+            ) = (&generated_scopes, shown)
+            {
+                for list in lists.iter().filter(|list| reported(list, options.gapped)) {
+                    if let Some(subject) = names.parsed_subject(list.oid) {
+                        crate::algorithm::common::database::refuse_generated_query_id(
+                            subject,
+                            names.oid(list.oid),
+                            scopes.of_query(batch.query_ordinal + qidx),
+                            options.program().upper,
+                            crate::algorithm::common::database::XML_EFFECT,
+                        )?;
+                    }
+                }
+            }
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
+                options.program().upper,
                 query,
                 batch.search_skipped,
                 options.filtered_empty,
                 has_hits,
+                options.merged_volumes(),
             )?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if let std::collections::hash_map::Entry::Vacant(slot) =

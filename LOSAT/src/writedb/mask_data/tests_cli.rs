@@ -191,7 +191,12 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
 
         let run = run_words(&words, &date, &[&dir, &seqdb]);
         assert_eq!(run.status, rc, "{name}: exit status\n{}", run.stderr);
-        assert_eq!(run.stderr, stderr, "{name}: standard error");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            run.stderr,
+            crate::wording::losat_text(&stderr),
+            "{name}: standard error"
+        );
         assert_eq!(run.stdout, stdout, "{name}: standard output");
         if rc == 0 {
             built += 1;
@@ -307,46 +312,23 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
                 "{file}: files left behind: {left:?}"
             );
         };
-        match class {
-            Class::UnknownEncoding | Class::NoDatabase | Class::Equal => {
-                assert_eq!(run.status, ncbi.rc, "{context}");
-                assert_eq!(run.stderr, ncbi.stderr, "{file}: standard error");
-                assert_eq!(run.stdout, logs[file], "{file}: standard output");
-                if run.status == 0 && class == Class::Equal {
-                    compared += assert_database(&base, protein, file, ncbi);
-                } else {
-                    no_files();
-                }
-            }
-            Class::Serial | Class::OutOfMemory => {
-                assert_eq!(run.status, 255, "{context}");
-                assert!(
-                    run.stderr
-                        .starts_with(&format!("Error: mask data in '{file}': ")),
-                    "{context}"
-                );
-                assert_eq!(
-                    run.stderr.ends_with(DESTRUCTOR_MESSAGE),
-                    ncbi.stderr.ends_with(DESTRUCTOR_MESSAGE),
-                    "{file}: the message of the destructor"
-                );
-                assert_eq!(run.stdout, logs[file], "{file}: standard output");
-                no_files();
-            }
-            Class::Unsupported => {
-                assert_eq!(run.status, 1, "{context}");
-                assert!(
-                    run.stderr
-                        .starts_with("losat makeblastdb: mask data that LOSAT does not read: "),
-                    "{context}"
-                );
-                no_files();
-            }
+        assert_eq!(run.status, ncbi.rc, "{context}");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            run.stderr,
+            crate::wording::losat_text(&ncbi.stderr),
+            "{file}: standard error"
+        );
+        assert_eq!(run.stdout, logs[file], "{file}: standard output");
+        if run.status == 0 && class == Class::Read {
+            compared += assert_database(&base, protein, file, ncbi);
+        } else {
+            no_files();
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Equal"], 109);
-    assert_eq!(classes.values().sum::<usize>(), 162);
+    assert_eq!(classes["Read"], 149);
+    assert_eq!(classes.values().sum::<usize>(), 223);
 }
 
 #[test]
@@ -484,7 +466,11 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
                 refused += 1;
             } else {
                 assert_eq!(format!("{}\n", run.status), expected("rc"), "{context}");
-                assert_eq!(run.stderr, expected("stderr"), "{stem}: standard error");
+                assert_eq!(
+                    run.stderr,
+                    crate::wording::losat_text(&expected("stderr")),
+                    "{stem}: standard error"
+                );
                 assert_eq!(left, expected("files"), "{stem}: files left");
                 compared += 1;
             }
@@ -510,7 +496,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             None,
             None,
             1,
-            "BLAST options error: mask_data option found, but no files were specified.\n".into(),
+            "LOSAT options error: mask_data option found, but no files were specified.\n".into(),
             vec![],
         ),
         (
@@ -534,7 +520,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("5"),
             None,
             1,
-            "BLAST options error: mask_id can not be numeric.\n".into(),
+            "LOSAT options error: mask_id can not be numeric.\n".into(),
             vec![],
         ),
         (
@@ -542,7 +528,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("a"),
             None,
             1,
-            "BLAST options error: the size of mask_id does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_id does not match that of mask_data.\n".into(),
             vec![],
         ),
         (
@@ -550,7 +536,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("a"),
             Some("x,y"),
             1,
-            "BLAST options error: the size of mask_desc does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_desc does not match that of mask_data.\n".into(),
             vec![],
         ),
         (
@@ -558,7 +544,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             None,
             None,
             1,
-            "BLAST options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
+            "LOSAT options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
             vec![],
         ),
         (

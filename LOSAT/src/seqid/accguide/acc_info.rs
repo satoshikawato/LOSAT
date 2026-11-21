@@ -2,43 +2,10 @@
 //! (`sc_AccInfoArray`).
 //!
 //! NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:246-260,262-303,305-318
-//! ```c++
-//!         // Mask for Seq_id type; allow 8 bits to be safe
-//!         eAcc_type_mask = 0xff,
-//!
-//!         // Useful general flags (not inherent in choice of division,
-//!         // albeit not necessarily applicable to all divisions).
-//!         fAcc_nuc       = 0x80000000,
-//!         fAcc_prot      = 0x40000000,
-//!         fAcc_seq       = 0,
-//!         fAcc_predicted = 0x20000000, // only for refseq
-//!         fAcc_specials  = 0x10000000, // has special cases; only used internally
-//!         fAcc_master    = 0x08000000,
-//!         fAcc_ncbo      = 0x04000000, // for refseq pathogen detection pipeline
-//!         fAcc_fallback  = 0x02000000, // is a fallback; only used internally
-//!         fAcc_vdb_only  = 0x01000000,
-//!         eAcc_flag_mask = 0xff000000,
-//!
-//!         // Divisions and categories (multiples of 1 << 8; always
-//!         // globally unique nowadays, no matter how specialized)
-//!         eAcc_other         =   0 << 8, // no further classification
-//!         eAcc_est           =   1 << 8, // expressed sequence tag (mRNA)
-//!         ...
-//!         eAcc_targeted      = 139 << 8, // targeted genomic project
-//!         eAcc_division_mask = 0xff00,
-//!
-//!         // Internal values combinining a division and a flag for convenience.
-//!         eAcc_wgs_master          = eAcc_wgs          | fAcc_master,
-//!         ...
-//!         eAcc_targeted_vdb_master = eAcc_targeted | fAcc_master | fAcc_vdb_only,
-//!
-//!         // Internal macro, left defined only temporarily
-//! #define NCBI_ACC(type, div, mol) eSeqId_##type | eAcc_##div | fAcc_##mol
-//! ```
 //! The values of the table below are the enumerators of Seq_id.hpp:323-541 written with
 //! that macro (`acc`), each under its name in `sc_AccInfoArray` (Seq_id.cpp:646-860).
 
-// NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id_.hpp (generated from
+// NCBI reference (598d8ae6): datatool's include/objects/seqloc/Seq_id_.hpp (generated from
 // seqloc.asn:24-45): `E_Choice` = 0 for `e_not_set`, then 1 + the position of the
 // alternative (`e_Local` 1 ... `e_Named_annot_track` 20); `eSeqId_<type>` = `e_<Type>`
 // (Seq_id.hpp:221-244, `eSeqId_refseq` = `eSeqId_other`).
@@ -148,19 +115,6 @@ pub const GI: u32 = acc(SEQID_GI, OTHER, SEQ);
 /// binary search).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:645-651,856-864
-/// ```c++
-/// typedef SStaticPair<const char*, CSeq_id::EAccessionInfo> TAccInfoMapEntry;
-/// // used for binary searching; must be in order.
-/// static const TAccInfoMapEntry sc_AccInfoArray[] = {
-///     { "ambiguous_nuc",           CSeq_id::eAcc_ambiguous_nuc },
-///     { "ddbj_con",                CSeq_id::eAcc_ddbj_con },
-///     ...
-///     { "unreserved_prot",         CSeq_id::eAcc_unreserved_prot }
-/// };
-/// typedef CStaticPairArrayMap<CTempString, CSeq_id::EAccessionInfo,
-///                             PNocase_Generic<CTempString> > TAccInfoMap;
-/// DEFINE_STATIC_ARRAY_MAP_WITH_COPY(TAccInfoMap, sc_AccInfoMap, sc_AccInfoArray);
-/// ```
 pub(super) const ACC_INFO_NAMES: [(&str, u32); 213] = [
     ("ambiguous_nuc", acc(SEQID_NOT_SET, AMBIG, NUC)),
     ("ddbj_con", acc(SEQID_DDBJ, CON, NUC)),
@@ -426,19 +380,5 @@ pub(super) fn find_acc_info(name: &[u8]) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_names_are_in_order_and_the_values_are_ncbi_s() {
-        assert!(ACC_INFO_NAMES.windows(2).all(|pair| pair[0].0 < pair[1].0));
-        // Values of the enumerators (NCBI_ACC of Seq_id.hpp).
-        assert_eq!(find_acc_info(b"gb_prot"), Some(0x4000_0005));
-        assert_eq!(find_acc_info(b"REFSEQ_PROT_PREDICTED"), Some(0x6000_000a));
-        assert_eq!(find_acc_info(b"refseq_chromosome"), Some(0x8000_850a));
-        assert_eq!(find_acc_info(b"gb_wgsvm_nuc"), Some(0x8900_8305));
-        assert_eq!(find_acc_info(b"pdb"), Some(15));
-        assert_eq!(find_acc_info(b"unknown"), Some(UNKNOWN));
-        assert_eq!(find_acc_info(b"no_such_type"), None);
-    }
-}
+#[path = "acc_info_tests.rs"]
+mod tests;

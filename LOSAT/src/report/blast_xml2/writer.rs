@@ -2,16 +2,6 @@
 //! `Encoder`, one report per query, and `Xml2Writer`, which frames the reports (`framing`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:678-686
-//! ```c++
-//! 	blastxml2::CResults & results = report.SetResults();
-//! 	if(data->IsBl2seq()) {
-//! 		list<CRef<blastxml2::CSearch> > & bl2seq = results.SetBl2seq();
-//! 		for(int i=0; i < data->GetNumOfSearchResults(); i++ ) {
-//! 			CRef<blastxml2::CSearch>  search (new blastxml2::CSearch);
-//! 			s_SetBlastXMLSearch(*search, data, i);
-//! 			bl2seq.push_back(search);
-//! 		}
-//! ```
 //! A report is the `BlastOutput2` object of one query: the program, version and reference, the
 //! target (the `-db` name or the `Subject_N` list), the parameters and the results (one
 //! `Search`; a `-subject` search's is the one element of `bl2seq`).
@@ -36,12 +26,6 @@ use super::records::{Xml2Run, Xml2Target};
 /// search, the filter, the composition-based statistics and the genetic codes.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:531-535
-/// ```c++
-///     if(data->IsGappedSearch()) {
-///     	params.SetGap_open(data->GetGapOpeningCost());
-///     	params.SetGap_extend(data->GetGapExtensionCost());
-///     }
-/// ```
 fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run) {
     enc.member("params", 4);
     enc.begin_sequence("Parameters");
@@ -81,12 +65,6 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run)
 /// sequence and letter counts only for `-db`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:565-568
-/// ```c++
-/// 	if(!data->IsBl2seq()) {
-///     	stats.SetDb_num(data->GetDbNumSeqs());
-///     	stats.SetDb_len(data->GetDbLength());
-/// 	}
-/// ```
 fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run, stats: &XmlStats) {
     enc.member("stat", 5);
     enc.begin_sequence("Statistics");
@@ -131,7 +109,7 @@ where
 {
     enc.begin_sequence("Search");
     string_member(enc, "query-id", 0, query.id);
-    // `if(q_title != kEmptyStr) search.SetQuery_title(q_title);`
+    // NCBI sets the query title only when it is not empty.
     if !query.title.is_empty() {
         string_member(enc, "query-title", 1, query.title);
     }
@@ -210,13 +188,6 @@ where
     enc.member("search-target", 3);
     match params.target {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:157-169
-        // ```c++
-        // 	ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbsInfo) {
-        // 		if(i != dbsInfo.begin()) {
-        // 			m_DbName += " " ;
-        // 		}
-        // 		m_DbName += i->name;
-        // ```
         // `i->name` is each name of the `-db` list as the reports open it alone
         // (`seqdb::alias::report_names`): quotes kept, one space between names.
         Xml2Target::Database => {
@@ -474,20 +445,6 @@ pub(super) fn is_string_element(tag: &[u8]) -> bool {
 /// out), and the run goes on; outfmt 14 does not catch it (`MadeReport::ends_run`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:749-766
-/// ```c++
-/// void
-/// BlastXML2_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream)
-/// {
-/// 	blastxml2::CBlastOutput2 bxmlout;
-/// 	try {
-/// 		s_FillBlastOutput(bxmlout, data);
-/// 		s_WriteXML2ObjectNoHeader(bxmlout, out_stream);
-/// 	}
-/// 	catch(CException &e){
-/// 	    ERR_POST(Error << e.GetMsg() << e.what() );
-/// 	    return;
-/// 	}
-/// ```
 /// The report of 16 is written to the output stream through the object stream's buffer
 /// (`s_WriteXML2ObjectNoHeader`, blastxml2_format.cpp:716-724): a post comes after the bytes that
 /// the buffer had written by then (`out_buffer::xml_written_at`). A 14 report goes to its file,
@@ -528,8 +485,7 @@ fn xml_report_made(
             match (kind, thrown) {
                 (Xml2Kind::Single16, Some(thrown)) => {
                     let exception = thrown.exception();
-                    let mut message = exception.get_msg().as_bytes().to_vec();
-                    message.extend_from_slice(exception.what().as_bytes());
+                    let message = exception.what_after(exception.get_msg());
                     made.posts.push(DocumentPost {
                         at: report.len(),
                         text: crate::ncbi_exception::error_post_line(None, Some(program), &message),

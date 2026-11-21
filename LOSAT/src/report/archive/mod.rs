@@ -1,22 +1,6 @@
 //! The BLAST archive (outfmt 11, `Blast4-archive`), shared by the programs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1051-1064
-//! ```c++
-//! void CBlastFormat::PrintArchive(CRef<objects::CBlast4_archive> archive, CNcbiOstream& out)
-//! {
-//!     if (archive.Empty()) {
-//!         return;
-//!     }
-//!     string outfmt = CNcbiEnvironment().Get("ARCHIVE_FORMAT");
-//!     if (outfmt.empty()) {
-//!         out << MSerial_AsnText << *archive;
-//!     } else if (!NStr::CompareNocase(outfmt, "xml")) {
-//!         out << MSerial_Xml << *archive;
-//!     } else if (NStr::StartsWith(outfmt, "bin", NStr::eNocase)) {
-//!         out << MSerial_AsnBinary << *archive;
-//!     }
-//! }
-//! ```
 //! One `Blast4-archive` per query batch is written after the batch's search, one error
 //! archive when the application stops with a diagnostic (`PrintErrorArchive`). Each archive
 //! is written straight to the sink, element by element (`writer`), from data the program
@@ -43,6 +27,9 @@ pub mod writer;
 #[cfg(test)]
 mod option_walk_tests;
 
+use crate::wording::{
+    DATABASE_ERROR, ENGINE_ERROR, OPTIONS_ERROR, QUERY_ERROR, QUERY_OPTIONS_ERROR,
+};
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;
@@ -146,17 +133,6 @@ impl ArchiveEncoding {
 /// Whether NCBI's `PrintErrorArchive` writes the error archive for this `-outfmt` text.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-929
-/// ```c++
-/// void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
-/// {
-///     try {
-///         if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
-///             ...
-///             CBlastFormat::PrintArchive(archive, a[kArgOutput].AsOutputFile());
-///         }
-///     } catch (...) {}
-/// }
-/// ```
 /// The conversion throws (and nothing is written) for text after the number, such as
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
@@ -194,31 +170,7 @@ impl ArchiveRequest {
     /// for `-subject`).
     pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
-        // ```c++
-        //         else
-        //         {
-        //             if(num_iters != 0)
-        //             	retval.Reset(new blast::CExportStrategy(queries, opts_hndl, search_db, client_id, num_iters));
-        //             else
-        //             	retval.Reset(new blast::CExportStrategy(queries, opts_hndl, search_db, client_id));
-        //         }
-        //     ...
-        //         else
-        //         {
-        //             retval.Reset(new blast::CExportStrategy(queries, opts_hndl,
-        //             								 db_args->GetSubjects(), client_id));
-        //         }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
-        // ```c++
-        // void CExportStrategy::x_AddPsiNumOfIterationsToFormatOptions(unsigned int num_iters)
-        // {
-        // 	CRef<CBlast4_parameter> p(new CBlast4_parameter);
-        // 	p->SetName(CBlast4Field::GetName(eBlastOpt_Web_StepNumber));
-        //
-        // 	CRef<CBlast4_value> v(new CBlast4_value);
-        // 	v->SetInteger(num_iters);
-        // ```
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
         // for 0 or with `-subject` (`p9.ps.q.db.it0.f6`, `p9.ps.q.sub.it2.f6`).
         let step_number = inputs
@@ -247,15 +199,6 @@ impl ArchiveRequest {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173 (quoted
 // at `OptionsHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
-// ```c++
-//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
-//                                        db_num_bases, db_num_seqs,
-//                                        &eff_len_params);
-//
-//     Int2 status =
-//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
-//                              eff_len_params, sbp, m_QueryInfo, NULL);
-// ```
 // The request's `EffectiveSearchSpace` is `BLAST_CalcEffLengths` with the statistics' length and
 // count before the setup's fallback to OID 0 (`BLAST_GapAlignSetUp`, blast_setup.c:929-937): the
 // search's own value where the length is positive; nothing (0) for a length of 0 (blast_setup.c:
@@ -302,14 +245,6 @@ impl RequestLength {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282,304-306
-// ```c++
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-//     ...
-//             if (isArchiveFormat) {
-//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-// ```
 /// What NCBI's options handle (`m_OptsHndl`) holds for the requests of a run beyond the options
 /// of the command line: the database list's parameter and how the database's statistics make the
 /// `EffectiveSearchSpace` option of a searched batch (`RequestLength`), and the parameters that
@@ -372,18 +307,6 @@ pub struct HandleCarry(options::ParamList);
 
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
-    // ```c++
-    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
-    //     if (total_length <= 0)
-    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
-    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
-    //     if (num_seqs <= 0)
-    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
-    //
-    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
-    //                                          num_seqs, total_length,
-    //                                          full_data->m_ScoreBlk->GetPointer());
-    // ```
     /// What the database's list and statistics make of the requests: its `program-options`
     /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
@@ -406,14 +329,7 @@ impl OptionsHandle {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-503
-    // ```c++
-    //     // Set the filtering algorithms
-    //     string algo_key = db->GetFilteringAlgorithmKey();
-    //     if (algo_key != kEmptyStr)
-    //     {
-    //     	int mask_type = (int) db->GetMaskType();
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-504
     /// The database masking's program options of the archive (`ResolvedMask::archive_params`)
     /// and of the search strategy (`DbMaskOption::strategy_params`), which follow the list's: set
     /// once per run, where the formatter resolves the masking; a second setting is LOSAT's
@@ -434,21 +350,6 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
-    // ```c++
-    //     void x_AttachValue(CRef<objects::CBlast4_parameter> p)
-    //     {
-    //         typedef objects::CBlast4_parameter TParam;
-    //
-    //         NON_CONST_ITERATE(list< CRef<TParam> >, iter, m_ReqOpts->Set()) {
-    //             if ((**iter).GetName() == p->GetName()) {
-    //                 (*iter) = p;
-    //                 return;
-    //             }
-    //         }
-    //
-    //         m_ReqOpts->Set().push_back(p);
-    //     }
-    // ```
     /// The parameters that the run sets in the handle after the command line's options and
     /// besides the batches' `EffectiveSearchSpace`: `before_batches` once, before the first batch
     /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios), and
@@ -521,13 +422,6 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
-    // ```c++
-    //     vector<Int8> eff_searchsp;
-    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
-    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
-    //     }
-    //     options->SetEffectiveSearchSpace(eff_searchsp);
-    // ```
     /// Moves `carry` past a batch: what the batch's set-up sets in the handle (`set_search_sets`'s
     /// `each_batch`), then the batch's `EffectiveSearchSpace` option when the batch was searched
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
@@ -761,21 +655,6 @@ impl ArchiveHandle {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-// ```c++
-// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-// {
-// 	if(m_handler != NULL) {
-// 		m_handler->Post(mess);
-// 	}
-// 	if(m_save) {
-// 		CRef<CBlast4_error> d(new CBlast4_error);
-// 		string m;
-// 		mess.Write(m);
-// 		d->SetMessage(NStr::Sanitize(m));
-// 		d->SetCode((int)mess.m_Severity);
-// 		...
-// 			m_messages.push_back(d);
-// ```
 /// Posts error 803.7 of each byte that NCBI's stream replaced in an archive of the run of the
 /// application `application` (`encoder::ReplacedChar`, with its prefix: `SetDiagPostPrefix(
 /// "blastn")`, `ArchiveRequest::application`) on `diagnostics`, without saving them as messages of the run's archive `archive`:
@@ -860,41 +739,23 @@ pub(crate) fn seq_id_written_as_is(
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
     // (BLASTN's `-window_masker_db` file that cannot be opened).
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
-    // ```c++
-    //     catch (const blast::CBlastException& e) {                               \
-    //         const string& msg = e.GetMsg();                                     \
-    //         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-    //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-    //             exit_code = BLAST_INPUT_ERROR;                                  \
-    // ```
     // `BLAST options error:` is that report of an options error that the search raises inside
     // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
     // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
     // refuses `-outfmt 11`).
-    const PREFIXES: [&str; 6] = [
-        "BLAST query error:",
-        "BLAST Database error:",
-        "BLAST engine error:",
-        "BLAST options error:",
-        "BLAST query/options error:",
-        "Error: NCBI C++ Exception:",
+    // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
+    // `catch_all` below, `cli::NativeError::exception`.)
+    const PREFIXES: [&[u8]; 5] = [
+        QUERY_ERROR.as_bytes(),
+        DATABASE_ERROR.as_bytes(),
+        ENGINE_ERROR.as_bytes(),
+        OPTIONS_ERROR.as_bytes(),
+        QUERY_OPTIONS_ERROR.as_bytes(),
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
-    // ```c++
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
     // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
     // latter is `Error: vector::reserve` of the `-in_pssm` reader's Dense-seg hook (NCBI BLAST+
@@ -902,16 +763,16 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // failed the main thread's diagnostic stream, that report is its line feed alone
     // (`cli::catch_all_text`).
     let catch_all = native.exit == 255
-        && (native.message.starts_with("Error: ") || crate::ncbi_exception::main_diag_failbit());
+        && (native.message.starts_with(b"Error: ") || crate::ncbi_exception::main_diag_failbit());
     let known = catch_all
         || PREFIXES
             .iter()
             .any(|prefix| native.message.starts_with(prefix))
-        || (subject_file && native.message.starts_with("Command line argument error:"));
+        || (subject_file && native.message.starts_with(b"Command line argument error:"));
     if !known {
         return None;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (quoted in
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (cited in
     // `report::diag_log`: `mess.Write(m)` of each post)
     // In a failed stream every post writes its header only (`ncbi_exception::post_line`) and saves
     // that text: `CATCH_ALL`'s posts, which have no header, save empty messages, one per line
@@ -919,27 +780,37 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // D3-1 `k02_failed_then_choice_exc`: `message ""`).
     if crate::ncbi_exception::main_diag_failbit() {
         let written = crate::cli::catch_all_text(&native.message);
-        return Some(
+        // One post per line feed (`split_terminator('\n')`: a final empty piece is not one).
+        let pieces = if written.is_empty() {
+            0
+        } else {
             written
-                .split_terminator('\n')
-                .map(|_| (ERROR, Vec::new()))
-                .collect(),
-        );
+                .strip_suffix(b"\n")
+                .unwrap_or(written)
+                .split(|&byte| byte == b'\n')
+                .count()
+        };
+        return Some((0..pieces).map(|_| (ERROR, Vec::new())).collect());
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
-    // several lines (an exception's chain), and the macro of an invalid input posts the line
-    // "Please refer to the BLAST+ user manual." as a second one.
-    const REFER: &str = "Please refer to the BLAST+ user manual.";
-    let text = native.message.trim_end_matches('\n');
-    let (first, refer) = match text.strip_suffix(REFER) {
-        Some(head) if head.ends_with('\n') => (head, Some(REFER)),
+    // several lines (an exception's chain), and the macro of an invalid input posts the user
+    // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
+    // second one.
+    let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
+    let text = &native.message[..native
+        .message
+        .iter()
+        .rposition(|&byte| byte != b'\n')
+        .map_or(0, |last| last + 1)];
+    let (first, refer) = match text.strip_suffix(refer_line) {
+        Some(head) if head.ends_with(b"\n") => (head, Some(refer_line)),
         _ => (text, None),
     };
     Some(
         std::iter::once(first)
             .chain(refer)
             .filter_map(|part| {
-                let text = crate::report::diag_log::sanitize(part.as_bytes());
+                let text = crate::report::diag_log::sanitize(part);
                 (!text.is_empty()).then_some((ERROR, text))
             })
             .collect(),
@@ -947,13 +818,6 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:351-355
-// ```c++
-//     } CATCH_ALL(status)
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 /// The error lines of a run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
 /// the failed write of the object manager's message after its diagnostic stream failed, a PSSM
 /// file that ends after its header): none, and NCBI writes the error archive of the messages saved
@@ -964,14 +828,6 @@ pub fn silent_end_lines(handle: &ArchiveHandle, error: &anyhow::Error) -> Option
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 /// Writes the error archive of a command line run that stopped with `error` (`error_lines` of it:
 /// `lines`) into `sink`, after the error's text. NCBI's `CATCH_ALL` writes the text to standard
 /// error before `PrintErrorArchive` writes the archive (`cli::post_native_error`), so in one
@@ -1018,389 +874,5 @@ impl Write for DiagTee<'_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::blastinput::app::Program;
-
-    /// `writes_text` and the encoders decide the same bytes: for every byte and each stream, a
-    /// one-byte VisibleString that `writes_text` accepts is written by the default encoder
-    /// without an error and by the replacing one with nothing replaced, and one that it refuses
-    /// is the default encoder's `NonVisibleChar` and the replacing one's single replaced byte.
-    #[test]
-    fn writes_text_is_what_each_encoder_writes_as_it_is() {
-        use crate::report::serial::asn_ber::AsnBinaryEncoder;
-        use crate::report::serial::asn_text::AsnTextEncoder;
-        use crate::report::serial::encoder::{Encoder, SerialError};
-        use crate::report::serial::xml::XmlEncoder;
-        for byte in 0..=u8::MAX {
-            for encoding in [
-                ArchiveEncoding::Text,
-                ArchiveEncoding::Binary,
-                ArchiveEncoding::Xml,
-            ] {
-                let as_is = encoding.writes_text(&[byte]);
-                let (error, replaced) = match encoding {
-                    ArchiveEncoding::Text => {
-                        let mut buf = Vec::new();
-                        let mut plain = AsnTextEncoder::new(&mut buf);
-                        plain.visible_str(&[byte]);
-                        let error = plain.error();
-                        let mut buf = Vec::new();
-                        let mut replacing = AsnTextEncoder::new(&mut buf);
-                        replacing.visible_str_replacing(&[byte]);
-                        (error, replacing.take_replaced())
-                    }
-                    ArchiveEncoding::Binary => {
-                        let mut buf = Vec::new();
-                        let mut plain = AsnBinaryEncoder::new(&mut buf);
-                        plain.visible_str(&[byte]);
-                        let error = plain.error();
-                        let mut buf = Vec::new();
-                        let mut replacing = AsnBinaryEncoder::new(&mut buf);
-                        replacing.visible_str_replacing(&[byte]);
-                        (error, replacing.take_replaced())
-                    }
-                    _ => {
-                        let mut buf = Vec::new();
-                        let mut plain = XmlEncoder::archive(&mut buf);
-                        plain.visible_str(&[byte]);
-                        let error = plain.error();
-                        let mut buf = Vec::new();
-                        let mut replacing = XmlEncoder::archive(&mut buf);
-                        replacing.visible_str_replacing(&[byte]);
-                        (error, replacing.take_replaced())
-                    }
-                };
-                if as_is {
-                    assert_eq!(error, None, "{encoding:?} 0x{byte:02X}");
-                    assert!(replaced.is_empty(), "{encoding:?} 0x{byte:02X}");
-                } else {
-                    assert_eq!(
-                        error,
-                        Some(SerialError::NonVisibleChar(byte)),
-                        "{encoding:?} 0x{byte:02X}"
-                    );
-                    assert_eq!(replaced.len(), 1, "{encoding:?} 0x{byte:02X}");
-                    assert_eq!(replaced[0].byte, byte);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn archive_format_is_read_like_print_archive() {
-        let of = |value: &str| ArchiveEncoding::of(Some(OsStr::new(value)));
-        assert_eq!(ArchiveEncoding::of(None), ArchiveEncoding::Text);
-        assert_eq!(of(""), ArchiveEncoding::Text);
-        assert_eq!(of("xml"), ArchiveEncoding::Xml);
-        assert_eq!(of("XML"), ArchiveEncoding::Xml);
-        assert_eq!(of("Xml"), ArchiveEncoding::Xml);
-        assert_eq!(of("bin"), ArchiveEncoding::Binary);
-        assert_eq!(of("BIN"), ArchiveEncoding::Binary);
-        assert_eq!(of("binary"), ArchiveEncoding::Binary);
-        assert_eq!(of("bin foo"), ArchiveEncoding::Binary);
-        assert_eq!(of(" bin"), ArchiveEncoding::Nothing);
-        assert_eq!(of("asn"), ArchiveEncoding::Nothing);
-        assert_eq!(of("text"), ArchiveEncoding::Nothing);
-        assert_eq!(of("foo"), ArchiveEncoding::Nothing);
-        assert_eq!(of("xmlx"), ArchiveEncoding::Nothing);
-        assert_eq!(of("bi"), ArchiveEncoding::Nothing);
-    }
-
-    /// The strings the archive copies from the command line are written as they are where the
-    /// encoding does: text and binary write `#` for a byte outside `0x20..=0x7E`, XML writes
-    /// every byte but a control one as it is (`writes_text`); such a request is written through
-    /// `Traced` (`writer::write_archive`).
-    #[test]
-    fn a_request_tells_whether_its_strings_are_written_as_they_are() {
-        let as_is = |encoding, path: Option<&str>, db: Option<&str>| {
-            let mut inputs = OptionInputs::new(Program::Blastn, "megablast");
-            inputs.window_masker_db = path.map(str::to_string);
-            ArchiveRequest::for_inputs(&inputs, db).written_as_is(encoding)
-        };
-        for encoding in [
-            ArchiveEncoding::Text,
-            ArchiveEncoding::Binary,
-            ArchiveEncoding::Xml,
-        ] {
-            assert!(as_is(encoding, None, None));
-            assert!(as_is(encoding, Some("wm&<\"'q/mg.obinary"), Some("d b&<")));
-            // A control byte: NCBI writes `#` and a post, but TAB, LF and CR in XML.
-            for bad in ["a\x01b", "a\x1fb", "a\x0bb", "a\x0eb"] {
-                assert!(!as_is(encoding, Some(bad), None), "{encoding:?} {bad:?}");
-                assert!(!as_is(encoding, None, Some(bad)), "{encoding:?} {bad:?}");
-            }
-        }
-        for good in ["a\tb", "a\nb", "a\rb"] {
-            assert!(as_is(ArchiveEncoding::Xml, Some(good), Some(good)));
-            assert!(!as_is(ArchiveEncoding::Text, Some(good), None));
-        }
-        // Bytes from 0x7F up: replaced in text and binary, written as they are in XML.
-        for high in ["wm\u{e9}/mg.obinary", "d\u{7f}b", "\u{1f600}"] {
-            assert!(
-                as_is(ArchiveEncoding::Xml, Some(high), Some(high)),
-                "{high:?}"
-            );
-            for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-                assert!(!as_is(encoding, Some(high), None), "{encoding:?} {high:?}");
-                assert!(!as_is(encoding, None, Some(high)), "{encoding:?} {high:?}");
-            }
-        }
-    }
-
-    /// A record's title and Seq-ids: in text and binary a byte outside `0x20..=0x7E`, in XML a
-    /// control byte (which no FASTA title or id holds: NCBI's reader ends the title there).
-    #[test]
-    fn a_bioseq_tells_whether_its_strings_are_written_as_they_are() {
-        use requests::RequestRecord;
-        let caf = FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT");
-        let del = FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT");
-        let plain = FastaRecord::new("Query_1", b"title", b"ACGT");
-        for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-            assert!(!caf.bioseq(false).written_as_is(encoding));
-            assert!(!del.bioseq(false).written_as_is(encoding));
-            assert!(plain.bioseq(false).written_as_is(encoding));
-        }
-        assert!(caf.bioseq(false).written_as_is(ArchiveEncoding::Xml));
-        assert!(del.bioseq(false).written_as_is(ArchiveEncoding::Xml));
-        // A parsed local id with DEL (NCBI's `CSeq_id::CheckLocalID` takes it).
-        let ids = [crate::seqid::ParsedSeqId::Local(
-            crate::seqid::model::ObjectId::Str(b"a\x7fb".to_vec()),
-        )];
-        let bioseq = bioseq::BioseqInput {
-            ids: Some(&ids),
-            ..plain.bioseq(false)
-        };
-        assert!(!bioseq.written_as_is(ArchiveEncoding::Text));
-        assert!(bioseq.written_as_is(ArchiveEncoding::Xml));
-    }
-
-    #[test]
-    fn the_search_space_option_carries_over_unsearched_batches() {
-        let handle = ArchiveHandle::new(
-            ArchiveEncoding::Text,
-            ArchiveRequest {
-                program: "blastp",
-                application: "blastp",
-                service: "plain",
-                algorithm: Vec::new(),
-                database: None,
-                step_number: None,
-            },
-            OptionsHandle::default(),
-        );
-        let searched = |space| {
-            Some(writer::SearchedContext0 {
-                space,
-                query_length: 142,
-            })
-        };
-        let space = |handle: &ArchiveHandle, searched| search_space(&handle.request_sets(searched));
-        assert_eq!(space(&handle, None), None);
-        assert_eq!(space(&handle, searched(8738)), Some(8738));
-        assert_eq!(space(&handle, None), Some(8738));
-        assert_eq!(space(&handle, searched(0)), Some(0));
-        assert_eq!(space(&handle, None), Some(0));
-        // A statistics length of 0, and a negative one (probe run2 of line RG D1a-3: the query's
-        // length, 142): the run's options handle is set once, so each case has its own.
-        let with_length = |length| {
-            let handle = ArchiveHandle::new(
-                ArchiveEncoding::Text,
-                ArchiveRequest {
-                    program: "blastp",
-                    application: "blastp",
-                    service: "plain",
-                    algorithm: Vec::new(),
-                    database: None,
-                    step_number: None,
-                },
-                OptionsHandle::default(),
-            );
-            handle.options().set_database_filter(None, length).unwrap();
-            handle
-        };
-        assert_eq!(
-            space(&with_length(RequestLength::Lengths(None)), searched(8738)),
-            Some(0)
-        );
-        assert_eq!(
-            space(
-                &with_length(RequestLength::Lengths(Some((i64::MIN + 1, 23)))),
-                searched(15_876)
-            ),
-            Some(142)
-        );
-        assert_eq!(
-            space(
-                &with_length(RequestLength::Lengths(Some((-1, -5)))),
-                Some(writer::SearchedContext0 {
-                    space: 0,
-                    query_length: 0,
-                })
-            ),
-            Some(0)
-        );
-    }
-
-    /// The `EffectiveSearchSpace` option among a request's sets.
-    pub(super) fn search_space(sets: &[options::Param]) -> Option<i64> {
-        sets.iter()
-            .find(|param| param.name == "EffectiveSearchSpace")
-            .map(|param| match param.value {
-                options::ParamValue::BigInteger(space) => space,
-                ref other => panic!("EffectiveSearchSpace {other:?}"),
-            })
-    }
-
-    /// The application's parameters come first and each batch's set-up's before its search
-    /// space, by `x_AttachValue` (rpsblast's documents after the first, NCBI BLAST+ 2.17.0
-    /// `p9.rps.3v.q40.n1.f6`, `p9.rps.err.nofreq`).
-    #[test]
-    fn the_handle_sets_fold_in_ncbis_order() {
-        use options::{Param, ParamValue};
-        let handle = OptionsHandle::default();
-        handle
-            .set_search_sets(
-                vec![Param {
-                    name: "CompositionBasedStats",
-                    value: ParamValue::Integer(0),
-                }],
-                vec![
-                    Param {
-                        name: "DbLength",
-                        value: ParamValue::BigInteger(560),
-                    },
-                    Param {
-                        name: "MatrixName",
-                        value: ParamValue::Str("BLOSUM62".to_string()),
-                    },
-                ],
-            )
-            .unwrap();
-        assert!(handle.set_search_sets(Vec::new(), Vec::new()).is_err());
-        let mut carry = HandleCarry::default();
-        let names = |carry: &HandleCarry| -> Vec<&'static str> {
-            handle
-                .request_sets(carry)
-                .iter()
-                .map(|param| param.name)
-                .collect()
-        };
-        assert_eq!(names(&carry), ["CompositionBasedStats"]);
-        handle.pass(&mut carry, None);
-        assert_eq!(
-            names(&carry),
-            ["CompositionBasedStats", "DbLength", "MatrixName"]
-        );
-        let searched = |space| {
-            Some(writer::SearchedContext0 {
-                space,
-                query_length: 142,
-            })
-        };
-        handle.pass(&mut carry, searched(85_680));
-        handle.pass(&mut carry, searched(96_628));
-        assert_eq!(
-            names(&carry),
-            [
-                "CompositionBasedStats",
-                "DbLength",
-                "MatrixName",
-                "EffectiveSearchSpace"
-            ]
-        );
-        assert_eq!(search_space(&handle.request_sets(&carry)), Some(96_628));
-    }
-
-    #[test]
-    fn the_tee_saves_lines_for_the_next_archive() {
-        let handle = ArchiveHandle::new(
-            ArchiveEncoding::Text,
-            ArchiveRequest {
-                program: "blastn",
-                application: "blastn",
-                service: "plain",
-                algorithm: Vec::new(),
-                database: None,
-                step_number: None,
-            },
-            OptionsHandle::default(),
-        );
-        let mut seen: Vec<u8> = Vec::new();
-        {
-            let mut tee = DiagTee::new(&mut seen, handle.clone());
-            tee.write_all(b"Warning: [blastn] a  b\n").unwrap();
-        }
-        assert_eq!(seen, b"Warning: [blastn] a  b\n");
-        assert_eq!(
-            handle.take_messages(),
-            vec![(1, b"Warning: [blastn] a b".to_vec())]
-        );
-        assert!(handle.take_messages().is_empty());
-    }
-
-    /// NCBI 2.17.0 (`PrintErrorArchive`): each text below was run with a missing `-query` and
-    /// wrote the error archive (`true`) or nothing (`false`).
-    #[test]
-    fn the_error_archive_follows_the_outfmt_text_like_print_error_archive() {
-        for (text, writes) in [
-            ("11", true),
-            (" 11", true),
-            ("11 ", true),
-            ("\t11\n", true),
-            ("\x0b11\x0c", true),
-            ("011", true),
-            ("+11", true),
-            ("00000000000011", true),
-            ("11 qseqid", false),
-            (" 11 qseqid", false),
-            ("11qseqid", false),
-            ("11.0", false),
-            ("1 1", false),
-            ("-11", false),
-            ("0x0B", false),
-            ("1_1", false),
-            ("11,0", false),
-            ("4294967307", false),
-            ("2147483648", false),
-            ("", false),
-            (" ", false),
-            ("+", false),
-            ("6", false),
-        ] {
-            assert_eq!(writes_error_archive(text), writes, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn a_handle_tied_to_a_spec_writes_no_error_archive() {
-        let make = || {
-            ArchiveHandle::new(
-                ArchiveEncoding::Text,
-                ArchiveRequest {
-                    program: "tblastx",
-                    application: "tblastx",
-                    service: "plain",
-                    algorithm: Vec::new(),
-                    database: None,
-                    step_number: None,
-                },
-                OptionsHandle::default(),
-            )
-        };
-        let lines = vec![(ERROR, b"Error: x".to_vec())];
-        // No text (the API): the error archive is written.
-        let mut sink = Vec::new();
-        write_error_archive(&make(), &lines, &mut sink).unwrap();
-        assert!(!sink.is_empty());
-        // `11`: written; `11 qseqid`: nothing, and the messages stay unread.
-        let mut sink = Vec::new();
-        write_error_archive(&make().with_outfmt_text(" 11 "), &lines, &mut sink).unwrap();
-        assert!(!sink.is_empty());
-        let mut sink = Vec::new();
-        let spec = make().with_outfmt_text("11 qseqid");
-        assert!(!spec.error_archive_enabled());
-        write_error_archive(&spec, &lines, &mut sink).unwrap();
-        assert!(sink.is_empty());
-    }
-}
+#[path = "tests.rs"]
+mod tests;

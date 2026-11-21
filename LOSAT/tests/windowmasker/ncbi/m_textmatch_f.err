@@ -1,0 +1,2 @@
+Error: (CWinMaskConfigException::inconsistent program options) -text_match false can be used only with infmt blastdb
+Error: (106.16) Application's execution failed (CWinMaskConfigException::inconsistent program options) -text_match false can be used only with infmt blastdb

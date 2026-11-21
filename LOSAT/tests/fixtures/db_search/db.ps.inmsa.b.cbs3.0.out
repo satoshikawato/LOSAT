@@ -1,0 +1,96 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= 
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          79.0    1e-22
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       17.7    8.5  
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       17.4    9.6  
+
+
+>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 79.0 bits (193),  Expect = 1e-22, Method: Composition-based stats.
+ Identities = 28/60 (47%), Positives = 39/60 (65%), Gaps = 0/60 (0%)
+
+Query  1   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  60
+           T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ 
+Sbjct  4   TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+
+>BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]
+Length=2526
+
+ Score = 17.7 bits (34),  Expect = 8.5, Method: Composition-based stats.
+ Identities = 7/16 (44%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+
+Query  19   TYLKNIYQQENGGNKH  34
+            + LK +Y+ E   NKH
+Sbjct  786  SSLKQLYKYEAENNKH  801
+
+
+>BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]
+Length=219
+
+ Score = 17.4 bits (33),  Expect = 9.6, Method: Composition-based stats.
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+
+Query  18   STYLKNIYQQENGGNKHCL  36
+            +T L NI +Q     KHCL
+Sbjct  145  NTTLSNIRRQRLYNFKHCL  163
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.129    0.364    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0396    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1659164
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

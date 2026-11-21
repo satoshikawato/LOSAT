@@ -12,6 +12,7 @@ import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } fr
 import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
+import { focused } from './support/live';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import {
@@ -472,31 +473,19 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await task(page, 'megablast');
     await expect(page.getByTestId('argv-validation')).toContainText(
-      'BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
+      'LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
     );
   }
 });
 
 test("the engine's refusals of option values are shown as the engine writes them, and nothing is started", async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's messages need the engine build");
-  await program(page, 'tblastx');
-  await openParameters(page);
-  // A toolkit word in a free-text value (S08+a, D14): the arguments of the Low complexity regions filter.
-  await page.getByTestId('param-seg-value').fill('-version');
-  await expect(page.getByTestId('argv-validation')).toHaveText(
-    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
-  );
-  await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
-  await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
-  await submit(page);
-  await expect(page.getByTestId('search-message')).toHaveText(
-    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
-  );
-  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs 15/2; a
-  // value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5,
-  // with which NCBI crashes), and one that NCBI refuses.
+  // A toolkit word in a free-text value (S08+a) prints the command line's version, as the CLI does: help-version.spec.ts
+  // (line WQA's D14, 2026-11-20). IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs
+  // 15/2; a value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5, with which NCBI
+  // crashes), and one that NCBI refuses.
   await program(page, 'blastp');
+  await openParameters(page);
   await page.getByTestId('param-matrix').selectOption('other');
   await page.getByTestId('param-matrix-other').fill('IDENTITY');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
@@ -507,7 +496,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await page.getByTestId('param-word_size').selectOption('3');
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
-  await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
+  await expect(page.getByTestId('argv-validation')).toContainText('LOSAT query/options error:');
 });
 
 // WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI
@@ -582,6 +571,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
       return;
     }
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
     const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
     const query = testInfo.outputPath(`${id}-query.fa`);
@@ -704,11 +694,10 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
-  // A gap line fails the index: NCBI's reader reads it as data of the record before it.
+  // A gap line is read as the CLI reads it: ten N of the record before it (line WQA's D13 (a), 2026-11-20; before,
+  // "gap lines are not supported in the browser").
   await paste(page, 'query', '>q\nACGT\n>?10\nACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText(
-    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
-  );
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 18 nt');
   if (BUILD_HAS_ENGINE) {
     // A first line that NCBI's data loaders would fetch as a Seq-id fails; '>' can go before it (a defline line
     // would make it the first data line).
@@ -989,11 +978,12 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
 
 test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
   await program(page, 'blastn');
-  // Not a defline, and the gap line fails it again after the defline: the card stays, with the button.
-  await paste(page, 'query', 'ACGTACGTACGT\n>?10\nACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText('gap line');
+  // Not a defline, and a later line that NCBI's reader refuses fails it again after the defline: the card stays, with
+  // the button. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this; LOSAT Web now reads it as the CLI does.)
+  await paste(page, 'query', 'ACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
   await page.getByTestId('query-source-0-add-defline').click();
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
   await expect(page.getByTestId('query-source-0')).toBeFocused();
 });
 
@@ -1112,6 +1102,9 @@ test.describe('leaving and returning', () => {
     await expect(page.getByTestId('keep-awake').locator('xpath=..')).not.toHaveAttribute('data-wake-lock', 'held');
     await page.getByTestId('resume-dismiss').click();
     await expect(page.getByTestId('resume-notice')).toHaveCount(0);
+    // A click on Dismiss, as Enter (announce.spec.ts), leaves the focus on the tab shown (WA2-AX-04): what the click
+    // does is not held as the press is (ui/press-hold.ts).
+    expect(await focused(page)).toMatch(/^tab-/);
     const log = await page.evaluate(() => (window as unknown as { __wakeLog: string[] }).__wakeLog);
     expect(log[0]).toBe('request');
     expect(log.at(-1)).toBe('release');
@@ -1131,7 +1124,7 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toHaveCount(0);
   // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
   await toggle.hover();
-  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast or blastn-short');
+  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn');
   await expect(help).toHaveAttribute('data-pinned', 'false');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(0, 0);
@@ -1201,13 +1194,14 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
 
   // Task Selection: BLASTN's "Optimize for", the engine's default task checked.
   await expect(page.getByTestId('param-task-field')).toContainText('Optimize for');
-  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(4);
+  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(5);
   await expect(page.getByTestId('param-task')).toHaveAccessibleName(/^Optimize for -task/);
   for (const [value, label] of [
     ['megablast', 'Highly similar sequences (megablast)'],
     ['dc-megablast', 'More dissimilar sequences (discontiguous megablast)'],
     ['blastn', 'Somewhat similar sequences (blastn)'],
     ['blastn-short', 'Short sequences (blastn-short)'],
+    ['rmblastn', 'Scores from the matrix alone (rmblastn)'],
   ] as const) {
     await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId(`param-task-${value}`) })).toHaveText(label);
   }
@@ -1513,12 +1507,15 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(extra).toHaveAccessibleName('Additional options');
   // The engine reads the words as the command line does, and says what it does not read.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
-  // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
-  await extra.fill('-help');
-  await expect(validation).toHaveText('-help is not available in the browser');
+  // The CLI's options that a search in the browser cannot have (WA-FM-04). The engine prints the CLI's help, as the CLI
+  // does (line WQA's D14, 2026-11-20: help-version.spec.ts), where WA-FM-05 refused it.
+  if (BUILD_HAS_ENGINE) {
+    await extra.fill('-help');
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+  }
   await extra.fill('-db nt');
   await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
   await extra.fill('-mt_mode 1');

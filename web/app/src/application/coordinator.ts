@@ -1,16 +1,29 @@
 // Application coordinator (plan §5.5): one active run, a FIFO queue, and the run state
 // machine  queued -> preparing -> running -> finalizing -> completed | cancelled | failed.
 //
-// Ordering rule for cancel versus commit: a run can be cancelled until it enters
-// `finalizing`; after that, cancel requests are ignored and the run completes.
+// Ordering rule for cancel versus commit: a run can be cancelled until it ends. A cancel while it
+// is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
+// worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
+// (line WQA's sweep, D2, 2026-11-19). When the Data worker ends, the active run ends at once,
+// with its search: it could not keep its results (the review of D2, L2).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
+  WINDOW_MASKER_FLAG,
+  WINDOW_MASKER_TAXID_FLAG,
+  type FastaReader,
+  type PrintedKind,
+  type ProgramId,
+  type RunFile,
+  type RunOutput,
+} from 'losat/domain';
+import {
+  isUnavailable,
   RunCancelledError,
   runFilesOf,
+  runOutputFailedOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -20,11 +33,11 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, runFileName, runOutputs } from '../domain/output-format';
-import { fastaParser, programById } from '../domain/programs';
+import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
+import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
+import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
 import { taskOf } from './results';
 import { Store } from './store';
@@ -87,10 +100,14 @@ export interface CoordinatorDeps {
   readonly newRunId: () => string;
   /** The lower-case hex SHA-256 of bytes (the package's `sha256Hex`), for the registry file of a snapshot. */
   readonly digest: (bytes: Uint8Array) => Promise<string>;
+  /** Settles when the Data worker could not start or ended, with the error of its calls from then on. */
+  readonly dataWorkerEnded?: Promise<Error>;
 }
 
-export type EnqueueResult = ValidationResult & { readonly runId?: string };
-export type EnqueueAllResult = ValidationResult & { readonly runIds?: readonly string[] };
+/** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
+type Queued = { readonly ok: true } | { readonly ok: false; readonly message: string };
+export type EnqueueResult = Queued & { readonly runId?: string };
+export type EnqueueAllResult = Queued & { readonly runIds?: readonly string[] };
 
 const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
   preparing: 'preparing',
@@ -117,10 +134,16 @@ export class Coordinator {
    */
   private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
+  /**
+   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
+   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   */
+  private stopActive: ((error: Error) => void) | undefined;
   private nextNumber = 1;
 
   constructor(private readonly deps: CoordinatorDeps) {
     void this.refreshStorage();
+    void deps.dataWorkerEnded?.then((error) => this.dataWorkerEnded(error));
   }
 
   /** Validates the request with the engine and, if valid, freezes it as a queued run. */
@@ -154,11 +177,11 @@ export class Coordinator {
       try {
         start = await this.deps.engine.start(argv);
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
-      const { dryRun } = start.start;
+      const { dryRun, prints } = start.start;
       // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
       const conffileName = registryName(start.start);
       if (conffileName !== undefined && request.conffile !== undefined) {
@@ -176,10 +199,10 @@ export class Coordinator {
       try {
         validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
+      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -200,15 +223,17 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
-      const program = programById(request.program);
+    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
+      // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
+      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
+        // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
+        query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
+        subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
       } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+        return { ok: false, message: failureText(error) };
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
@@ -237,6 +262,7 @@ export class Coordinator {
           ...(windowMasker === undefined ? {} : { windowMasker }),
           ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
           ...(dryRun ? { dryRun: true as const } : {}),
+          ...(prints === null ? {} : { prints }),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
@@ -259,9 +285,8 @@ export class Coordinator {
   }
 
   /**
-   * Cancels the runs of a group: the running one, if it can still be cancelled, and the
-   * queued ones (plan §5.2). Finished runs and a run that is finalizing are left alone;
-   * the operation is not atomic.
+   * Cancels the runs of a group: the active one and the queued ones (plan §5.2). Finished
+   * runs are left alone; the operation is not atomic.
    */
   cancelGroup(groupId: string): void {
     const members = this.state.get().runs.filter((run) => run.snapshot.group?.groupId === groupId);
@@ -270,10 +295,10 @@ export class Coordinator {
     for (const run of members) this.cancel(run.snapshot.runId);
   }
 
-  /** Cancels a queued or running run. Runs that are finalizing or finished are left alone. */
+  /** Cancels a queued or active run (one that is finalizing too). Finished runs are left alone. */
   cancel(runId: string): void {
     const view = this.find(runId);
-    if (view === undefined || isTerminal(view.status) || view.status === 'finalizing') return;
+    if (view === undefined || isTerminal(view.status)) return;
     const queuedIndex = this.queue.indexOf(runId);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
@@ -283,12 +308,30 @@ export class Coordinator {
     }
     this.cancelRequested.add(runId);
     this.deps.engine.cancel(runId);
+    if (this.active === runId) this.stopActive?.(new RunCancelledError(runId));
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
+  /**
+   * The Data worker ended: the active run cannot keep its results, so it fails now with the error of the Data worker's
+   * calls, and its search ends. Before, the search went on, and the run failed only at its commit, when the search
+   * ended, while the page already said that the Data worker had stopped (line WQA's sweep, D2; its review, L2, 2026-11-19).
+   * The runs queued behind it fail when they start, as each call of the Data worker fails at once.
+   */
+  private dataWorkerEnded(error: Error): void {
+    const runId = this.active;
+    if (runId === undefined) return;
+    // First the run's wait, so that it ends with this error rather than with the cancel of its search.
+    this.stopActive?.(error);
+    this.deps.engine.cancel(runId);
+  }
+
+  /**
+   * Saves one compatibility output of a run that kept its outputs (a completed run, or a failed run: the bytes that the
+   * CLI leaves before its error), byte for byte, named by outputFileName, with its format's media type.
+   */
   async exportOutput(runId: string, output: RunOutput): Promise<void> {
     const view = this.find(runId);
-    if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
+    if (view?.result === undefined) throw new Error('only runs that kept their outputs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
     const [bytes, task] = await Promise.all([this.deps.data.readOutput(runId, output), this.taskOf(view.snapshot)]);
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
@@ -307,6 +350,26 @@ export class Coordinator {
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
   }
 
+  /** The input of a run that reads none (one that prints the command line's help or version): no bytes, no records. */
+  private async noInput(name: string): Promise<InputSnapshot> {
+    const bytes = new Uint8Array(0);
+    return Object.freeze({ name, bytes, sha256: await this.deps.digest(bytes), revisionIds: Object.freeze([]), records: Object.freeze([]) });
+  }
+
+  /**
+   * Saves the text that a run printed in place of a search (RunRecord.printed: the command line's help or version; line
+   * WQA's D14, 2026-11-20), its bytes as the engine wrote them, named by printedFileName.
+   */
+  async exportPrinted(runId: string): Promise<void> {
+    const view = this.find(runId);
+    const bytes = view?.record.printed;
+    const kind = view?.snapshot.prints;
+    if (view?.status !== 'completed' || bytes === undefined || kind === undefined) throw new Error('the run printed no text');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const task = await this.taskOf(view.snapshot);
+    this.deps.downloader.save(printedFileName({ number, program, task, queuedAt, argv }, kind, bytes), bytes, printedFileType(bytes).type);
+  }
+
   /**
    * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
    * changes do not reach), the run's input, and their SHA-256.
@@ -323,14 +386,15 @@ export class Coordinator {
     return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
   }
 
-  /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
+  /** Opens one output of a run that kept its outputs without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
   async checkOutput(runId: string, output: RunOutput): Promise<void> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     await this.deps.data.readOutputRange(runId, output, 0, 0);
   }
 
+  /** One output of a run that kept its outputs (a completed run, or a failed run: what the CLI leaves before its error). */
   async readOutput(runId: string, output: RunOutput): Promise<string> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, output));
   }
 
@@ -369,7 +433,7 @@ export class Coordinator {
     role: string,
     input: SequenceInput,
     name: string,
-    parser: FastaParserKind,
+    reader: FastaReader,
     made: Made,
   ): Promise<InputSnapshot> {
     try {
@@ -391,13 +455,15 @@ export class Coordinator {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
         made.sources.push(source.sourceId);
-        const revision = await this.deps.data.indexSource(source.sourceId, parser);
+        const revision = await this.deps.data.indexSource(source.sourceId, reader);
         revisionIds = Object.freeze([revision.revisionId]);
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
       const { bytes, sha256, records } = await runInput;
       return Object.freeze({ name, bytes, sha256, revisionIds, records });
     } catch (error) {
+      // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
+      if (isUnavailable(error)) throw error;
       throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
     }
   }
@@ -417,18 +483,30 @@ export class Coordinator {
     const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
-    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    // The files that the run made besides its outputs, which a completed and a failed run keep, and
+    // whether the engine ended the output of a failed run with `fail`, after which the data layer has
+    // the warnings that it wrote before its error (a completed run's are in its results).
     let runFiles: readonly RunFile[] | undefined;
+    let outputFailed = false;
+    // Why the run was stopped (stopActive), if it was.
+    let stop: Error | undefined;
+    const stopped = new Promise<never>((_, reject) => {
+      this.stopActive = (error) => {
+        stop ??= error;
+        reject(error);
+      };
+    });
+    stopped.catch(() => undefined);
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
       staged = true;
-      // A cancel while the outputs were staged found no search to end: the engine has not started it.
-      if (this.cancelRequested.has(runId)) {
+      // A stop while the outputs were staged found no search to end: the engine has not started it, and does not.
+      if (stop !== undefined) {
         output.close();
-        throw new RunCancelledError(runId);
+        throw stop;
       }
-      const runtime = await this.deps.engine.run(
+      const search = this.deps.engine.run(
         {
           runId,
           argv: snapshot.argv,
@@ -442,12 +520,19 @@ export class Coordinator {
         (phase) => this.onPhase(runId, phase),
       ).catch((error: unknown) => {
         runFiles = runFilesOf(error);
+        outputFailed = runOutputFailedOf(error);
         throw error;
       });
+      const runtime = await Promise.race([search, stopped]);
       runFiles = runtime.runFiles;
-      if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
+      if (stop !== undefined) throw stop;
       this.update(runId, { status: 'finalizing' });
-      const result = await this.deps.data.commitRun(runId);
+      const commit = this.deps.data.commitRun(runId);
+      const result = await Promise.race([commit, stopped]).catch((error: unknown) => {
+        // Results that the commit makes after the run ended are deleted.
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+        throw error;
+      });
       this.update(runId, {
         status: 'completed',
         result,
@@ -460,24 +545,42 @@ export class Coordinator {
           ...(runtime.runtimeGeneration === undefined ? {} : { runtimeGeneration: runtime.runtimeGeneration }),
           ...(runtime.memory === undefined ? {} : { memory: runtime.memory }),
           ...(runtime.subjectRetained === undefined ? {} : { subjectRetained: runtime.subjectRetained }),
+          messages: runtime.messages,
+          ...(runtime.shownIds === undefined ? {} : { shownIds: runtime.shownIds }),
           ...(runtime.windowMasker === undefined
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
           ...(runFiles === undefined ? {} : { runFiles }),
+          ...(runtime.printed === undefined ? {} : { printed: runtime.printed }),
         },
       });
     } catch (error) {
-      if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
+      // A failed run keeps the outputs that the CLI leaves before its error, and the warnings that it wrote before it
+      // (stream 3), which the data layer commits as it commits a completed run's (docs/web/abi_v2.md §5; line WQA's
+      // sweep, D3, 2026-11-19, and D15, 2026-11-20). A stop (Cancel, the end of the Data worker) ends that wait, and the
+      // other discards are not waited for: a Data worker that does not answer must not keep the run from ending (line
+      // WQA's sweep, D2). What was kept after the wait ended is deleted.
+      let kept: KeptRun | undefined;
+      if (staged && outputFailed && !cancelled && stop === undefined) {
+        const keeping = this.deps.data.keepFailedRun(runId);
+        kept = await Promise.race([keeping, stopped]).catch(() => {
+          void keeping.then((late) => (late === undefined ? undefined : this.deps.data.deleteRun(runId))).catch(() => undefined);
+          return undefined;
+        });
+      } else if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
+        ...(kept?.result === undefined ? {} : { result: kept.result }),
         record: {
           endedAt: this.deps.now(),
-          ...(cancelled ? {} : { error: errorMessage(error) }),
+          ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
+          ...(cancelled || !kept?.diagnostics ? {} : { diagnostics: kept.diagnostics }),
         },
       });
     } finally {
+      this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
@@ -522,6 +625,10 @@ interface Prepared {
   /** The registry file of the argv's `-conffile`, read from the chosen file: what the snapshot keeps of it, and its bytes. */
   readonly conffile: { readonly snapshot: ConffileSnapshot; readonly file: Blob } | undefined;
   readonly dryRun: boolean;
+  /** What the run prints in place of a search, as the engine's start says; null for a search. */
+  readonly prints: PrintedKind | null;
+  /** Whether the run reads its inputs with NCBI's data loaders on (the validation's verdict: `[BLAST] DATA_LOADERS` of its registry). */
+  readonly dataLoaders: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */
@@ -541,4 +648,9 @@ function engineInput(input: InputSnapshot): EngineInput {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why the engine could not check the options of a request: a part of LOSAT that is unavailable is said as the page says it. */
+function uncheckedOptions(error: unknown): string {
+  return isUnavailable(error) ? failureText(error) : `The options could not be checked: ${errorMessage(error)}`;
 }

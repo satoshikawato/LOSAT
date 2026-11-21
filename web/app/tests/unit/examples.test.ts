@@ -1,11 +1,13 @@
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
-import type { WholeFileInflater } from 'losat/ports';
+import { UnavailableError, type WholeFileInflater } from 'losat/ports';
 import { siteHeaders } from '../../build/headers';
+import type { AvailabilityState } from '../../src/application/availability';
 import { SearchDraft } from '../../src/application/draft';
 import { ExampleLoader } from '../../src/application/examples';
-import { EXAMPLE_BYTE_LIMIT, EXAMPLE_SETS, exampleById, exampleHost, exampleQuery, examplesFor } from '../../src/domain/examples';
+import { Store } from '../../src/application/store';
+import { EXAMPLE_BYTE_LIMIT, EXAMPLE_SETS, exampleById, exampleHost, exampleQuery, exampleQuerySources, examplesFor } from '../../src/domain/examples';
 import { PROGRAMS, programById, sequenceKind } from '../../src/domain/programs';
 import { BrowserFileDownloader } from '../../src/infra/browser/example-downloader';
 import { DataService } from '../../src/infra/data/data-service';
@@ -15,12 +17,28 @@ import { FakeDeletionChannel, FakeFileDownloader, FakeFileSaver, MemoryExampleSt
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
+import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore, FileDownloader } from '../../src/ports/example';
 import { NodeInflater } from './support/node-inflater';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 const UNIPROT = exampleById('uniprot-ecoli-k12');
 const SET_16S = '>NR_102783.2 Bacillus subtilis 16S\nACGTACGTAC\n>NR_114042.1 Escherichia coli 16S\nACGTTCGTAC\n';
+const UNAVAILABLE = 'LOSAT could not download its engine file /engine/serial.wasm (network error)';
+
+/**
+ * Whether LOSAT works, as Availability says it: `problem`, changed by `set`; a recheck answers at `answer`, as once the
+ * search form has asked the engine again.
+ */
+function heldAvailability(problem?: string) {
+  const state = new Store<AvailabilityState>(problem === undefined ? {} : { problem });
+  let answer: () => void = () => undefined;
+  return {
+    state,
+    recheck: () => new Promise<string | undefined>((resolve) => (answer = () => resolve(state.get().problem))),
+    answer: () => answer(),
+    set: (next?: string) => state.set(next === undefined ? {} : { problem: next }),
+  };
+}
 
 function setup(
   options: {
@@ -30,6 +48,7 @@ function setup(
     deletions?: ExampleDeletions;
     wrapStore?: (store: MemoryExampleStore) => ExampleStore;
     saver?: FakeFileSaver;
+    availability?: ReturnType<typeof heldAvailability>;
   } = {},
 ) {
   let token = 0;
@@ -44,7 +63,7 @@ function setup(
   });
   const fake = new FakeEngine();
   const draft = new SearchDraft({
-    engine: { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: async () => ({ ok: true }), prepare: () => undefined },
+    engine: { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: async () => ({ ok: true, dataLoaders: true }), prepare: () => undefined },
     data,
     enqueueAll: async (batch) => ({ ok: true, runIds: batch.map((_, i) => `r${i}`) }),
     fetcher: new FakeAccessionFetcher(),
@@ -59,6 +78,7 @@ function setup(
     draft,
     ...(options.deletions === undefined ? {} : { deletions: options.deletions }),
     ...(options.saver === undefined ? {} : { saver: options.saver }),
+    ...(options.availability === undefined ? {} : { availability: options.availability }),
   });
   const settle = async () => {
     await examples.idle();
@@ -81,6 +101,17 @@ describe('Example table', () => {
         expect(nucleotide, `${set.id} ${program.id}`).toBe(sequenceKind(programById(program.id), 'query') === 'nucleotide');
       }
     }
+  });
+
+  it("names where every mode's queries come from, with the accession of each query's defline", () => {
+    for (const program of PROGRAMS) {
+      const sources = exampleQuerySources(program.id);
+      const deflines = [...new Set(examplesFor(program.id).map((set) => exampleQuery(set, program.id).split('\n')[0]!))];
+      expect(sources.length, program.id).toBe(deflines.length);
+      deflines.forEach((defline, i) => expect(defline, program.id).toContain(sources[i]!.split(' (')[0]!.split(' ').at(-1)!));
+    }
+    // UniProt's CC BY 4.0 asks for the credit.
+    expect(exampleQuerySources('blastp')).toEqual(['UniProtKB P16971 (UniProt, CC BY 4.0)']);
   });
 
   it('downloads only from hosts that the CSP names, over HTTPS, without anything of the user in the URL', () => {
@@ -196,6 +227,175 @@ describe('ExampleLoader', () => {
       state: 'failed',
       message: 'ftp.ncbi.nlm.nih.gov could not be reached (Failed to fetch).',
     });
+  });
+
+  // Line WQA's sweep, D1, its review, M2 (2026-11-19): with the engine file not downloaded, a press downloaded the whole set
+  // (8 MB for 16S, 37 MB for PDB) and then said "The file from ftp.ncbi.nlm.nih.gov could not be decompressed (LOSAT
+  // could not download its engine file …)": the file was blamed for the decoders that could not be loaded.
+  it('loads no set while a part of LOSAT is unavailable, and says what the page says', async () => {
+    // The answer comes once the form asked the engine again (Availability.recheck); nothing starts before it.
+    const availability = heldAvailability(UNAVAILABLE);
+    const { draft, examples, downloader, settle } = setup({ availability });
+    draft.setPaste('query', '>old\nACGT\n');
+    examples.load('refseq-16s-bacteria');
+    await draft.idle();
+    // Busy from the press, with Cancel (the fourth review of D1 and D2, M1).
+    expect(examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'asking' } });
+    availability.answer();
+    await settle();
+    expect(examples.state.get().load).toEqual({
+      id: 'refseq-16s-bacteria',
+      progress: { state: 'failed', message: `${UNAVAILABLE}. Reload the page.`, unavailable: true },
+    });
+    expect(downloader.requests).toEqual([]);
+    expect(draft.state.get().query.paste).toBe('>old\nACGT\n');
+    availability.set();
+    examples.load('refseq-16s-bacteria');
+    availability.answer();
+    await settle();
+    expect(downloader.requests.map((request) => request.url)).toEqual([SIXTEEN_S.url]);
+    expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 1 });
+  });
+
+  // The fifth review of D1 and D2, L2 (2026-11-19): a load refused while a part of LOSAT could not be loaded said "Reload
+  // the page" also once LOSAT worked again.
+  it('drops a load refused while a part of LOSAT is unavailable once LOSAT works, and only such a load', async () => {
+    const availability = heldAvailability(UNAVAILABLE);
+    const { examples, settle } = setup({ availability });
+    examples.load('refseq-16s-bacteria');
+    availability.answer();
+    await settle();
+    const refused = { id: 'refseq-16s-bacteria', progress: { state: 'failed', message: `${UNAVAILABLE}. Reload the page.`, unavailable: true } };
+    expect(examples.state.get().load).toEqual(refused);
+    // Another part that is unavailable: the remedy is the same.
+    availability.set('The part of LOSAT that keeps the results stopped');
+    expect(examples.state.get().load).toEqual(refused);
+    availability.set();
+    expect(examples.state.get().load).toBeUndefined();
+
+    // A load that failed for its set's site stays.
+    const works = heldAvailability();
+    const other = setup({ availability: works, files: { [SIXTEEN_S.url]: { ok: false, reason: 'refused', status: 404 } } });
+    other.examples.load('refseq-16s-bacteria');
+    works.answer();
+    await other.settle();
+    const failed = other.examples.state.get().load;
+    expect(failed?.progress.state).toBe('failed');
+    works.set(UNAVAILABLE);
+    works.set();
+    expect(other.examples.state.get().load).toBe(failed);
+  });
+
+  // The sixth review of D1 and D2 (2026-11-20): a set pressed while the engine file was still on its way downloaded at
+  // once, its inflation then waited for that file, which failed: the row said "Downloading 43 bytes of 43 bytes…" while
+  // it waited, and "Reload the page" also once LOSAT worked again.
+  it('waits for LOSAT while the set is inflated, and drops a refusal of its inflation once LOSAT works', async () => {
+    const availability = heldAvailability();
+    const { draft } = setup();
+    let inflated: () => void = () => undefined;
+    const downloader: FileDownloader = {
+      download: async (_request, onProgress) => {
+        onProgress({ bytes: 43, total: 43 });
+        onProgress({ bytes: 43, total: 43, inflating: true });
+        await new Promise<void>((resolve) => (inflated = resolve));
+        return { ok: false, reason: 'unavailable', detail: UNAVAILABLE };
+      },
+    };
+    const store = new MemoryExampleStore({ persistent: true, now: () => 0 });
+    const examples = new ExampleLoader({ downloader, store, draft, availability });
+    examples.load('refseq-16s-bacteria');
+    availability.answer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'inflating' } });
+    inflated();
+    await examples.idle();
+    expect(examples.state.get().load).toEqual({
+      id: 'refseq-16s-bacteria',
+      progress: { state: 'failed', message: `${UNAVAILABLE}. Reload the page.`, unavailable: true },
+    });
+    // The page says it too, and then LOSAT works again.
+    availability.set(UNAVAILABLE);
+    availability.set();
+    expect(examples.state.get().load).toBeUndefined();
+  });
+
+  // A problem that the page says only after the recheck answered refuses the load all the same.
+  it('decides on what the page says once the recheck answered', async () => {
+    const availability = heldAvailability();
+    const { examples, downloader, settle } = setup({ availability });
+    examples.load('refseq-16s-bacteria');
+    availability.answer();
+    availability.set(UNAVAILABLE);
+    await settle();
+    expect(examples.state.get().load?.progress).toEqual({ state: 'failed', message: `${UNAVAILABLE}. Reload the page.`, unavailable: true });
+    expect(downloader.requests).toEqual([]);
+  });
+
+  // The fourth review of D1 and D2, M1 (2026-11-19): while LOSAT was asked again, the load had no state, so a mode change,
+  // a Delete or Cancel did not end it: 16S (8 MB) then downloaded and was saved for a mode the user had left.
+  describe('a load that waits while LOSAT is asked again', () => {
+    function waiting() {
+      const availability = heldAvailability();
+      const loader = setup({ availability });
+      loader.examples.load('refseq-16s-bacteria');
+      expect(loader.examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'asking' } });
+      return { ...loader, answer: () => availability.answer() };
+    }
+
+    it('ends at a mode that has no button for the set, before any request', async () => {
+      const { draft, examples, downloader, store, settle, answer } = waiting();
+      draft.setProgram('blastp');
+      // The row of the mode follows (ExampleLine's watch).
+      examples.refresh();
+      expect(examples.state.get().load).toBeUndefined();
+      answer();
+      await settle();
+      expect(downloader.requests).toEqual([]);
+      expect(await store.readExample(SIXTEEN_S.id, SIXTEEN_S.url)).toBeUndefined();
+      expect(examples.state.get().loaded).toBeUndefined();
+    });
+
+    it('gets no set for a mode that changed meanwhile, also unseen by the row', async () => {
+      const { draft, examples, downloader, settle, answer } = waiting();
+      draft.setProgram('blastp');
+      answer();
+      await settle();
+      expect(downloader.requests).toEqual([]);
+      expect(examples.state.get().load).toBeUndefined();
+    });
+
+    it('ends at Cancel and at a Delete, before any request', async () => {
+      const cancelled = waiting();
+      cancelled.examples.cancel();
+      expect(cancelled.examples.state.get().load).toBeUndefined();
+      cancelled.answer();
+      await cancelled.settle();
+      expect(cancelled.downloader.requests).toEqual([]);
+
+      const deleted = waiting();
+      await deleted.examples.delete('refseq-16s-bacteria');
+      expect(deleted.examples.state.get().load).toBeUndefined();
+      deleted.answer();
+      await deleted.settle();
+      expect(deleted.downloader.requests).toEqual([]);
+    });
+  });
+
+  it('says what the page says when the decoders or the store of the sets stop during a load, not that the file is damaged', async () => {
+    const STOPPED = 'The part of LOSAT that keeps the results stopped';
+    const { examples, settle } = setup({ files: { [SIXTEEN_S.url]: { ok: false, reason: 'unavailable', detail: STOPPED } } });
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    expect(examples.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.`, unavailable: true });
+    // The store that keeps the saved copies stopped: no download starts.
+    const { examples: other, downloader, settle: settleOther } = setup({
+      wrapStore: (store) =>
+        Object.assign(Object.create(store) as ExampleStore, { readExample: () => Promise.reject(new UnavailableError(STOPPED)) }),
+    });
+    other.load('refseq-16s-bacteria');
+    await settleOther();
+    expect(other.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.`, unavailable: true });
+    expect(downloader.requests).toEqual([]);
   });
 
   it('uses the set in this tab when the browser keeps nothing, or when the storage is full', async () => {
@@ -438,8 +638,30 @@ describe('BrowserFileDownloader', () => {
     expect(result).toMatchObject({ ok: true, downloadedBytes: gz.length, version: '2026-10-27' });
     // The body is the set's file as its site names it.
     expect(given).toEqual([['x.fna.gz', EXAMPLE_BYTE_LIMIT]]);
-    expect(progress.at(-1)).toEqual({ bytes: gz.length, total: gz.length });
+    // The whole body, and then its inflation (the sixth review of line WQA's D1 and D2, 2026-11-20).
+    expect(progress.slice(-2)).toEqual([
+      { bytes: gz.length, total: gz.length },
+      { bytes: gz.length, total: gz.length, inflating: true },
+    ]);
     expect(calls[0]![1]).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer' });
+  });
+
+  it('says that the body is being inflated before the decoders answer', async () => {
+    const gz = gzipSync(TEXT);
+    const seen: DownloadProgress[] = [];
+    let atInflation: DownloadProgress | undefined;
+    const downloader = new BrowserFileDownloader({
+      inflater: {
+        inflateFile: (file, maxBytes) => {
+          atInflation = seen.at(-1);
+          return inflateFile(file, new NodeInflater(), maxBytes);
+        },
+      },
+      fetch: async () => new Response(gz),
+    });
+    const request = { url: 'https://ftp.ncbi.nlm.nih.gov/x.fna.gz', maxBytes: EXAMPLE_BYTE_LIMIT, fileName: 'x.fna' };
+    await downloader.download(request, (p) => seen.push(p), new AbortController().signal);
+    expect(atInflation).toEqual({ bytes: gz.length, inflating: true });
   });
 
   it('keeps a body that is not gzip as it is, without the inflation, and names UniProt releases', async () => {
@@ -447,6 +669,7 @@ describe('BrowserFileDownloader', () => {
     expect(await text(result)).toBe(TEXT);
     expect(result).toMatchObject({ version: 'UniProt release 2026_03' });
     expect(progress.at(-1)).toEqual({ bytes: TEXT.length });
+    expect(progress.some((p) => p.inflating === true)).toBe(false);
     expect(given).toEqual([]);
   });
 
@@ -463,6 +686,10 @@ describe('BrowserFileDownloader', () => {
     const sentence = "'x.fna.gz' is named .gz but is not gzip data (incomplete deflate stream); LOSAT reads a file named .gz through gzip";
     const engine: WholeFileInflater = { inflateFile: () => Promise.reject(new Error(sentence)) };
     expect((await run(() => new Response(gz), { inflater: engine })).result).toEqual({ ok: false, reason: 'corrupt', detail: sentence });
+    // Decoders that could not be loaded are no fault of the file (line WQA's sweep, D1; its review, M2).
+    const missing = 'LOSAT could not download its engine file /engine/serial.wasm (network error)';
+    const unloaded: WholeFileInflater = { inflateFile: () => Promise.reject(new UnavailableError(missing)) };
+    expect((await run(() => new Response(gz), { inflater: unloaded })).result).toEqual({ ok: false, reason: 'unavailable', detail: missing });
     // Too large once inflated, and too large as it comes.
     expect((await run(() => new Response(gz), { maxBytes: 100 })).result).toEqual({ ok: false, reason: 'too-large' });
     const large = await run(() => new Response(TEXT), { maxBytes: 100 });

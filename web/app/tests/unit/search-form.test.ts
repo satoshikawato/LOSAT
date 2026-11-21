@@ -240,6 +240,15 @@ describe('setField', () => {
     expect('-template_length' in next).toBe(false);
   });
 
+  it('removes the template fields when the task is rmblastn', () => {
+    // Without the engine's defaults the form cannot tell that rmblastn's scores 0,0 and their
+    // gap costs 5 2 are the task's own, so it writes them (the same search).
+    const next = setField3(templates, '-task', 'rmblastn');
+    expect(next).toEqual({ '-task': 'rmblastn', '-evalue': '1', '-reward': '0', '-penalty': '0', '-gapopen': '5', '-gapextend': '2' });
+    expect('-template_type' in next).toBe(false);
+    expect('-template_length' in next).toBe(false);
+  });
+
   it.each(['dc-megablast', 'megablast'])('keeps the template fields when the task is %s', (task) => {
     expect(setField3(templates, '-task', task)).toEqual({ ...templates, '-task': task });
   });
@@ -607,6 +616,12 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(pairList(blastn, gaps!, {}, bn)).toEqual(['0 0', '5 2', '2 2', '1 2', '0 2', '3 1', '2 1', '1 1']);
     expect(pairList(blastn, gaps!, { '-task': 'dc-megablast' }, bn)).toEqual(['4 4', '2 4', '0 4', '3 3', '6 2', '5 2', '4 2', '2 2']);
     expect(pairList(blastn, gaps!, { '-reward': '1', '-penalty': '-1' }, bn)).not.toContain('0 0');
+    // rmblastn: 0,0 (matrix-only scoring) is offered with that task only, and takes the gap costs of 1,-3.
+    expect(pairList(blastn, scores!, { '-task': 'rmblastn' }, bn)).toEqual(['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1', '0,0']);
+    expect(pairList(blastn, scores!, { '-task': 'blastn' }, bn)).not.toContain('0,0');
+    expect(pairValue(blastn, scores!, { '-task': 'rmblastn' }, bn)).toBe('0,0');
+    expect(pairList(blastn, gaps!, { '-task': 'rmblastn' }, bn)).toEqual(['5 2', '2 2', '1 2', '0 2', '2 1', '1 1']);
+    expect(pairValue(blastn, gaps!, { '-task': 'rmblastn' }, bn)).toBe('5 2');
     // Scores outside NCBI's list have no list of gap costs: the two fields show.
     expect(pairList(blastn, gaps!, { '-reward': '3', '-penalty': '-3' }, bn)).toEqual([]);
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'BLOSUM45' }, tn)).toContain('14 2');
@@ -708,6 +723,10 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
       ['-gapopen', '12'],
       ['-gapextend', '8'],
     ]);
+    // rmblastn: its own scores 0,0 and their default gap costs, neither written; back to
+    // blastn, the scores stay unwritten (blastn's own) and so do the costs.
+    expect(setField(blastn, fourFive, '-task', 'rmblastn', bn)).toEqual({ '-task': 'rmblastn' });
+    expect(setField(blastn, { '-task': 'rmblastn' }, '-task', 'blastn', bn)).toEqual({ '-task': 'blastn' });
     // Back to megablast (the default task, not written): Linear again.
     expect(formParameters(blastn, setField(blastn, blastnTask, '-task', 'megablast', bn), bn)).toEqual([
       ['-reward', '4'],

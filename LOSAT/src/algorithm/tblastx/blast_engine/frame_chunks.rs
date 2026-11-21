@@ -18,9 +18,9 @@ use super::word_finder::{self, WordFinderCx};
 use super::{
     merge_tblastx_subject_chunk_hits, sort_ungapped_hits_by_score_ncbi,
     tblastx_max_dbseq_len_for_run, tblastx_scan_chunk_size_for_run,
-    ungapped_hits_is_sorted_by_score_ncbi, x_soft_subject_calls, DiagStruct, OffsetPair,
-    OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState, Subjects,
-    TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
+    ungapped_hits_is_sorted_by_score_ncbi, x_db_mask_calls, x_soft_subject_calls, DiagStruct,
+    OffsetPair, OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState,
+    Subjects, TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
     TWO_HIT_CHUNK_MERGE_IS_DEFINED,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
@@ -48,6 +48,9 @@ use {
 pub(super) struct SubjectScan<'a> {
     pub(super) subjects: Subjects<'a>,
     pub(super) x_soft_subjects: bool,
+    /// A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2): the
+    /// subject's ranges in bases (`subject_prep::SubjectFrames::x_db_mask`).
+    pub(super) x_db_mask: Option<&'a [(i32, i32)]>,
     pub(super) use_serial_scan_chunks: bool,
     pub(super) use_parallel_chunks: bool,
     pub(super) num_threads: usize,
@@ -85,13 +88,6 @@ pub(super) struct SubjectSums<'s> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-855 (the frame loop of
 /// `s_BlastSearchEngineCore`)
-/// ```c
-/// for (context=first_context; context<=last_context; context++) {
-/// ...
-///     status = s_BlastSearchEngineOneContext(program_number, query, query_info,
-/// ...
-///     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-/// ```
 pub(super) fn search_subject_frames<S: TbxScore>(
     cx: &WordFinderCx<'_>,
     subject: &SubjectScan<'_>,
@@ -109,11 +105,13 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         ))]
         diag_array_size,
         x_read_failure,
+        subject_besthit,
         ..
     } = cx;
     let &SubjectScan {
         subjects,
         x_soft_subjects,
+        x_db_mask,
         use_serial_scan_chunks,
         use_parallel_chunks,
         num_threads,
@@ -139,7 +137,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
     for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
         // NCBI: Diagonal state is NOT reset between subject frames.
         // NCBI shares ewp (diag_table) across all 6 subject frame iterations.
-        // Reference: blast_engine.c:805-855
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-855
         // The per-subject reset (`process_subject`, before the unit path) matches NCBI's
         // Blast_ExtendWordNew calloc.
         // Blast_ExtendWordExit at the end of each subject chunk increments diag_offset.
@@ -151,25 +149,30 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         let subject_all = &subject_full[1..subject_full.len() - 1];
         let s_aa_len = s_frame.aa_len;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:804-855
-        // ```c
-        // for (context=first_context; context<=last_context; context++) {
-        //    subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-        //    subject->sequence = translation_buffer + frame_offsets[context] + 1;
-        //    subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-        //    status = s_BlastSearchEngineOneContext(..., &hsp_list_for_chunks, ...);
-        //    Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-855
         let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
         let mut split_state = SubjectSplitState::new(s_aa_len);
         let max_dbseq_len = tblastx_max_dbseq_len_for_run();
         // `-lcase_masking`: the scan ranges of this frame's chunks, `None` for a subject
-        // without lower-case letters.
-        let x_soft_calls = if x_soft_subjects {
-            x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
-        } else {
-            None
+        // without lower-case letters. A masked `-db` search: with `-db_soft_mask` the scan ranges
+        // of the frame's chunks, with `-db_hard_mask` its chunks, each scanned whole
+        // (`SubjectSplitState::listed`).
+        let x_soft_calls = match x_db_mask {
+            Some(ranges) => {
+                let hard = matches!(subjects, Subjects::Stream(stream)
+                    if stream.mask().is_some_and(|mask| mask.hard()));
+                let calls = x_db_mask_calls(ranges, hard, s_frame, s_frames_preliminary);
+                if hard {
+                    split_state = SubjectSplitState::listed(s_aa_len, &calls);
+                    None
+                } else {
+                    Some(calls)
+                }
+            }
+            None if x_soft_subjects => {
+                x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
+            }
+            None => None,
         };
 
         // What the word finder reads of this subject and frame (`word_finder::FrameCx`).
@@ -244,6 +247,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
                     failure: x_read_failure,
                     s_idx,
                 }),
+                subject_besthit,
             },
             &scan_chunk,
             sc,
@@ -290,6 +294,8 @@ pub(super) struct ChunkSums<'s> {
     pub(super) stats_hsp_filtered_by_cutoff: &'s mut usize,
     pub(super) stats_score_distribution: &'s mut Vec<i32>,
     pub(super) one_hit: Option<OneHitChunkMerge<'s>>,
+    /// `-subject_besthit`: the frame's list is filtered after each merge.
+    pub(super) subject_besthit: bool,
 }
 
 /// Searches the chunks of one subject frame (`split_state`) with `scan_chunk`, which scans a chunk
@@ -343,42 +349,24 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
         ))]
         offset_pairs_len,
     } = drive;
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
     // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
     if use_serial_scan_chunks {
         loop {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-            // ```c
-            // while (TRUE) {
-            //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-            //                                   dbseq_chunk_overlap);
-            //    if (status == SUBJECT_SPLIT_DONE) break;
-            //    BlastInitHitListReset(init_hitlist);
-            //    aux_struct->WordFinder(..., init_hitlist, ...);
-            //    BLAST_GetUngappedHSPList(..., &hsp_list);
-            //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-            //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
             let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
                 SubjectChunkStatus::Done => break,
                 SubjectChunkStatus::Ok(chunk) => chunk,
             };
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
-            // ```c
-            // for (s = s_first; s <= s_last; s++) {
-            //     ...
-            //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
             //
             // Experimental scan chunks split only the scan walk inside this
             // NCBI search unit. The reducer still extends against `subject`,
             // the full real chunk, and `Blast_ExtendWordExit` runs once, at the end
             // of the chunk's scan.
             let scan_size = tblastx_scan_chunk_size_for_run(chunk.length, num_threads);
-            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
             // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
             crate::utils::threading::report_stage(
                 "tblastx",
@@ -402,16 +390,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-            // ```c
-            // while (TRUE) {
-            //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-            //                                   dbseq_chunk_overlap);
-            //    if (status == SUBJECT_SPLIT_DONE) break;
-            //    ...
-            //    status = Blast_HSPListsMerge(...);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
             let mut chunks = Vec::new();
             loop {
                 match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
@@ -419,8 +398,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                     SubjectChunkStatus::Ok(chunk) => chunks.push(chunk),
                 }
             }
-            // NCBI reference: c++/src/algo/blast/core/blast_engine.c:452-584
-            // status = s_GetNextSubjectChunk(subject, &backup, ...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
             crate::utils::threading::report_stage(
                 "tblastx",
                 "subject_chunks",
@@ -468,7 +446,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                     // same chunk order as NCBI before the next subject frame starts.
                     // The experimental workers above use local diagonal tables; the
                     // ordered merge below remains the NCBI `Blast_HSPListsMerge` path.
-                    // References: blast_engine.c:561-584, blast_extend.c:167-173.
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-584, c++/src/algo/blast/core/blast_extend.c:167-173.
                     advance_tblastx_diag_offset(
                         diag_offset,
                         diag_array,
@@ -488,26 +466,14 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
         }
     } else {
         loop {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-            // ```c
-            // while (TRUE) {
-            //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-            //                                   dbseq_chunk_overlap);
-            //    if (status == SUBJECT_SPLIT_DONE) break;
-            //    BlastInitHitListReset(init_hitlist);
-            //    aux_struct->WordFinder(..., init_hitlist, ...);
-            //    BLAST_GetUngappedHSPList(..., &hsp_list);
-            //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-            //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
             let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
                 SubjectChunkStatus::Done => break,
                 SubjectChunkStatus::Ok(chunk) => chunk,
             };
 
             // NCBI: BlastInitHitListReset(init_hitlist) - reset per chunk.
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
             let result = scan_chunk(chunk, offset_pairs, diag_array, diag_offset, None, sc);
             add_chunk_result(&mut sums, result);
         }
@@ -518,12 +484,6 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
 /// the frame's list where they meet the list's HSPs in the chunks' overlap.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584
-/// ```c
-///         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-///                      kHspNumMax, &(backup.offset), INT4_MIN,
-///                      overlap, score_options->gapped_calculation,
-///                      Blast_ProgramIsMapping(program_number));
-/// ```
 fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
     *sums.stats_hsp_saved += result.stats.hsp_saved;
     *sums.stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
@@ -540,6 +500,9 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
             sums.one_hit
                 .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED)
                 .refuse(undefined);
+        }
+        if sums.subject_besthit {
+            super::frame_subject_besthit(sums.frame_ungapped_hits);
         }
     }
 }
@@ -559,23 +522,8 @@ pub(super) fn append_frame_hits(
         // into the combined translated-subject list, then sorts the
         // combined list by score through s_BlastHSPListsCombineByScore.
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:804-845
-        // ```c
-        // for (context=first_context; context<=last_context; context++) {
-        //     subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-        //     ...
-        //     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-        // }
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2758-2766
-        // ```c
-        // for (index=combined_hsp_list->hspcnt, index1=0;
-        //      index1<hsp_list->hspcnt; index1++) {
-        //    combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
-        // }
-        // combined_hsp_list->hspcnt = new_hspcnt;
-        // Blast_HSPListSortByScore(combined_hsp_list);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-845
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
         combined_ungapped_hits.extend(frame_ungapped_hits);
         if !ungapped_hits_is_sorted_by_score_ncbi(combined_ungapped_hits) {
             sort_ungapped_hits_by_score_ncbi(combined_ungapped_hits);

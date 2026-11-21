@@ -1,6 +1,6 @@
 //! When two Seq-ids are one `CSeq_id_Handle` in NCBI BLAST+ 2.17.0: the identity that
 //! `makeblastdb`'s `CMaskedRangeSet` matches a mask's Seq-id and a database sequence's Seq-ids
-//! by (`c++/src/app/blastdb/masked_range_set.{hpp,cpp}`: a `map<CSeq_id_Handle, CConstRef<CSeq_loc>>`
+//! by (`c++/src/app/blastdb/masked_range_set.hpp`, `.cpp`: a `map<CSeq_id_Handle, CConstRef<CSeq_loc>>`
 //! per algorithm, filled with `CSeq_id_Handle::GetHandle(id)` and looked up the same way), and
 //! that the object manager keys the ranges of a PSSM query's annotations by
 //! (`algorithm::pssm_search::annot_index`, `CHandleRangeMap`; psiblast and tblastn `-in_pssm`
@@ -60,21 +60,6 @@ pub(crate) enum TreeHandle {
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:193-207
-// ```c++
-//     bool operator== (const CSeq_id_Handle& handle) const
-//         {
-//             return m_Packed == handle.m_Packed && m_Info == handle.m_Info;
-//         }
-//     ...
-//     bool operator<  (const CSeq_id_Handle& handle) const
-//         {
-//             // Packed (m_Packed != 0) first:
-//             // zeroes are converted to a highest unsigned value by decrement.
-//             TUintId p1 = INT_ID_TO(TUintId, m_Packed-1);
-//             TUintId p2 = INT_ID_TO(TUintId, handle.m_Packed-1);
-//             return p1 < p2 || (p1 == p2 && m_Info < handle.m_Info);
-//         }
-// ```
 /// The key of the `CSeq_id_Handle` that `CSeq_id_Handle::GetHandle(id)` gives in NCBI 2.17.0
 /// (`CSeq_id_Mapper::GetHandle` -> `FindOrCreate`): two Seq-ids are one handle exactly when
 /// their keys are equal. `Ok(None)`: a Textseq-id with neither accession nor name, which gets a
@@ -122,6 +107,31 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeH
         }
     }
     Ok(Some(key))
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1185
+/// The key of the info (`CSeq_id_Info`) of the handle that `CSeq_id_Handle::GetHandle(id)` gives:
+/// two Seq-ids whose keys are equal share one info, and `GetSeqId()` of either handle is made from
+/// the Seq-id that made it ([`handle_seq_id`]). It is [`mask_handle_key`] but for a Textseq-id that
+/// packs: its info is shared by every accession with the same prefix (without case), number of
+/// digits and version (the packed tree's `TKey`), whatever the number and, in the GenBank tree,
+/// whatever the alternative (GenBank, EMBL or DDBJ).
+pub(crate) fn mask_info_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHandle> {
+    if let Some(text) = id.textseq().filter(|text| textseq_packs(text)) {
+        let accession = text
+            .accession
+            .as_deref()
+            .expect("a packed Textseq-id has an accession");
+        let (prefix_len, digits) =
+            textseq_packed_split(accession).expect("a packed Textseq-id splits");
+        let mut key = vec![handle_tree(id), b'I'];
+        push_bytes(&mut key, &accession[..prefix_len].to_ascii_lowercase());
+        key.extend((digits as u32).to_le_bytes());
+        push_opt_i32(&mut key, text.version);
+        return Ok(Some(key));
+    }
+    mask_handle_key(id)
 }
 
 /// The key of a Textseq-id (`key` holds its tree).
@@ -222,59 +232,19 @@ pub(crate) fn mask_handle_order(packed: i64) -> u64 {
     (packed as u64).wrapping_sub(1)
 }
 
-// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:300-312 (the Seq-id of a
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:300-313 (the Seq-id of a
 // handle: its info's own, or the one its packed number and case variant give back)
-// ```c++
-//     CConstRef<CSeq_id> GetSeqId(void) const
-//         {
-//             CConstRef<CSeq_id> ret;
-//             if ( m_Packed || m_Variant ) {
-//                 ret = m_Info->GetPackedSeqId(m_Packed, m_Variant);
-//             }
-//             else {
-//                 ret = m_Info->GetSeqId();
-//             }
-//             return ret;
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:736-786 (a case variant has
 // one bit per letter of the info's Seq-id, at most 64: `TVariant` is `Uint8`)
-// ```c++
-//     for ( size_t i = 0; variant && i != len; ++i ) {
-//         int c = Uint1(str[i]);
-//         if ( isalpha(c) ) {
-//             if ( variant & 1 ) {
-//                 // flip case
-// ...
-//     for ( size_t i = 0; bit && i != ref.size(); ++i ) {
-//         int cr = Uint1(ref[i]);
-//         if ( !isalpha(cr) ) {
-//             continue;
-//         }
-//         int cs = Uint1(str[i]);
-//         if ( cs != cr ) {
-//             ...
-//             variant |= bit;
-//         }
-//         bit <<= 1;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:938-966, 1022-1029 (a packed
 // Textseq-id is made again with the info's alternative and the accession's case; a plain one is
 // the info's Seq-id with the accession's case only), 1934-1950 (a local string id), 2172-2181,
 // 2338-2357, 2466-2481 (a general id: the database, then a string tag), 3408-3463 (a PDB id: the
 // variant of `CSeq_id_PDB_Info::Normalize` gives back the molecule's case, `chain` and `chain-id`)
-// ```c++
-//     const_cast<CSeq_id&>(*ret).Select(GetType(), eDoNotResetVariant);
-//     Restore(*const_cast<CTextseq_id*>(ret->GetTextseq_Id()), param, variant);
-// ...
-//     CRef<CSeq_id> ret(new CSeq_id);
-//     s_AssignSeq_id(*ret, *m_Seq_id);
-//     s_RestoreCaseVariant(const_cast<CTextseq_id*>(ret->GetTextseq_Id())->SetAccession(), variant);
-// ```
 /// `CSeq_id_Handle::GetSeqId()` of the handle that `CSeq_id_Handle::GetHandle(id)` gives when the
-/// handle's info was made from `first` (the two are one handle: [`mask_handle_key`], or the `giim`
-/// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes. The info keeps `first`;
+/// handle's info was made from `first` (the two share the info: [`mask_info_key`], or the `giim`
+/// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes and the masking tools'
+/// `seqloc_*` and `maskinfo_*` writers print. The info keeps `first`;
 /// the handle's case variant gives back the case of `id`'s first 64 letters where the tree keeps
 /// one:
 /// - a local string id; a general id's database, then its string tag;
@@ -605,41 +575,12 @@ fn push_opt_i32(key: &mut Vec<u8>, value: Option<i32>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964
-// ```c++
-// CSeq_id_Info* CSeq_id_Giim_Tree::x_FindInfo(const CGiimport_id& gid) const
-// {
-//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
-//     if (id_it == m_IdMap.end())
-//         return 0;
-//     ITERATE (TGiimList, dbr_it, id_it->second) {
-//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
-//         const CGiimport_id& gid2 = id->GetGiim();
-//         // Both Db and Release must be equal
-//         if ( !gid.Equals(gid2) ) {
-//             return *dbr_it;
-//         }
-//     }
-//     // Not found
-//     return 0;
-// }
-// ...
-// CSeq_id_Handle CSeq_id_Giim_Tree::FindOrCreate(const CSeq_id& id)
-// {
-//     ...
-//     CSeq_id_Info* info = x_FindInfo(gid);
-//     if ( !info ) {
-//         info = CreateInfo(id);
-//         m_IdMap[gid.GetId()].push_back(info);
-//     }
-//     return CSeq_id_Handle(info);
-// }
-// ```
 /// NCBI's `CSeq_id_Giim_Tree` ([`TreeHandle::Giim`]): the live handles of each `giim` number, in
 /// the order they were made, each with the Giimport-id it was made from (`GetSeqId()` of the
 /// info). The one model of the tree: `makeblastdb`'s mask ranges (`writedb::mask_data::range_set`)
 /// and the object manager's index and attach of a PSSM query (`algorithm::pssm_search::annot_index`)
 /// keep their handles in it and drop each one when the last thing holding it goes.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct GiimTree {
     lists: HashMap<i32, Vec<(usize, GiimportId)>>,
     made: usize,

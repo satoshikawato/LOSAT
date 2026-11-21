@@ -3,14 +3,6 @@
 //! searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155
-//! ```c
-//! static Int4 s_BlastAaExtendTwoHit(...)
-//! {
-//!     ...
-//!     left_score = s_BlastAaExtendLeft(matrix, subject, query, ...);
-//!     ...
-//!         right_score = s_BlastAaExtendRight(matrix, subject, query, ...);
-//! ```
 //! The switch is in the strict set (on unless it is `0`).
 //! The path gives the extension's result of the closure it replaces (the module's argument), so
 //! the property under test is that the report does not depend on it, for subjects read from FASTA

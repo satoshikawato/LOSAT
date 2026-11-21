@@ -1,0 +1,10 @@
+# RPSTBLASTN 2.17.0+
+# Query: tkcut570
+# Database: fo11rps3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 12 hits found
+tkcut570	CDD:101	100.000	190	0	0	1	570	1	190	1.62e-114	312
+tkcut570	CDD:101	42.857	14	8	0	129	88	22	35	3.8	14.3
+tkcut570	CDD:101	30.435	23	16	0	437	369	140	162	7.0	13.6
+tkcut570	CDD:101	83.333	6	1	0	392	409	137	142	8.9	13.2
+# BLAST processed 1 queries

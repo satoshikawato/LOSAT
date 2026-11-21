@@ -184,17 +184,6 @@ fn assert_matches_cli(inputs: &Inputs, extra: &[&str], hits: bool, context: &str
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-297
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-// ...
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ...
-//         formatter.PrintEpilog(opt);
-// ```
 // The half of the test of this name in the crate (`local_blast_tests/blastx.rs`) checks the
 // observer's ranges against the entry's hit records; this half compares the reports and the
 // warnings with the CLI runs, and the api's ranges with its hit records.
@@ -245,11 +234,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
-// ```c++
-//     if (args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) {
-//        m_NumDescriptions = args[kArgNumDescriptions].AsInteger();
-//     }
-// ```
 // The pairwise report's counts differ by format: formats that need different hit lists are
 // searched by separate calls (LOSAT Web's search groups), which may share one pool.
 // The half of the test of this name in the crate checks that the entry refuses formats that need
@@ -340,14 +324,6 @@ fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c++
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-// ```
 #[test]
 fn formats_of_one_search_equal_the_frozen_ncbi_rows() {
     let rows = manifest_rows();
@@ -359,15 +335,18 @@ fn formats_of_one_search_equal_the_frozen_ncbi_rows() {
         formats.extend(FORMATS.iter().filter(|&&f| f != outfmt));
         let inputs = Inputs::new(&query, &subject);
         let run = inputs.collect(&formats, &extra);
-        let expected = std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.out")))
-            .expect("frozen NCBI output");
+        let expected = losat::wording::losat_output_bytes(
+            &std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.out")))
+                .expect("frozen NCBI output"),
+        )
+        .into_owned();
         assert!(run.reports[0].bytes == expected, "{id}: differs from NCBI");
         if let Ok(stderr) =
             std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.err")))
         {
             assert_eq!(
                 String::from_utf8_lossy(&run.diagnostics),
-                String::from_utf8_lossy(&stderr),
+                String::from_utf8_lossy(&losat::wording::losat_output_bytes(&stderr)),
                 "{id}: warnings"
             );
         }
@@ -419,11 +398,6 @@ fn reader_cases() -> Vec<(String, String)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:328-330
-// ```c++
-//     flags += (m_ReadProteins
-//               ? CFastaReader::fAssumeProt
-//               : CFastaReader::fAssumeNuc);
-// ```
 // LOSAT Web registers the records of NCBI's reader (`fasta_reader`), which `run_local` turns into
 // BLASTX's records; the CLI reads with BLASTX's reader. Both must give the same report and
 // messages, and fail where the other fails, except where the readers differ (`ReaderDifference`).
@@ -440,11 +414,14 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
             let (ok, output, stderr) = inputs.cli("6", extra);
             let run = inputs.write(&["6"], extra);
             // The api reads the files before any report: a reader error comes with no output.
-            if let Err(Error::Input(error)) = &run.result {
+            if let Err(error @ Error::Input(_)) = &run.result {
                 // A first line that NCBI may fetch as a Seq-id: LOSAT Web's `register` refuses
                 // it (NCBI's reader with its data loaders); BLASTX's reader reads the line.
                 if query.contains("/seqid3.") || subject.contains("/seqid3.") {
-                    assert!(error.contains("data loader"), "{query} {subject}: {error}");
+                    assert!(
+                        error.to_string().contains("data loader"),
+                        "{query} {subject}: {error}"
+                    );
                     continue;
                 }
                 if ok {
@@ -466,14 +443,14 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
                 Ok(()) => ok && outputs[0] == output && diagnostics == stderr,
                 Err(error) => {
                     !ok && diagnostics == stderr[..diagnostics.len().min(stderr.len())]
-                        && error_is_in_stderr(error.message(), &stderr)
+                        && error_is_in_stderr(&error.to_string(), &stderr)
                 }
             };
             if !same {
                 differences.push(format!(
                     "{query} {subject} {extra:?}: CLI ok={ok} stderr={:?}; the api {:?} diagnostics={:?}",
                     String::from_utf8_lossy(&stderr),
-                    result.as_ref().map_err(|e| e.message()),
+                    result.as_ref().map_err(|e| e.to_string()),
                     String::from_utf8_lossy(&diagnostics),
                 ));
             }
@@ -487,13 +464,6 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
 const WAVES_CHILD: &str = "SX_RUN_LOCAL_WAVES_CHILD";
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:345-357
-// ```c
-// 		while (master_node.Processing()) {
-// 			if (!input.AtEOF()) {
-// 			 	if (!master_node.IsFull()) {
-// ...
-// 					int num_q = input.GetQueryBatch(qb, q_index);
-// ```
 // With 2+ threads the batch loop queues the reader's batches; `LOSAT_X_BXFLOW=0` (read once per
 // process) searches them in waves (`x_flush`) instead of the flow (`x_flow`), so a child process
 // of this test binary runs the comparison of several batches with it.
@@ -540,13 +510,6 @@ fn waves_child() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1361-1365
-// ```c++
-//
-//     // apply source mods *after* figuring out mol type
-//     ITERATE(vector<SLineTextAndLoc>, title_ci, m_CurrentSeqTitles) {
-//         ParseTitle(*title_ci, pMessageListener);
-//     }
-// ```
 // NCBI posts a record's title warning when it assembles the record, after the warnings of its
 // data lines. NCBI BLAST+ 2.17.0 (`blastx -query q.fna -subject s.faa -outfmt 6`, the inputs
 // below) wrote this standard error and the rows that LOSAT writes, from LOSAT Web's records and on
@@ -618,7 +581,7 @@ impl ReaderDifference {
         assert!(!cli_ok, "{context}: the CLI fails");
         match self {
             Self::NoRecords => {
-                assert_eq!(cli_stderr, "BLAST engine error: Empty CBlastQueryVector\n");
+                assert_eq!(cli_stderr, "LOSAT engine error: Empty CBlastQueryVector\n");
                 assert!(result.is_ok(), "{context}");
                 assert_eq!(diagnostics, b"Warning: [blastx] Query is Empty!\n");
             }
@@ -664,18 +627,6 @@ fn short_subject_between_warnings() -> PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-// ```c++
-//     TSeqPos size_read = 0;
-//
-//     while (size_read < GetBatchSize()) {
-// ...
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-// ...
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-// ```
 /// `-query_loc` and `-subject_loc` cut the records as the command line cuts them: the reports of
 /// the three formats from one search equal the CLI's of each format, with queries skipped or
 /// without letters in the range, subjects without letters, lower-case masks, the minus strand and
@@ -803,7 +754,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
             } = inputs.write(&FORMATS, &extra);
             let error = result.expect_err(&context);
             assert!(
-                matches!(error, Error::Search(_)) && error.message().contains(message),
+                matches!(error, Error::Search(_)) && error.to_string().contains(message),
                 "{context}: {error}"
             );
             for (index, outfmt) in FORMATS.iter().enumerate() {
@@ -814,9 +765,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
                     "{context}: outfmt {outfmt} differs from the CLI"
                 );
                 assert_eq!(
-                    String::from_utf8_lossy(
-                        &[&diagnostics[..], error.message().as_bytes()].concat()
-                    ),
+                    String::from_utf8_lossy(&[&diagnostics[..], error.message()].concat()),
                     String::from_utf8_lossy(&stderr),
                     "{context}: outfmt {outfmt}'s warnings and error"
                 );
@@ -826,7 +775,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
     let _ = std::fs::remove_file(&short_subject);
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
 // c++/src/app/blast/blastx_app.cpp:283-288: NCBI searches each `-subject` sequence on its own
 // with BL2SEQ_LEGACY (LOSAT refuses it), and converts PRE_FETCH_SEQS_LIMIT with NStr::StringToInt
 // before the first batch's report, whose `CStringException` ends the program after the outfmt 0
@@ -1035,7 +984,7 @@ fn environment_child() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
-// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `parameters::subject_parameters`).
+// c++/src/algo/blast/core/blast_message.c:215-217 (cited at `parameters::subject_parameters`).
 // Without the Gumbel block (`-searchsp`, `OLD_FSC` or `-ungapped`) a set of subjects whose average is below one letter
 // fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
 // report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an
@@ -1061,7 +1010,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
     let path = subject.0.display().to_string();
     let subjects_warning = "Warning: [blastx] Subject_2 b: Subject sequence contains no data\n\
                             Warning: [blastx] Subject_3 c: Subject sequence contains no data\n";
-    let error = "BLAST engine error: The average subject length is too short\n";
+    let error = "LOSAT engine error: The average subject length is too short\n";
     // The prolog's database line wraps a long path as NCBI's does, so only its end is compared.
     let prolog_end = "           3 sequences; 1 total letters\n\n";
     for (args, env, first_batch) in [
@@ -1091,13 +1040,13 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             );
             match (outfmt, first_batch) {
                 ("0", false) => assert!(
-                    stdout.starts_with("BLASTX 2.17.0+\n")
+                    stdout.starts_with(concat!("BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(prolog_end),
                     "{stdout}"
                 ),
                 ("0", true) => assert!(
-                    stdout.starts_with("BLASTX 2.17.0+\n")
+                    stdout.starts_with(concat!("BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(&format!(
                             "{prolog_end}\n\nQuery= qx all N\n\nLength=90\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
@@ -1107,7 +1056,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
                 ("7", true) => assert_eq!(
                     stdout,
                     format!(
-                        "# BLASTX 2.17.0+\n# Query: qx all N\n# Database: User specified sequence set (Input: {path})\n"
+                        concat!("# BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n# Query: qx all N\n# Database: User specified sequence set (Input: {path})\n"), path = path
                     )
                 ),
                 _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),

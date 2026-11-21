@@ -4,13 +4,13 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { ProgramId, RecordKey, SequenceKind } from 'losat/domain';
+import type { MessagePlace, OutputPlace, ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
 import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
-import { customOutfmt } from '../domain/output-format';
+import { customOutfmt, runOutputs } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import {
   buildResultIndex,
@@ -116,13 +116,26 @@ export interface LoadedRun {
   readonly description: ProgramDescription;
   readonly limits: HitLimits;
   /**
-   * Whether outfmt 0 has a search of its own (-num_descriptions / -num_alignments) that wrote nothing: outfmt 0
-   * always writes its header when its search succeeds, so an empty stream 0 next to the tabular records means that
-   * the search failed (abi_v2.md §7; its error is in the diagnostics).
+   * Where the error of outfmt 0 is when the run could not write it, as the engine said (`failedOutput`): its report
+   * failed alone in the search of the other formats, or its search of its own (-num_descriptions / -num_alignments)
+   * failed (abi_v2.md §5, §7). Undefined where outfmt 0 was written (line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
    */
-  readonly outfmt0Failed: boolean;
+  readonly outfmt0Error: OutputPlace | undefined;
+  /**
+   * Where the error of outfmt 6 is when the run could not write it, as the engine said (`failedOutput`), so that it
+   * has no HSP records (they point into outfmt 6, abi_v2.md §8); outfmt 7 stops at the same row. Undefined where
+   * outfmt 6 was written.
+   */
+  readonly tabularError: OutputPlace | undefined;
   readonly badge: Badge;
+  /** The run's diagnostics (stream 3): the lines that the CLI writes to its standard error. */
   readonly diagnostics: string;
+  /**
+   * Where the run's messages went, as the engine said (`RunRecord.messages`): to the diagnostics, or, for TBLASTX with
+   * -logfile, to the file of -logfile or nowhere, so that empty diagnostics are not taken for a run without warnings
+   * (line WQA's sweep, D7, 2026-11-20).
+   */
+  readonly messages: MessagePlace;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
   readonly units: Units;
   /** The task that the search used: the argv's -task, or the engine's default; undefined for a program without tasks. */
@@ -260,6 +273,8 @@ export class ResultsBrowser {
         this.deps.data.readDiagnostics(runId),
       ]);
       if (token !== this.loadToken) return;
+      const messages = run.record.messages;
+      if (messages === undefined) throw new Error('the record of the run does not say where its messages went');
       const program = programById(run.snapshot.program);
       const kinds = { query: program.query, subject: program.subject };
       const limits = hitLimits(run.snapshot.argv, description.parameters);
@@ -269,7 +284,8 @@ export class ResultsBrowser {
         out6,
         description,
         limits,
-        outfmt0Failed: limits.outfmt0?.separate === true && run.result?.byteLengths[0] === 0,
+        outfmt0Error: failedOutput(run, 0),
+        tabularError: failedOutput(run, 6),
         badge: verificationBadge(
           {
             program: run.snapshot.program,
@@ -283,6 +299,7 @@ export class ResultsBrowser {
           this.deps.verification,
         ),
         diagnostics,
+        messages,
         kinds,
         units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },
         ...taskOf(run.snapshot.argv, description),
@@ -541,7 +558,7 @@ export class ResultsBrowser {
     const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
     if (byScore) this.scores ??= shownScores(table, loaded.out6);
     const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
-      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx),
+      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx, loaded.run.record.shownIds),
       this.row(subject.rows[0]!).sseqid,
     ]);
     const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
@@ -638,7 +655,7 @@ export class ResultsBrowser {
     loaded.run.snapshot.query.records.forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
-      const id = recordName(record.id, 'query', qIdx);
+      const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
       if (text !== '' && !id.toLowerCase().includes(text)) return;
       entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
     });
@@ -679,19 +696,40 @@ export class ResultsBrowser {
   }
 }
 
+/**
+ * Where the error of the output `output` of a run is when the run could not write it, as the engine said
+ * (`ResultSetRef.failed`); undefined where the run wrote it, or has no result.
+ */
+export function failedOutput(run: RunView, output: RunOutput): OutputPlace | undefined {
+  return run.result?.failed.find((failed) => failed.output === output)?.error;
+}
+
 /** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
-export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-queries' | 'no-hits' | 'filtered-out';
+export type NoHspReason =
+  | 'printed-help'
+  | 'printed-version'
+  | 'dry-run'
+  | 'empty-query'
+  | 'no-tabular-hits'
+  | 'no-tabular-output'
+  | 'no-queries'
+  | 'no-hits'
+  | 'filtered-out';
 
 /**
  * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
- * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing.
+ * loaded. A run that printed the command line's help or version (line WQA's D14, 2026-11-20) and a
+ * dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
+ * (`LoadedRun.tabularError`) has no HSP records, whatever its queries found.
  */
 export function noHspReason(state: ResultsState): NoHspReason | undefined {
   const loaded = state.loaded;
   if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
   if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
+  if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';
   if (state.queryTotals === undefined) return undefined;
   if (state.queryTotals.hsps === 0) return 'no-hits';
@@ -721,8 +759,9 @@ export function unreadableResults(run: RunView, error: unknown): string {
 
 /**
  * Why a run that has not completed has no results: the results page's sentence, also told to a
- * screen reader as the run ends. A failed run that made the file of its `-logfile` keeps it (line RG
- * E1w-3b), and the page shows it under the sentence (RunFiles).
+ * screen reader as the run ends. A failed run keeps the outputs that the CLI leaves before its error (line WQA's
+ * sweep, D15, 2026-11-20), the warnings that it wrote before it (D3, 2026-11-19) and the file of its `-logfile` (line
+ * RG E1w-3b), and the page shows them under the sentence (ResultsPanel, OutputsView, RunFiles).
  */
 export function unavailableMessage(run: RunView): string {
   const n = run.snapshot.number;
@@ -731,14 +770,31 @@ export function unavailableMessage(run: RunView): string {
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
     case 'failed': {
       const files = run.record.runFiles ?? [];
+      const written = keptOutputsWritten(run) ? ' It keeps the outputs written before the error.' : '';
+      const warned = run.record.diagnostics?.trim() ? ' It keeps the warnings written before the error.' : '';
       const kept = files.length === 0 ? '' : ` It keeps the file of its -logfile, ${files.map((file) => file.name).join(', ')}.`;
-      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.${kept}`;
+      const nothing = `${written}${warned}${kept}` === '' ? ' It keeps no outputs.' : '';
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')}${written}${warned}${kept}${nothing}`;
     }
     case 'completed':
       return '';
     default:
       return `Run ${n} has not finished yet. Its results appear when it completes.`;
   }
+}
+
+/**
+ * The outputs that a run kept: for a completed run those that its argv writes and the engine wrote, for a failed run
+ * the output that the CLI's run of the argv leaves before its error, from which the engine dropped the others (place
+ * `run`, ABI v2 §5). None for a run that kept none (`RunView.result`).
+ */
+export function keptOutputs(run: RunView): readonly RunOutput[] {
+  return run.result === undefined ? [] : runOutputs(run.snapshot.argv).filter((output) => failedOutput(run, output) !== 'run');
+}
+
+/** Whether a kept output of the run has bytes: an empty file is nothing that the run wrote before its error. */
+export function keptOutputsWritten(run: RunView): boolean {
+  return keptOutputs(run).some((output) => (run.result?.byteLengths[output] ?? 0) > 0);
 }
 
 /** A message as a sentence of its own: no trailing space or line break, and one full stop at most. */

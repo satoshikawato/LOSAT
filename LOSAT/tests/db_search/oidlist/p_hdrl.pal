@@ -1,0 +1,5 @@
+TITLE oidlist header walk
+DBLIST ../taxfilter/tfp
+OIDLIST hdr.msk
+NSEQ 12
+LENGTH 1700

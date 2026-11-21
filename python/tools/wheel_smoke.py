@@ -10,8 +10,11 @@ The search is the row `blastp pairwise_default_serial` of the command line's fro
 (docs/evidence/losat_web_e1a/baseline/hashes.tsv; ci.yml checks the command line against them on
 every pull request). Its words go to `Search.from_argv` as they are, but for the inputs and the
 format, which are arguments of `run`, and `-out`. The report must have the row's frozen hash and
-the diagnostics that of the row's standard error. Prints one Markdown table row for the job
-summary: the Python, the wheel's file name, tags and size, and the hash.
+the diagnostics that of the row's standard error. The wheel must also carry the license files
+of pyproject.toml's `license-files` in its .dist-info/licenses/, each the same bytes as in python/
+(LOSAT's MIT license and the third-party notices and licenses), and name each in METADATA
+(`License-File`, PEP 639). Prints one Markdown table row for the job summary: the Python, the
+wheel's file name, tags and size, and the hash.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ HASHES = Path("docs/evidence/losat_web_e1a/baseline/hashes.tsv")
 CASE = ("blastp", "pairwise_default_serial")
 FIXTURES = "LOSAT/tests/fasta/"
 ARGUMENTS_OF_RUN = ("-query", "-subject", "-outfmt", "-out")
+# pyproject.toml's `license-files`, in python/.
+LICENSE_FILES = ("LICENSE", "THIRD_PARTY_NOTICES", "THIRD_PARTY_LICENSES")
 
 
 def frozen_row(repo: Path) -> dict[str, str]:
@@ -55,6 +60,28 @@ def wheel_metadata(wheel: Path) -> tuple[str, list[str]]:
         tags = [line.split(":", 1)[1].strip() for line in read("WHEEL") if line.startswith("Tag:")]
         (version,) = [line.split(":", 1)[1].strip() for line in read("METADATA") if line.startswith("Version:")]
     return version, tags
+
+
+def license_failures(wheel: Path, repo: Path) -> list[str]:
+    """How the wheel's license files differ from python/'s: missing, other bytes, not in METADATA."""
+    failures = []
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        (metadata,) = [name for name in names if name.endswith(".dist-info/METADATA")]
+        declared = {
+            line.split(":", 1)[1].strip()
+            for line in archive.read(metadata).decode().split("\n\n", 1)[0].splitlines()
+            if line.startswith("License-File:")
+        }
+        for file in LICENSE_FILES:
+            found = [name for name in names if name.endswith(f".dist-info/licenses/{file}")]
+            if not found:
+                failures.append(f"no .dist-info/licenses/{file}")
+            elif archive.read(found[0]) != (repo / "python" / file).read_bytes():
+                failures.append(f"{found[0]} differs from python/{file}")
+            if file not in declared:
+                failures.append(f"METADATA has no License-File: {file}")
+    return failures
 
 
 def main() -> None:
@@ -98,7 +125,7 @@ def main() -> None:
     )
     report = hashlib.sha256(outcome.reports[0].bytes).hexdigest()
     diagnostics = hashlib.sha256(outcome.diagnostics.encode()).hexdigest()
-    failures = []
+    failures = license_failures(args.wheel, args.repo)
     if report != row["expected_sha256"]:
         failures.append(f"report sha256 {report}, frozen {row['expected_sha256']}")
     if diagnostics != row["stderr_sha256"]:
@@ -111,7 +138,7 @@ def main() -> None:
         f"`{report[:12]}` {verdict} |"
     )
     if failures:
-        raise SystemExit(f"{HASHES.as_posix()}, {' '.join(CASE)}: " + "; ".join(failures))
+        raise SystemExit(f"{args.wheel.name} ({HASHES.as_posix()}, {' '.join(CASE)}): " + "; ".join(failures))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      behavior by calling out to NCBI.
 
 3. Bit-perfect output parity is required.
-   - Output must match NCBI BLAST+ exactly.
+   - Output must match NCBI BLAST+ exactly, apart from the statement of the
+     program's version, which names LOSAT (`BLASTP (LOSAT 0.2.0)` where NCBI
+     writes `BLASTP 2.17.0+`; `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 14):
+     comparisons map NCBI's freezes through `LOSAT/src/wording.rs` (rule 8).
    - Do not simplify algorithms if it changes output.
    - Use the same floating-point precision as NCBI.
    - Approved project exception: for TBLASTX local `-s/--subject` searches,
@@ -69,11 +72,33 @@ authoritative, current guidance for agent behavior in LOSAT.
      text and stops at its first line; exception 8); a failed write of `losat rpsbproc`'s
      report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
      stops LOSAT with a message and exit 4, and a failed write to its standard error
-     (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
+     (NCBI: SIGPIPE) with exit 4 and no message (exception 9); a closed pipe in
+     `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, and version/help/argument
+     errors stops with exit 0 or ignores the closed pipe (exception 10); on a terminal, the command line's
+     `blastn` draws a progress bar on the standard error while it searches with `-num_threads` 2
+     or more against two subjects or more and clears it when each batch's search ends; a standard
+     error sent to a file or a pipe gets none of it (exception 11); messages use
+     LOSAT's words, not NCBI's product or toolkit: `Please refer to the LOSAT user manual.`
+     in place of `Please refer to the BLAST+ user manual.`, and NCBI's exception reports
+     reduced to their messages (no `NCBI C++ Exception:`, thread, NCBI source path and line,
+     `(<class>::<code>)` or C++ function; `(m_Pos = N)` reads `(position N)`), in standard
+     error and in an archive's messages, while NCBI's diagnostic codes such as `(106.15)`
+     and the message bodies stay NCBI's (exception 12); the error prefixes read
+     `LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`,
+     `LOSAT database creation error:`, `LOSAT options error:` and `LOSAT query error:`
+     (NCBI's `BLAST ... error:`, same length), and wherever LOSAT states the running
+     program's version it states LOSAT's: `BLASTP (LOSAT 0.2.0)` in a search output's
+     header (outfmt 0 line 1, outfmt 7 `# BLASTP (LOSAT 0.2.0)`, `BlastOutput_version`,
+     the XML2 and JSON `version`), `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone (an
+     archive's or strategy's `ident`, SAM `@PG VN:`, `-version`), `0.2.0` in `-xmlhelp`'s
+     `<version>`, and in the descriptions of
+     NCBI's frozen `-help` and `-xmlhelp` texts and rpsbproc's banner; the XML and JSON
+     structure, DOCTYPE, namespaces and schema locations stay NCBI's (exception 14; one
+     producer and one mapping, `LOSAT/src/wording.rs`). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
-     every search result must still match NCBI. Non-UTF-8
+     every other byte of every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not
-     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's package),
+     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's version and package),
      `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
      without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
      run as in NCBI (README, NCBI C++ Toolkit options).
@@ -120,12 +145,31 @@ authoritative, current guidance for agent behavior in LOSAT.
      process-wide id table can print the type of another id of the same prefix,
      digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
      with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
+     Approved difference: `losat rpsbproc` sorts with Rust's standard sort, so hits equal in
+     E-value and bit score, and data rows of one key, keep their input order, where NCBI's
+     `std::sort` leaves an order of its own (Owner, 2026-11-20, PD-LOSAT-NCBI-DEFECTS 1.67); a
+     NaN E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20).
 
-4. NCBI code comments are mandatory for modifications.
-   - Every code change must include NCBI C/C++ reference comments with file path
-     and line numbers.
-   - Include the relevant NCBI snippet immediately above the Rust code.
-   - If you cannot add the NCBI reference comments, do not write the code.
+4. NCBI references are mandatory for modifications.
+   - Every code change must cite the NCBI C/C++ source it follows, by path and line numbers
+     in the pinned tree, immediately above the Rust code:
+     `// NCBI reference (598d8ae6): c++/<path>:<first>-<last>` (rpsbproc:
+     `// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/<path>:<lines>`).
+   - Do not copy source text into comments, NCBI's included: cite the lines and say in your
+     own words what the Rust code follows (maintainer, 2026-11-20).
+     `scripts/ncbi_ref.py <file>[:<line>]` prints the cited lines from `$NCBI_SRC`.
+   - Cite the code of any other project by `<project> <version>: <path>:<lines>`: GPL and
+     LGPL code (libstdc++, glibc), Microsoft's sources, permissively licensed code (LMDB,
+     Boost, BitMagic, Rust crates), and the copies of such code in NCBI's tree
+     (`LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/...`; never "NCBI reference" for
+     them). Use no GPL-mixed code: none taken from GPL or LGPL sources (libstdc++, glibc) or
+     from Microsoft source whose license does not allow redistribution (maintainer,
+     2026-11-20).
+   - `LOSAT/tests/check_foreign_quotes.py` (CI `rust lint`) fails on source text in a
+     comment, on an NCBI citation that does not name the pinned tree, and on a cited path or
+     line range that is not in it (`LOSAT/tests/ncbi_source_lines.tsv`); it holds the one
+     list of what in NCBI's tree is not NCBI's.
+   - If you cannot add the NCBI reference, do not write the code.
 
 5. No unauthorized features.
    - Never introduce functionality that does not exist in NCBI.
@@ -154,7 +198,16 @@ authoritative, current guidance for agent behavior in LOSAT.
      (outfmt 0 wraps the path at 68 columns), and the run root in their output
      and stderr is replaced by that prefix before hashing
      (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
-     checkout-path prefix.
+     checkout-path prefix. LOSAT's words (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+     exceptions 12 and 14: messages, error prefixes and the version statement of every
+     output) are compared through one mapping of the freeze, the function that makes
+     them: `losat_output_bytes` / `losat_bytes` of `LOSAT/src/wording.rs` (Rust tests:
+     `losat::wording`, `temp_support::expected_losat_bytes`; Python harnesses:
+     `LOSAT/tests/losat_wording.py`, which reads that file's constants, LOSAT's version
+     from `LOSAT/Cargo.toml` and checks its samples,
+     `LOSAT/tests/fixtures/wording/samples.tsv`; an ad-hoc comparison with an NCBI run:
+     `python3 -I LOSAT/tests/losat_wording.py map-output <ncbi-output>`). A comparison of
+     LOSAT's output with NCBI's, freeze or live run, without that mapping is a harness bug.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
@@ -394,11 +447,14 @@ cd LOSAT && cargo fmt
   runs; `web/AGENTS.md` governs checks for application commits.
 - Add unit tests for NCBI-ported functions, including edge cases and boundaries.
 - Reference NCBI unit tests when available:
-  `ncbi-blast/c++/src/algo/blast/unit_tests/`.
+  `c++/src/algo/blast/unit_tests/`.
 - Port the NCBI unit-test cases of a ported function one case at a time, inside the parity
   sweep of the module that owns it (rule 10). The test lives next to the implementation, in
-  its `#[cfg(test)]` module or a sibling `<name>_tests.rs` declared with
-  `#[cfg(test)] mod <name>_tests;`, with the line
+  a sibling `<stem>_tests.rs` declared with
+  `#[cfg(test)] #[path = "<stem>_tests.rs"] mod tests;` (no inline `#[cfg(test)] mod tests { ... }`
+  in a `LOSAT/src` file: the published crate would carry it, and crates.io takes 10 MiB;
+  `python3 LOSAT/tests/check_inline_test_modules.py --root . [--fix]` checks it and moves
+  such a module, `--fix` after merging a dev that has one), with the line
   `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
   above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).
@@ -579,7 +635,8 @@ remains subject to all the requirements above.
 
 ## Project Summary
 
-LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity.
+LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity
+(the version statement names LOSAT; rule 3).
 Primary focus: TBLASTX and BLASTN. BLASTP support exists but remains secondary
 and must be treated as ongoing parity/performance work unless the touched path is
 covered by current comparison fixtures. The Rust crate root is `LOSAT/`.

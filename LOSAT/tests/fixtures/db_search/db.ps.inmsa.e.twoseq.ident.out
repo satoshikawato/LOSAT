@@ -1,0 +1,18 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: 
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+q1	BDT63550.1	47.458	59	31	0	1	59	4	62	6.48e-14	56.2
+q1	BDT63554.1	30.000	40	28	0	6	45	173	212	0.17	22.3
+q1	BDT63580.1	46.667	15	8	0	3	17	2805	2819	1.2	20.0
+q1	BDT63580.1	22.222	36	28	0	14	49	744	779	5.6	18.1
+q1	BDT63504.1	23.810	42	28	1	22	59	502	543	1.2	20.0
+q1	BDT63506.1	23.810	42	28	1	22	59	509	550	1.2	20.0
+q1	BDT63505.1	26.190	42	27	1	22	59	503	544	1.6	19.6
+q1	BDT63525.1	31.034	29	16	1	5	29	162	190	3.8	18.5
+q1	BDT63523.1	44.444	18	10	0	16	33	1150	1167	4.7	18.1
+q1	BDT63516.1	33.333	27	18	0	13	39	2176	2202	5.4	18.1
+q1	BDT63508.1	40.000	20	12	0	25	44	1206	1225	8.7	17.7
+# BLAST processed 1 queries

@@ -3,6 +3,7 @@
 // the Data worker. Blocks of one working session live under tmp/<session-token>/; their
 // names are internal tokens, never input names.
 import {
+  asStorageFull,
   checkRange,
   isStorageFull,
   isStorageRemoved,
@@ -14,7 +15,7 @@ import {
   type BlockStore,
   type BlockWriter,
 } from './block-store';
-import { TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
+import { StorageRefusedError, StorageUnsupportedError, TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
 
 /** The part of FileSystemSyncAccessHandle that the store uses (worker-only API). */
 interface SyncAccessHandle {
@@ -83,17 +84,17 @@ export class OpfsBlockStore implements BlockStore {
         try {
           this.root = await this.session.reopen();
         } catch (reopenError) {
-          throw isStorageFull(reopenError) ? new StorageFullError() : new StorageRemovedError(undefined, reopenError);
+          throw isStorageFull(reopenError) ? asStorageFull(reopenError) : new StorageRemovedError(undefined, reopenError);
         }
         try {
           opened = await open();
         } catch (again) {
-          if (isStorageFull(again)) throw new StorageFullError();
+          if (isStorageFull(again)) throw asStorageFull(again);
           throw mayBeStorageRemoved(again) ? new StorageRemovedError(undefined, again) : again;
         }
       }
     } catch (error) {
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     const { directory, file, handle } = opened;
     if (this.blocks.has(path)) {
@@ -114,7 +115,7 @@ export class OpfsBlockStore implements BlockStore {
         } catch (error) {
           if (!isStorageFull(error)) throw error;
           block.state = 'full';
-          throw new StorageFullError();
+          throw asStorageFull(error);
         }
         block.length += written;
         this.used += written;
@@ -139,7 +140,7 @@ export class OpfsBlockStore implements BlockStore {
         try {
           block.handle.flush();
         } catch (error) {
-          throw isStorageFull(error) ? new StorageFullError() : error;
+          throw isStorageFull(error) ? asStorageFull(error) : error;
         }
         block.handle.close();
         block.handle = undefined;
@@ -226,7 +227,7 @@ export class OpfsBlockStore implements BlockStore {
 /** OPFS for the working sessions (session.ts): tmp/ and the directory of each session. */
 export const opfsAccess: OpfsAccess = {
   async space() {
-    return opfsSessionSpace(await tmpDirectory());
+    return opfsSessionSpace(await (await firstRoot(opfsStorage())).getDirectoryHandle(TMP_DIRECTORY, { create: true }));
   },
   /**
    * Opens tmp/<token>/, checked by writing, sealing, reading and removing a small block.
@@ -249,12 +250,38 @@ export const opfsAccess: OpfsAccess = {
   },
 };
 
-async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
+function opfsStorage(): StorageManager {
   const storage = (globalThis.navigator as Navigator | undefined)?.storage;
   if (typeof storage?.getDirectory !== 'function') {
-    throw new Error('this browser has no Origin Private File System');
+    throw new StorageUnsupportedError('this browser has no Origin Private File System');
   }
-  return (await storage.getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
+  return storage;
+}
+
+/**
+ * The root of the site's storage when a session starts (`space()`), the first thing that asks for
+ * it. Only SecurityError is the browser's refusal, StorageRefusedError (session.ts): Firefox's
+ * private windows, a site whose data is blocked. An UnknownError is tried once more, as a passing
+ * fault would not come again; when it does, it stays the browser's error, as does anything else (a
+ * full storage among them). WebKit answers the same UnknownError for its ephemeral sessions (as
+ * Safari's private windows) and for a storage that fails in a normal window, and Firefox for the
+ * latter, so it is no refusal (review storage-r2 of line WQA's sweep, D5, M1, 2026-11-19).
+ */
+async function firstRoot(storage: StorageManager): Promise<FileSystemDirectoryHandle> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await storage.getDirectory();
+    } catch (error) {
+      const name = (error as { name?: unknown }).name;
+      if (name === 'UnknownError' && attempt < 2) continue;
+      throw name === 'SecurityError' ? new StorageRefusedError(error) : error;
+    }
+  }
+}
+
+/** tmp/ once the session has the storage (`open()` and its `reopen`): a failure there is the browser's error. */
+async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
+  return (await opfsStorage().getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
 }
 
 /** Whether tmp/<token>/ is not there (a lookup that does not make it). */
@@ -299,7 +326,7 @@ async function probe(store: OpfsBlockStore): Promise<void> {
 async function openSyncAccessHandle(file: FileSystemFileHandle): Promise<SyncAccessHandle> {
   const open = (file as SyncFileHandle).createSyncAccessHandle;
   if (typeof open !== 'function') {
-    throw new Error('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
+    throw new StorageUnsupportedError('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
   }
   return open.call(file);
 }

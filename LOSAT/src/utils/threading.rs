@@ -1,9 +1,7 @@
 //! Search-scoped execution; NCBI owns search semantics, Rayon only schedules.
 use anyhow::{ensure, Context, Result};
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // This borrow cannot outlive the one search, or the run (`with_run_pool`), that owns the pool.
 pub struct SearchPool<'a> {
     requested: &'a usize,
@@ -19,14 +17,6 @@ pub struct SearchPool<'a> {
 
 impl SearchPool<'static> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:253-261
-    // ```c
-    // GetDbIndexRunSearchFn()(
-    //         chunk_queries, lut_options, word_options );
-    // ...
-    // if (IsMultiThreaded()) {
-    //      x_LaunchMultiThreadedSearch(*chunk_data);
-    // } else {
-    // ```
     // NCBI runs a search without the thread launch when it is not multithreaded. This pool is what a
     // search that is itself one task of a parallel loop gets: it runs on one thread, in the NCBI
     // order. Scheduling only.
@@ -66,14 +56,12 @@ impl<'a> SearchPool<'a> {
 }
 
 impl SearchPool<'_> {
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:147
-    // TBlastThreads the_threads(GetNumberOfThreads());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145,147
     pub fn threads(&self) -> usize {
         *self.requested
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
     pub fn enabled(&self) -> bool {
         #[cfg(feature = "parallel")]
         return self.pool.is_some();
@@ -81,8 +69,7 @@ impl SearchPool<'_> {
         false
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
     // Nested DP/linking/redo work uses this same pool, never the global pool.
     pub fn install<F, R>(&self, work: F) -> R
     where
@@ -97,8 +84,7 @@ impl SearchPool<'_> {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187,3205-3236
-// arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187,3205-3236
 // NCBI warns when restricting threads. LOSAT's explicit-N contract instead
 // rejects unsupported requests, without silently reducing the requested pool.
 pub fn validate_threads(requested: usize) -> Result<()> {
@@ -137,9 +123,7 @@ pub fn validate_threads(requested: usize) -> Result<()> {
     Ok(())
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // The caller occupies slot zero, so N includes the caller and N-1 children.
 // Rayon-core 1.13.0 registry.rs:910-938 runs start_handler inside the worker
 // loop; WorkerThread::drop at 687-693 clears its TLS registration on return.
@@ -254,17 +238,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149,242-262
-// ```c
-// TBlastThreads the_threads(GetNumberOfThreads());
-// ...
-// _TRACE("Launching BLAST with " << GetNumberOfThreads() << " threads");
-// ...
-//             GetDbIndexRunSearchFn()(
-//                     chunk_queries, lut_options, word_options );
-//
-//             if (IsMultiThreaded()) {
-//                  x_LaunchMultiThreadedSearch(*chunk_data);
-// ```
 // NCBI launches its search threads for each query chunk (lines 253-257) and joins them before
 // the next chunk. Here one pool is built for the whole loop of query batches instead of one per
 // batch. Each batch is still searched by the same function with the same inputs, and the results
@@ -357,8 +330,7 @@ fn run_pool<'a>(requested: usize) -> Option<&'a rayon::ThreadPool> {
     (size == requested).then(|| unsafe { &*pool })
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
 // Erase only the scoped caller callback's lifetime for Rayon's 'static startup
 // hook. No borrowed data is dereferenced by a child, and scope joins all children.
 #[cfg(feature = "parallel")]
@@ -377,7 +349,7 @@ unsafe impl Sync for CallerCallback {}
 
 #[cfg(feature = "parallel")]
 impl CallerCallback {
-    // NCBI reference: prelim_stage.cpp:172-180; Run precedes Join.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180; Run precedes Join.
     // SAFETY: body must remain live until slot zero and all children return.
     unsafe fn new<F: FnMut()>(body: &mut F) -> Self {
         unsafe fn invoke<F: FnMut()>(data: *mut ()) {
@@ -390,14 +362,14 @@ impl CallerCallback {
         }
     }
 
-    // NCBI reference: prelim_stage.cpp:172-180; Run precedes Join.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180; Run precedes Join.
     // SAFETY: invoke once, on the caller which owns the still-live body.
     unsafe fn call(&self) {
         unsafe { (self.invoke)(self.data) };
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // LOSAT_WASI_THREADS_DEBUG is read once per process, as LOSAT's other switches are: the stage
 // reports run once per subject chunk, and a read of the environment there cost about 340
@@ -418,15 +390,14 @@ pub(crate) fn write_diagnostic_line(line: String) {
     let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:147,177-188
-// TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:147,177-188
 fn report_pool(program: &str, requested: usize, pool: usize) {
     if diagnostics_enabled() {
         write_diagnostic_line(format!("[losat-thread-pool] program={program} requested_threads={requested} pool_threads={pool} caller_participates={} measured_activity=null\n", pool > 0));
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // Record stage selection separately from the already verified pool size.
 // The test is taken where the stage runs (blastn reports a stage for every subject chunk); the
@@ -438,7 +409,7 @@ pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: boo
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // The line of `report_stage`, written only when LOSAT_WASI_THREADS_DEBUG is on.
 #[cold]
@@ -448,14 +419,6 @@ fn report_stage_line(program: &str, stage: &str, work_items: usize, parallel: bo
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
-// ```c++
-//     /* Use a local diagnostics structure, because the one passed in an input
-//       argument can be shared between multiple threads, so we don't want to pass
-//       it to the engine and have a lot of mutex contention. */
-//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-//
-//     if ((status =
-// ```
 // Diagnostic-only host clock/worker identity; never read by search or reporting.
 #[cfg(feature = "blastx-worker-probe")]
 fn probe_lifecycle(event: &str, index: usize) {
@@ -466,13 +429,6 @@ fn probe_lifecycle(event: &str, index: usize) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1660-1664
-// ```c++
-//       argument can be shared between multiple threads, so we don't want to pass
-//       it to the engine and have a lot of mutex contention. */
-//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-//
-//     if ((status =
-// ```
 // Diagnostic-only host recording uses a separate append file. Native reporting
 // owns stderr's lock throughout search; workers must never acquire that lock.
 #[cfg(feature = "blastx-worker-probe")]
@@ -490,107 +446,5 @@ pub(crate) fn probe_write(message: String) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187
-    // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
-    #[test]
-    fn invalid_request_never_enters_search() {
-        assert!(with_search_pool(0, "test", |_| -> Result<()> {
-            panic!("invalid request entered search")
-        })
-        .is_err());
-    }
-
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    #[test]
-    fn repeated_pools_include_caller_and_preserve_errors() {
-        let caller = std::thread::current().id();
-        for n in [1, 2, 4, 2, 1] {
-            let error = with_search_pool(n, "test", |search| -> Result<()> {
-                assert_eq!(search.threads(), n);
-                assert_eq!(std::thread::current().id(), caller);
-                if let Some(pool) = search.pool {
-                    let workers = pool.broadcast(|_| std::thread::current().id());
-                    assert_eq!(workers.len(), n);
-                    assert_eq!(workers.iter().filter(|id| **id == caller).count(), 1);
-                }
-                anyhow::bail!("original search error")
-            })
-            .unwrap_err();
-            assert_eq!(format!("{error:#}"), "original search error");
-            assert_eq!(rayon::current_thread_index(), None);
-        }
-    }
-
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
-    // (*thread)->Run(); (*thread)->Join(&result);
-    #[test]
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    fn caller_registration_is_cleared_after_panic() {
-        let failed = std::panic::catch_unwind(|| {
-            let _ = with_search_pool(2, "test", |_| -> Result<()> { panic!("search panic") });
-        });
-        assert!(failed.is_err());
-        assert_eq!(rayon::current_thread_index(), None);
-        with_search_pool(4, "test", |_| Ok(())).unwrap();
-        assert_eq!(rayon::current_thread_index(), None);
-    }
-
-    // The searches of a run share its pool: the same worker threads, no pool of their own; a
-    // search of another size cannot start inside it, and after the run a search builds its pool.
-    #[test]
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    fn searches_of_a_run_share_its_pool() {
-        let workers = |search: &SearchPool<'_>| {
-            let mut ids = search
-                .pool
-                .expect("a pool")
-                .broadcast(|_| format!("{:?}", std::thread::current().id()));
-            ids.sort();
-            ids
-        };
-        let (first, second) = with_run_pool(3, "test", || {
-            let first = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
-            let second = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
-            assert!(with_search_pool(2, "test", |_| Ok(())).is_err());
-            assert!(!with_search_pool(1, "test", |search| Ok(search.enabled())).unwrap());
-            (first, second)
-        });
-        assert_eq!(first.len(), 3);
-        assert_eq!(first, second);
-        // A search after the run builds its pool: new threads besides the caller.
-        let caller = format!("{:?}", std::thread::current().id());
-        let after = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
-        assert!(after
-            .iter()
-            .filter(|id| **id != caller)
-            .all(|id| !first.contains(id)));
-        // A run of one thread has no pool, and its searches none either.
-        assert!(
-            !with_run_pool(1, "test", || with_search_pool(1, "test", |search| Ok(
-                search.enabled()
-            )))
-            .unwrap()
-        );
-        // A run whose pool cannot be built runs without it: its search fails as on its own.
-        let too_many = rayon::max_num_threads() + 1;
-        let mut ran = false;
-        let error = with_run_pool(too_many, "test", || {
-            ran = true;
-            with_search_pool(too_many, "test", |_| Ok(()))
-        })
-        .unwrap_err();
-        assert!(ran);
-        assert_eq!(
-            format!("{error:#}"),
-            format!(
-                "{:#}",
-                with_search_pool(too_many, "test", |_| Ok(())).unwrap_err()
-            )
-        );
-    }
-}
+#[path = "threading_tests.rs"]
+mod tests;

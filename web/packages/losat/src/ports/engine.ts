@@ -1,12 +1,12 @@
 // Engine port: the application's only view of the search engine. The Wasm implementation
 // (src/infra/engine-worker/gateway.ts) follows docs/web/abi_v2.md; LOSAT Web's development
 // build has a FakeEngine of its own (web/app/src/infra/fake/fake-engine.ts).
-import type { RecordKey } from '../domain/dataset.js';
+import type { RecordKey, ShownIds } from '../domain/dataset.js';
 import type { OutputFormat } from '../domain/output-format.js';
 import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
-import type { RegistryFile, RunFile } from '../domain/run-files.js';
+import type { MessagePlace, PrintedKind, RegistryFile, RunFile } from '../domain/run-files.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -29,7 +29,16 @@ export interface ProgramDescription {
   readonly subjectGencodes?: readonly number[];
 }
 
-export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
+ * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
+ * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
+ * data, as the CLI does (line WQA's D16, 2026-11-20). A refused argv says it too when the engine's
+ * start read the registry before the option that it refuses (line WQA's D13 round 3, L1).
+ */
+export type ValidationResult =
+  | { readonly ok: true; readonly dataLoaders: boolean }
+  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean };
 
 /**
  * What NCBI's application reads of an argv before its arguments (docs/web/abi_v2.md §4
@@ -43,9 +52,21 @@ export interface StartInfo {
   readonly conffile: string | null;
   readonly logFile: string | null;
   readonly dryRun: boolean;
+  /**
+   * Whether a run of the argv takes its query and subject read together for it
+   * (`losat_web2_register_inputs`, ABI v2 §4: an argv with -parse_deflines, which reads the ids of
+   * the deflines in one scope for both, and is not a dry run), not registered one at a time. The
+   * Engine worker registers a run's inputs by it.
+   */
+  readonly registerInputs: boolean;
+  /**
+   * What a run of the argv prints in place of a search, as the command line does (ABI v2 §5 stream 11): its help or
+   * its version; null for a search. Such a run reads no inputs (line WQA's D14, 2026-11-20).
+   */
+  readonly prints: PrintedKind | null;
 }
 
-/** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a version word). */
+/** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a program that LOSAT Web does not run). */
 export type StartResult = { readonly ok: true; readonly start: StartInfo } | { readonly ok: false; readonly message: string };
 
 /**
@@ -103,6 +124,17 @@ export interface RuntimeInfo {
   readonly memory?: EngineMemory;
   /** The engine searched the subject that it held from an earlier search (plan §4.6 R1). */
   readonly subjectRetained?: boolean;
+  /**
+   * Where the run's messages go, as the engine said (ABI v2 §5, stream 10): the messages that the CLI writes to its
+   * standard error without -logfile. The diagnostics, or, for TBLASTX with -logfile, the file of -logfile or nowhere,
+   * as on the CLI (line WQA's sweep, D7, 2026-11-20).
+   */
+  readonly messages: MessagePlace;
+  /**
+   * The IDs that the run's outputs show for its records, where the engine read them from the
+   * deflines (-parse_deflines; line WQA's sweep, D7, 2026-11-19).
+   */
+  readonly shownIds?: ShownIds;
   /** The WindowMasker counts file of the run, when the argv has `-window_masker_db`. */
   readonly windowMasker?: CountsUse;
   /**
@@ -110,6 +142,11 @@ export interface RuntimeInfo {
    * it made any. A run that fails gives its files with its rejection (`runFilesOf`).
    */
   readonly runFiles?: readonly RunFile[];
+  /**
+   * The text that the run printed in place of a search (ABI v2 stream 11: the command line's standard output), for an
+   * argv whose start `prints` (line WQA's D14, 2026-11-20).
+   */
+  readonly printed?: Uint8Array;
 }
 
 /** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */
@@ -168,6 +205,24 @@ export function isFileReadError(error: unknown): error is Error {
   return error instanceof Error && error.name === 'FileReadError';
 }
 
+/**
+ * A part of LOSAT could not be loaded, or stopped: an engine file that could not be downloaded, a worker that could not
+ * start or that ended (line WQA's sweep, D1 and D2, 2026-11-19). It is no verdict on the inputs or the options, and a
+ * page says it as LOSAT's own failure. Its message names the part and why, as a clause. An error that crosses a worker
+ * keeps its name only (`isUnavailable`).
+ */
+export class UnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'UnavailableError';
+  }
+}
+
+/** Whether an error is an UnavailableError, also one rebuilt from its name after it crossed a worker. */
+export function isUnavailable(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'UnavailableError';
+}
+
 /** Thrown (as a rejection) by `run` after `cancel` was called for that run. */
 export class RunCancelledError extends Error {
   constructor(readonly runId: string) {
@@ -192,6 +247,23 @@ export function withRunFiles<E extends Error>(error: E, runFiles: readonly RunFi
   return Object.assign(error, { runFiles });
 }
 
+/**
+ * Whether the engine ended the output of a failed run with `fail` (ports/run-output.ts), which the
+ * rejection of `EngineGateway.run` then says (`withRunOutputFailed`): the data layer has what the run
+ * wrote to the CLI's standard error before its error (ABI v2 §5: stream 3, which the host keeps with a
+ * failed run as it keeps stream 8), as NCBI's `Subject sequence contains no data` before `The average
+ * subject length is too short` (line WQA's sweep, D3, 2026-11-19), and reads it before it discards
+ * the run. False for a run that failed before it began to write, and for a trap's or a cancel's error.
+ */
+export function runOutputFailedOf(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { readonly outputFailed?: unknown }).outputFailed === true;
+}
+
+/** Says that the engine ended the output of the failed run with `fail` (`runOutputFailedOf`); the error's name and message stay. */
+export function withRunOutputFailed<E extends Error>(error: E): E {
+  return Object.assign(error, { outputFailed: true as const });
+}
+
 export interface EngineGateway {
   describe(program: ProgramId): Promise<ProgramDescription>;
   /**
@@ -210,7 +282,10 @@ export interface EngineGateway {
    * every stream, then `end`, all posted before the promise resolves. `output` comes from
    * `DataGateway.openRun` and may be transferred to a worker. Rejects on failure or cancel
    * without sending `end`; the data layer then discards what arrived. The files that a failed run
-   * made besides its outputs come with the rejection (`runFilesOf`).
+   * made besides its outputs come with the rejection (`runFilesOf`). A run that the engine failed
+   * after it began to write sends `fail` in place of `end` before it rejects, and its rejection says
+   * so (`runOutputFailedOf`): the data layer reads the warnings that it wrote before its error from
+   * what arrived, then discards it.
    */
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
   /** Stops the run as soon as possible. Unknown or finished runs are ignored. */

@@ -3,10 +3,6 @@
 //! binary.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1281
-//! ```c
-//!     for (context = query_info->first_context;
-//!          context <= query_info->last_context; ++context) {
-//! ```
 //! The switch chooses between two LOSAT code paths with the same result: the frames masked one
 //! after the other, or one task per frame on the search pool. So the property under test is that
 //! the report does not depend on it: for several queries with low-complexity runs (pieces of

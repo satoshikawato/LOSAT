@@ -3,10 +3,10 @@
 //! This table contains ln(n!) for n = 0..10000, exactly matching NCBI's `lnfact[]` array
 //! in blast_seg.c.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:50-1303
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:50-1303
 
 /// ln(n!) for n = 0..10000 (10001 entries).
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:50-1303
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:50-1303
 #[expect(
     clippy::approx_constant,
     reason = "NCBI's lnfact[] digits (blast_seg.c:50-52): 0.693147 is not the f64 of LN_2, and the std constant would change SEG's probabilities"

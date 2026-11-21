@@ -104,7 +104,7 @@ fn run_search(
     command.output().expect("run LOSAT CLI")
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737, blastp_app.cpp:280-285,
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210,732-737, c++/src/app/blast/blastp_app.cpp:280-285,
 // tblastn_app.cpp:294-299, tblastx_app.cpp:197-202, blastn_app.cpp:304-309 and
 // psiblast_app.cpp:262-266 (psiblast fetches ahead before it writes the archive).
 #[test]
@@ -183,12 +183,6 @@ fn prolog(report: &[u8]) -> &[u8] {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-// ```
 // NCBI 2.17.0 (the official Linux x64 release) with each variable set to `abc` (env parity probe
 // h_probe of 2026-11-12, REPORT.md "Stop point"): `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` (the query
 // splitter of the first batch, local_blast.cpp:59-61, split_query_aux_priv.cpp:55-57) and
@@ -238,8 +232,10 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
                     string_to_int_exception("abc", 861, 0),
                     "{what}"
                 );
+                // NCBI's archive in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+                let archive = losat::wording::losat_output_bytes(ABC_ERROR_ARCHIVE.as_bytes());
                 let expected: &[u8] = match (outfmt, stop) {
-                    ("11", _) => ABC_ERROR_ARCHIVE.as_bytes(),
+                    ("11", _) => &archive,
                     ("0", Stop::Prolog) => prolog(&plain.stdout),
                     _ => b"",
                 };
@@ -254,18 +250,7 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
-// ```c++
-//     TSeqAlignVector aligns =
-//         LocalBlastResults2SeqAlign(hsp_results,
-//                                    *qdata,
-//                                    *m_SeqInfoSrc,
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
-// ```c++
-//                    results = psiblast->Run();
-//                    BlastFormatter_PreFetchSequenceData(*results, scope,
-//                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
-// ```
 // NCBI reads the titles of a batch's reported sequences in its traceback (the Seq-ids of the
 // Seq-aligns; psiblast's in `Run`), before the batch's prefetch converts `PRE_FETCH_SEQS_LIMIT`:
 // with a database whose header file is missing and a query that has hits, NCBI 2.17.0 stops with
@@ -292,7 +277,7 @@ fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
         };
         // The path as LOSAT prints it on this platform (Windows: `\` throughout).
         let error = format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")
                 .join("db_search")
@@ -318,10 +303,6 @@ fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:159-160
-// ```c++
-//     int from = NStr::StringToInt(tokens.front());
-//     int to = NStr::StringToInt(tokens.back());
-// ```
 // NCBI 2.17.0 blastn and blastp `-query_loc` and `-subject_loc` (env parity probe h_probe of
 // 2026-11-12, cases `LOC.*`): a part that `NStr::StringToInt` cannot convert ends the program
 // with its `CStringException` before anything is written (exit 255), the start before the stop.
@@ -361,11 +342,7 @@ fn a_location_part_that_ncbi_cannot_convert_is_its_exception() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
-// ```c
-//     use_old_fsc = getenv("OLD_FSC");
-//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-// ```
-// NCBI sets OLD_FSC for any -searchsp (blast_args.cpp:303-307), so BLASTP, BLASTX, TBLASTN and
+// NCBI sets OLD_FSC for any -searchsp (c++/src/algo/blast/blastinput/blast_args.cpp:303-307), so BLASTP, BLASTX, TBLASTN and
 // PSIBLAST with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0`
 // (rows sp.<program>.zero.0 and ps.subj.sp.zero.tk.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes
 // the same bytes with OLD_FSC=1, and psiblast with OLD_FSC=true, probe `ofsctrue.tk.subj.0` of line
@@ -399,11 +376,14 @@ fn old_fsc_is_the_statistics_of_searchsp_0() {
             "ps.subj.sp.zero.tk.0",
         ),
     ] {
-        let expected = std::fs::read(format!(
-            "{}/tests/fixtures/outfmt0/{frozen}.out",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("frozen -searchsp 0 report");
+        let expected = losat::wording::losat_output_bytes(
+            &std::fs::read(format!(
+                "{}/tests/fixtures/outfmt0/{frozen}.out",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("frozen -searchsp 0 report"),
+        )
+        .into_owned();
         for value in ["1", ""] {
             let output = run_files(program, query, subject, "0", Some(("OLD_FSC", value)), &[]);
             assert_eq!(

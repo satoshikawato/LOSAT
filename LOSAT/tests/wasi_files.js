@@ -9,15 +9,6 @@ const { waitForStream } = require("./wasi_artifact");
 const tty = { isatty: descriptor => require("tty").isatty(descriptor) };
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
-// ```c++
-// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
-// {
-//     std::lock_guard<std::mutex> guard(m_FileMemMapMutex);
-//     auto it = m_FileMemMap.find(fileName);
-//     ...
-//     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
-//     m_FileMemMap[fileName].reset(file);
-// ```
 // NCBI opens a database file once for the process, and every thread reads it there. LOSAT does
 // the same with one descriptor (LOSAT/src/seqdb/file.rs: a seek and a read under a lock), so a
 // descriptor must name the same open file on every thread, as in the native process's table.
@@ -33,23 +24,12 @@ const tty = { isatty: descriptor => require("tty").isatty(descriptor) };
 // instead of 9.3 s on ws, 2026-10-27.)
 //
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
-// ```c++
-//         CBlastFormat formatter(opt, *db_adapter,
-//                                fmt_args->GetFormattedOutputChoice(),
-//                                query_opts->GetParseDeflines(),
-//                                m_CmdLineArgs->GetOutputStream(),
-// ```
 // The output (-out) is one stream of the process too. LOSAT creates the file at the report's
 // first write, and a write from a thread other than the one that opened -out must work: a file
 // opened by one thread and written by another gave EBADF, so opens for writing enter the table as
 // well as opens for reading.
 //
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
-// ```c++
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-// ```
 // NCBI opens a file argument by its name through the OS, so -query /dev/stdin and -out /dev/stdout
 // name the process's standard input and output whatever they are. uvwasi resolves symbolic links
 // itself and cannot follow /dev/stdout -> /proc/self/fd/1 -> "pipe:[N]": with a pipe there it gave

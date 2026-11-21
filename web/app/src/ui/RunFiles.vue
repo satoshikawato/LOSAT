@@ -10,6 +10,7 @@ import { computed } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { formatBytes } from './format';
+import OptionName from './OptionName.vue';
 import OutputText from './OutputText.vue';
 import { useStore } from './useStore';
 
@@ -28,7 +29,7 @@ const problem = useStore(saver.problem);
   <div class="run-files" data-testid="run-files">
     <section v-for="(file, index) in files" :key="`${run.snapshot.runId}:${index}`" class="run-file" :data-testid="`run-file-${index}`">
       <p class="run-file-name">
-        <span class="option-name">-logfile</span> <span data-testid="run-file-name">{{ file.name }}</span><span class="muted small">, {{ formatBytes(file.bytes.length) }}</span>
+        <OptionName name="-logfile" /> <span data-testid="run-file-name">{{ file.name }}</span><span class="muted small">, {{ formatBytes(file.bytes.length) }}</span>
       </p>
       <OutputText v-if="file.bytes.length > 0" :text="texts[index]!" :label="file.name" data-testid="run-file-text" />
       <p v-else class="muted" data-testid="run-file-empty">The file is empty.</p>

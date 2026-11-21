@@ -36,6 +36,7 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
+import { withUnit } from '../domain/units';
 import { formatCount, formatCounted, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
@@ -78,7 +79,8 @@ const MINOR_PX = 4;
 const AXIS_PX = PAD + TITLE_PX + GAP + LABEL_PX + GAP + MAJOR_PX;
 const MARGIN = { left: AXIS_PX, top: AXIS_PX, right: 14, bottom: 10 } as const;
 
-const stage = ref<HTMLElement>();
+/** An empty line as wide as the plot's stage (its width is the room the plot has). */
+const ruler = ref<HTMLElement>();
 const base = ref<HTMLCanvasElement>();
 const overlay = ref<HTMLCanvasElement>();
 const popup = ref<HTMLElement>();
@@ -101,7 +103,7 @@ const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.lef
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
 
 /** What a protein axis's title adds against a nucleotide axis while the axes are to scale (S13b decision 26). */
-const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${weight} nt per aa` : '');
+const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${withUnit(weight, 'nt')} per aa` : '');
 /** A context that measures the query's axis title (in its font) before the canvas is sized. */
 const measuring = document.createElement('canvas').getContext('2d');
 if (measuring !== null) measuring.font = TITLE_FONT;
@@ -161,7 +163,7 @@ const selectedText = computed(() => {
   if (hsp === undefined) return '';
   const { qstart, qend, sstart, send } = hsp.fields;
   const frames = framesPhrase(hsp);
-  return `Selected: HSP ${hsp.id.rank + 1}, query ${qstart}–${qend} ${units.value.query}, subject ${sstart}–${send} ${units.value.subject}${frames ? `, ${frames}` : ''}.`;
+  return `Selected: HSP ${hsp.id.rank + 1}, query ${withUnit(`${qstart}–${qend}`, units.value.query)}, subject ${withUnit(`${sstart}–${send}`, units.value.subject)}${frames ? `, ${frames}` : ''}.`;
 });
 /**
  * n and p on the plot select an HSP: with the popup closed, which tells its HSP itself, the line
@@ -708,15 +710,21 @@ function placePopup(): void {
 
 // --- life cycle ----------------------------------------------------------------------------------
 
+// The observer reads the stage's width from its ruler, an empty line as wide as the stage, whose height the plot never
+// changes. It observed the stage itself, which is as tall as the plot: the width it set changed the square plot's
+// height, and so the stage's, in the same frame, and every change of the window's width ended with "ResizeObserver loop
+// completed with undelivered notifications." (line WQA's sweep 2, S2-2, 2026-11-20). The ruler's width is the page's,
+// and the plot's height decides whether the page scrolls: where scroll bars take space, the page's width followed the
+// plot until the page always kept its scroll bar (styles.css, html; S2-2 review M1).
 let observer: ResizeObserver | undefined;
 onMounted(() => {
   observer = new ResizeObserver((entries) => {
     const next = Math.floor(entries[0]?.contentRect.width ?? stageWidth.value);
     if (next > 0 && next !== stageWidth.value) stageWidth.value = next;
   });
-  if (stage.value !== undefined) {
-    stageWidth.value = Math.max(200, Math.floor(stage.value.getBoundingClientRect().width));
-    observer.observe(stage.value);
+  if (ruler.value !== undefined) {
+    stageWidth.value = Math.max(200, Math.floor(ruler.value.getBoundingClientRect().width));
+    observer.observe(ruler.value);
   }
   base.value?.addEventListener('wheel', onWheel, { passive: false });
   schedule(true);
@@ -778,7 +786,7 @@ function pickSubject(event: Event): void {
         <span>Subject</span>
         <select data-testid="dotplot-subject" @change="pickSubject">
           <option v-for="s in state.subjects" :key="s.sIdx" :value="s.sIdx" :selected="s.sIdx === state.sIdx">
-            {{ s.first.sseqid }} · {{ formatCount(s.length) }} {{ units.subject }} · {{ formatCounted(s.hspCount, 'HSP') }}
+            {{ s.first.sseqid }} · {{ withUnit(formatCount(s.length), units.subject) }} · {{ formatCounted(s.hspCount, 'HSP') }}
           </option>
         </select>
       </label>
@@ -790,11 +798,11 @@ function pickSubject(event: Event): void {
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
       <span class="muted small"
-        >Query {{ queryId }} ({{ formatCount(queryLength) }} {{ units.query }}) against subject {{ subjectId }} ({{ formatCount(subjectLength) }}
-        {{ units.subject }}).</span
+        >Query {{ queryId }} ({{ withUnit(formatCount(queryLength), units.query) }}) against subject {{ subjectId }} ({{ withUnit(formatCount(subjectLength), units.subject) }}).</span
       >
     </figcaption>
-    <div ref="stage" class="plot-stage">
+    <div class="plot-stage">
+      <div ref="ruler" class="plot-ruler" />
       <!-- As tall as the canvas, and the popup when it is under the plot. -->
       <div class="plot-layers" :style="{ width: `${canvasWidth}px` }">
         <canvas
@@ -843,9 +851,9 @@ function pickSubject(event: Event): void {
               <dt>Identity (%)</dt>
               <dd data-field="pident">{{ selected.fields.pident }}</dd>
               <dt>Query</dt>
-              <dd data-field="query">{{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}</dd>
+              <dd data-field="query">{{ withUnit(`${selected.fields.qstart}–${selected.fields.qend}`, units.query) }}</dd>
               <dt>Subject</dt>
-              <dd data-field="subject">{{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}</dd>
+              <dd data-field="subject">{{ withUnit(`${selected.fields.sstart}–${selected.fields.send}`, units.subject) }}</dd>
               <template v-if="framesLabel(selected)">
                 <dt>{{ framesLabel(selected) }}</dt>
                 <dd data-field="frames">{{ framesText(selected, ' / ') }}</dd>

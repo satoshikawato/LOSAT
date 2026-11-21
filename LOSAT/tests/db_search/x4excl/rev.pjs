@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "rev",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "rev",
+  "number-of-letters": 240,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-20T23:23:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49788,
+  "bytes-to-cache": 339,
+  "files": [
+    "rev.pdb",
+    "rev.phr",
+    "rev.pin",
+    "rev.pog",
+    "rev.pos",
+    "rev.pot",
+    "rev.psq",
+    "rev.ptf",
+    "rev.pto"
+  ]
+}

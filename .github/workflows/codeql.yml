@@ -3,7 +3,8 @@ name: CodeQL
 # Code scanning with CodeQL, for the languages of this repository: GitHub Actions workflows,
 # JavaScript/TypeScript (web/), Python (python/, scripts) and Rust (LOSAT/). It replaces GitHub's
 # CodeQL default setup (Owner, 2026-11-15: scan dev once a week and main on every push; no run on
-# pull requests, so no CI congestion). Default setup scans only the default branch, main, which
+# pull requests, so no CI congestion; 2026-11-19 「C」: also scan dev every night with a failure on any
+# open alert, and scan the workflows of a pull request that changes them). Default setup scans only the default branch, main, which
 # lags dev, where all work merges, by weeks.
 #
 # - Every push to main runs the scan on that commit. A merge made by github-actions[bot] (auto-merge
@@ -12,6 +13,11 @@ name: CodeQL
 #   a schedule only from the file on the default branch, main, so main carries the same file as dev;
 #   each scan checks out its branch and files its results under that branch and its commit.
 # - workflow_dispatch does what the schedule does (main and dev), for a scan between Mondays.
+# - workflow_call with own_commit: true scans the caller's commit, files it under the caller's ref
+#   and fails (job `open alerts`) when an analysis is missing or an alert is open on that ref; a
+#   false positive is dismissed on GitHub with its reason (dismissals carry over by category):
+#   nightly.yml scans dev every night, ci.yml the workflows of a pull request that changes
+#   .github/ (languages: ["actions"]), release-readiness-v020.yml the release candidate.
 #
 # The categories are /language:<language>, the ones default setup used, so the alerts that exist
 # and their dismissals carry over to this workflow's results. Code scanning rejects an upload from
@@ -22,12 +28,24 @@ on:
   schedule:
     - cron: '0 18 * * 0'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      own_commit:
+        description: Scan the caller's commit instead of the heads of main and dev, and fail on an open alert
+        type: boolean
+        default: false
+      languages:
+        description: JSON array of the languages to scan
+        type: string
+        default: '["actions", "javascript-typescript", "python", "rust"]'
 
 permissions:
   contents: read
 
+# Called, github.workflow is the caller's name: `codeql` keeps this group apart from the caller's own
+# (nightly.yml uses <workflow>-<ref>; the same group would wait for itself).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-codeql-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,9 +60,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [actions, javascript-typescript, python, rust]
-        # A push scans its own commit (''); the schedule and workflow_dispatch scan main and dev.
-        branch: ${{ github.event_name == 'push' && fromJSON('[""]') || fromJSON('["main", "dev"]') }}
+        language: ${{ fromJSON(inputs.languages || '["actions", "javascript-typescript", "python", "rust"]') }}
+        # A push and a call with own_commit scan their own commit (''); the schedule and
+        # workflow_dispatch scan main and dev.
+        branch: ${{ (github.event_name == 'push' || inputs.own_commit) && fromJSON('[""]') || fromJSON('["main", "dev"]') }}
     steps:
       - name: Check out the scanned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,3 +97,37 @@ jobs:
           category: /language:${{ matrix.language }}
           ref: ${{ steps.scan.outputs.ref }}
           sha: ${{ steps.scan.outputs.sha }}
+
+  # A call with own_commit: every language has an analysis of this commit on this ref, and no alert
+  # is open on the ref.
+  open-alerts:
+    name: open alerts
+    if: inputs.own_commit
+    needs: analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LANGUAGES: ${{ inputs.languages }}
+    steps:
+      - name: Analyses of this commit, and no open alert on its ref
+        run: |
+          set -euo pipefail
+          analysed=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/analyses?ref=$GITHUB_REF&per_page=100" \
+            --jq "[.[] | select(.commit_sha == \"$GITHUB_SHA\") | .category] | unique | join(\" \")")
+          for language in $(jq -r '.[]' <<< "$LANGUAGES"); do
+            if [[ " $analysed " != *" /language:$language "* ]]; then
+              echo "::error::no CodeQL analysis of $GITHUB_SHA on $GITHUB_REF for /language:$language"
+              exit 1
+            fi
+          done
+          open=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$GITHUB_REF&state=open&per_page=100" --paginate \
+            --jq '.[] | "#\(.number) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"')
+          if [[ -n "$open" ]]; then
+            echo "::error::open code scanning alerts on $GITHUB_REF at $GITHUB_SHA (fix the code, or dismiss a false positive on GitHub with its reason):"
+            echo "$open"
+            exit 1
+          fi
+          echo "No open code scanning alert on $GITHUB_REF at $GITHUB_SHA ($analysed)."

@@ -9,14 +9,6 @@
 //! the subjects, chunks, sorted tie runs and the two fallbacks, which must stay zero.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
-//! ```c
-//! for (index=combined_hsp_list->hspcnt, index1=0;
-//!      index1<hsp_list->hspcnt; index1++) {
-//!    combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
-//! }
-//! combined_hsp_list->hspcnt = new_hspcnt;
-//! Blast_HSPListSortByScore(combined_hsp_list);
-//! ```
 //! The switch changes how LOSAT orders the same lists, not a value. For the fixture pair the
 //! expected output (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was produced
 //! by NCBI BLAST+ 2.17.0. The search with tied HSPs is compared with the same LOSAT search with the
@@ -149,13 +141,6 @@ fn assert_kmerge_ran(stderr: &str, subjects: u64, what: &str) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
-// ```c
-// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-// {
-//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // With no variable for the switch (it is on by default) the fixture pair is merged by the switch
 // at 1, 2, 4, 8 and 16 threads, and the report is NCBI's.
 #[test]
@@ -170,9 +155,6 @@ fn the_switch_merges_the_lists_and_gives_ncbis_report() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2766
-// ```c
-// Blast_HSPListSortByScore(combined_hsp_list);
-// ```
 // `LOSAT_X_TBXKMERGE=0` turns the switch off: no TBXKMERGE line, the same report.
 #[test]
 fn the_switch_follows_its_variable() {
@@ -190,9 +172,6 @@ fn the_switch_follows_its_variable() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-// ```c
-// if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-// ```
 // The switch on the other form of the units' lists (`LOSAT_X_SEEDCOMPACT=0`; the compact records are
 // the default, tested above): the merge ran, the report is NCBI's.
 #[test]
@@ -226,12 +205,6 @@ fn record(defline: &str, letters: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
-// ```c
-// if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-//     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-//     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-//     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-// ```
 // Ties that the conversion's sort reorders: query 1 is 900 bases of MjeNMV followed by the 600
 // bases X (bases 2,000-2,600), query 2 is X alone, and the subject is the first 6 kb of MjeNMV
 // (short enough for the first exactness guard that the unit path applies without LOSAT_X_TBXBAND:

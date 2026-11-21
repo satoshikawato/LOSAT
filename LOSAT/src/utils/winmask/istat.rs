@@ -13,20 +13,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::pct::{apply_pct, PctSettings};
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str;
+use crate::utils::lower_bound::lower_bound_by;
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat_factory.hpp:56-62
-/// ```c
-///     enum EStatType {
-///         eAscii,
-///         eBinary,
-///         eOAscii,
-///         eOBinary,
-///         eUnknown
-///     };
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatType {
     Ascii,
@@ -46,19 +39,8 @@ pub struct StatFile {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:165-197
-/// ```c
-/// CSeqMaskerIstatFactory::EStatType CSeqMaskerIstatFactory::DiscoverStatType(
-///         string const & name, vector< string > & md, size_t & skip ) {
-///     GetMetaDataLines( name, md, skip );
-///     CNcbiIfstream check( name.c_str() );
-///
-///     if( !check ) {
-///         NCBI_THROW( Exception, eOpen, string( "could not open " ) + name );
-///     }
-/// ...
-/// ```
 pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
-    let name = path.to_string_lossy().into_owned();
+    let name = crate::utils::os_bytes::path_bytes(path).into_owned();
     let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
     discover(&mut file)
 }
@@ -88,126 +70,38 @@ pub fn discover_stat_type_in<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinM
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatSite {
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:57-63
-    /// ```c
-    /// Uint4 CSeqMaskerIstatOBinary::readWord( CNcbiIstream & is ) const
-    /// {
-    ///     Uint4 result;
-    ///
-    ///     if( !is )
-    ///         NCBI_THROW( Exception, eFormat, "file too short" );
-    /// ```
     FileTooShort,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:113-115
-    /// ```c
-    ///     if( unit_size == 0 || unit_size > 16 )
-    ///         NCBI_THROW( Exception, eBadParam,
-    ///             "unit size must be in [1,16]" );
-    /// ```
     UnitSize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:124-126
-    /// ```c
-    ///     if( k == 0U || k > (Uint4)(2*unit_size - 1) )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "hash key size must be in [1,2*unit_size - 1]" );
-    /// ```
     HashKeySize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:128-130
-    /// ```c
-    ///     if( roff > 32 - k )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "offset must by in [0,32 - hash_key_size]" );
-    /// ```
     HashOffset,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:132-134
-    /// ```c
-    ///     if( bc == 0 || bc > 32 - k )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "shift must be in [1, 32 - hash_key_size]" );
-    /// ```
     HashShift,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:196-198
-    /// ```c
-    ///     if( !input_stream.read( (char *)ht, ht_size*sizeof( Uint4 ) ) )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough data to fill the hash table" );
-    /// ```
     HashTable,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:207-209
-    /// ```c
-    ///     if( !input_stream.read( (char *)vt, M*sizeof( Uint2 ) ) )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough data to fill the values table" );
-    /// ```
     ValuesTable,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:78-79
-    /// ```c
-    ///         if( iflen < HEADER_LEN + TRAILER_LEN )
-    ///             NCBI_THROW( Exception, eFormat, "wrong file size" );
-    /// ```
     BinFileSize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:98-99
-    /// ```c
-    ///         if( unit_size == 0 || unit_size > 16 )
-    ///             NCBI_THROW( Exception, eFormat, "illegal unit size" );
-    /// ```
     BinUnitSize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:107-108
-    /// ```c
-    ///         if( datalen%(2*sizeof( Uint4 )) != 0 )
-    ///             NCBI_THROW( Exception, eFormat, "wrong length" );
-    /// ```
     BinLength,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:100-102
-    /// ```c
-    ///                 if( unit_size == 0 || unit_size > 16 )
-    ///                     NCBI_THROW( Exception, eBadParam,
-    ///                                 "unit size must be in [1,16]" );
-    /// ```
     OAsciiUnitSize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:113-116
-    /// ```c
-    ///                     if( k == 0U || k > (Uint4)(2*unit_size - 1) )
-    ///                         NCBI_THROW(
-    ///                             Exception, eBadHashParam,
-    ///                             "hash key size must be in [1,2*unit_size - 1]" );
-    /// ```
     OAsciiHashKeySize,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:118-121
-    /// ```c
-    ///                     if( roff > 32 - k )
-    ///                         NCBI_THROW(
-    ///                             Exception, eBadHashParam,
-    ///                             "offset must by in [0,32 - hash_key_size]" );
-    /// ```
     OAsciiHashOffset,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:123-127
-    /// ```c
-    ///                     if( bc == 0 || bc > 32 - k )
-    ///                         NCBI_THROW(
-    ///                             Exception, eBadHashParam,
-    ///                             "shift must be in "
-    ///                             "[1, 32 - hash_key_size]" );
-    /// ```
     OAsciiHashShift,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:144-145
-    /// ```c
-    ///     if( linenum < HEADER_LINES )
-    ///         NCBI_THROW( Exception, eFormat, "file too short" );
-    /// ```
     OAsciiFileTooShort,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:175-177
-    /// ```c
-    ///     if( linenum < ht_size )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough lines to fill the hash table" );
-    /// ```
     OAsciiHashTable,
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:191-193
-    /// ```c
-    ///     if( linenum < M )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough lines to fill the values table" );
-    /// ```
     OAsciiValuesTable,
 }
 
@@ -240,18 +134,7 @@ impl FormatSite {
     /// build, observed).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:48-52
-    /// ```c
-    ///         case eStreamOpenFail:   return "open failed";
-    ///         case eBadHashParam:     return "bad hash parameter";
-    ///         case eBadParam:         return "bad parameter";
-    ///         case eFormat:           return "format error";
-    ///         case eAlloc:            return "allocation failure";
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:49-50
-    /// ```c
-    ///         case eStreamOpenFail:   return "open failed";
-    ///         case eFormat:           return "file format error";
-    /// ```
     /// The optimized ascii reader's codes are those of the optimized binary one
     /// (`seq_masker_istat_oascii.cpp:50-54`). The lines are those of `NCBI_THROW` (NCBI BLAST+
     /// 2.17.0, line NP M3d).
@@ -296,31 +179,7 @@ pub(super) fn discover<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskErr
     let (metadata, skip) = metadata_lines(r)?;
     seek(r, 0)?;
 
-    // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:174-194
-    // ```c
-    //     if( skip > 0 ) {
-    //         char * buf( new char[skip] );
-    //         check.read( buf, skip );
-    //         delete[] buf;
-    //     }
-    //     else if( !md.empty() ) {
-    //         string line;
-    //         for( size_t i( 0 ); i < md.size(); ++i ) getline( check, line );
-    //     }
-    //
-    //     if( check ) {
-    //         Uint4 data = 1;
-    //
-    //         if( check.read( (char *)&data, sizeof( Uint4 ) ) ) {
-    //             if( data == 0 ) return eBinary;
-    //             if( data == 0x41414141 ) return eOAscii;
-    //             if( data == 1 || data == 2 ) return eOBinary;
-    //             return eAscii;
-    //         }
-    //     }
-    //
-    //     return eUnknown;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:174-195
     let mut reader = BufReader::new(r);
     let mut readable = true;
     if skip > 0 {
@@ -354,51 +213,6 @@ pub(super) fn discover<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskErr
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:61-107
-/// ```c
-/// static bool CheckBin(
-///         string const & name, vector< string > & md, size_t & skip ) {
-///     skip = 0;
-///     CNcbiIfstream input_stream( name.c_str(), IOS_BASE::binary );
-///
-///     if( input_stream ) {
-///         Uint4 word( 0 );
-///         input_stream.read( (char *)&word, sizeof( word ) );
-///
-///         if( word == 3 ) {
-///             skip = 8;
-///             input_stream.read( (char *)&word, sizeof( word ) );
-///             skip += word;
-///             char * data( new char[word + 2] );
-///             data[word] = data[word + 1] = 0;
-///             input_stream.read( data, word );
-///
-///             for( char * d( data ); *d != 0; d += strlen( d ) + 1 ) {
-///                 md.push_back( string( d ) );
-///             }
-/// ...
-///             return true;
-///         }
-///         else if( word < 3 ) return true;
-///         else return false;
-///     }
-/// ...
-/// static void GetMetaDataLines(
-///         string const & name, vector< string > & md, size_t & skip ) {
-///     if( !CFile( name ).Exists() ) return;
-///     if( CheckBin( name, md, skip ) ) return;
-///     CNcbiIfstream check( name.c_str() );
-///     string line;
-///
-///     while( check ) {
-///         getline( check, line );
-///
-///         if( line.size() >= 2 && line[0] == '#' && line[1] == '#' ) {
-///             md.push_back( line );
-///         }
-///         else break;
-///     }
-/// }
-/// ```
 /// A short first word keeps the zero bytes of `word( 0 )`; a short length word keeps the bytes
 /// of the 3 it replaces. A file shorter than its metadata block fails the skip in
 /// `DiscoverStatType`, which then returns eUnknown, so the block is read only as far as the
@@ -470,14 +284,6 @@ enum Uset {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_hash.hpp:122-128
-/// ```c
-///         Uint1 unit_size;    /**<\internal Unit size in bases. */
-///         Uint1 k;            /**<\internal Hash key size in bits. */
-///         Uint1 roff;         /**<\internal Right offset in bits. */
-///         Uint1 bc;           /**<\internal Bit size of "number of collisions" field. */
-///         Uint4 M;            /**<\internal Size of the secondary table (in 2-byte words). */
-///         Uint4 cmask;        /**<\internal Mask used to extract the "number of collisions" field. */
-/// ```
 struct UsetHash {
     unit_size: u8,
     k: u8,
@@ -490,15 +296,6 @@ struct UsetHash {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:124-130
-/// ```c
-///         struct entry
-///         {
-///             Uint4 u;    /**\internal The unit value. */
-///             Uint4 c;    /**\internal The unit count. */
-///         };
-///
-///         Uint1 unit_size;            /**<\internal The unit size. */
-/// ```
 struct UsetArray {
     unit_size: u8,
     entries: Vec<(u32, u32)>,
@@ -508,35 +305,41 @@ impl UnitCounts {
     /// `CSeqMaskerIstatFactory::create` for the two formats blastn accepts.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:317-340
-    /// ```c
-    ///             case eBinary: res = new CSeqMaskerIstatBin(
-    ///                                   name, threshold, textend,
-    ///                                   max_count, use_max_count,
-    ///                                   min_count, use_min_count,
-    ///                                   skip );
-    ///                           break;
-    /// ...
-    ///             case eOBinary: res = new CSeqMaskerIstatOBinary(
-    ///                                    name,
-    ///                                    threshold, textend,
-    ///                                    max_count, use_max_count,
-    ///                                    min_count, use_min_count,
-    ///                                    use_ba, skip );
-    ///                            break;
-    ///
-    /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
-    /// ```
-    /// The `-t_*_pct` settings of the windowmasker application are not ported (blastn passes
-    /// -1, `seq_masker.hpp:178-181`).
+    /// blastn passes no `-t_*_pct` setting (-1 each, `seq_masker.hpp:178-181`); the
+    /// windowmasker application's are [`UnitCounts::open_with_pct`].
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        let name = path.to_string_lossy().into_owned();
-        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
-        Self::read(&mut file, params)
+        Self::open_with_pct(path, params, &PctSettings::default(), &mut |_| {})
     }
 
     /// [`UnitCounts::open`] on an opened file or an in-memory copy of one.
     pub fn read<R: Read + Seek>(r: &mut R, params: &MaskerParams) -> Result<Self, WinMaskError> {
+        Self::read_with_pct(r, params, &PctSettings::default(), &mut |_| {})
+    }
+
+    /// [`UnitCounts::open`] with the windowmasker application's `-t_*_pct` settings `pct`
+    /// (`pct::apply_pct`); `warn` gets the warning that NCBI posts, at once, when the file has
+    /// no percentages.
+    pub fn open_with_pct(
+        path: &Path,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
+        let name = crate::utils::os_bytes::path_bytes(path).into_owned();
+        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
+        Self::read_with_pct(&mut file, params, pct, warn)
+    }
+
+    /// [`UnitCounts::open_with_pct`] on an opened file or an in-memory copy of one.
+    pub fn read_with_pct<R: Read + Seek>(
+        r: &mut R,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
         let found = discover(r)?;
+        check_pct_lines(&found.metadata, found.stat_type)?;
+        let params = &apply_pct(params, &found.metadata, found.stat_type, pct, warn)?;
         let mut counts = Self {
             unit_size: 0,
             threshold: params.cutoff_score,
@@ -553,7 +356,6 @@ impl UnitCounts {
             metadata: found.metadata,
             warnings: Vec::new(),
         };
-        check_pct_lines(&counts.metadata, found.stat_type)?;
         let start_line = counts.metadata.len();
         match found.stat_type {
             StatType::OBinary => counts.read_obinary(r, found.skip)?,
@@ -571,114 +373,7 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:65-176
-    /// ```c
-    ///     bool start = true;
-    ///     Uint4 linenum = start_line;
-    ///     Uint4 ambig_len = kMax_UI4;
-    ///     string line;
-    ///     for( Uint4 i( 0 ); i < start_line; ++i ) getline( input_stream, line );
-    ///
-    ///     while( input_stream )
-    ///     {
-    ///         line.erase();
-    ///         getline( input_stream, line );
-    ///         ++linenum;
-    ///         if( line.length() == 0 ) continue;
-    ///         if( line[0] == '#' ) continue;
-    ///
-    ///         // Check if we have a precomputed parameter.
-    ///         if( line[0] == '>' )
-    ///         {
-    ///             SIZE_TYPE name_end = line.find_first_of( " \t", 0 );
-    ///             SIZE_TYPE val_start = line.find_first_not_of( " \t", name_end );
-    ///
-    ///             if( name_end == NPOS || val_start == NPOS )
-    ///             {
-    ///                 CNcbiOstrstream str;
-    ///                 str << "at line " << linenum;
-    ///                 string msg = CNcbiOstrstreamToString(str);
-    ///                 NCBI_THROW( Exception, eSyntax, msg);
-    ///             }
-    ///
-    ///             string name = line.substr( 1, name_end - 1 );
-    ///
-    ///             if( name == "t_threshold" && get_threshold() == 0 )
-    ///                 set_threshold(
-    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
-    ///
-    ///             if( name == "t_extend" && get_textend() == 0 )
-    ///                 set_textend(
-    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
-    ///
-    ///             if( name == "t_low" )
-    ///                 set_min_count(
-    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
-    ///
-    ///             if( name == "t_high" && get_max_count() == 0 )
-    ///                 set_max_count(
-    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
-    ///
-    ///             continue;
-    ///         }
-    ///
-    ///         if( start )
-    ///         {
-    ///             start = false;
-    ///             uset.set_unit_size(
-    ///                 static_cast< Uint1 >( NStr::StringToUInt( line ) ) );
-    ///             continue;
-    ///         }
-    ///
-    ///         SIZE_TYPE unit_start = line.find_first_not_of( " \t", 0 );
-    ///         SIZE_TYPE unit_end   = line.find_first_of( " \t", unit_start );
-    ///         SIZE_TYPE cnt_start  = line.find_first_not_of( " \t", unit_end );
-    ///
-    ///         if( unit_start == NPOS || unit_end == NPOS || cnt_start == NPOS )
-    ///         {
-    /// ...
-    ///             NCBI_THROW( Exception, eSyntax, msg );
-    ///         }
-    ///
-    ///         Uint4 unit = NStr::StringToUInt(line.substr(unit_start,
-    ///                                                     unit_end - unit_start),
-    ///                                         0, 16);
-    ///         Uint4 cnt = NStr::StringToUInt(line.substr(cnt_start));
-    ///
-    ///         if( cnt < ambig_len ) {
-    ///             ambig_len = cnt;
-    ///             set_ambig_unit( unit );
-    ///         }
-    ///
-    ///         if( cnt >= get_min_count() )
-    ///             uset.add_info( unit, cnt );
-    ///     }
-    ///
-    ///     string bad_param;
-    ///
-    ///     if( get_threshold() == 0 )
-    ///         bad_param += "t_threhold ";
-    /// ...
-    ///     if( !bad_param.empty() )
-    ///         NCBI_THROW( Exception, eParam, bad_param );
-    ///
-    ///     if( get_use_min_count() == 0 )
-    ///       set_use_min_count( (get_min_count() + 1)/2 );
-    ///
-    ///     if( get_use_max_count() == 0 )
-    ///       set_use_max_count( get_max_count() );
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_simple.cpp:55-67
-    /// ```c
-    /// void CSeqMaskerUsetSimple::add_info( Uint4 unit, Uint4 count )
-    /// {
-    ///     if( !units.empty() && unit <= units[units.size() - 1] )
-    ///     {
-    ///         ostringstream s;
-    ///         s << "last unit: " << hex << units[units.size() - 1]
-    ///           << " ; adding " << hex << unit;
-    ///         NCBI_THROW( Exception, eBadOrder, s.str() );
-    ///     }
-    /// ```
     /// The units are kept in increasing order, so the search of `CSeqMaskerUsetSimple::get_info`
     /// (`lower_bound`) is that of the binary format's array ([`UsetArray::get_info`]). A file
     /// without a unit size line keeps the default of 15 (`seq_masker_uset_simple.hpp:79`). The
@@ -799,69 +494,8 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:72-196
-    /// ```c
-    ///     Uint4 linenum = 0;
-    ///     string line;
-    ///     for( Uint4 i( 0 ); i < start_line; ++i ) getline( input_stream, line );
-    ///     Uint1 unit_size( 0 );
-    ///     Uint4 k, roff, bc;
-    ///     Uint4 t_low    = 0,
-    ///           t_extend = 0,
-    ///           t_thres  = 0,
-    ///           t_high   = 0,
-    ///           M;
-    ///
-    ///     while( getline( input_stream, line ) )
-    ///     {
-    ///         ++linenum;
-    ///
-    ///         switch( linenum )
-    ///         {
-    ///             case 1: break; //skip the file format identifier
-    ///             case 2: // unit size
-    ///
-    ///                 unit_size = (Uint1)atoi( line.c_str() );
-    /// ...
-    ///             case 3: // hash table parameters
-    ///
-    ///                 {
-    ///                     istringstream i( line );
-    ///                     i >> M >> k >> roff >> bc;
-    /// ...
-    ///             case 4: t_low    = atoi( line.c_str() ); break;
-    ///             case 5: t_extend = atoi( line.c_str() ); break;
-    ///             case 6: t_thres  = atoi( line.c_str() ); break;
-    ///             case 7: t_high   = atoi( line.c_str() ); break;
-    ///
-    ///             default: break;
-    ///         }
-    ///
-    ///         if( linenum == HEADER_LINES )
-    ///             break;
-    ///     }
-    ///
-    ///     if( linenum < HEADER_LINES )
-    ///         NCBI_THROW( Exception, eFormat, "file too short" );
-    ///
-    ///     set_min_count( t_low );
-    /// ...
-    ///     Uint4 ht_size = (1ULL<<k);
-    ///     Uint4 * ht = new Uint4[ht_size];
-    /// ...
-    ///     for( linenum = 0;
-    ///          linenum < ht_size && getline( input_stream, line );
-    ///          ++linenum )
-    ///         ht[linenum] = atoi( line.c_str() );
-    /// ...
-    ///     Uint2 * vt = new Uint2[M];
-    /// ...
-    ///     for( linenum = 0;
-    ///          linenum < M && getline( input_stream, line );
-    ///          ++linenum )
-    ///         vt[linenum] = (Uint2)atoi( line.c_str() );
-    /// ```
     /// The numbers are glibc's `atoi` ([`ncbi_str::c_atoi`]) truncated to the field, and those of
-    /// the hash table parameters are read as libstdc++'s `>>` reads an `unsigned int`
+    /// the hash table parameters are read as C++'s `>>` reads an `unsigned int`
     /// ([`extract_uints`]). A value that `>>` does not reach (the line ends, or an earlier value
     /// failed) is left uninitialized by NCBI: a check that reads one is refused
     /// ([`WinMaskError::UnsetHashParameter`]). NCBI 2.17.0's errors for such lines change from
@@ -988,69 +622,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:70-216
-    /// ```c
-    ///     word = readWord( input_stream );
-    ///
-    ///     if( word == 1 )
-    ///         use_opt = false;
-    ///
-    ///     word = readWord( input_stream );
-    ///     unit_size = (Uint1)word;
-    ///
-    ///     if( unit_size == 0 || unit_size > 16 )
-    ///         NCBI_THROW( Exception, eBadParam,
-    ///             "unit size must be in [1,16]" );
-    ///
-    ///     uset.setUnitSize( unit_size );
-    ///
-    ///     M    = readWord( input_stream );
-    ///     k    = readWord( input_stream );
-    ///     roff = readWord( input_stream );
-    ///     bc   = readWord( input_stream );
-    ///
-    ///     if( k == 0U || k > (Uint4)(2*unit_size - 1) )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "hash key size must be in [1,2*unit_size - 1]" );
-    ///
-    ///     if( roff > 32 - k )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "offset must by in [0,32 - hash_key_size]" );
-    ///
-    ///     if( bc == 0 || bc > 32 - k )
-    ///         NCBI_THROW( Exception, eBadHashParam,
-    ///                     "shift must be in [1, 32 - hash_key_size]" );
-    ///
-    ///     t_low    = readWord( input_stream );
-    ///     t_extend = readWord( input_stream );
-    ///     t_thres  = readWord( input_stream );
-    ///     t_high   = readWord( input_stream );
-    ///
-    ///     set_min_count( t_low );
-    /// ...
-    ///     if( use_opt )
-    ///     {
-    ///         Uint4 divisor = readWord( input_stream );
-    ///
-    ///         if( divisor > 0 )
-    ///         {
-    ///             Uint8 total = (1ULL<<(2*unit_size));
-    ///             Uint4 cba_size = (Uint4)(total/(8*sizeof( Uint4 )));
-    /// ...
-    ///             else if( !input_stream.read( (char *)cba, cba_size*sizeof( Uint4 ) ) )
-    ///             {
-    ///                 ERR_POST( Warning << "file read failed: "
-    ///                                   << "bit array optimizations are not used." );
-    /// ...
-    ///     Uint4 ht_size = (1ULL<<k);
-    /// ...
-    ///     if( !input_stream.read( (char *)ht, ht_size*sizeof( Uint4 ) ) )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough data to fill the hash table" );
-    /// ...
-    ///     if( !input_stream.read( (char *)vt, M*sizeof( Uint2 ) ) )
-    ///         NCBI_THROW( Exception, eFormat,
-    ///                     "not enough data to fill the values table" );
-    /// ```
     /// The words are read in the machine's byte order, as NCBI reads them, through [`Stream`]:
     /// `readWord` throws "file too short" when an earlier read came up short, and the word of a
     /// short read keeps 0 in the bytes it did not get (NCBI's are uninitialized). So a file that
@@ -1098,21 +669,6 @@ impl UnitCounts {
             let divisor = read_word(&mut s)?;
             if divisor > 0 {
                 // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:164-186
-                // ```c
-                //             Uint8 total = (1ULL<<(2*unit_size));
-                //             Uint4 cba_size = (Uint4)(total/(8*sizeof( Uint4 )));
-                // ...
-                //             else if( !input_stream.read( (char *)cba, cba_size*sizeof( Uint4 ) ) )
-                //             {
-                //                 ERR_POST( Warning << "file read failed: "
-                //                                   << "bit array optimizations are not used." );
-                //                 delete[] cba;
-                //                 cba = 0;
-                //             }
-                // ...
-                //             optimization_data opt_data( 8*sizeof( Uint4 ), cba );
-                //             set_optimization_data( opt_data );
-                // ```
                 // `arg_use_ba` is true for blastn and the application (`winmask_filter.cpp:121`,
                 // `win_mask_config.cpp:361`), so the array is kept. Units of 1 or 2 letters give
                 // an array of 0 words that is still in use (`new Uint4[0]`); see `SeqMasker::mask`.
@@ -1137,12 +693,6 @@ impl UnitCounts {
         self.warnings.extend(warnings);
 
         // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:53-62
-        // ```c
-        //     k = arg_k;
-        //     roff = arg_roff;
-        //     bc = arg_bc;
-        //     cmask = (1ULL<<bc) - 1;
-        // ```
         self.uset = Uset::Hash(UsetHash {
             unit_size,
             k: k as u8,
@@ -1157,40 +707,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:76-122
-    /// ```c
-    ///         iflen = (streamsize)input_file.GetLength();
-    ///
-    ///         if( iflen < HEADER_LEN + TRAILER_LEN )
-    ///             NCBI_THROW( Exception, eFormat, "wrong file size" );
-    /// ...
-    ///     streamsize adj( in_stream.tellg() );
-    ///     Uint4 data;
-    ///     in_stream.read( (char *)&data, sizeof( Uint4 ) );
-    ///
-    ///     {
-    ///         in_stream.read( (char *)&data, sizeof( Uint4 ) );
-    ///         Uint1 us = (Uint1)data;
-    ///
-    ///         if( us == 0 || us > 16 )
-    ///             NCBI_THROW( Exception, eFormat, "illegal unit size" );
-    /// ...
-    ///         streamsize datalen = iflen - HEADER_LEN - TRAILER_LEN - adj;
-    ///
-    ///         if( datalen%(2*sizeof( Uint4 )) != 0 )
-    ///             NCBI_THROW( Exception, eFormat, "wrong length" );
-    /// ...
-    ///         if( datalen > 0 )
-    ///         {
-    ///             cdata = new Uint4[datalen/sizeof( Uint4 )];
-    ///             in_stream.read( (char *)cdata, datalen );
-    ///             uset.add_info( cdata, datalen/sizeof( Uint4 ) );
-    ///         }
-    ///     }
-    ///
-    ///     in_stream.read( (char *)&data, sizeof( Uint4 ) );
-    ///
-    ///     set_min_count( data );
-    /// ```
     /// One `data` word takes every read, so a short read keeps the earlier value in the bytes it
     /// did not get. `datalen % 8` is unsigned (`sizeof`), so a data part of -8 or -16 bytes
     /// passes and the trailer comes from the bytes after the header. DiscoverStatType has read
@@ -1219,10 +735,9 @@ impl UnitCounts {
         }
         let mut entries = Vec::new();
         if datalen > 0 {
-            let words = s
-                .read_u32s(datalen as u64 / 4)
+            entries = s
+                .read_u32_pairs(datalen as u64 / 8)
                 .ok_or_else(|| WinMaskError::format(FormatSite::BinLength))?;
-            entries = words.chunks_exact(2).map(|e| (e[0], e[1])).collect();
         }
         s.read_into(&mut data);
         let t_low = data;
@@ -1239,24 +754,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:141-157
-    /// ```c
-    ///     set_min_count( t_low );
-    ///
-    ///     if( get_textend() == 0 )
-    ///         set_textend( t_extend );
-    ///
-    ///     if( get_threshold() == 0 )
-    ///         set_threshold( t_thres );
-    ///
-    ///     if( get_max_count() == 0 )
-    ///         set_max_count( t_high );
-    ///
-    ///     if( get_use_min_count() == 0 )
-    ///       set_use_min_count( (get_min_count() + 1)/2 );
-    ///
-    ///     if( get_use_max_count() == 0 )
-    ///       set_use_max_count( get_max_count() );
-    /// ```
     /// The binary reader does the same (`seq_masker_istat_bin.cpp:120-142`).
     fn set_thresholds(&mut self, t_low: u32, t_extend: u32, t_thres: u32, t_high: u32) {
         self.set_min_count(t_low);
@@ -1278,23 +775,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat.hpp:260-273
-    /// ```c
-    ///     void set_min_count( Uint4 arg_min_count )
-    ///     {
-    ///         if( min_count != 0 && min_count < arg_min_count ) {
-    ///             ERR_POST( Warning << "Requested value of t_low ("
-    ///                               << min_count
-    ///                               << ") is less than the one stored with the "
-    ///                               << "N-mer counts (" << arg_min_count << ")."
-    ///                               << "The value " << arg_min_count
-    ///                               << " will be used." );
-    ///             min_count = arg_min_count;
-    ///         }
-    ///         else if( min_count == 0 ) {
-    ///             min_count = arg_min_count;
-    ///         }
-    ///     }
-    /// ```
     /// The warning is kept for the caller to print ([`UnitCounts::warnings`]).
     fn set_min_count(&mut self, arg_min_count: u32) {
         if self.min_count != 0 && self.min_count < arg_min_count {
@@ -1309,17 +789,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:219-227
-    /// ```c
-    /// Uint4 CSeqMaskerIstatOBinary::at( Uint4 unit ) const
-    /// {
-    ///     Uint4 res = uset.get_info( unit );
-    ///
-    ///     if( res == 0 || res < get_min_count() )
-    ///         return get_use_min_count();
-    ///
-    ///     return (res > get_max_count()) ? get_use_max_count() : res;
-    /// }
-    /// ```
     /// `CSeqMaskerIstatBin::at` is the same (`seq_masker_istat_bin.cpp:151-159`).
     #[inline]
     pub(super) fn at(&self, unit: u32) -> Result<u32, WinMaskError> {
@@ -1389,10 +858,6 @@ impl UnitCounts {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat.hpp:155-156
-    /// ```c
-    ///     const optimization_data * get_optimization_data() const
-    ///     { return opt_data_.cba_ == 0 ? 0 : &opt_data_; }
-    /// ```
     pub(super) fn cache_bit_array(&self) -> Option<&[u32]> {
         self.cba.as_deref()
     }
@@ -1400,44 +865,6 @@ impl UnitCounts {
 
 impl UsetHash {
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:73-111
-    /// ```c
-    ///     Uint4 runit = CSeqMaskerUtil::reverse_complement( unit, unit_size );
-    ///
-    ///     if( runit < unit )
-    ///         unit = runit;
-    ///
-    ///     pair< Uint4, Uint1 > hash = CSeqMaskerUtil::hash_code( unit, k, roff );
-    ///     Uint4 hval = htp[hash.first];
-    ///     Uint4 coll = hval&cmask;
-    ///
-    ///     if( coll == 0 )
-    ///         return 0;
-    ///     else if( coll == 1 )
-    ///     {
-    ///         if( hash.second != (hval>>24) )
-    ///             return 0;
-    ///         else return (hval>>bc)&0xFFF;
-    ///     }
-    ///     else
-    ///     {
-    ///         if( (hval>>bc) + coll > M )
-    ///         {
-    ///             ostringstream r;
-    ///             r << "bad index at key " << hash.first
-    ///               << " : " << htp[hash.first];
-    ///             NCBI_THROW( Exception, eBadIndex, r.str() );
-    ///         }
-    ///
-    ///         const Uint2 * start = vtp + (hval>>bc);
-    ///         const Uint2 * end = start + coll;
-    ///
-    ///         for( ; start < end; ++start )
-    ///             if( ((*start)>>9) == hash.second )
-    ///                 return (*start)&0x1FF;
-    ///
-    ///         return 0;
-    ///     }
-    /// ```
     #[inline]
     fn get_info(&self, unit: u32) -> Result<u32, WinMaskError> {
         let runit = reverse_complement(unit, self.unit_size);
@@ -1469,68 +896,28 @@ impl UsetHash {
 }
 
 impl UsetArray {
+    /// `CSeqMaskerUsetArray::get_info(unit)`: the count of the unit or of its reverse complement,
+    /// whichever is smaller, 0 when the array has no entry for it.
+    ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_array.cpp:64-82
-    /// ```c
-    ///     const entry * ud = unit_data.get();
-    ///
-    ///     if( ud == 0 )
-    ///         return 0;
-    ///
-    ///     Uint4 runit = CSeqMaskerUtil::reverse_complement( unit, unit_size );
-    ///
-    ///     if( runit < unit )
-    ///         unit = runit;
-    ///
-    ///     entry target = { unit, 0 };
-    ///     const entry * r = lower_bound( ud, ud + asize, target, less< entry >() );
-    ///
-    ///     if( r == ud + asize || r->u != unit )
-    ///         return 0;
-    ///     else return r->c;
-    /// ```
-    /// `lower_bound` is libstdc++'s halving loop (`stl_algobase.h`, `__lower_bound`), so a file
-    /// whose units are out of order is probed at the same entries as by NCBI's Linux builds.
+    /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:151-153
+    /// The units of a binary file are not checked for order (`add_info`), so in a file whose
+    /// units are not increasing the entry found is the one NCBI's `lower_bound` finds
+    /// (`utils::lower_bound`). No data (`unit_data` null) is an empty array here: 0 either way.
     #[inline]
     fn get_info(&self, unit: u32) -> u32 {
-        if self.entries.is_empty() {
-            return 0;
-        }
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };
-        let mut first = 0usize;
-        let mut len = self.entries.len();
-        while len > 0 {
-            let half = len >> 1;
-            let middle = first + half;
-            if self.entries[middle].0 < unit {
-                first = middle + 1;
-                len = len - half - 1;
-            } else {
-                len = half;
-            }
-        }
-        match self.entries.get(first) {
-            Some(&(u, c)) if u == unit => c,
+        let entries = &self.entries;
+        let at = lower_bound_by(0, entries.len(), |i| entries[i].0 < unit);
+        match entries.get(at) {
+            Some(&(u, count)) if u == unit => count,
             _ => 0,
         }
     }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_util.cpp:54-65
-/// ```c
-/// Uint4 CSeqMaskerUtil::reverse_complement( Uint4 seq, Uint1 size )
-/// {
-///     Uint4 result( 0 );
-///
-///     for( Uint1 i( 0 ); i < size; ++i )
-///     {
-///         Uint4 letter( ~(((seq>>(2*i))&0x3)|(~0x3)) );
-///         result = (result<<2)|letter;
-///     }
-///
-///     return result;
-/// }
-/// ```
 #[inline]
 pub(super) fn reverse_complement(seq: u32, size: u8) -> u32 {
     let mut result = 0u32;
@@ -1542,15 +929,6 @@ pub(super) fn reverse_complement(seq: u32, size: u8) -> u32 {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_util.hpp:81-87
-/// ```c
-///     static pair< Uint4, Uint1 > hash_code( Uint4 unit,
-///                                            Uint1 k, Uint1 roff )
-///     {
-///         return make_pair( (unit>>roff)&((((Uint4)1)<<k) - 1),
-///                           (Uint1)(((unit>>(roff + k))<<roff)
-///                             + (unit&((1<<roff) - 1))) );
-///     }
-/// ```
 /// With units of 16 letters `roff + k` can be 32, a shift that C++ leaves undefined. NCBI's
 /// x86-64 and arm64 builds shift by the amount modulo 32, and the counts files they write
 /// (`CSeqMaskerOstatOpt::doFinalize`, `seq_masker_ostat_opt.cpp:289-313`) hold the check bits
@@ -1652,33 +1030,33 @@ impl<R: Read> Stream<'_, R> {
     /// `is.read( (char *)array, n*sizeof( Uint4 ) )` into a new array; `None` when the read
     /// fails (checked against the file's length before the array is allocated).
     fn read_u32s(&mut self, n: u64) -> Option<Vec<u32>> {
-        let bytes = n.checked_mul(4)?;
-        if self.failed || bytes > self.left {
-            self.failed = true;
-            self.left = 0;
-            return None;
-        }
-        let mut out = Vec::with_capacity(n as usize);
-        let mut buf = vec![0u8; 1 << 16];
-        let mut todo = bytes as usize;
-        while todo > 0 {
-            let take = todo.min(buf.len());
-            if self.read(&mut buf[..take]) < take {
-                return None;
-            }
-            out.extend(
-                buf[..take]
-                    .chunks_exact(4)
-                    .map(|w| u32::from_ne_bytes([w[0], w[1], w[2], w[3]])),
-            );
-            todo -= take;
-        }
-        Some(out)
+        self.read_array(n, u32::from_ne_bytes)
     }
 
     /// `is.read( (char *)array, n*sizeof( Uint2 ) )` into a new array; `None` when it fails.
     fn read_u16s(&mut self, n: u64) -> Option<Vec<u16>> {
-        let bytes = n.checked_mul(2)?;
+        self.read_array(n, u16::from_ne_bytes)
+    }
+
+    /// `n` pairs of words (unit, count), each pair read into its entry at once.
+    fn read_u32_pairs(&mut self, n: u64) -> Option<Vec<(u32, u32)>> {
+        self.read_array(n, |pair: [u8; 8]| {
+            let [a, b, c, d, e, f, g, h] = pair;
+            (
+                u32::from_ne_bytes([a, b, c, d]),
+                u32::from_ne_bytes([e, f, g, h]),
+            )
+        })
+    }
+
+    /// `n` values of `W` bytes each, the vector of exactly `n` filled through a block
+    /// buffer; `None` (the stream failed) when the file has fewer bytes.
+    fn read_array<T, const W: usize>(
+        &mut self,
+        n: u64,
+        value: impl Fn([u8; W]) -> T,
+    ) -> Option<Vec<T>> {
+        let bytes = n.checked_mul(W as u64)?;
         if self.failed || bytes > self.left {
             self.failed = true;
             self.left = 0;
@@ -1688,14 +1066,14 @@ impl<R: Read> Stream<'_, R> {
         let mut buf = vec![0u8; 1 << 16];
         let mut todo = bytes as usize;
         while todo > 0 {
-            let take = todo.min(buf.len());
+            let take = todo.min(buf.len() / W * W);
             if self.read(&mut buf[..take]) < take {
                 return None;
             }
             out.extend(
                 buf[..take]
-                    .chunks_exact(2)
-                    .map(|w| u16::from_ne_bytes([w[0], w[1]])),
+                    .chunks_exact(W)
+                    .map(|w| value(w.try_into().expect("a chunk of W bytes"))),
             );
             todo -= take;
         }
@@ -1704,49 +1082,11 @@ impl<R: Read> Stream<'_, R> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:239-276
-/// ```c
-///         if( stat_type == eAscii || stat_type == eOAscii )
-///         {
-///             for( auto const & line : md )
-///             {
-///                 if( !line.empty() && line.substr( 0, 6 ) == "##pct:" )
-///                 {
-///                     double pct( 0.0 );
-///                     Uint4 count;
-///                     std::istringstream iss(
-///                         line.substr( 7, line.size() - 7 ) );
-///                     iss >> count >> pct;
-///                     count_map.push_back( pct );
-///                 }
-///             }
-/// ...
-///         if( stat_type == eBinary || stat_type == eOBinary )
-///         {
-///             for( auto const & line : md )
-///             {
-///                 if( !line.empty() && line.substr( 0, 6 ) == "##pct:" )
-///                 {
-///                     std::istringstream iss(
-///                         line.substr( 7, line.size() - 7 ) );
-/// ...
-///                     break;
-///                 }
-///             }
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:361-366
-/// ```c
-///     catch( std::exception & e )
-///     {
-///         NCBI_THROW( Exception, eCreateFail,
-///                     std::string( "could not create a unit counts container: " ) +
-///                     e.what() );
-///     }
-/// ```
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
 /// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
-/// are used only by the application's `-t_*_pct` settings, which are not ported.
+/// are used only by the application's `-t_*_pct` settings (`pct::apply_pct`).
 fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
     let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let short = match stat_type {
@@ -1763,40 +1103,6 @@ fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinM
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:111-146
-/// ```c
-/// void ExtractStatAlgoVersion(
-///         vector< string > const & md, CSeqMaskerVersion & ver ) {
-///     static char const * DIGITS = "0123456789";
-///     string t;
-///
-///     for( vector< string >::const_iterator i( md.begin() );
-///             i != md.end(); ++i ) {
-///         string::size_type p( i->find( ':', 2 ) ), pp;
-///
-///         if( p != string::npos ) {
-///             if( i->substr( 2, p -2 ) ==
-///                     CSeqMaskerOstat::STAT_ALGO_COMPONENT_NAME ) {
-///                 int major = 0, minor = 0, patch = 0;
-///                 pp = p + 1;
-///                 p = i->find( '.', pp );
-///                 if( p == string::npos ) continue;
-///                 t = i->substr( pp, p - pp );
-///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
-///                 major = NStr::StringToInt( t );
-///                 pp = p + 1;
-///                 p = i->find( '.', pp );
-///                 if( p == string::npos ) continue;
-///                 t = i->substr( pp, p - pp );
-///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
-///                 minor = NStr::StringToInt( t );
-///                 t = i->substr( p + 1 );
-///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
-///                 patch = NStr::StringToInt( t );
-///                 ver = CSeqMaskerVersion(
-///                         CSeqMaskerOstat::STAT_ALGO_COMPONENT_NAME,
-///                         major, minor, patch );
-///                 return;
-/// ```
 /// `CSeqMaskerIstatFactory::create` calls it after the reader (`:343-348`), inside its `try`:
 /// a part of digits that `StringToInt` cannot convert (empty, or beyond `int`) is its
 /// exception, which the factory rethrows. The version itself is not used by the masker.
@@ -1848,15 +1154,6 @@ fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
 const ASCII_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatAscii::CSeqMaskerIstatAscii");
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:40-50
-/// ```c
-/// CSeqMaskerIstatAscii::Exception::GetErrCodeString() const
-/// {
-///     switch( GetErrCode() )
-///     {
-///         case eStreamOpenFail:   return "open failed";
-///         case eSyntax:           return "syntax error";
-///         case eParam:            return "bad parameter value";
-/// ```
 /// The ascii reader's syntax errors: line 96 (a `>` line) and 137 (a unit line).
 const fn ascii_site(line: u32) -> ThrowSite {
     ThrowSite {
@@ -1868,10 +1165,6 @@ const fn ascii_site(line: u32) -> ThrowSite {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:168-169
-/// ```c
-///     if( !bad_param.empty() )
-///         NCBI_THROW( Exception, eParam, bad_param );
-/// ```
 const ASCII_BAD_PARAM: ThrowSite = ThrowSite {
     file: "src/algo/winmask/seq_masker_istat_ascii.cpp",
     line: 169,
@@ -1880,13 +1173,6 @@ const ASCII_BAD_PARAM: ThrowSite = ThrowSite {
 };
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_simple.cpp:44-52
-/// ```c
-/// const char * CSeqMaskerUsetSimple::Exception::GetErrCodeString() const
-/// {
-///     switch( GetErrCode() )
-///     {
-///         case eBadOrder:     return "bad unit order";
-/// ```
 const USET_SIMPLE_BAD_ORDER: ThrowSite = ThrowSite {
     file: "src/algo/winmask/seq_masker_uset_simple.cpp",
     line: 62,
@@ -1933,59 +1219,72 @@ impl<R: Read> TextLines<R> {
     }
 }
 
-/// `istringstream( line ) >> v0 >> v1 >> ...` into `unsigned int`s, as libstdc++ reads them
-/// (`num_get::_M_extract_int` with the stream's default flags): white space, then a sign and the
-/// decimal digits up to the first other byte; no digit is 0 and a failure, a value beyond
-/// `UINT_MAX` is `UINT_MAX` and a failure, and a `-` gives the value's negation modulo 2^32.
-/// After a failure, and once the line has ended, the stream reads nothing more: the values and
-/// how many of them `>>` set (the first ones; a failed one is set), the others 0 here (NCBI
-/// leaves them uninitialized; see [`UnitCounts::read_oascii`]).
+/// Reads up to `N` unsigned integers from `line` as C++'s `std::istringstream` extracts them with
+/// `>>` into `unsigned int` (default flags: decimal, white space skipped), and returns them with
+/// the number of values that the stream stored.
+///
+/// A value that was not stored (the line ended before it, or an earlier value failed) is 0 in the
+/// returned array and is not counted: NCBI leaves such a variable as it was. A value that failed is
+/// stored and counted (0 when no number was found, `u32::MAX` when it was too large).
+///
+/// The rules are those of the C++ standard's `num_get` stages 1 to 3 for an unsigned integer
+/// (specifier `%u`) and `strtoull`, as the table `tests/fixtures/winmask_uints/oascii_hash_line.tsv`
+/// observed them (NCBI 2.17.0's C++ library, 3,038 lines, 4 fields each):
+///
+/// * Each `>>` first skips white space (space, tab, line feed, vertical tab, form feed, carriage
+///   return); if the text ends there nothing is stored and the stream has failed.
+/// * Stage 2 accumulates an optional `+` or `-` and then decimal digits, and stops at any other
+///   character (`0x10` is `0`; `1.5` is `1`; a sign followed by a space has no digits).
+/// * Stage 3 converts the field. No digit: 0, and the stream has failed. Otherwise the digits give
+///   a magnitude; one above `u32::MAX` stores `u32::MAX` and the stream has failed, whatever the
+///   sign (`-4294967296`, and `-18446744073709551615`, where `strtoull` alone would wrap in 64
+///   bits, fail alike). A magnitude that fits is stored as it is, or negated in 32 bits when the
+///   field has a `-` (`-1` is `u32::MAX`, `-4294967295` is 1, `-0` is 0), and the stream has not
+///   failed.
+/// * A stream that has failed, or that reached the end of the text while accumulating a field,
+///   stores nothing more.
 pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
+    let is_space = |byte: u8| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
     let mut values = [0u32; N];
-    let mut set = 0;
-    let mut pos = 0;
-    for value in values.iter_mut() {
-        // The sentry: skip white space; at the end of the line it fails.
-        while pos < line.len() && ncbi_str::is_space(line[pos]) {
-            pos += 1;
+    let mut stored = 0;
+    let mut at = 0;
+    while stored < N {
+        while at < line.len() && is_space(line[at]) {
+            at += 1;
         }
-        if pos == line.len() {
+        if at == line.len() {
             break;
         }
-        set += 1;
-        let negative = line[pos] == b'-';
-        if negative || line[pos] == b'+' {
-            pos += 1;
+        let negative = line[at] == b'-';
+        if matches!(line[at], b'-' | b'+') {
+            at += 1;
         }
-        let digits_from = pos;
-        let mut result: u32 = 0;
-        let mut overflow = false;
-        while pos < line.len() && line[pos].is_ascii_digit() {
-            let digit = u32::from(line[pos] - b'0');
-            if result > u32::MAX / 10 {
-                overflow = true;
-            } else {
-                result *= 10;
-                overflow |= result > u32::MAX - digit;
-                result = result.wrapping_add(digit);
+        let first_digit = at;
+        let mut magnitude = 0u64;
+        let mut too_large = false;
+        while at < line.len() && line[at].is_ascii_digit() {
+            magnitude = magnitude * 10 + u64::from(line[at] - b'0');
+            if magnitude > u64::from(u32::MAX) {
+                // Past this the magnitude only has to stay above the limit.
+                too_large = true;
+                magnitude = u64::from(u32::MAX) + 1;
             }
-            pos += 1;
+            at += 1;
         }
-        if pos == digits_from {
-            break;
-        }
-        if overflow {
-            *value = u32::MAX;
-            break;
-        }
-        *value = if negative {
-            result.wrapping_neg()
+        let (value, failed) = if at == first_digit {
+            (0, true)
+        } else if too_large {
+            (u32::MAX, true)
+        } else if negative {
+            ((magnitude as u32).wrapping_neg(), false)
         } else {
-            result
+            (magnitude as u32, false)
         };
-        if pos == line.len() {
+        values[stored] = value;
+        stored += 1;
+        if failed || at == line.len() {
             break;
         }
     }
-    (values, set)
+    (values, stored)
 }

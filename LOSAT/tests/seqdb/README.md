@@ -90,8 +90,10 @@ each of them:
   continuation, empty `masks`, different Seq-ids in one Seq-loc, enumerations as numbers,
   every Seq-loc alternative and the combination of several Seq-locs of one sequence with empty and
   whole ranges (`h_seqloc_*`, `h_unsupported_*`), files cut inside an object, garbage after the
-  last object, files that are neither text nor binary ASN.1, ...); `mask_parse/b_*`: damaged and
-  hand-made binary files (`b_seqloc_*`: the Seq-loc alternatives in BER).
+  last object, files that are neither text nor binary ASN.1, NCBI's pointer syntax `NULL`, `@n`
+  and `:Type` (`h_pointer_*`), ...); `mask_parse/b_*`: damaged and hand-made binary files
+  (`b_seqloc_*`: the Seq-loc alternatives in BER; `b_pointer_*`: the pointer syntax in BER;
+  `b_length_long_wrap_*`: 8-byte lengths whose end wraps past 2^64).
 - `mask_parse/expected.tsv`: per file the exit status and standard error of
   `makeblastdb -in <fasta> -dbtype <type> -mask_data <file>` (no `-parse_seqids`), and the masks that
   `blastdbcmd -outfmt '%o\t%m<algorithm>'` reads back from the database it wrote (`RUN`, `NODB`
@@ -99,8 +101,9 @@ each of them:
   the header of the file explains them).
 - `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
   inputs are deterministic, so a rebuild changes nothing.
-- `stl_sort/cases.txt`: the permutations that libstdc++'s `std::sort` gives ranges under NCBI's
-  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the port of `CSeq_loc::Add`.
+- `stl_sort/cases.txt`: orders in which C++ `std::sort` leaves ranges under NCBI's
+  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the test of the sort in the port
+  of `CSeq_loc::Add`.
 
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the

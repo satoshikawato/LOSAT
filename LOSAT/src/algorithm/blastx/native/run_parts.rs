@@ -21,7 +21,7 @@ use crate::algorithm::blastx::input::{parse_fasta_stream_keeping, FastaRecord, F
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::blastx::subjects::Subjects;
 use crate::algorithm::blastx::{archive, seqalign};
-use crate::blastinput::app::{self, FormatChoice, Program};
+use crate::blastinput::app::{self, EarlyFormat, Program};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::blastinput::query_batch::QueryScopes;
 use crate::blastinput::seq_range::SequenceRange;
@@ -39,12 +39,8 @@ use std::{cell::RefCell, io::Write, sync::Arc};
 /// (`BlastxArgs::resolve`; a semantic error is raised later, where NCBI's handlers raise it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3630
-/// ```c++
-///     CRef<CBlastOptionsHandle> retval(x_CreateOptionsHandle(locality, args));
-///     CBlastOptions& opts = retval->SetOptions();
-/// ```
 pub(super) struct RunSetup {
-    pub(super) choice: FormatChoice,
+    pub(super) choice: EarlyFormat,
     pub(super) archive: Option<ArchiveHandle>,
     pub(super) strategy: Option<StrategyExport>,
     pub(super) resolution: Result<ResolvedOptions>,
@@ -57,10 +53,6 @@ impl RunSetup {
     /// `resolve` that is not a semantic one is returned here.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3584-3585
-    /// ```c++
-    /// CRef<CBlastOptionsHandle>
-    /// CBlastAppArgs::SetOptions(const CArgs& args)
-    /// ```
     pub(super) fn open(
         args: &BlastxArgs,
         settings: &ApplicationSettings,
@@ -69,37 +61,21 @@ impl RunSetup {
         strategy_slot: &mut Option<StrategyExport>,
     ) -> Result<Self> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
-        // ```c++
-        //     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
-        //         (*arg)->ExtractAlgorithmOptions(args, opts);
-        //     }
-        //
-        //     m_IsUngapped = !opts.GetGappedMode();
-        //     try { retval->Validate(); }
-        //     catch (const CBlastException& e) {
-        //         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
-        //     }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-        // ```c++
-        //     if (GetExportSearchStrategyStream(args) ||
-        //            m_FormattingArgs->ArchiveFormatRequested(args)) {
-        //         locality = CBlastOptions::eBoth;
-        //     }
-        // ```
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run, with NCBI's errors; a format that NCBI runs and LOSAT does not
         // write is rejected there too. The custom tabular fields are read as NCBI reads them
         // (`ResolvedOptions::tabular`).
         // `GetExportSearchStrategyStream` comes first: it creates the search strategy file
-        // (`strategy::open_strategy_file`), which an error after it leaves empty.
+        // (`strategy::open_strategy_file`), which an error after it leaves empty; with it a value
+        // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
             program.upper,
         )?;
-        let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let format = choice.report_format(Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
         // The run's options handle, which its archive and its search strategy share.
@@ -116,7 +92,7 @@ impl RunSetup {
             crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs.map(|count| count as usize),
                     num_descriptions: args.num_descriptions,
@@ -129,11 +105,16 @@ impl RunSetup {
         strategy_slot.clone_from(&strategy);
         // Preserve explicit product refusals; defer supported semantic failures
         // until subject and standard query/output streams have been extracted.
-        let mut resolution = match args.resolve() {
-            Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
-                return Err(error)
-            }
-            resolution => resolution,
+        // A deferred `-outfmt` value is read again by the formatting handler (`at_formatting_handler`),
+        // which fails with NCBI's error after the errors of the arguments that come before it.
+        let mut resolution = match &choice {
+            EarlyFormat::Deferred => Err(SemanticOptionsError::from(String::new()).into()),
+            EarlyFormat::Parsed(_) => match args.resolve() {
+                Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
+                    return Err(error)
+                }
+                resolution => resolution,
+            },
         };
         // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file when
         // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused
@@ -142,17 +123,6 @@ impl RunSetup {
             options.find_matrix_file(&settings.matrix_search)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3157-3165
-        // ```c++
-        //
-        //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
-        //                            "Number of threads (CPUs) to use in the BLAST search",
-        //                            CArgDescriptions::eInteger,
-        //                            NStr::IntToString(kDfltValue));
-        //     arg_desc.SetConstraint(kArgNumThreads,
-        //                            new CArgAllowValuesGreaterThanOrEqual(kMinValue));
-        //     arg_desc.SetDependency(kArgNumThreads,
-        //                            CArgDescriptions::eExcludes,
-        // ```
         // Existing LOSAT search-scoped pool validates the explicit thread contract
         // before input/output side effects; serial WASI remains explicitly serial.
         crate::utils::threading::validate_threads(args.num_threads as usize)?;
@@ -172,11 +142,6 @@ impl RunSetup {
 /// archive (`early_archive_error`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2525-2527
-/// ```c++
-///     } else if (args.Exist(kArgSubject) && args[kArgSubject]) {
-///
-///         CNcbiIstream* subj_input_stream = NULL;
-/// ```
 pub(super) struct SubjectRead<'a> {
     pub(super) args: &'a BlastxArgs,
     pub(super) settings: &'a ApplicationSettings,
@@ -192,11 +157,6 @@ pub(super) struct SubjectRead<'a> {
 /// interval and the records, not yet cut to it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2463-2465
-/// ```c++
-/// void
-/// CBlastDatabaseArgs::ExtractAlgorithmOptions(const CArgs& args,
-///                                             CBlastOptions& opts)
-/// ```
 pub(super) fn read_subjects(
     input: SubjectRead<'_>,
 ) -> Result<(Option<SequenceRange>, Vec<FastaRecord>)> {
@@ -211,18 +171,6 @@ pub(super) fn read_subjects(
         early_archive_error,
     } = input;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2540-2556
-    // ```c++
-    //         TSeqRange subj_range;
-    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-    //             subj_range =
-    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-    //                             "Invalid specification of subject location");
-    //         }
-    // ...
-    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-    //                                        subj_range, parse_deflines,
-    //                                        use_lcase_masks, subjects, m_IsMapper);
-    // ```
     // The handler of the database arguments reads `-subject_loc` after it opened the subject
     // file, and then the subjects, one record at a time: a record whose interval starts more
     // than one letter past its end stops the reading there (`seq_range::record_cut`), so the
@@ -273,11 +221,6 @@ pub(super) fn read_subjects(
 /// the options, the `-subject` records and the scopes of the queries (`-parse_deflines`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1067-1069
-/// ```c++
-/// CBlastFormat::WriteArchive(blast::IQueryFactory& queries,
-///                            blast::CBlastOptionsHandle& options_handle,
-///                            const CSearchResultSet& results,
-/// ```
 pub(super) struct ArchiveBatch<'a> {
     pub(super) handle: &'a ArchiveHandle,
     pub(super) archive_requests: &'a RunRequests<'a>,
@@ -295,11 +238,6 @@ impl ArchiveBatch<'_> {
     /// the titles of the reported sequences read first.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-285
-    /// ```c++
-    ///             if (fmt_args->ArchiveFormatRequested(args)) {
-    ///                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-    ///                 m_Bah.ResetMessages();
-    /// ```
     pub(super) fn write(
         self,
         writer: &mut crate::cli::NcbiOstream<'static>,
@@ -356,6 +294,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
+                            usize::MAX,
                             (None, None),
                         )
                         .map_err(reported_error)?,

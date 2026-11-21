@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Bind the specifically approved Session G Windows and Sakai authorities.
 
-NCBI c++/src/objtools/align_format/tabular.cpp:1100-1108:
-// void CBlastTabularInfo::Print() {
-//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//         x_PrintField(*iter);
+NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
 //     }
-//     m_Ostream << "\\n";
 // }
 The authority compares the resulting raw bytes. It never normalizes newlines.
 """

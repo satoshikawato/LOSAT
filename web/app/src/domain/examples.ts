@@ -103,6 +103,14 @@ const BSU_RECA_CDS = [
   'GGATAATAACGGAGTAGTGCAGCAGCAAGCTGAAGAGACACAAGAAGAACTCGAATTTGAAGAATAA',
 ].join('\n') + '\n';
 
+/** Where each example query comes from, as the help says it (UniProt's CC BY 4.0 asks for the credit). */
+const QUERY_SOURCES: ReadonlyMap<string, string> = new Map([
+  [BSU_16S, 'RefSeq NR_102783.2 (NCBI)'],
+  [SCE_ITS, 'RefSeq NR_111007.1 (NCBI)'],
+  [BSU_RECA_PROTEIN, 'UniProtKB P16971 (UniProt, CC BY 4.0)'],
+  [BSU_RECA_CDS, 'AL009126.3:1764645-1765691 (ENA)'],
+]);
+
 const NCBI_FTP = 'https://ftp.ncbi.nlm.nih.gov';
 const REFSEQ_TERMS = 'NCBI places no restrictions on the use of RefSeq (ncbi.nlm.nih.gov/home/about/policies).';
 
@@ -176,6 +184,16 @@ export function exampleQuery(set: ExampleSet, program: ProgramId): string {
   const query = set.queries[sequenceKind(programById(program), 'query')];
   if (query === undefined) throw new Error(`example ${set.id} has no query for ${program}`);
   return query;
+}
+
+/** Where the queries of a mode's sets come from, once each, in the order of the sets. */
+export function exampleQuerySources(program: ProgramId): readonly string[] {
+  const sources = examplesFor(program).map((set) => {
+    const source = QUERY_SOURCES.get(exampleQuery(set, program));
+    if (source === undefined) throw new Error(`example ${set.id} has a query of no source for ${program}`);
+    return source;
+  });
+  return [...new Set(sources)];
 }
 
 /** The host that a set is downloaded from, as the in-place sentence names it. */

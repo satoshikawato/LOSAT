@@ -5,7 +5,8 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { noSequenceOf, SearchDraft, type DraftSource } from '../../src/application/draft';
+import { fastaParser, programById } from '../../src/domain/programs';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -35,9 +36,9 @@ function setup(
   });
   const checks: string[] = [];
   const checkInput = data.checkInput.bind(data);
-  data.checkInput = async (program, role, revisionIds) => {
-    checks.push(`${program}|${role}|${revisionIds.join(',')}`);
-    return (options.checkInput ?? checkInput)(program, role, revisionIds);
+  data.checkInput = async (reader, revisionIds) => {
+    checks.push(`${reader.program}|${reader.role}|${revisionIds.join(',')}`);
+    return (options.checkInput ?? checkInput)(reader, revisionIds);
   };
   const fake = new FakeEngine();
   const validated: Array<readonly string[]> = [];
@@ -47,11 +48,11 @@ function setup(
   const engine = {
     describe: fake.describe.bind(fake),
     start: async (argv: readonly string[]): Promise<StartResult> =>
-      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false } },
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } },
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
-      return (await options.validate?.(argv, registry)) ?? { ok: true };
+      return (await options.validate?.(argv, registry)) ?? { ok: true, dataLoaders: true };
     },
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
@@ -124,6 +125,51 @@ describe('SearchDraft inputs', () => {
     expect(source.base?.records.map((r) => r.id)).toEqual(['q1', 'q2']);
     expect(source.check).toEqual({ state: 'ok', records: 2 });
     expect(source.head).toBe('>q1\nACGT\n>q2\nGGCC\n');
+  });
+
+  // Line WQA's sweep, D4 (2026-11-19): an input without residues is read and run as the command line
+  // runs it, and is told apart from one with a sequence, and (D4 review) from one whose records with
+  // residues are left out. A source whose records are all left out is not one (runs leave it out), nor
+  // is one with an empty record among others.
+  it('tells an input that holds no sequence, which the engine reads and runs take as they are', async () => {
+    const { draft } = setup();
+    const cases: ReadonlyArray<readonly [string, string, 'none' | undefined]> = [
+      ['empty.fa', '', 'none'],
+      ['blank.fa', '  \n\t\n', 'none'],
+      ['defline.fa', '>empty record\n', 'none'],
+      ['deflines.fa', '>a\n>b\n\n', 'none'],
+      ['mixed.fa', '>a\nACGT\n>empty record\n>b\nGGCC\n', undefined],
+      ['plain.fa', '>a\nACGT\n', undefined],
+    ];
+    draft.addFiles('subject', cases.map(([name, text]) => file(name, text)));
+    await draft.idle();
+    cases.forEach(([name, , none], index) => {
+      const source = sourceOf(draft, 'subject', index);
+      expect(source.name).toBe(name);
+      expect(source.check).toMatchObject({ state: 'ok' });
+      expect(noSequenceOf(source), name).toBe(none);
+    });
+    // What runs take decides: the records with residues left out, the rest holds none, though the input
+    // has a sequence; every record left out, runs leave the source out. Deflines alone, one of them left
+    // out, still have no sequence at all.
+    const mixed = sourceOf(draft, 'subject', 4);
+    draft.setIncluded('subject', mixed.key, [0, 2], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBe('excluded');
+    draft.setIncluded('subject', mixed.key, [1], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBeUndefined();
+    draft.setIncluded('subject', mixed.key, [0], true);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBeUndefined();
+    const deflines = sourceOf(draft, 'subject', 3);
+    draft.setIncluded('subject', deflines.key, [0], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 3))).toBe('none');
+    // The run is not refused: the command line runs these inputs.
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    expect(draft.readiness()).toBeUndefined();
   });
 
   it('replaces the paste source when the text changes, and removes it when the text is emptied', async () => {
@@ -386,13 +432,177 @@ describe('SearchDraft inputs', () => {
     expect(draft.region('query')).toEqual({ start: '2', stop: '12' });
   });
 
+  // Line WQA's D13 (c) and D16, 2026-11-20: the engine's reader refuses a first line that may be a Seq-id in the CLI's
+  // words with the data loaders on, and reads it as data with `[BLAST] DATA_LOADERS=none` of -conffile, as the CLI does.
+  // The validation says which; the draft reads a refused source again, and checks the others again, with that reader.
+  it("reads and checks the sources with the data loaders of the argv's registry, as the CLI reads them", async () => {
+    const { draft, data } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+    });
+    const readers: string[] = [];
+    const indexSource = data.indexSource.bind(data);
+    const seqId = (program: string) =>
+      `the first line of the query ("2HHB") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's ${program.toUpperCase()} (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)`;
+    const checks: string[] = [];
+    const checkInput = data.checkInput.bind(data);
+    data.checkInput = async (reader, revisionIds) => {
+      checks.push(`${reader.program}|${reader.role}|${reader.dataLoaders}`);
+      return checkInput(reader, revisionIds);
+    };
+    data.indexSource = async (sourceId, reader) => {
+      readers.push(`${reader.program}|${reader.role}|${reader.dataLoaders}`);
+      // The engine's reader with the loaders on refuses the first line (the FakeScanner does not take Seq-ids).
+      if (reader.dataLoaders) throw new Error(seqId(reader.program));
+      return indexSource(sourceId, reader);
+    };
+    draft.setPaste('query', '2HHB\nMKLV\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('blastn') });
+    // Another program: the refusal names it, so the source is read again with its reader.
+    draft.setProgram('tblastx');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('tblastx') });
+    expect(readers).toEqual(['blastn|query|true', 'tblastx|query|true']);
+    draft.setExtra('-conffile nol.ini');
+    draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+    await draft.idle();
+    expect(draft.state.get().dataLoaders).toBe(false);
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(readers.at(-1)).toBe('tblastx|query|false');
+    expect(checks.at(-1)).toBe('tblastx|query|false');
+    // Without the file, the loaders are on again: the table read with them off is checked again with them on.
+    draft.setExtra('');
+    await draft.idle();
+    expect(draft.state.get().dataLoaders).toBe(true);
+    expect(checks.at(-1)).toBe('tblastx|query|true');
+  });
+
+  // line WQA's D13 round 3, L1, 2026-11-20: the engine gives the data loaders of the registry of -conffile also when it
+  // refuses another option of the argv, and the draft reads the inputs with them: the card does not ask for
+  // DATA_LOADERS=none that the chosen file already sets while the argv is invalid.
+  it('reads the sources with the data loaders of the registry while another option is refused', async () => {
+    const { draft, data } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      validate: (argv, registry) => {
+        const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
+        return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
+      },
+    });
+    const readers: string[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, reader) => {
+      readers.push(`${reader.program}|${reader.dataLoaders}`);
+      if (reader.dataLoaders) throw new Error('the first line of the query ("2HHB") is not a defline and may be a sequence identifier');
+      return indexSource(sourceId, reader);
+    };
+    draft.setPaste('query', '2HHB\nMKLV\n');
+    draft.setExtra('-conffile nol.ini -unknown_option');
+    draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('invalid');
+    expect(draft.state.get().dataLoaders).toBe(false);
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(readers.at(-1)).toBe('blastn|false');
+  });
+
+  // An index that is running when the reader changes ends with the old reader's records or refusal; the input is read
+  // again with the reader in force, whatever the order (line WQA's D13 round 2, M1, 2026-11-20; the review's probe).
+  describe('an index that is running when its reader changes reads the input again with the reader in force', () => {
+    const seqId = (program: string) =>
+      `the first line of the query ("2HHB") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's ${program.toUpperCase()} (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)`;
+    const until = async (condition: () => boolean): Promise<void> => {
+      for (let i = 0; i < 400 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(condition()).toBe(true);
+    };
+
+    it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
+      const { draft, data } = setup({
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+      });
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const indexSource = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        // A large input: the reader with the loaders on takes a while, then refuses the first line.
+        if (reader.dataLoaders) {
+          await gate;
+          throw new Error(seqId(reader.program));
+        }
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('query', '2HHB\nMKLV\n');
+      await until(() => readers.length === 1);
+      draft.setExtra('-conffile nol.ini');
+      draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+      await until(() => draft.state.get().dataLoaders === false);
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|true', 'blastn|false']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', name: 'query.fa' });
+      expect(sourceOf(draft, 'query').error).toBeUndefined();
+    });
+
+    it('the program changes while the input is read', async () => {
+      const { draft, data } = setup();
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      data.indexSource = async (_sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        if (reader.program === 'blastn') await gate;
+        throw new Error(seqId(reader.program));
+      };
+      draft.setPaste('query', '2HHB\nACGT\n');
+      await until(() => readers.length === 1);
+      draft.setProgram('tblastx');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|true', 'tblastx|true']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('tblastx') });
+    });
+
+    it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
+      const { draft, data } = setup({
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+      });
+      draft.setExtra('-conffile nol.ini');
+      draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+      await draft.idle();
+      expect(draft.state.get().dataLoaders).toBe(false);
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const indexSource = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        if (reader.dataLoaders) throw new Error(seqId(reader.program));
+        await gate;
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('query', '2HHB\nMKLV\n');
+      await until(() => readers.length === 1);
+      draft.setExtra('');
+      await until(() => draft.state.get().dataLoaders);
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|false', 'blastn|true']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('blastn') });
+    });
+  });
+
   it('reads a text pasted just before a program change once, with the new kind', async () => {
     const { draft, data } = setup();
     const kinds: number[] = [];
     const indexSource = data.indexSource.bind(data);
-    data.indexSource = async (sourceId, parser) => {
-      kinds.push(parser);
-      return indexSource(sourceId, parser);
+    data.indexSource = async (sourceId, reader) => {
+      kinds.push(fastaParser(programById(reader.program), reader.role));
+      return indexSource(sourceId, reader);
     };
     draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n');
     draft.setProgram('blastp');
@@ -632,7 +842,7 @@ describe('SearchDraft accessions (line WF-1)', () => {
     draft.setPaste('query', 'NC_000001.11');
     draft.fetchAccessions('query');
     await draft.idle();
-    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
   });
 });
 
@@ -825,6 +1035,7 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
 
 describe('SearchDraft accessions by groups, one site a press (line WF-5)', () => {
   const C1 = '>C_AA004835.1 SARS-CoV-2\nMESLVPGFNE\n';
+  // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
   const C2 = '>C_AA000002.1 other\nMKTAYIAKQR\n';
   const P = '>sp|P12345|AATM_RABIT\nMALLHS\n';
   const records = { 'C_AA004835.1': C1, 'C_AA000002.1': C2, P12345: P };
@@ -920,7 +1131,7 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     await draft.idle();
     draft.fetchGroup('subject', 0, 'cncb');
     await draft.idle();
-    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
     expect(draft.state.get().subject.fetched).toEqual({ 1: { fasta: P, source: 'ncbi' } });
   });
 
@@ -1238,9 +1449,9 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
-  // WA-FM-04, WA-FM-05: the CLI prints its help for -h, and its messages for these name
-  // -subject and -num_threads, which the browser sets itself.
-  it("refuses in Additional options the CLI's help and the options that a search in the browser cannot have, in the browser's words", async () => {
+  // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help
+  // words are not refused: the engine prints the command line's help (line WQA's D14, 2026-11-20).
+  it("refuses in Additional options the options that a search in the browser cannot have, in the browser's words", async () => {
     const { draft } = setup({ useCoordinator: true });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
@@ -1251,8 +1462,6 @@ describe('SearchDraft submit', () => {
       const validation = draft.state.get().validation;
       return validation.state === 'invalid' ? validation.message : validation.state;
     };
-    expect(await refusal('-help')).toBe('-help is not available in the browser');
-    expect(await refusal('-ungapped -h')).toBe('-h is not available in the browser');
     expect(await refusal('-db nt')).toBe('-db (a database search) is not supported in the browser yet');
     expect(await refusal('-taxids 9606')).toBe('-taxids (a database search filter) is not supported in the browser yet');
     expect(await refusal('-mt_mode 1')).toBe('-mt_mode is managed by LOSAT');
@@ -1307,13 +1516,13 @@ describe('SearchDraft submit', () => {
 
   it("validates the draft's argv with the engine and shows its message", async () => {
     const { draft, validated } = setup({
-      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'BLAST query/options error: bad' } : { ok: true }),
+      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'LOSAT query/options error: bad' } : { ok: true, dataLoaders: true }),
     });
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
     draft.setField('-word_size', '3');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'BLAST query/options error: bad' });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'LOSAT query/options error: bad' });
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-word_size', '3']);
   });
 
@@ -1323,13 +1532,13 @@ describe('SearchDraft submit', () => {
   it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
-      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
-    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false });
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null });
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
@@ -1382,7 +1591,7 @@ describe('SearchDraft submit', () => {
       start: (argv) => {
         const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
         const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
-        return { ok: true, start: { conffile: name, logFile: null, dryRun: false } };
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false, prints: null } };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1425,7 +1634,7 @@ describe('SearchDraft submit', () => {
         most = Math.max(most, running);
         await new Promise<void>((resolve) => gates.push(resolve));
         running--;
-        return { ok: true };
+        return { ok: true, dataLoaders: true };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1453,9 +1662,9 @@ describe('SearchDraft submit', () => {
   // -conffile, the argv's name and the file, and says what to do.
   it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
     const { draft } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
       validate: (_argv, registry) => {
-        if (registry === undefined) return { ok: true };
+        if (registry === undefined) return { ok: true, dataLoaders: true };
         // As the Data worker's error arrives: its name and message (rpc.ts).
         const error = new Error('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.');
         error.name = 'FileReadError';
@@ -1472,15 +1681,43 @@ describe('SearchDraft submit', () => {
     });
   });
 
+  // Line WQA's D14, 2026-11-20: an argv with a help or version word prints the command line's text, which reads no input:
+  // Run LOSAT goes without inputs and queues one run whose inputs are empty, as the command line needs none.
+  it("runs an argv that prints the command line's help or version without inputs", async () => {
+    const { draft, requests, coordinator } = setup({
+      useCoordinator: true,
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null },
+      }),
+    });
+    await draft.idle();
+    expect(draft.readiness()).toBeDefined();
+    draft.setExtra('-h');
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('ok');
+    expect(draft.readiness()).toBeUndefined();
+    const result = await draft.submit();
+    expect(result).toMatchObject({ ok: true });
+    expect(requests).toEqual([[expect.objectContaining({ query: { text: '' }, subject: { text: '' }, extra: ['-h'] })]]);
+    const runId = (result as { runIds: readonly string[] }).runIds[0]!;
+    expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints).toBe('help');
+    // A search needs its inputs again.
+    draft.setExtra('-evalue 1');
+    await draft.idle();
+    expect(draft.readiness()).toBeDefined();
+    expect(await draft.submit()).toMatchObject({ ok: false });
+  });
+
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
     const { draft, validated } = setup({
-      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false } }),
+      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
     });
     await draft.idle();
     const before = validated.length;
-    draft.setExtra('-version');
+    draft.setExtra('-unstartable');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "error: unexpected argument '-version' found" });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'the engine cannot start this argv' });
     expect(draft.state.get().start).toBeUndefined();
     expect(validated).toHaveLength(before);
   });

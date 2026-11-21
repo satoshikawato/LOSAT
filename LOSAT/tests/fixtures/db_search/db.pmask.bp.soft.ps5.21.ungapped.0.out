@@ -1,0 +1,831 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: seg masks v5
+Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+           7 sequences; 1,720 total letters
+
+
+
+Query= qp1
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p1 Q block and SG block                                               430     9e-125
+p6 p1 homolog                                                         322     2e-92 
+p2 random                                                             17.2    1.9   
+
+
+>p1 Q block and SG block
+Length=300
+
+ Score = 430 bits (928),  Expect = 9e-125
+ Identities = 174/200 (87%), Positives = 177/200 (89%), Gaps = 0/200 (0%)
+
+Query  1    TLEHWGDSELMQFSCSKAYNGTDCKPDYLCNVCFECNQHGQQQQQQQQQQQQQQQQQQQQ  60
+            TLEHWGD  LMQF+CSKA +G DCKP YLCNVCFECN HGQQQQQQQQQQQQQQQQQQQQ
+Sbjct  61   TLEHWGDFMLMQFACSKAKDGADCKPIYLCNVCFECNAHGqqqqqqqqqqqqqqqqqqqq  120
+
+Query  61   QQQQVRSFPLVTQVAMWRCEVEDNPRIMGNYMSQLDNKRCVQQLQGILCRNGACTQHIHK  120
+            QQQQV S PLVTQV MWRCEVEDNPRIMG YMSQL NKRCVQQLQGILC NGACTQHI K
+Sbjct  121  qqqqVASVPLVTQVMMWRCEVEDNPRIMGCYMSQLVNKRCVQQLQGILCVNGACTQHITK  180
+
+Query  121  GYQASHIQPEDVMSELSEGAGGSGSGSYSGSGFGSGSVSGGRLRFQIWLMPVVTYFTFGG  180
+            GYQAS IQPEDVMSEL EGA GSGSGS SGSG GSGS SGG+L FQIW MP VTYFTFG 
+Sbjct  181  GYQASGIQPEDVMSELYEGAsgsgsgsgsgsgsgsgsgsggKLSFQIWWMPKVTYFTFGD  240
+
+Query  181  FHWESDSCGWRMQRDSYMDL  200
+            FHWESDSCGWRMQRDSYMDL
+Sbjct  241  FHWESDSCGWRMQRDSYMDL  260
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 322 bits (695),  Expect = 2e-92
+ Identities = 139/200 (70%), Positives = 148/200 (74%), Gaps = 0/200 (0%)
+
+Query  1    TLEHWGDSELMQFSCSKAYNGTDCKPDYLCNVCFECNQHGQQQQQQQQQQQQQQQQQQQQ  60
+            TL+ W D  L QF CS A +G  CKP+YLC VCFECN  GQQQQQQQQQQQQQQQQQQQQ
+Sbjct  61   TLQKWRDFMLRQFGCSTAKDGAYCKPNYLCQVCFECNAQGqqqqqqqqqqqqqqqqqqqq  120
+
+Query  61   QQQQVRSFPLVTQVAMWRCEVEDNPRIMGNYMSQLDNKRCVQQLQGILCRNGACTQHIHK  120
+            QQQQ  S  LVTQV  WR E ED PRIM  Y +QL NKRCV Q QGILC NGA TQ+I K
+Sbjct  121  qqqqRASVTLVTQVMGWRLEDEDRPRIMFCYNAQLVNKRCVDQRQGILCVNGAVTQNITK  180
+
+Query  121  GYQASHIQPEDVMSELSEGAGGSGSGSYSGSGFGSGSVSGGRLRFQIWLMPVVTYFTFGG  180
+            GYQ S  QPEDVM EL EG  GSGSGS SGSG GSGS SGG+L FQ+W M  VTYFTFG 
+Sbjct  181  GYQVSGWQPEDVMKELYEGYsgsgsgsgsgsgsgsgsgsggKLSFQMWWMWKVTYFTFGN  240
+
+Query  181  FHWESDSCGWRMQRDSYMDL  200
+             H E  SCGWR+QRDSY  +
+Sbjct  241  CHPEDMSCGWRVQRDSYKSI  260
+
+
+>p2 random
+Length=250
+
+ Score = 17.2 bits (31),  Expect = 1.9
+ Identities = 7/13 (54%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+
+Query  118  IHKGYQASHIQPE  130
+            I  GYQ    QPE
+Sbjct  46   IKAGYQMQMKQPE  58
+
+
+
+Lambda      K        H
+   0.319    0.132    0.425 
+
+
+Effective search space used: 278748
+
+
+Query= qp2
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p2 random                                                             536     7e-157
+p5 random for hand masks                                              20.7    0.16  
+p3 EK head and K tail                                                 19.8    0.31  
+p6 p1 homolog                                                         18.4    0.82  
+p7 PA block                                                           17.0    2.2   
+p1 Q block and SG block                                               17.0    2.2   
+
+
+>p2 random
+Length=250
+
+ Score = 536 bits (1136),  Expect = 7e-157
+ Identities = 196/200 (98%), Positives = 197/200 (99%), Gaps = 0/200 (0%)
+
+Query  1    QSCMKSRNMWCKNTRWSKQMMPHMDIKAGYQMQMKQPEMQIWLPKMFMIEPLKICIIFDW  60
+            QSCMKSRNMWCKNTRW+KQMMPHMDIKAGYQMQMKQPEMQIWLPKMFMI PLKICIIFDW
+Sbjct  21   QSCMKSRNMWCKNTRWNKQMMPHMDIKAGYQMQMKQPEMQIWLPKMFMITPLKICIIFDW  80
+
+Query  61   DRRLKFMQPMPQGCWIQGGVIWPEAWEILHNMAAAFYEKEWRGRHGYPICHAITIGTGMQ  120
+            DRRLKFMQPMPQGCWIQGGVIWPEAWEILHNMAAAFYEKEWRGRHGYPICHAITIGTGMQ
+Sbjct  81   DRRLKFMQPMPQGCWIQGGVIWPEAWEILHNMAAAFYEKEWRGRHGYPICHAITIGTGMQ  140
+
+Query  121  CWGHDATTEESTFDSKCGTHINVPRIAGLVYSYIMCYGMRFLQGYHHKQCGHNFMNMTGQ  180
+            CWGHDATTEESTFDSKCGTHINVPRIAGLVYSYIMCYGMRFLQGYHHKQCGHNFMNM GQ
+Sbjct  141  CWGHDATTEESTFDSKCGTHINVPRIAGLVYSYIMCYGMRFLQGYHHKQCGHNFMNMYGQ  200
+
+Query  181  KWAIEKGQHWIGEEKIAEWT  200
+            KWAIEKGQ WIGEEKIAEWT
+Sbjct  201  KWAIEKGQGWIGEEKIAEWT  220
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 20.7 bits (38),  Expect = 0.16
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  82   WPEAWEI  88
+            WP  WEI
+Sbjct  119  WPHCWEI  125
+
+
+>p3 EK head and K tail
+Length=200
+
+ Score = 19.8 bits (36),  Expect = 0.31
+ Identities = 6/12 (50%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+
+Query  171  GHNFMNMTGQKW  182
+            G N M   G+KW
+Sbjct  31   GENIMPKFGEKW  42
+
+
+ Score = 15.1 bits (26),  Expect = 8.0
+ Identities = 2/11 (18%), Positives = 5/11 (45%), Gaps = 0/11 (0%)
+
+Query  76  IQGGVIWPEAW  86
+           ++   +W   W
+Sbjct  52  LESQTVWKRGW  62
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 18.4 bits (33),  Expect = 0.82
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+
+Query  25   DIKAGYQMQMKQPE  38
+            +I  GYQ+   QPE
+Sbjct  177  NITKGYQVSGWQPE  190
+
+
+>p7 PA block
+Length=150
+
+ Score = 17.0 bits (30),  Expect = 2.2
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  105  HGYPIC  110
+            H YP+C
+Sbjct  15   HCYPLC  20
+
+
+>p1 Q block and SG block
+Length=300
+
+ Score = 17.0 bits (30),  Expect = 2.2
+ Identities = 7/13 (54%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+
+Query  26   IKAGYQMQMKQPE  38
+            I  GYQ    QPE
+Sbjct  178  ITKGYQASGIQPE  190
+
+
+ Score = 16.0 bits (28),  Expect = 4.2
+ Identities = 4/18 (22%), Positives = 8/18 (44%), Gaps = 0/18 (0%)
+
+Query  182  WAIEKGQHWIGEEKIAEW  199
+            W ++  ++W      A W
+Sbjct  19   WVLDLCENWPNMPNNAVW  36
+
+
+
+Lambda      K        H
+   0.326    0.137    0.500 
+
+
+Effective search space used: 278748
+
+
+Query= qp3
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p3 EK head and K tail                                                 479     1e-139
+p2 random                                                             20.3    0.21  
+p5 random for hand masks                                              16.7    2.7   
+p1 Q block and SG block                                               16.7    2.7   
+
+
+>p3 EK head and K tail
+Length=200
+
+ Score = 479 bits (1041),  Expect = 1e-139
+ Identities = 187/200 (94%), Positives = 188/200 (94%), Gaps = 0/200 (0%)
+
+Query  1    EKEKEKSKEKEKEKEKEKEKKGLNMFQFSDGENGMPKFGEKWNYMIDCLAILESQVVWKC  60
+            EKEKEK KEKEKEKEKEKEKK LNMFQFSDGEN MPKFGEKWN MIDCLAILESQ VWK 
+Sbjct  1    ekekekekekekekekekekkCLNMFQFSDGENIMPKFGEKWNQMIDCLAILESQTVWKR  60
+
+Query  61   GWHKAFMEYFNIRRKEYNLHPLCKYCNPRVCTGRDFNDHMDHINDYSANCETTRYHMTKN  120
+            GWHKAFMEYFNIRRKE  LHPLCKYCNPRVCTGRDFNDHMDHINDYSANCETTR HMT+N
+Sbjct  61   GWHKAFMEYFNIRRKELQLHPLCKYCNPRVCTGRDFNDHMDHINDYSANCETTRAHMTQN  120
+
+Query  121  GERCMVRKFFWNQTWNYPLWEFWTGPCMQPTNVSKTKDYVNKMWRVLAVQQSPERTRRCQ  180
+            GERCMVRKFFWNQTWNYPLWEFWTGPCMQ TNVSKTKDYVN MWRVLAVQQSPERTRRCQ
+Sbjct  121  GERCMVRKFFWNQTWNYPLWEFWTGPCMQLTNVSKTKDYVNHMWRVLAVQQSPERTRRCQ  180
+
+Query  181  KKKYKKKKKKKKKKKKKKKK  200
+            KKK KKKKKKKKKKKKKKKK
+Sbjct  181  kkkkkkkkkkkkkkkkkkkk  200
+
+
+ Score = 15.3 bits (27),  Expect = 6.9
+ Identities = 8/35 (23%), Positives = 16/35 (46%), Gaps = 0/35 (0%)
+
+Query  94   RDFNDHMDHINDYSANCETTRYHMTKNGERCMVRK  128
+            +D+ +HM  +     + E TR    K  ++   +K
+Sbjct  157  KDYVNHMWRVLAVQQSPERTRRCQkkkkkkkkkkk  191
+
+
+ Score = 14.8 bits (26),  Expect = 9.5
+ Identities = 3/7 (43%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  38   FGEKWNY  44
+            + + WNY
+Sbjct  131  WNQTWNY  137
+
+
+>p2 random
+Length=250
+
+ Score = 20.3 bits (38),  Expect = 0.21
+ Identities = 6/12 (50%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  31   GENGMPKFGEKW  42
+            G N M  +G+KW
+Sbjct  191  GHNFMNMYGQKW  202
+
+
+ Score = 16.7 bits (30),  Expect = 2.7
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  130  FWNQTW  135
+            FW  TW
+Sbjct  3    FWGCTW  8
+
+
+ Score = 15.3 bits (27),  Expect = 6.9
+ Identities = 3/5 (60%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+
+Query  58  WKCGW  62
+           W C W
+Sbjct  4   WGCTW  8
+
+
+ Score = 15.3 bits (27),  Expect = 6.9
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+
+Query  11  EKEKEKEKEKKGLNMF  26
+           +K KE++   K  NM+
+Sbjct  15  DKCKERQSCMKSRNMW  30
+
+
+ Score = 15.3 bits (27),  Expect = 6.9
+ Identities = 6/11 (55%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
+
+Query  53   ESQVVWKCGWH  63
+            ES    KCG H
+Sbjct  150  ESTFDSKCGTH  160
+
+
+ Score = 14.8 bits (26),  Expect = 9.5
+ Identities = 3/11 (27%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
+
+Query  52   LESQVVWKCGW  62
+            ++  V+W   W
+Sbjct  96   IQGGVIWPEAW  106
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 16.7 bits (30),  Expect = 2.7
+ Identities = 7/19 (37%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
+
+Query  41  KWNYMIDCLAILESQVVWK  59
+           KW Y +   A  +S   WK
+Sbjct  66  KWKYCMVETAKKDSGKEWK  84
+
+
+>p1 Q block and SG block
+Length=300
+
+ Score = 16.7 bits (30),  Expect = 2.7
+ Identities = 6/17 (35%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+
+Query  47  DCLAILESQVVWKCGWH  63
+           DC  I    V ++C  H
+Sbjct  83  DCKPIYLCNVCFECNAH  99
+
+
+
+Lambda      K        H
+   0.318    0.132    0.435 
+
+
+Effective search space used: 278748
+
+
+Query= qp4
+
+Length=120
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.282    0.118    0.317 
+
+
+Effective search space used: 148992
+
+
+Query= qp5
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              899     0.0  
+p2 random                                                             20.7    0.30 
+p6 p1 homolog                                                         17.0    4.1  
+p7 PA block                                                           16.5    5.7  
+p3 EK head and K tail                                                 16.0    7.9  
+p1 Q block and SG block                                               16.0    7.9  
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 899 bits (1908),  Expect = 0.0
+ Identities = 334/360 (93%), Positives = 340/360 (94%), Gaps = 0/360 (0%)
+
+Query  1    LFADLGGEYWVWAKLFSWYIWRINLTDPHIHYEQMAVGGHFSQAPKWKYCMVETAKKDSD  60
+            LFADL GE WVWAKLFSWYIWRINLTDPHIHYEQMAVG HFSQAPKWKYCMVETAKKDS 
+Sbjct  21   LFADLSGESWVWAKLFSWYIWRINLTDPHIHYEQMAVGAHFSQAPKWKYCMVETAKKDSG  80
+
+Query  61   KEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWPHCWEIKQKHFSYVMLIMVQN  120
+            KEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWPHCWEIKQ HFSYVMLIMV N
+Sbjct  81   KEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWPHCWEIKQIHFSYVMLIMVLN  140
+
+Query  121  FQNINRRLIVYVNMVCAPEDPHQHDVMLSNADFIRECAHFLKLQGRFYCCNVNKHAYYPP  180
+            FQNINRR+IVYVNMVCAPEDPHQHDVMLSNADFIRECAHF+ LQGRFYCCNVNKHAYYPP
+Sbjct  141  FQNINRRVIVYVNMVCAPEDPHQHDVMLSNADFIRECAHFITLQGRFYCCNVNKHAYYPP  200
+
+Query  181  YKKMGVHIMVCDMPACQKLCLHTVSKDHHWWVSAIYSTGPYLRYQSFKEWSGDVKRCAWV  240
+            YK+MGVHIMVCDMPACQKLCLHTVSKDHHWWVS IYSTGPYLRYQSFK WSGDVKRCAWV
+Sbjct  201  YKRMGVHIMVCDMPACQKLCLHTVSKDHHWWVSYIYSTGPYLRYQSFKIWSGDVKRCAWV  260
+
+Query  241  QFAGAAYLHCSLTICMPDTDDTGPEDRPMIMEHTHSISKAICNETLTNVAYQHQYLTQTI  300
+            QFAGAAYLHCSLTIC PDTDDTGPED PMIMEHTHSISKAICNETLTNV YQHQYLT  I
+Sbjct  261  QFAGAAYLHCSLTICCpdtddtgpedepMIMEHTHSISKAICNETLTNVCYQHQYLTCQI  320
+
+Query  301  IVKQSDVNRKFCSIIQPEHQEMGGETRFEDPDHCMPFFTQVNDKYQRKWENRLTKMTCCG  360
+            IVKQSDVNRKF SIIQPEHQEMGG+TRF DP HCMPF TQVND+Y+RKW NR TKMTCCG
+Sbjct  321  IVKQSDVNRKFKSIIQPEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNRWTKMTCCG  380
+
+
+ Score = 20.3 bits (37),  Expect = 0.42
+ Identities = 5/20 (25%), Positives = 11/20 (55%), Gaps = 0/20 (0%)
+
+Query  18   WYIWRINLTDPHIHYEQMAV  37
+            W++  I  T P++ Y+   +
+Sbjct  230  WWVSYIYSTGPYLRYQSFKI  249
+
+
+ Score = 19.8 bits (36),  Expect = 0.58
+ Identities = 5/16 (31%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+
+Query  210  WWVSAIYSTGPYLRYQ  225
+            W++  I  T P++ Y+
+Sbjct  38   WYIWRINLTDPHIHYE  53
+
+
+>p2 random
+Length=250
+
+ Score = 20.7 bits (38),  Expect = 0.30
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  99   WPHCWEI  105
+            WP  WEI
+Sbjct  102  WPEAWEI  108
+
+
+ Score = 16.0 bits (28),  Expect = 7.9
+ Identities = 3/8 (38%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+
+Query  345  YQRKWENR  352
+            Y+++W  R
+Sbjct  117  YEKEWRGR  124
+
+
+ Score = 16.0 bits (28),  Expect = 7.9
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+
+Query  230  WSGDVKRCAWVQ  241
+            W G+ K   W +
+Sbjct  210  WIGEEKIAEWTR  221
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 17.0 bits (30),  Expect = 4.1
+ Identities = 2/6 (33%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+
+Query  18   WYIWRI  23
+            W++W++
+Sbjct  228  WWMWKV  233
+
+
+>p7 PA block
+Length=150
+
+ Score = 16.5 bits (29),  Expect = 5.7
+ Identities = 6/15 (40%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+
+Query  250  CSLTICMPDTDDTGP  264
+            C  + C P   DT P
+Sbjct  11   CLNSHCYPLCPDTSP  25
+
+
+>p3 EK head and K tail
+Length=200
+
+ Score = 16.0 bits (28),  Expect = 7.9
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  327  RFEDPDHCMPFF  338
+            +F D ++ MP F
+Sbjct  27   QFSDGENIMPKF  38
+
+
+ Score = 16.0 bits (28),  Expect = 7.9
+ Identities = 5/10 (50%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+
+Query  75  ETWKQKYFCL  84
+           E W Q   CL
+Sbjct  40  EKWNQMIDCL  49
+
+
+>p1 Q block and SG block
+Length=300
+
+ Score = 16.0 bits (28),  Expect = 7.9
+ Identities = 6/13 (46%), Positives = 9/13 (69%), Gaps = 0/13 (0%)
+
+Query  112  YVMLIMVQNFQNI  124
+            YVM    ++F+NI
+Sbjct  272  YVMAQRRKHFENI  284
+
+
+
+Lambda      K        H
+   0.326    0.136    0.483 
+
+
+Effective search space used: 525383
+
+
+Query= qp5t
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              369     2e-106
+p6 p1 homolog                                                         16.5    2.3   
+p7 PA block                                                           16.0    3.1   
+p2 random                                                             15.5    4.3   
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 369 bits (783),  Expect = 2e-106
+ Identities = 140/148 (95%), Positives = 140/148 (95%), Gaps = 0/148 (0%)
+
+Query  3    DVKRCAWVQFAGAWYLHCSLTICCPDTTDTGPEDEPMIMEHTHSISKAICNETLTNVSYQ  62
+            DVKRCAWVQFAGA YLHCSLTICCPDT DTGPEDEPMIMEHTHSISKAICNETLTNV YQ
+Sbjct  253  DVKRCAWVQFAGAAYLHCSLTICCpdtddtgpedepMIMEHTHSISKAICNETLTNVCYQ  312
+
+Query  63   HQYLTCQAIVKQSDVNRKFKRIILYEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNR  122
+            HQYLTCQ IVKQSDVNRKFK II  EHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNR
+Sbjct  313  HQYLTCQIIVKQSDVNRKFKSIIQPEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNR  372
+
+Query  123  WTKMTCCGTSADTVPFIGWGLRSGHTAR  150
+            WTKMTCCGTSADTVPFIGWGLRSGH AR
+Sbjct  373  WTKMTCCGTSADTVPFIGWGLRSGHVAR  400
+
+
+ Score = 19.7 bits (36),  Expect = 0.23
+ Identities = 7/24 (29%), Positives = 10/24 (42%), Gaps = 0/24 (0%)
+
+Query  11   QFAGAWYLHCSLTICCPDTTDTGP  34
+            Q+   W    +   CC  + DT P
+Sbjct  364  QYKRKWSNRWTKMTCCGTSADTVP  387
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 16.5 bits (29),  Expect = 2.3
+ Identities = 5/18 (28%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+
+Query  117  RKWSNRWTKMTCCGTSAD  134
+            +KW +   +   C T+ D
+Sbjct  63   QKWRDFMLRQFGCSTAKD  80
+
+
+>p7 PA block
+Length=150
+
+ Score = 16.0 bits (28),  Expect = 3.1
+ Identities = 6/15 (40%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+
+Query  20  CSLTICCPDTTDTGP  34
+           C  + C P   DT P
+Sbjct  11  CLNSHCYPLCPDTSP  25
+
+
+ Score = 16.0 bits (28),  Expect = 3.1
+ Identities = 4/5 (80%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+
+Query  26  CPDTT  30
+           CPDT+
+Sbjct  20  CPDTS  24
+
+
+>p2 random
+Length=250
+
+ Score = 15.5 bits (27),  Expect = 4.3
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  62   QHQYLTCQAI  71
+            +H Y  C AI
+Sbjct  124  RHGYPICHAI  133
+
+
+ Score = 15.1 bits (26),  Expect = 6.0
+ Identities = 6/24 (25%), Positives = 9/24 (38%), Gaps = 0/24 (0%)
+
+Query  97   RFFDPLHCMPFRTQVNDQYKRKWS  120
+            RF    H         + Y +KW+
+Sbjct  180  RFLQGYHHKQCGHNFMNMYGQKWA  203
+
+
+
+Lambda      K        H
+   0.324    0.135    0.464 
+
+
+Effective search space used: 202917
+
+
+Query= qp5h
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              383     6e-111
+p2 random                                                             20.7    0.12  
+p6 p1 homolog                                                         20.3    0.16  
+p3 EK head and K tail                                                 16.0    3.0   
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 383 bits (812),  Expect = 6e-111
+ Identities = 143/150 (95%), Positives = 144/150 (96%), Gaps = 0/150 (0%)
+
+Query  1    QQIELNAGHTNSMWPSSAGYLFADLSGESWVWAKLFSWYTWRINLTDPHIHYEQMAVGAH  60
+            QQIELNA HTNSMWPSS GYLFADLSGESWVWAKLFSWY WRINLTDPHIHYEQMAVGAH
+Sbjct  1    QQIELNACHTNSMWPSSLGYLFADLSGESWVWAKLFSWYIWRINLTDPHIHYEQMAVGAH  60
+
+Query  61   FSQAPKWKYCMVETAKKDSGKDWKDAKTFRGCDMETWKQKYFCLLWRQERATTNVFMHWP  120
+            FSQAPKWKYCMVETAKKDSGK+WKDAKTFRGCD ETWKQKYFCLLWRQERATTNVFMHWP
+Sbjct  61   FSQAPKWKYCMVETAKKDSGKEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWP  120
+
+Query  121  HCWEIKQIHFSYVMLIMVQNFFNINRRVIV  150
+            HCWEIKQIHFSYVMLIMV NF NINRRVIV
+Sbjct  121  HCWEIKQIHFSYVMLIMVLNFQNINRRVIV  150
+
+
+ Score = 18.8 bits (34),  Expect = 0.43
+ Identities = 5/20 (25%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
+
+Query  38   WYTWRINLTDPHIHYEQMAV  57
+            W+   I  T P++ Y+   +
+Sbjct  230  WWVSYIYSTGPYLRYQSFKI  249
+
+
+ Score = 15.1 bits (26),  Expect = 5.8
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  47   DPHIH  51
+            DPH H
+Sbjct  160  DPHQH  164
+
+
+ Score = 14.6 bits (25),  Expect = 8.0
+ Identities = 3/11 (27%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
+
+Query  97   WKQKYFCLLWR  107
+            W + +   +WR
+Sbjct  32   WAKLFSWYIWR  42
+
+
+>p2 random
+Length=250
+
+ Score = 20.7 bits (38),  Expect = 0.12
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  119  WPHCWEI  125
+            WP  WEI
+Sbjct  102  WPEAWEI  108
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 20.3 bits (37),  Expect = 0.16
+ Identities = 6/17 (35%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+
+Query  9   HTNSMWPSSAGYLFADL  25
+           H N MWP     L+ ++
+Sbjct  14  HRNMMWPRDMDELWPNM  30
+
+
+ Score = 16.0 bits (28),  Expect = 3.0
+ Identities = 2/6 (33%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  38   WYTWRI  43
+            W+ W++
+Sbjct  228  WWMWKV  233
+
+
+ Score = 15.1 bits (26),  Expect = 5.8
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  97   WKQKYF  102
+            WK  YF
+Sbjct  231  WKVTYF  236
+
+
+>p3 EK head and K tail
+Length=200
+
+ Score = 16.0 bits (28),  Expect = 3.0
+ Identities = 5/10 (50%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+
+Query  95   ETWKQKYFCL  104
+            E W Q   CL
+Sbjct  40   EKWNQMIDCL  49
+
+
+ Score = 15.1 bits (26),  Expect = 5.8
+ Identities = 7/20 (35%), Positives = 9/20 (45%), Gaps = 0/20 (0%)
+
+Query  26   SGESWVWAKLFSWYTWRINL  45
+            +GE  +  K F   TW   L
+Sbjct  120  NGERCMVRKFFWNQTWNYPL  139
+
+
+
+Lambda      K        H
+   0.325    0.134    0.483 
+
+
+Effective search space used: 202917
+
+
+Query= qp7
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p7 PA block                                                           348     2e-100
+p5 random for hand masks                                              17.3    1.2   
+p1 Q block and SG block                                               17.3    1.2   
+p2 random                                                             16.9    1.7   
+p6 p1 homolog                                                         16.4    2.4   
+
+
+>p7 PA block
+Length=150
+
+ Score = 348 bits (740),  Expect = 2e-100
+ Identities = 133/150 (89%), Positives = 136/150 (91%), Gaps = 0/150 (0%)
+
+Query  1    QKYRGPKAEVCLNSHCYPLCPDTSPHSITTYRIVQIAWPKTAFFYFIEELLDLEQNTLFH  60
+            Q YRGPKAEVCLNSHCYPLCPDTSP+SITTYRIV IAWP+TAFFYFIEELLDLEQNTLFH
+Sbjct  1    QWYRGPKAEVCLNSHCYPLCPDTSPYSITTYRIVVIAWPQTAFFYFIEELLDLEQNTLFH  60
+
+Query  61   MLPAPPAPAPPAPAAAPPNPRGEDEWKVQLNYADVVIRPGINGYYCHAVFEQRNHIFTIV  120
+              PAPPAPAPPAPA APP PRGEDEWKVQLNYADVVIRPGING  CHAVFEQR HIFT V
+Sbjct  61   papappapappapapappapRGEDEWKVQLNYADVVIRPGINGINCHAVFEQREHIFTPV  120
+
+Query  121  CFLNYNDCGYKLMANGSIYCWFGHKDINCS  150
+            CFLN NDCGYKLMA+GSIY W GH DINCS
+Sbjct  121  CFLNKNDCGYKLMAHGSIYIWIGHHDINCS  150
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 17.3 bits (31),  Expect = 1.2
+ Identities = 4/14 (29%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+
+Query  127  DCGYKLMANGSIYC  140
+            +C + +   G  YC
+Sbjct  176  ECAHFITLQGRFYC  189
+
+
+ Score = 15.5 bits (27),  Expect = 4.5
+ Identities = 8/22 (36%), Positives = 8/22 (36%), Gaps = 0/22 (0%)
+
+Query  2    KYRGPKAEVCLNSHCYPLCPDT  23
+            K  G    VC    C  LC  T
+Sbjct  202  KRMGVHIMVCDMPACQKLCLHT  223
+
+
+>p1 Q block and SG block
+Length=300
+
+ Score = 17.3 bits (31),  Expect = 1.2
+ Identities = 7/30 (23%), Positives = 14/30 (47%), Gaps = 0/30 (0%)
+
+Query  91   NYADVVIRPGINGYYCHAVFEQRNHIFTIV  120
+            +Y D+     +  Y  + + ++R H   IV
+Sbjct  256  SYMDLCTHCPVYYYSMYVMAQRRKHFENIV  285
+
+
+>p2 random
+Length=250
+
+ Score = 16.9 bits (30),  Expect = 1.7
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  15   HCYPLC  20
+            H YP+C
+Sbjct  125  HGYPIC  130
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 16.4 bits (29),  Expect = 2.4
+ Identities = 5/25 (20%), Positives = 12/25 (48%), Gaps = 0/25 (0%)
+
+Query  91   NYADVVIRPGINGYYCHAVFEQRNH  115
+            +Y  +     +  Y C  + ++RN+
+Sbjct  256  SYKSICTHCPVTYYKCGVMAQRRNN  280
+
+
+
+Lambda      K        H
+   0.324    0.141    0.488 
+
+
+Effective search space used: 202917
+
+
+  Database: seg masks v5
+  Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+    Posted date:  Nov 21, 2026  4:28 AM
+  Number of letters in database: 1,720
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

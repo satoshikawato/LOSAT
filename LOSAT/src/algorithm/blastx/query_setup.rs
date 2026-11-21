@@ -8,17 +8,6 @@ use anyhow::{bail, Result};
 
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:86-94
-// ```c++
-//         for (i = 0; i < retval->last_context + 1; i++) {
-//             retval->contexts[i].query_index =
-//                 Blast_GetQueryIndexFromContext(i, program);
-//             ASSERT(retval->contexts[i].query_index != -1);
-//
-//             retval->contexts[i].frame = BLAST_ContextToFrame(program,  i);
-//             ASSERT(retval->contexts[i].frame != INT1_MAX);
-//
-//             retval->contexts[i].is_valid = TRUE;
-// ```
 pub struct QueryContext {
     pub query_index: usize,
     pub frame: i8,
@@ -31,26 +20,8 @@ pub struct QueryContext {
 }
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:264-266
-// ```c++
-//             int seg_flags = queries.GetSegmentInfo(j);
-//             query_info->contexts[ctx_index].segment_flags = seg_flags;
-//             query_info->contexts[ctx_index + 1].segment_flags = seg_flags;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:499-501
-// ```c++
-//
-//     int buflen = QueryInfo_GetSeqBufLen(qinfo);
-//     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:654-659
-// ```c++
-//     BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
-//
-//     (*seqblk)->lcase_mask = mask.Release();
-//     (*seqblk)->lcase_mask_allocated = TRUE;
-// }
-//
-// ```
 pub struct PreparedQueryBatch {
     pub original_lengths: Vec<usize>,
     pub contexts: Vec<QueryContext>,
@@ -97,63 +68,12 @@ impl PreparedQueryBatch {
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
-// ```c++
-//     // in the next chunk
-//     case eBlastx:
-//         if (task_name == "blastx-fast" && mt_mode == true)
-//         {
-// 		retval = 20004;
-// 		break;
-// 	}
-//     case eTblastx:
-//         // N.B.: the splitting is done on the nucleotide query sequences, then
-//         // each of these chunks is translated
-//         retval = 10002;
-//         break;
-//     case eBlastp:
-//     default:
-// ```
 pub const BATCH_SIZE: usize = 10002;
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:136-139
-// ```c++
-//     case eBlastp:
-//     default:
-//         retval = 10000;
-//         break;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:134-139
 /// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize(eRPSTblastn)`, the `default:`
 /// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
 pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
-// ```c++
-//
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-//
-//         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-//
-//         if (loc->IsInt()) {
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-//         } else if (loc->IsWhole()) {
-//             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-//         } else {
-//             // programmer error, CBlastInputSource should only return Seq-locs
-// ```
 pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops::Range<usize>> {
     let mut result = Vec::new();
     let mut start = 0;
@@ -183,107 +103,10 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
     (len, enabled)
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88
-// ```c++
-//     if (index) {
-//         Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
-//         Uint4 prev_len = qinfo->contexts[index-1].query_length;
-//
-//         Uint4 shift = prev_len ? prev_len + 1 : 0;
-//
-//         qinfo->contexts[index].query_offset = prev_loc + shift;
-//         qinfo->contexts[index].query_length = length;
-//         if (length == 0)
-//            qinfo->contexts[index].is_valid = false;
-//     } else {
-//         // First context
-//         qinfo->contexts[0].query_offset = 0;
-//         qinfo->contexts[0].query_length = length;
-//         if (length == 0)
-//            qinfo->contexts[0].is_valid = false;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:191-219
-// ```c++
-//
-//         if (translate) {
-//             for (unsigned int i = 0; i < kNumContexts; i++) {
-//                 unsigned int prot_length =
-//                     static_cast<unsigned int>(BLAST_GetTranslatedProteinLength(length, i));
-//                 max_length = MAX(max_length, prot_length);
-//                 min_length = MIN(min_length, prot_length);
-//
-//                 Uint4 ctx_len(0);
-//
-//                 switch (strand) {
-//                 case eNa_strand_plus:
-//                     ctx_len = (i<3) ? prot_length : 0;
-//                     s_QueryInfo_SetContext(query_info, ctx_index + i, ctx_len);
-//                     // the missing frame is present in query_info as
-//                     // zero-lenghth context
-//                     min_length = 0;
-//                     break;
-//
-//                 case eNa_strand_minus:
-//                     ctx_len = (i<3) ? 0 : prot_length;
-//                     s_QueryInfo_SetContext(query_info, ctx_index + i, ctx_len);
-//                     min_length = 0;
-//                     break;
-//
-//                 case eNa_strand_both:
-//                 case eNa_strand_unknown:
-//                     s_QueryInfo_SetContext(query_info, ctx_index + i,
-//                                            prot_length);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:577-587
-// ```c++
-//                 for (unsigned int i = 0; i < kNumContexts; i++) {
-//                     if (qinfo->contexts[ctx_index + i].query_length <= 0) {
-//                         continue;
-//                     }
-//
-//                     int offset = qinfo->contexts[ctx_index + i].query_offset;
-//                     BLAST_GetTranslation(sequence.data.get() + 1,
-//                                          seqbuf_rev,
-//                                          na_length,
-//                                          qinfo->contexts[ctx_index + i].frame,
-//                                          & buf.get()[offset], gc);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:620-641
-// ```c++
-//
-//     if (!mask_at_hash) {
-//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-//                              program_number);
-//     }
-//
-//     if (program_number == eBlastTypeBlastx && scoring_options->is_ooframe) {
-//         BLAST_CreateMixedFrameDNATranslation(query_blk, query_info);
-//     }
-//
-//     /* Find complement of the mask locations, for which lookup table will be
-//      * created. This should only be done if we do want to create a lookup table,
-//      * i.e. if it is a full search, not a traceback-only search.
-//      */
-//     if (lookup_segments) {
-//         BLAST_ComplementMaskLocations(program_number, query_info,
-//                                       filter_maskloc, lookup_segments);
-//     }
-//
-//     if (mask)
-//     {
-//         if (Blast_QueryIsTranslated(program_number)) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1003
-// ```c++
-// /// Auxiliary class to validate the genetic code input
-// class CArgAllowGeneticCodeInteger : public CArgAllow
-// {
-// protected:
-//      /// Overloaded method from CArgAllow
-//      virtual bool Verify(const string& value) const {
-//          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
-// ```
 /// The error of a query batch with a `-matrix` that NCBI's tables do not have
 /// (`ResolvedOptions::unknown_matrix`): NCBI's (`unknown_matrix_message`), or LOSAT's refusal when
 /// NCBI reads a file for the name (`ResolvedOptions::matrix_file`): NCBI 2.17.0 reads it where it
@@ -307,34 +130,21 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
 /// the batch: a name that the matrix loader does not know fails with -1, blast_stat.c:1679-1680,
 /// posted for all queries, blast_setup.c:498-501)
-/// ```c
-///     Int2 status = BLAST_MainSetUp(opts_memento->m_ProgramType,
-/// ...
-///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
-///     if (status != 0 &&
-///         (!(blast_msg.Get()) || (blast_msg.Get() && blast_msg.Get()->severity == eBlastSevError)))
-///     {
-///         	string msg;
-///         	if (search_messages.HasMessages()) {
-///             		msg = search_messages.ToString();
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:246 (the text of -1)
-/// ```c
-///             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
-/// ```
 /// One message per query (`TSearchMessages::ToString`), `Error: ` first (`GetMessage`); a query
 /// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
 /// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
-    let mut message = String::new();
-    for record in records {
-        message.push_str("Error: Unknown error code -1 ");
-        if record.sequence.is_empty() {
-            message.push_str("Warning: Sequence contains no data ");
-        }
-    }
-    message
+    crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(records.iter().map(
+        |record| {
+            if record.sequence.is_empty() {
+                vec![crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string()]
+            } else {
+                Vec::new()
+            }
+        },
+    ))
 }
 
 pub fn prepare_queries(
@@ -415,29 +225,8 @@ pub(crate) fn prepare_unit_queries(
     }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup.hpp:192-197
-    // ```c++
-    //     TSeqPos size() const {
-    //         TSeqPos retval = x_Size();
-    //         if (retval == 0) {
-    //             NCBI_THROW(CBlastException, eInvalidArgument,
-    //                        "Sequence contains no data");
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:634-639
-    // ```c++
-    //             // to determine whether the message should contain a warning or
-    //             // error?
-    //             CRef<CSearchMessage> m
-    //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-    //             messages[index].push_back(m);
-    //             s_InvalidateQueryContexts(qinfo, index);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-652
-    // ```c++
-    //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-    //         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-    //     }
-    // ```
     // `qinfo` is the query batch's: a unit of a reader batch (`batch`) fails only when no
     // context of the reader batch is valid, with the messages of all its empty queries.
     let (fails, empty) = match batch {
@@ -464,23 +253,6 @@ pub(crate) fn prepare_unit_queries(
     }
     let nomask = buffer.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158
-    // ```c++
-    //         SSegOptions* seg_options = filter_options->segOptions;
-    //         SegParameters* sparamsp=NULL;
-    //
-    //         sparamsp = SegParametersNewAa();
-    //         sparamsp->overlaps = TRUE;
-    //         if (seg_options->window > 0)
-    //             sparamsp->window = seg_options->window;
-    //         if (seg_options->locut > 0.0)
-    //             sparamsp->locut = seg_options->locut;
-    //         if (seg_options->hicut > 0.0)
-    //             sparamsp->hicut = seg_options->hicut;
-    //
-    // 		status = SeqBufferSeg(sequence, length, offset, sparamsp,
-    //                               seqloc_retval);
-    // 		SegParametersFree(sparamsp);
-    // ```
     // Same SEG parameters as the block above; the masker is built once for all contexts instead of
     // once per context (placement only).
     let seg_masker = options.seg.filter_options().map(|(window, locut, hicut)| {
@@ -498,19 +270,6 @@ pub(crate) fn prepare_unit_queries(
     // so the contexts of a large batch (the six frames of the full query) are filtered on the
     // search pool before the loop consumes the intervals in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
-    // ```c
-    //     for (context = query_info->first_context;
-    //          context <= query_info->last_context; ++context) {
-    // ...
-    //         BlastSeqLoc *filter_per_context = NULL;
-    //         status = s_GetFilteringLocationsForOneContext(query_blk,
-    //                                                       query_info,
-    //                                                       context,
-    //                                                       program_number,
-    //                                                       filter_options,
-    //                                                       &filter_per_context,
-    //                                                       blast_message);
-    // ```
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
     // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
     // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
@@ -553,18 +312,6 @@ pub(crate) fn prepare_unit_queries(
         let mut masks = Vec::new();
         if let Some(masker) = seg_masker.as_ref() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
-            // ```c
-            //     for (context = query_info->first_context;
-            //          context <= query_info->last_context; ++context) {
-            // ...
-            //         status = s_GetFilteringLocationsForOneContext(query_blk,
-            //                                                       query_info,
-            //                                                       context,
-            //                                                       program_number,
-            //                                                       filter_options,
-            //                                                       &filter_per_context,
-            //                                                       blast_message);
-            // ```
             // Dispatch point: a context filtered ahead of the loop uses its stored intervals; any
             // other context is filtered here exactly as before.
             if let Some(ready) = seg_ready.get_mut(context_index).and_then(Option::take) {
@@ -632,15 +379,6 @@ pub(crate) fn prepare_unit_queries(
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
-// ```c++
-// BLAST_GetTranslatedProteinLength(size_t nucleotide_length, unsigned int context)
-// {
-//     if (nucleotide_length == 0 || nucleotide_length <= context % CODON_LENGTH) {
-//         return 0;
-//     }
-//     return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
-// }
-// ```
 fn contexts_lengths(length: usize) -> [usize; 3] {
     [
         length / 3,
@@ -649,75 +387,10 @@ fn contexts_lengths(length: usize) -> [usize; 3] {
     ]
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:143-160
-// ```c++
-//     Int4 start_context = NUM_FRAMES*query_index;
-//     Int4 dna_length = 2;
-//     Int4 index;
-//
-//     /* Make sure that query index is within appropriate range, and that this is
-//        really a translated search */
-//     ASSERT(query_index < query_info->num_queries);
-//     ASSERT(start_context < query_info->last_context);
-//
-//     /* If only reverse strand is searched, then forward strand contexts don't
-//        have lengths information */
-//     if (query_info->contexts[start_context].query_length == 0)
-//         start_context += 3;
-//
-//     for (index = start_context; index < start_context + 3; ++index)
-//         dna_length += query_info->contexts[index].query_length;
-//
-//     return dna_length;
-// ```
 fn core_dna_length(lengths: &[usize; 3]) -> usize {
     lengths.iter().sum::<usize>() + 2
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1073-1115
-// ```c++
-//             filter_end = start_offset + seq_range->right;
-//          }
-//          /* The canonical "state" at the top of this
-//             while loop is that both "left" and "right" have
-//             been initialized to their correct values.
-//             The first time this loop is entered in a call to
-//             the function this is not true and the following "if"
-//             statement moves everything to the canonical state. */
-//          if (first) {
-//             last_interval_open = TRUE;
-//             first = FALSE;
-//
-//             if (filter_start > start_offset) {
-//                /* beginning of sequence not filtered */
-//                left = start_offset;
-//             } else {
-//                /* beginning of sequence filtered */
-//                left = filter_end + 1;
-//                continue;
-//             }
-//          }
-//
-//          right = filter_start - 1;
-//
-//          /* Cache the tail of the list to avoid the overhead of traversing the
-//           * list when appending to it */
-//          tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
-//          if (filter_end >= end_offset) {
-//             /* last masked region at end of sequence */
-//             last_interval_open = FALSE;
-//             break;
-//          } else {
-//             left = filter_end + 1;
-//          }
-//       }
-//
-//       if (last_interval_open) {
-//          /* Need to finish SSeqRange* for last interval. */
-//          right = end_offset;
-//          /* Cache the tail of the list to avoid the overhead of traversing the
-//           * list when appending to it */
-//          tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
-//       }
-// ```
 fn complement_masks(contexts: &[QueryContext]) -> Vec<(i32, i32)> {
     let mut result = Vec::new();
     for c in contexts.iter().filter(|c| c.is_valid) {
@@ -760,188 +433,5 @@ fn complement_masks(contexts: &[QueryContext]) -> Vec<(i32, i32)> {
 
 #[cfg(test)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:86-94
-// ```c++
-//         for (i = 0; i < retval->last_context + 1; i++) {
-//             retval->contexts[i].query_index =
-//                 Blast_GetQueryIndexFromContext(i, program);
-//             ASSERT(retval->contexts[i].query_index != -1);
-//
-//             retval->contexts[i].frame = BLAST_ContextToFrame(program,  i);
-//             ASSERT(retval->contexts[i].frame != INT1_MAX);
-//
-//             retval->contexts[i].is_valid = TRUE;
-// ```
-mod tests {
-    use super::*;
-    #[test]
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:1003-1027 BlastxLowerCaseMaskProteinLocations
-    // ```c++
-    //     bqff.UseProteinCoords(9180); // 9180 is length of GI|1945388
-    //
-    //     BlastSeqLoc* bsl = *bqff[CSeqLocInfo::eFramePlus1];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 0);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 25);
-    //
-    //     bsl = *bqff[CSeqLocInfo::eFramePlus2];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 0);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 24);
-    //
-    //     bsl = *bqff[CSeqLocInfo::eFramePlus3];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 0);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 24);
-    //
-    //     bsl = *bqff[CSeqLocInfo::eFrameMinus1];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 3034);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 3059);
-    //
-    //     bsl = *bqff[CSeqLocInfo::eFrameMinus2];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 3034);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 3058);
-    //
-    //     bsl = *bqff[CSeqLocInfo::eFrameMinus3];
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->left, 3034);
-    //     BOOST_REQUIRE_EQUAL(bsl->ssr->right, 3058);
-    // ```
-    fn ncbi_active_lowercase_frame_assertions() {
-        let expected = [
-            (0, 25),
-            (0, 24),
-            (0, 24),
-            (3034, 3059),
-            (3034, 3058),
-            (3034, 3058),
-        ];
-        for (frame, expected) in [1, 2, 3, -1, -2, -3].into_iter().zip(expected) {
-            assert_eq!(
-                dna_to_protein_masks(&[(0, 75)], 9180, frame),
-                vec![expected]
-            );
-        }
-    }
-    #[test]
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:995-1003
-    // ```c++
-    //                 ptrs[i+1] = BlastSeqLocNodeFree(ptrs[i+1]);
-    //             } else {
-    //                 curr_tail = ptrs[i+1];
-    //             }
-    //         }
-    //     }
-    //
-    //     /* Rebuild the linked list */
-    //     {
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1089-1096
-    // ```c++
-    //                /* beginning of sequence filtered */
-    //                left = filter_end + 1;
-    //                continue;
-    //             }
-    //          }
-    //
-    //          right = filter_start - 1;
-    //
-    // ```
-    fn touching_and_duplicate_masks_preserve_lookup_intervals() {
-        assert_eq!(
-            combine_masks(vec![(0, 0), (0, 0), (1, 2), (2, 3)]),
-            vec![(0, 0), (0, 0), (1, 2), (2, 3)]
-        );
-        let c = QueryContext {
-            query_index: 0,
-            frame: 1,
-            offset: 0,
-            length: 2,
-            is_valid: true,
-            lowercase_masks: vec![],
-            masks: vec![(0, 0), (0, 0)],
-            dna_masks: vec![],
-        };
-        assert_eq!(complement_masks(&[c]), vec![(1, -1), (1, 1)]);
-    }
-    #[test]
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
-    // ```c++
-    //
-    //     while (size_read < GetBatchSize()) {
-    //
-    //         if (End())
-    //             break;
-    //
-    //         CRef<CBlastSearchQuery> q;
-    //         try { q.Reset(m_Source->GetNextSequence(scope)); }
-    //         catch (const CObjReaderParseException& e) {
-    //             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-    //                 break;
-    //             }
-    //             throw;
-    //         }
-    //         catch (const exception&) {
-    //             continue; //SB-2307. ignore well formed, not found accession
-    //         }
-    //
-    //         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-    //
-    //         if (loc->IsInt()) {
-    //             size_read += sequence::GetLength(loc->GetInt().GetId(),
-    //                                              q->GetScope());
-    //         } else if (loc->IsWhole()) {
-    //             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-    //         } else {
-    //             // programmer error, CBlastInputSource should only return Seq-locs
-    // ```
-    fn ncbi_batch_crossing_record_is_retained() {
-        let record = |n| FastaRecord {
-            internal_id: String::new(),
-            title: Vec::new(),
-            sequence: vec![b'A'; n],
-            lowercase_masks: vec![],
-            warnings: vec![],
-            source: None,
-            around: None,
-            skipped: None,
-        };
-        assert_eq!(
-            batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
-            vec![0..2, 2..3]
-        );
-        assert_eq!(
-            batch_ranges(&[record(10002), record(3)], BATCH_SIZE),
-            vec![0..1, 1..2]
-        );
-        assert_eq!(
-            batch_ranges(&[record(10003), record(3)], BATCH_SIZE),
-            vec![0..1, 1..2]
-        );
-    }
-
-    // `BATCH_SIZE` sets the limit (`GetQueryBatchSize`): the record that crosses it ends its
-    // batch, and a limit above the default keeps the longer batch whole.
-    #[test]
-    fn the_batch_size_is_the_limit_of_a_batch() {
-        let record = |n| FastaRecord {
-            internal_id: String::new(),
-            title: Vec::new(),
-            sequence: vec![b'A'; n],
-            lowercase_masks: vec![],
-            warnings: vec![],
-            source: None,
-            around: None,
-            skipped: None,
-        };
-        let records = [
-            record(100),
-            record(100),
-            record(100),
-            record(100),
-            record(100),
-        ];
-        assert_eq!(batch_ranges(&records, 200), vec![0..2, 2..4, 4..5]);
-        assert_eq!(batch_ranges(&records, 201), vec![0..3, 3..5]);
-        assert_eq!(
-            batch_ranges(&records, 1),
-            vec![0..1, 1..2, 2..3, 3..4, 4..5]
-        );
-        assert_eq!(batch_ranges(&records, 30000), vec![0..5]);
-    }
-}
+#[path = "query_setup_tests.rs"]
+mod tests;

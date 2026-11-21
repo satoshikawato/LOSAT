@@ -7,7 +7,8 @@ use super::view::V;
 use std::collections::HashMap;
 
 use crate::seqid::mask_handle::{
-    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, GiimTree, TreeHandle,
+    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, mask_info_key, GiimTree,
+    TreeHandle,
 };
 use crate::seqid::model::GiimportId;
 use crate::seqid::ParsedSeqId;
@@ -16,41 +17,6 @@ use crate::seqid::ParsedSeqId;
 pub(super) const MAX: u32 = u32::MAX;
 
 // NCBI reference (598d8ae6): c++/include/util/range.hpp:148-151, 255-308, 345-357, 398-401
-// ```c++
-//     bool Empty(void) const
-//         {
-//             return GetToOpen() <= GetFrom();
-//         }
-// ...
-//     static TThisType GetWhole(void)
-//         {
-//             return TThisType(GetWholeFrom(), GetWholeToOpen());
-//         }
-// ...
-//     static TThisType GetEmpty(void)
-//         {
-//             return TThisType(GetEmptyFrom(), GetEmptyToOpen());
-//         }
-// ...
-//     TThisType& CombineWith(const TThisType& r)
-//         {
-//             if ( !r.Empty() ) {
-//                 if ( !Empty() ) {
-//                     m_From = min(m_From, r.GetFrom());
-//                     m_ToOpen = max(m_ToOpen, r.GetToOpen());
-//                 }
-//                 else {
-//                     *this = r;
-//                 }
-//             }
-//             return *this;
-//         }
-// ...
-//     CRange(position_type from, position_type to)
-//         : TParent(from, to+1)
-//         {
-//         }
-// ```
 /// `COpenRange<TSeqPos>`: `from` and the open end `to_open`, empty when `to_open <= from`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Range {
@@ -106,23 +72,6 @@ const BOTH: Strand = 3;
 const BOTH_REV: Strand = 4;
 
 // NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range.hpp:185-199
-// ```c++
-// bool CHandleRange::x_IncludesPlus(const ENa_strand& strand) const
-// {
-//     // Anything but "minus" includes "plus"
-//     return strand != eNa_strand_minus;
-// }
-//
-//
-// inline
-// bool CHandleRange::x_IncludesMinus(const ENa_strand& strand) const
-// {
-//     return strand == eNa_strand_unknown
-//         || strand == eNa_strand_minus
-//         ||  strand == eNa_strand_both
-//         ||  strand == eNa_strand_both_rev;
-// }
-// ```
 fn includes_plus(strand: Strand) -> bool {
     strand != MINUS
 }
@@ -132,13 +81,6 @@ fn includes_minus(strand: Strand) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seqloc/Na_strand.hpp:75-79
-// ```c++
-// bool IsReverse(ENa_strand s)
-// {
-//     // treat unknown as forward
-//     return (s == eNa_strand_minus  ||  s == eNa_strand_both_rev);
-// }
-// ```
 fn is_reverse(strand: Strand) -> bool {
     matches!(strand, MINUS | BOTH_REV)
 }
@@ -170,91 +112,7 @@ impl Default for HandleRange {
 }
 
 impl HandleRange {
-    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:126-206
-    // ```c++
-    // void CHandleRange::AddRange(TRange range, ENa_strand strand,
-    //                             bool more_before, bool more_after, bool circular_rna)
-    // {
-    //     if ( !m_Ranges.empty()  &&  m_IsSingleStrand ) {
-    //         if ( strand != m_Ranges.front().second ) {
-    //             // Different strands, the location can not be circular
-    //             if ( m_IsCircular ) {
-    //                 // Different strands, the location can not be circular
-    //                 // Reorganize total ranges by strand
-    //                 TRange total_range = m_TotalRanges_plus;
-    //                 total_range += m_TotalRanges_minus;
-    //                 if ( x_IncludesPlus(m_Ranges.front().second) ) {
-    //                     m_TotalRanges_plus = total_range;
-    //                 }
-    //                 else {
-    //                     m_TotalRanges_plus = TRange::GetEmpty();
-    //                 }
-    //                 if ( x_IncludesMinus(m_Ranges.front().second) ) {
-    //                     m_TotalRanges_minus = total_range;
-    //                 }
-    //                 else {
-    //                     m_TotalRanges_minus = TRange::GetEmpty();
-    //                 }
-    //                 m_IsCircular = false;
-    //             }
-    //             m_IsSingleStrand = false;
-    //         }
-    //         else {
-    //             // Same strand, but location may become circular
-    //             if ( !m_IsCircular && !circular_rna ) {
-    //                 // Check if location becomes circular
-    //                 NON_CONST_REVERSE_ITERATE ( TRanges, it, m_Ranges ) {
-    //                     // compare with last non-empty range
-    //                     if ( !it->first.Empty() ) {
-    //                         if ( x_IncludesPlus(strand) ) {
-    //                             m_IsCircular =
-    //                                 range.GetFrom() < it->first.GetFrom();
-    //                         }
-    //                         else {
-    //                             m_IsCircular =
-    //                                 range.GetFrom() > it->first.GetFrom();
-    //                         }
-    //                         break;
-    //                     }
-    //                 }
-    //                 if ( m_IsCircular ) {
-    //                     ...
-    //                     m_TotalRanges_plus += m_TotalRanges_minus;
-    //                     m_TotalRanges_minus = TRange::GetEmpty();
-    //                 }
-    //                 else {
-    //                     ...
-    //                     if ( more_after ) {
-    //                         m_MoreAfter = true;
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     else {
-    //         if ( more_before ) {
-    //             m_MoreBefore = true;
-    //         }
-    //         if ( more_after ) {
-    //             m_MoreAfter = true;
-    //         }
-    //     }
-    //     m_Ranges.push_back(TRanges::value_type(range, strand));
-    //     if ( !m_IsCircular ) {
-    //         // Regular location
-    //         if ( x_IncludesPlus(strand) ) {
-    //             m_TotalRanges_plus += range;
-    //         }
-    //         if ( x_IncludesMinus(strand) ) {
-    //             m_TotalRanges_minus += range;
-    //         }
-    //     }
-    //     else {
-    //         // Circular location, second part
-    //         m_TotalRanges_minus += range;
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:115-206
     // The map's `AddRange` (handle_range_map.cpp:277) passes `more_before` and `more_after`
     // false: it sets the flags itself (`HandleRangeMap::add`).
     /// `AddRange(range, strand, false, false, circular_rna)`.
@@ -312,53 +170,7 @@ impl HandleRange {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:338-376
-    // ```c++
-    // CHandleRange::GetOverlappingRange(TTotalRangeFlags flags) const
-    // {
-    //     TRange ret = TRange::GetEmpty();
-    //     if (m_IsCircular) {
-    //         ETotalRangeFlags circular_strand =
-    //             IsReverse(m_Ranges.front().second) ?
-    //             eStrandMinus : eStrandPlus;
-    //         if (flags & circular_strand) {
-    //             ret = TRange::GetWhole();
-    //         }
-    //         return ret;
-    //     }
-    //     if (flags & eStrandPlus) {   // == eCircularStart
-    //         ret += m_TotalRanges_plus;
-    //     }
-    //     if (flags & eStrandMinus) {  // == eCircularEnd
-    //         ret += m_TotalRanges_minus;
-    //     }
-    //     if ( m_IsSingleStrand && (m_MoreBefore || m_MoreAfter) ) {
-    //         _ASSERT(!m_Ranges.empty());
-    //         if ( x_IncludesPlus(m_Ranges.front().second) ) {
-    //             if ( (flags & eStrandPlus)  ||
-    //                 x_IncludesMinus(m_Ranges.front().second) ) {
-    //                 if ( m_MoreBefore ) {
-    //                     ret.SetFrom(TRange::GetWholeFrom());
-    //                 }
-    //                 if ( m_MoreAfter ) {
-    //                     ret.SetTo(TRange::GetWholeTo());
-    //                 }
-    //             }
-    //         }
-    //         else {
-    //             if ( (flags & eStrandMinus) ) {
-    //                 if ( m_MoreAfter ) {
-    //                     ret.SetFrom(TRange::GetWholeFrom());
-    //                 }
-    //                 if ( m_MoreBefore ) {
-    //                     ret.SetTo(TRange::GetWholeTo());
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     return ret;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:331-376
     /// `GetOverlappingRange()` (`flags` `eStrandAny`).
     pub(super) fn overlapping(&self) -> Range {
         if self.circular {
@@ -387,55 +199,12 @@ impl HandleRange {
         ret
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:442-445
-    // ```c++
-    // bool CHandleRange::HasGaps(void) const
-    // {
-    //     return m_Ranges.size() > 1  ||  m_MoreBefore  ||  m_MoreAfter;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:442-447
     pub(super) fn has_gaps(&self) -> bool {
         self.ranges.len() > 1 || self.more_before || self.more_after
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:379-417
-    // ```c++
-    // CHandleRange::GetCircularRangeStart(bool include_origin) const
-    // {
-    //     _ASSERT(m_IsCircular);
-    //     TRange ret = m_TotalRanges_plus;
-    //     if ( include_origin ) {
-    //         // Adjust start/stop to include cut point
-    //         if ( !IsReverse(m_Ranges.front().second) ) {
-    //             // Include end
-    //             ret.SetTo(TRange::GetWholeTo());
-    //         }
-    //         else {
-    //             // Include start
-    //             ret.SetFrom(TRange::GetWholeFrom());
-    //         }
-    //     }
-    //     return ret;
-    // }
-    // ...
-    // CHandleRange::GetCircularRangeEnd(bool include_origin) const
-    // {
-    //     _ASSERT(m_IsCircular);
-    //     TRange ret = m_TotalRanges_minus;
-    //     if ( include_origin ) {
-    //         // Adjust start/stop to include cut point
-    //         if ( !IsReverse(m_Ranges.front().second) ) {
-    //             // Include end
-    //             ret.SetFrom(TRange::GetWholeFrom());
-    //         }
-    //         else {
-    //             // Include start
-    //             ret.SetTo(TRange::GetWholeTo());
-    //         }
-    //     }
-    //     return ret;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:378-417
     /// The strand of the first range (`m_Ranges.front().second`; the callers' ranges are never
     /// empty).
     fn first_strand(&self) -> Strand {
@@ -494,44 +263,10 @@ fn next_lookup() -> u64 {
 // does not pack: `x_FindStrInfo` looks in `m_ByAcc` when the accession is set, else in `m_ByName`,
 // else nowhere; the new info is put in the maps of what is set, so one without accession and name
 // is never found again: probe p4 r0261, `om/` case `s_i26_pir_empty`)
-// ```c++
-//     CSeq_id_Textseq_PlainInfo* info = x_FindStrInfo(id.Which(), tid);
-//     CSeq_id_Handle::TVariant variant = 0;
-//     if ( !info ) {
-//         ...
-//         info = new CSeq_id_Textseq_PlainInfo(ref_id, m_Mapper);
-//         if ( tid.IsSetAccession() ) {
-//             m_ByAcc.insert(TStringMapValue(tid.GetAccession(), info));
-//         }
-//         if ( tid.IsSetName() ) {
-//             m_ByName.insert(TStringMapValue(tid.GetName(), info));
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2941, 2953-2964 (a `giim`
 // Seq-id finds the first held handle of its number whose Seq-id is NOT `Equals` to it, else makes
 // one: two equal `giim` Seq-ids are two handles, two different ones of a number one handle, unless
 // other `giim` handles of the number are alive; `om/` cases `s_i72_giim_same`, `s_i73_giim_db_diff`)
-// ```c++
-//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
-//     if (id_it == m_IdMap.end())
-//         return 0;
-//     ITERATE (TGiimList, dbr_it, id_it->second) {
-//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
-//         const CGiimport_id& gid2 = id->GetGiim();
-//         // Both Db and Release must be equal
-//         if ( !gid.Equals(gid2) ) {
-//             return *dbr_it;
-//         }
-//     }
-// ...
-//     CSeq_id_Info* info = x_FindInfo(gid);
-//     if ( !info ) {
-//         info = CreateInfo(id);
-//         m_IdMap[gid.GetId()].push_back(info);
-//     }
-//     return CSeq_id_Handle(info);
-// ```
 impl Handle {
     /// `CSeq_id_Handle::GetHandle(id)`, a `giim` Seq-id found in `giim`.
     pub(super) fn of(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
@@ -555,14 +290,12 @@ impl Handle {
 
     /// `CSeq_id_Handle::GetHandle(id)` of a handle that lives as long as the run (a Bioseq's Seq-id,
     /// `CBioseq_Info::m_Id`; a Seq-table column's default, `CSeqTableLocColumns::m_DefaultIdHandle`):
-    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`).
+    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`: the info
+    /// of an accession is shared with every other number of its prefix, digit count and version).
     pub(super) fn of_run(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
         let handle = Handle::of(id, handles);
-        if let Handle::Key { key, .. } = &handle {
-            handles
-                .made_from
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
+        if let (Handle::Key { .. }, Ok(Some(info))) = (&handle, mask_info_key(id)) {
+            handles.made_from.entry(info).or_insert_with(|| id.clone());
         }
         handles.mapped(&handle);
         handles.end_object();
@@ -600,27 +333,11 @@ impl Handle {
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_handle.cpp:89-92 and
 // seq_id_tree.cpp:220-236 (an info leaves its tree when its last handle goes:
 // `CSeq_id_Info::x_RemoveLastLock` -> `DropInfo` -> `x_Unindex`)
-// ```c++
-// void CSeq_id_Info::x_RemoveLastLock(void) const
-// {
-//     GetTree().DropInfo(this);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:300-307 (the query's Seq-ids are
 // looked up when its Bioseq joins the scope, before its annotations; their handles live as long
 // as the scope)
-// ```c++
-//     if ( obj.IsSetId() ) {
-//         ITERATE ( TObject::TId, it, obj.GetId() ) {
-//             m_Id.push_back(CSeq_id_Handle::GetHandle(**it));
-//         }
-//     }
-//     if ( obj.IsSetAnnot() ) {
-//         x_SetAnnot();
-//     }
-// ```
 /// The Seq-id handles of NCBI's object manager during the query entry's step (`index_entry`): the
-/// `giim` tree (`seqid::mask_handle::GiimTree`, quoted at `Handle`) with what holds each of its live
+/// `giim` tree (`seqid::mask_handle::GiimTree`, cited at `Handle`) with what holds each of its live
 /// handles, and the Seq-id that made the info of each handle that lives as long as the run
 /// (`made_from`). A lookup in the `giim` tree gets the first live handle of its number whose
 /// Seq-id is not `Equals` to it, else a new handle; a handle leaves the tree when the last thing
@@ -645,8 +362,10 @@ pub(super) struct LiveHandles {
     tree: GiimTree,
     /// What holds each live `giim` handle: its number and holders, by its info.
     holds: HashMap<usize, (i32, Holds)>,
-    /// The Seq-id that made the info of each keyed handle of the run, the first of the run to
-    /// have it (the phase C handles: no other handle is made before the attach).
+    /// The Seq-id that made each info of the keyed handles of the run (by `mask_info_key`: the
+    /// info of a packing Textseq-id is shared by the accessions of one prefix, digit count and
+    /// version), the first of the run to have it (the phase C handles: no other handle is made
+    /// before the attach).
     made_from: HashMap<Vec<u8>, ParsedSeqId>,
 }
 
@@ -769,22 +488,20 @@ impl LiveHandles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_handle.cpp:220-233
-    // ```c++
-    //     if ( IsGi() ) {
-    //         os << "gi|" << m_Packed;
-    //     }
-    //     else if ( m_Info ) {
-    //         GetSeqId()->WriteAsFasta(os);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (the info of a packed
+    // Textseq-id is shared by its packed key, not by its accession: `seqid::mask_handle::mask_info_key`)
     /// `CSeq_id_Handle::AsString()` of `handle`, the handle of `id` that lives as long as the run:
     /// `GetSeqId()` (`seqid::mask_handle::handle_seq_id` of the Seq-id that made its info) in
     /// FASTA form (`gi|` and the number for a gi).
     pub(super) fn as_string(&self, handle: &Handle, id: &ParsedSeqId) -> String {
         let seq_id = match handle {
-            Handle::Key { key, .. } => self
-                .made_from
-                .get(key)
-                .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+            Handle::Key { .. } => match mask_info_key(id) {
+                Ok(Some(info)) => self
+                    .made_from
+                    .get(&info)
+                    .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+                _ => id.clone(),
+            },
             Handle::Giim { id: number, info } => {
                 ParsedSeqId::Giim(self.tree.made_from(*number, *info).clone())
             }
@@ -847,27 +564,7 @@ impl HandleRangeMap {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:249-281
-    // ```c++
-    // void CHandleRangeMap::AddRange(const CSeq_id_Handle& h,
-    //                                const TRange& range,
-    //                                ENa_strand strand,
-    //                                SAddState& state)
-    // {
-    //     CHandleRange& hr = m_LocMap[h];
-    //     if ( state.m_TransSplicing == eNoTransSplicing &&
-    //          state.m_PrevId && h && state.m_PrevId != h ) {
-    //         m_LocMap[state.m_PrevId].m_MoreAfter = true;
-    //         hr.m_MoreBefore = true;
-    //         if ( m_MasterSeq ) {
-    //         ...
-    //     }
-    //     hr.AddRange(range, strand, false, false, state.m_TransSplicing == eCircularRNA);
-    //     state.m_PrevId = h;
-    //     state.m_PrevStrand = strand;
-    //     state.m_PrevRange = range;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:246-281
     // The query is a raw Bioseq: its TSE has no master segments (`m_MasterSeq` null).
     fn add(&mut self, handle: Handle, range: Range, strand: Strand, state: &mut AddState<'_>) {
         let at = self.index_of(handle);
@@ -921,93 +618,6 @@ impl HandleRangeMap {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205
-    // ```c++
-    //     switch ( loc.Which() ) {
-    //     case CSeq_loc::e_not_set:
-    //     case CSeq_loc::e_Null:
-    //     {
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Empty:
-    //     {
-    //         AddRange(loc.GetEmpty(), TRange::GetEmpty(),
-    //                  eNa_strand_unknown, state);
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Whole:
-    //     {
-    //         AddRange(loc.GetWhole(), TRange::GetWhole(),
-    //                  eNa_strand_unknown, state);
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Int:
-    //     {
-    //         const CSeq_interval& i = loc.GetInt();
-    //         AddRange(i.GetId(),
-    //                  i.GetFrom(),
-    //                  i.GetTo(),
-    //                  i.IsSetStrand()? i.GetStrand(): eNa_strand_unknown,
-    //                  state);
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Pnt:
-    //     ...
-    //     case CSeq_loc::e_Packed_int:
-    //     ...
-    //     case CSeq_loc::e_Packed_pnt:
-    //     {
-    //         // extract each point
-    //         const CPacked_seqpnt& pp = loc.GetPacked_pnt();
-    //         CSeq_id_Handle idh = CSeq_id_Handle::GetHandle(pp.GetId());
-    //         ENa_strand strand =
-    //             pp.IsSetStrand()? pp.GetStrand(): eNa_strand_unknown;
-    //         ITERATE ( CPacked_seqpnt::TPoints, pi, pp.GetPoints() ) {
-    //             AddRange(idh, CRange<TSeqPos>(*pi, *pi), strand, state);
-    //         }
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Mix:
-    //     {
-    //         // extract sub-locations
-    //         ITERATE ( CSeq_loc_mix::Tdata, li, loc.GetMix().Get() ) {
-    //             AddLocation(**li, state);
-    //         }
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Equiv:
-    //     {
-    //         // extract sub-locations
-    //         bool first = true; // allow intron only before the first sub-location
-    //         ITERATE ( CSeq_loc_equiv::Tdata, li, loc.GetEquiv().Get() ) {
-    //             if ( first ) {
-    //                 // the remaining gaps between sub-location aren't introns
-    //                 first = false;
-    //             }
-    //             else {
-    //                 // there's no intron between equiv sub-locations
-    //                 state.m_PrevId.Reset();
-    //             }
-    //             AddLocation(**li, state);
-    //         }
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Bond:
-    //     {
-    //         const CSeq_bond& bond = loc.GetBond();
-    //         const CSeq_point& pa = bond.GetA();
-    //         AddRange(pa.GetId(), pa.GetPoint(), pa.GetPoint(), ..., state);
-    //         if ( bond.IsSetB() ) {
-    //             const CSeq_point& pb = bond.GetB();
-    //             AddRange(pb.GetId(), pb.GetPoint(), pb.GetPoint(), ..., state);
-    //         }
-    //         return;
-    //     }
-    //     case CSeq_loc::e_Feat:
-    //     {
-    //         //### Not implemented (do we need it?)
-    //         return;
-    //     }
-    // ```
     fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) {
         // The `mix` and `equiv` locations being walked (to any depth the reader read): the
         // location's parts, the next one, and whether it is an `equiv`.
@@ -1085,20 +695,7 @@ impl HandleRangeMap {
 
     // NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range_map.hpp:91 (the map's order
     // is `CSeq_id_Handle`'s `operator<`)
-    // ```c++
-    //     typedef map<CSeq_id_Handle, CHandleRange> TLocMap;
-    // ```
     // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207
-    // ```c++
-    //     bool operator<  (const CSeq_id_Handle& handle) const
-    //         {
-    //             // Packed (m_Packed != 0) first:
-    //             // zeroes are converted to a highest unsigned value by decrement.
-    //             TUintId p1 = INT_ID_TO(TUintId, m_Packed-1);
-    //             TUintId p2 = INT_ID_TO(TUintId, handle.m_Packed-1);
-    //             return p1 < p2 || (p1 == p2 && m_Info < handle.m_Info);
-    //         }
-    // ```
     /// The map's entries in NCBI's order, in groups of one `m_Packed`: the
     /// groups in NCBI's order, the handles of a group in the order of their infos' addresses,
     /// which LOSAT does not know (it keeps the order they came in). A gi and the packed accessions

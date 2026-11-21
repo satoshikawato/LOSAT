@@ -1,8 +1,6 @@
 use std::{env, path::PathBuf, process::Command};
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // WASI implementation boundary: Rust 1.92's cdylib link omits startup objects.
 // Its bundled crt1-reactor.o exports _initialize, which calls __wasi_init_tp
 // and __wasm_call_ctors. Linking it as the entry also prevents LLD from wrapping

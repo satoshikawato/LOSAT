@@ -114,9 +114,6 @@ def main() -> int:
         for label, command in modes.items():
             hashes = []
             # NCBI c++/src/app/blast/tblastn_app.cpp:290-301:
-            # lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-            # results = lcl_blast.Run();
-            # formatter.PrintOneResultSet(**result, query);
             # Time search/report commands only. Database preparation is already complete.
             for iteration in range(4):
                 record = execute(command, out, label, iteration)

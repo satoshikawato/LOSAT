@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The details of a run (plan §5.2, §5.8): its verification badge, what was fixed when it
 // was queued (RunSnapshot), what happened when it ran (RunRecord), the CLI command of each
-// output (with that of its own -outfmt, W10), and the warnings that the CLI writes to standard error.
+// output (with that of its own -outfmt, W10), and the warnings that the CLI writes to standard error, or where they are
+// when the run's -logfile took them.
 import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
@@ -13,6 +14,8 @@ import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';
+import { NO_WARNINGS, warningsPlaceParts } from './message-place-text';
+import PlaceWords from './PlaceWords.vue';
 import { vScrollFocus } from './scroll-focus';
 import VerificationBadge from './VerificationBadge.vue';
 
@@ -31,6 +34,13 @@ const duration = computed(() =>
 const countsFile = COUNTS_FILE;
 const countsHost = computed(() => (record.value.windowMasker?.origin === undefined ? '' : new URL(record.value.windowMasker.origin.url).host));
 const countsDate = computed(() => dateOf(record.value.windowMasker?.origin?.lastModified));
+/**
+ * What Warnings says besides the diagnostics: where the run's warnings are when they went to the file of its -logfile or
+ * nowhere, or that the engine wrote none (line WQA's sweep, D7, 2026-11-20).
+ */
+const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, props.loaded.diagnostics, props.run));
+/** Whether those words say that the engine wrote no warnings (its place holds none). */
+const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
 const inputs = computed(() => [
   { role: 'Query', input: snapshot.value.query },
   { role: 'Subject', input: snapshot.value.subject },
@@ -72,6 +82,11 @@ const inputs = computed(() => [
         <template v-if="snapshot.dryRun">
           <dt>-dryrun</dt>
           <dd data-testid="run-dry-run">a dry run: no search</dd>
+        </template>
+        <template v-if="snapshot.prints">
+          <!-- The command line's help or version, which the run printed in place of a search (line WQA's D14, 2026-11-20). -->
+          <dt>Printed</dt>
+          <dd data-testid="run-printed">the command line's {{ snapshot.prints }}: no search</dd>
         </template>
         <dt>Threads requested</dt>
         <dd>{{ snapshot.requestedThreads === 'auto' ? 'Auto' : snapshot.requestedThreads }}</dd>
@@ -136,6 +151,8 @@ const inputs = computed(() => [
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>
-    <p v-else class="muted" data-testid="run-diagnostics-none">The engine wrote no warnings.</p>
+    <p v-if="warningsPlace !== undefined" class="muted" :data-testid="noWarnings ? 'run-diagnostics-none' : 'run-diagnostics-place'">
+      <PlaceWords :parts="warningsPlace" />
+    </p>
   </div>
 </template>

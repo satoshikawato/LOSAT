@@ -6,30 +6,6 @@
 //! count of queries after the last.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-834
-//! ```c++
-//!         if (results.HasAlignments()) {
-//!     	    CSeq_align_set copy_aln_set;
-//!             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-//!
-//!             {
-//!             	unsigned int scores = CBlastFormatUtil::eNoQuerySubjCov;
-//!             	if(string::npos != m_CustomOutputFormatSpec.find("qcovs"))
-//!             		scores |= CBlastFormatUtil::eQueryCovPerSubj ;
-//!             	if(string::npos != m_CustomOutputFormatSpec.find("qcovus") &&
-//!             			ncbi::NStr::ToLower(m_Program) == string("blastn"))
-//!             		scores |= CBlastFormatUtil::eQueryCovPerUniqSubj ;
-//!
-//!             	if(scores != CBlastFormatUtil::eNoQuerySubjCov)
-//!             		CBlastFormatUtil::InsertSubjectScores (copy_aln_set, bhandle, m_QueryRange, (CBlastFormatUtil::ESubjectScores) scores);
-//!            	}
-//!             tabinfo.SetQueryGeneticCode(m_QueryGenCode);
-//!             tabinfo.SetDbGeneticCode(m_DbGenCode);
-//!             ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-//!                     const CSeq_align& s = **itr;
-//!                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-//!                     tabinfo.Print();
-//!             }
-//! ```
 //! What `SetFields` reads of an HSP is its Seq-align (`algorithm::blastn::blast_xml` has the
 //! coordinates): the query on its plus strand, the subject descending for a minus-strand HSP
 //! (frames `1/-1`), the score, e-value and bit score, the alignment's lengths and gaps, and for
@@ -54,6 +30,7 @@ use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
     TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
+use crate::utils::lower_bound::lower_bound_by;
 
 const PROGRAM: &str = "BLASTN";
 
@@ -91,19 +68,8 @@ pub(crate) struct BlastnTabular<'a> {
 /// search (`write_tabular_prolog_warning`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
-/// ```c++
-///     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-///         const CBlastTabularInfo::EFieldDelimiter kDelim = CBlastTabularInfo::eComma;
-///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-///         if(!m_CustomDelim.empty()) {
-///             tabinfo.SetCustomDelim(m_CustomDelim);
-///         }
-///         tabinfo.PrintFieldSpecs();
-///         return;
-///     }
-/// ```
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
     TabularWriter::new(spec, &version, None).prolog(writer)?;
     Ok(())
 }
@@ -150,17 +116,11 @@ pub(crate) fn write_blastn_tabular(
             }
         }
     }
-    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
     let table = TabularWriter::new(spec, &version, None);
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    // ```c++
-    // CBlastTabularInfo::CBlastTabularInfo(CNcbiOstream& ostr, const string& format,
-    // ...
-    //     x_CheckTaxDB();
-    // }
-    // ```
     let taxdb_warning =
         (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line("blastn"));
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
@@ -188,12 +148,6 @@ pub(crate) fn write_blastn_tabular(
         let hit_list = hit_list.as_ref();
         let searched_length = tab.searched_lengths.get(q_idx).copied().unwrap_or_default();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
-        // ```c++
-        //             if(m_QueryRange.NotEmpty())
-        //             	m_QueryLength = m_QueryRange.GetLength();
-        //             else
-        //             	m_QueryLength = query_bh.GetBioseqLength();
-        // ```
         let query_length = tab.range_length.unwrap_or(searched_length);
         let query = TabularQuery::of_ids(
             tab.queries.get(q_idx).and_then(FastaRecord::believed),
@@ -230,18 +184,6 @@ pub(crate) fn write_blastn_tabular(
             let s_idx = first.s_idx as usize;
             let values = tab.subjects.values(s_idx, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
-            // ```c++
-            //     CConstRef<CBioseq> query_bioseq = query_handle.GetCompleteBioseq();
-            //     int query_len = 0;
-            //     if(query_range.NotEmpty())
-            //     {
-            //     	query_len = query_range.GetLength();
-            //     }
-            //     else if (!query_bioseq.Empty() && query_bioseq->IsSetLength())
-            //     {
-            //     	query_len = query_bioseq->GetLength();
-            //     }
-            // ```
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once).
             let qcovs = if needs.qcovs {
@@ -274,10 +216,6 @@ pub(crate) fn write_blastn_tabular(
                 .as_ref()
                 .map(|values| values.nucleotide_subject(tab.names, -1, -1));
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-            // ```c++
-            //        		const CBioseq_Handle& subject_bh =
-            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-            // ```
             // A table whose rows read the subject (every row or none in BLASTN,
             // `TabularSpec::subject_fetch`) loads it at its first row where the query's batch
             // did not prefetch it: the texts of its taxonomy lookups follow the rows before it
@@ -359,12 +297,6 @@ pub(crate) fn write_blastn_tabular(
         writer.write_all(&buf)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
-    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
-    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
-    //         return;
-    // ```
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
@@ -376,35 +308,7 @@ pub(crate) fn write_blastn_tabular(
 /// `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091
-/// ```c++
-///         if(x_IsFieldRequested(eSubjectStrand))
-///         {
-///         	if(!subject_is_na)
-///         		m_SubjectStrand = NA;
-///         	else
-///         		m_SubjectStrand = ((s_start - s_end) > 0 )? "minus":"plus";
-///         }
-///     }
-///     SetEndpoints(q_start, q_end, s_start, s_end);
-///
-///     int query_frame = 1, subject_frame = 1;
-///     if (kTranslated) {
-///     ...
-///     else {
-///     	if (x_IsFieldRequested(eSubjFrame) || x_IsFieldRequested(eFrames)) {
-///     		if ((s_start - s_end) > 0 ) {
-///     			subject_frame = -1;
-///     		}
-///     	}
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1121
-/// ```c++
-///             if (chunk->IsGap()) {
-///                 ++num_gap_opens;
-///                 num_gaps += chunk_length;
-///             }
-/// ```
 /// The gaps are the letters of the edit script's gap operations; the gap openings and the
 /// identities are the default row's (`write_hsp_rows`).
 fn tabular_hsp<'r>(
@@ -435,6 +339,7 @@ fn tabular_hsp<'r>(
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
+        stored_gaps: [&[], &[]],
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }
@@ -444,19 +349,6 @@ fn tabular_hsp<'r>(
 /// covered.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:646-657
-/// ```c++
-///        	if((check_type & eQueryCovPerUniqSubj)) {
-///        		int uniq_coverage = align_format::CAlignFormatUtil::GetUniqSeqCoverage(tmp_align_set);
-///        		if (uniq_coverage)
-///        	    {
-///        	    	double uniq_subj_coverage = 100.0 * (double) uniq_coverage/ (double) query_len;
-///        	    	if(uniq_subj_coverage < 99)
-///        	        	uniq_subj_coverage +=0.5;
-///
-///        	         (*left_it)->SetNamedScore ("uniq_seq_percent_coverage", (int) uniq_subj_coverage);
-///        	    }
-///        	}
-/// ```
 fn uniq_subject_coverage(hsps: &[BlastnHsp], query_length: usize) -> i32 {
     if query_length == 0 {
         return -1;
@@ -516,13 +408,6 @@ impl SeqRange {
     /// `s_FixMinusStrandRange`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4829-4836
-    /// ```c++
-    /// static inline CRange<TSeqPos> & s_FixMinusStrandRange(CRange<TSeqPos> & rng)
-    /// {
-    /// 	if(rng.GetFrom() > rng.GetTo()){
-    /// 		rng.Set(rng.GetTo(), rng.GetFrom());
-    /// 	}
-    /// ```
     fn fix_minus_strand(self) -> Self {
         if self.from > self.to() {
             SeqRange::new(self.to(), self.from)
@@ -539,70 +424,22 @@ impl SeqRange {
 struct RangeCollection(Vec<SeqRange>);
 
 impl RangeCollection {
-    /// `std::lower_bound` from `start` with `PRangeLessPos` (`R.GetToOpen() <= Pos`): the first
-    /// range with `to_open > pos` while the ranges are sorted. libstdc++'s halving, step for
-    /// step, since a range that a query gap made (`to_open` 0, `uniq_seq_coverage`) leaves the
-    /// collection unsorted, where the probes decide the result.
+    /// `lower_bound(begin, end, pos, p)` of `x_CombineWith` and `x_Subtract` (cited below) from
+    /// position `start`: the first position of `start..len` whose range is not less than `pos` by
+    /// `p` (less: `to_open <= pos`), or `len` when there is none.
     ///
-    /// libstdc++ reference (bits/stl_algobase.h, `std::__lower_bound`):
-    /// ```c++
-    ///       while (__len > 0)
-    /// 	{
-    /// 	  _DistanceType __half = __len >> 1;
-    /// 	  _ForwardIterator __middle = __first;
-    /// 	  std::advance(__middle, __half);
-    /// 	  if (__comp(__middle, __val))
-    /// 	    {
-    /// 	      __first = __middle;
-    /// 	      ++__first;
-    /// 	      __len = __len - __half - 1;
-    /// 	    }
-    /// 	  else
-    /// 	    __len = __half;
-    /// 	}
-    ///       return __first;
-    /// ```
+    /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:44-51
+    /// The ranges are not always in the order of `to_open`: a query gap at the first or last subject
+    /// letter of a part gives a query range whose `TSeqPos` arithmetic wrapped (`uniq_seq_coverage`).
+    /// The position found then depends on which ranges are compared, so they are compared in the
+    /// order NCBI's `lower_bound` compares them (`utils::lower_bound`).
     fn lower_bound(&self, start: usize, pos: u32) -> usize {
-        let mut first = start;
-        let mut len = self.0.len() - start;
-        while len > 0 {
-            let half = len >> 1;
-            let middle = first + half;
-            if self.0[middle].to_open <= pos {
-                first = middle + 1;
-                len = len - half - 1;
-            } else {
-                len = half;
-            }
-        }
-        first
+        lower_bound_by(start, self.0.len(), |i| self.0[i].to_open <= pos)
     }
 
     /// `x_CombineWith(const TRange&)`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:321-346
-    /// ```c++
-    ///         position_type pos_from = r.GetFrom();
-    ///         position_type pos_to_open = r.GetToOpen();
-    ///
-    ///         if (pos_from == TRange::GetWholeFrom()) {
-    ///             pos_from++; // Prevent overflow
-    ///         }
-    ///         iterator it_begin_m =
-    ///             lower_bound(begin_nc(), end_nc(), pos_from - 1, p); /* NCBI_FAKE_WARNING: WorkShop */
-    ///         if(it_begin_m != end_nc() && it_begin_m->GetFrom() <= pos_to_open)  { // intersection
-    ///             iterator it_end_m = lower_bound(it_begin_m, end_nc(), pos_to_open, p);
-    ///             it_begin_m->CombineWith(r);
-    ///
-    ///             if(it_end_m != end_nc()  &&  it_end_m->GetFrom() <= pos_to_open) {// subject to merge
-    ///                 it_begin_m->SetToOpen(it_end_m->GetToOpen());
-    ///                 ++it_end_m; // including it into erased set
-    ///             }
-    ///             m_vRanges.erase(it_begin_m + 1, it_end_m);
-    ///         } else {
-    ///             m_vRanges.insert(it_begin_m, r);
-    ///         }
-    /// ```
     fn combine_with(&mut self, r: SeqRange) {
         let mut pos_from = r.from;
         let pos_to_open = r.to_open;
@@ -626,30 +463,6 @@ impl RangeCollection {
     /// `x_Subtract(const TRange&)`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:348-376
-    /// ```c++
-    ///         iterator it_begin_e = lower_bound(begin_nc(), end_nc(), pos_from, P);
-    ///         if(it_begin_e != end_nc()) {   // possible intersection
-    ///
-    ///             if(it_begin_e->GetFrom() < pos_from  &&  it_begin_e->GetToOpen() > pos_to_open)    {
-    ///                 //it_begin_e contains R, split it in two
-    ///                 TRange it_r = *it_begin_e;
-    ///                 it_begin_e = m_vRanges.insert(it_begin_e, it_r);
-    ///                 it_begin_e->SetToOpen(pos_from);
-    ///                 (++it_begin_e)->SetFrom(pos_to_open);
-    ///             } else  {
-    ///                 if(it_begin_e->GetFrom() < pos_from) { // cut this segement , but don't erase
-    ///                     it_begin_e->SetToOpen(pos_from);
-    ///                     ++it_begin_e;
-    ///                 }
-    ///                 iterator it_end_e = lower_bound(it_begin_e, end_nc(), pos_to_open, P);
-    ///                 if(it_end_e != end_nc()  &&  it_end_e->GetFrom() < pos_to_open)    {
-    ///                     it_end_e->SetFrom(pos_to_open); // truncate
-    ///                 }
-    ///                 // erase ranges fully covered by R
-    ///                 m_vRanges.erase(it_begin_e, it_end_e);
-    ///             }
-    ///         }
-    /// ```
     fn subtract(&mut self, r: SeqRange) {
         let pos_from = r.from;
         let pos_to_open = r.to_open;
@@ -701,18 +514,6 @@ fn query_range(hsp: &BlastnHsp) -> SeqRange {
 /// (`s_CollectSeqAlignData`; the columns are the edit script's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:663-686
-/// ```c++
-///     TNumseg seg = GetSeg(aln_pos);
-///     TSignedSeqPos pos = GetStart(for_row, seg);
-///     if (pos >= 0) {
-///         TSeqPos delta = (aln_pos - GetAlnStart(seg)) * GetWidth(for_row);
-///         if (IsPositiveStrand(for_row)) {
-///             pos += delta;
-///         } else {
-///             pos += x_GetLen(for_row, x_GetRawSegFromSeg(seg)) - 1 - delta;
-///         }
-///     } else if (dir != eNone) {
-/// ```
 fn query_position(hsp: &BlastnHsp, subject_pos: u32) -> i64 {
     let subject_first = hsp.s_start.min(hsp.s_end) as i64 - 1;
     let target = i64::from(subject_pos) - subject_first;
@@ -753,47 +554,7 @@ fn query_position(hsp: &BlastnHsp, subject_pos: u32) -> i64 {
 /// the HSPs cover, where a part of an HSP whose subject letters an HSP before it covered does
 /// not count (its query positions mapped through the alignment's columns).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4838-4892
-/// ```c++
-/// 	list<CRef<CSeq_align> >::iterator mItr=alnset.Set().begin();
-/// 	CRangeCollection<TSeqPos> subj_rng_coll((*mItr)->GetSeqRange(1));
-/// 	CRange<TSeqPos> q_rng((*mItr)->GetSeqRange(0));
-/// 	CRangeCollection<TSeqPos> query_rng_coll(s_FixMinusStrandRange(q_rng));
-/// 	++mItr;
-/// 	for(;mItr != alnset.Set().end(); ++mItr) {
-/// 		const CRange<TSeqPos> align_subj_rng((*mItr)->GetSeqRange(1));
-/// 		// subject range should always be on the positive strand
-/// 		ASSERT(align_subj_rng.GetTo() > align_subj_rng.GetFrom());
-/// 		CRangeCollection<TSeqPos> coll(align_subj_rng);
-/// 		coll.Subtract(subj_rng_coll);
-///
-/// 		if (coll.empty())
-/// 			continue;
-///
-/// 		if(coll[0] == align_subj_rng) {
-/// 			CRange<TSeqPos> query_rng ((*mItr)->GetSeqRange(0));
-/// 			query_rng_coll += s_FixMinusStrandRange(query_rng);
-/// 			subj_rng_coll += align_subj_rng;
-/// 		}
-/// 		else {
-/// 			ITERATE (CRangeCollection<TSeqPos>, uItr, coll) {
-/// 				CRange<TSeqPos> query_rng;
-/// 				const CRange<TSeqPos> & subj_rng = (*uItr);
-/// 				...
-/// 				CAlnMap map(densegAln->GetSegs().GetDenseg());
-/// 				TSignedSeqPos subj_aln_start =  map.GetAlnPosFromSeqPos(1,subj_rng.GetFrom());
-/// 				TSignedSeqPos subj_aln_end =  map.GetAlnPosFromSeqPos(1,subj_rng.GetTo());
-/// 				query_rng.SetFrom(map.GetSeqPosFromAlnPos(0,subj_aln_start));
-/// 				query_rng.SetTo(map.GetSeqPosFromAlnPos(0,subj_aln_end));
-///
-/// 				query_rng_coll += s_FixMinusStrandRange(query_rng);
-/// 				subj_rng_coll += subj_rng;
-/// 			}
-/// 		}
-/// 	}
-///
-/// 	return query_rng_coll.GetCoveredLength();
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4838-4896
 /// A query gap in the column of a part's first or last subject letter gives NCBI the position
 /// -1, which the `TSeqPos` range keeps as 2^32 - 1 (the same arithmetic here). LOSAT's BLASTN
 /// alignments are always gapped Dense-segs (no Dense-diag).
@@ -833,145 +594,5 @@ fn uniq_seq_coverage(hsps: &[BlastnHsp]) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn collection(ranges: &[(u32, u32)]) -> RangeCollection {
-        let mut out = RangeCollection::default();
-        for &(from, to) in ranges {
-            out.combine_with(SeqRange::new(from, to));
-        }
-        out
-    }
-
-    fn pairs(collection: &RangeCollection) -> Vec<(u32, u32)> {
-        collection.0.iter().map(|r| (r.from, r.to())).collect()
-    }
-
-    #[test]
-    fn range_collection_merges_overlapping_and_touching_ranges() {
-        let merged = collection(&[(10, 19), (30, 39), (20, 25), (0, 3)]);
-        assert_eq!(pairs(&merged), [(0, 3), (10, 25), (30, 39)]);
-        assert_eq!(merged.covered_length(), 4 + 16 + 10);
-        let spanning = collection(&[(10, 19), (30, 39), (5, 50)]);
-        assert_eq!(pairs(&spanning), [(5, 50)]);
-        let zero = collection(&[(5, 9), (0, 4)]);
-        assert_eq!(pairs(&zero), [(0, 9)]);
-    }
-
-    // A query gap at a part's last subject letter makes the range [from, to_open 0), which is
-    // empty and leaves the collection unsorted: the probes of `std::lower_bound` then decide
-    // where later ranges go (`uniq_seq_coverage`).
-    #[test]
-    fn lower_bound_probes_as_libstdcxx() {
-        let unsorted = RangeCollection(vec![
-            SeqRange::new(0, 9),
-            SeqRange {
-                from: 1546,
-                to_open: 0,
-            },
-            SeqRange::new(20, 29),
-            SeqRange::new(40, 49),
-        ]);
-        // The probes: [20, 30) is below 35, then [40, 50) is not.
-        assert_eq!(unsorted.lower_bound(0, 35), 3);
-        // A linear scan would answer 0 ([0, 10) is not below 5); the halving probes [20, 30),
-        // which is not below 5, then [1546, 0), which is, and answers 2.
-        assert_eq!(unsorted.lower_bound(0, 5), 2);
-        let mut collection = unsorted.clone();
-        collection.combine_with(SeqRange::new(12, 14));
-        assert_eq!(
-            collection
-                .0
-                .iter()
-                .map(|r| (r.from, r.to_open))
-                .collect::<Vec<_>>(),
-            [(0, 10), (1546, 0), (12, 15), (20, 30), (40, 50)]
-        );
-    }
-
-    #[test]
-    fn range_collection_subtracts_as_ncbi() {
-        let mut parts = RangeCollection(vec![SeqRange::new(0, 99)]);
-        parts.subtract(SeqRange::new(10, 19));
-        assert_eq!(pairs(&parts), [(0, 9), (20, 99)]);
-        parts.subtract(SeqRange::new(90, 120));
-        assert_eq!(pairs(&parts), [(0, 9), (20, 89)]);
-        parts.subtract(SeqRange::new(0, 30));
-        assert_eq!(pairs(&parts), [(31, 89)]);
-        parts.subtract(SeqRange::new(0, 200));
-        assert!(parts.0.is_empty());
-    }
-
-    fn hsp(
-        q: (usize, usize),
-        s: (usize, usize),
-        minus: bool,
-        ops: Option<Vec<GapEditOp>>,
-    ) -> BlastnHsp {
-        BlastnHsp {
-            identity: 0.0,
-            length: 0,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: q.0,
-            q_end: q.1,
-            s_start: s.0,
-            s_end: s.1,
-            e_value: 0.0,
-            bit_score: 0.0,
-            num_ident: 0,
-            query_frame: if minus { -1 } else { 1 },
-            query_length: 1000,
-            q_idx: 0,
-            s_idx: 0,
-            raw_score: 0,
-            internal_q_offset_0: 0,
-            internal_q_end_0: (q.1 - q.0 + 1) as i32,
-            internal_s_offset_0: 0,
-            internal_s_end_0: s.0.max(s.1) - s.0.min(s.1) + 1,
-            internal_query_context_offset: 0,
-            gap_info: ops,
-            num_positives: 0,
-        }
-    }
-
-    #[test]
-    fn query_positions_follow_the_columns() {
-        // Query 11..=20 against subject 101..=111 with a query gap after 4 columns.
-        let gapped = hsp(
-            (11, 20),
-            (101, 111),
-            false,
-            Some(vec![
-                GapEditOp::Sub(4),
-                GapEditOp::Del(1),
-                GapEditOp::Sub(6),
-            ]),
-        );
-        assert_eq!(query_position(&gapped, 100), 10);
-        assert_eq!(query_position(&gapped, 103), 13);
-        assert_eq!(query_position(&gapped, 104), -1);
-        assert_eq!(query_position(&gapped, 105), 14);
-        assert_eq!(query_position(&gapped, 110), 19);
-        // A minus-strand HSP: the query descends along the subject.
-        let minus = hsp((11, 20), (110, 101), true, None);
-        assert_eq!(query_position(&minus, 100), 19);
-        assert_eq!(query_position(&minus, 109), 10);
-    }
-
-    #[test]
-    fn uniq_coverage_skips_subject_letters_covered_before() {
-        // Two HSPs on disjoint subject ranges: both query ranges count.
-        let a = hsp((1, 100), (1, 100), false, None);
-        let b = hsp((201, 300), (201, 300), false, None);
-        assert_eq!(uniq_seq_coverage(&[a.clone(), b]), 200);
-        // A repeat of the query on the same subject letters counts once.
-        let repeat = hsp((401, 500), (1, 100), false, None);
-        assert_eq!(uniq_seq_coverage(&[a.clone(), repeat]), 100);
-        // A partly covered HSP: only its uncovered subject part maps to query letters.
-        let partial = hsp((501, 600), (51, 150), false, None);
-        assert_eq!(uniq_seq_coverage(&[a, partial]), 100 + 50);
-        assert_eq!(uniq_subject_coverage(&[], 100), -1);
-    }
-}
+#[path = "tabular_tests.rs"]
+mod tests;

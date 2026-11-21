@@ -7,6 +7,7 @@ words, and results are what the engine returned.
 
 from __future__ import annotations
 
+import builtins
 import functools
 import numbers
 import operator
@@ -170,13 +171,36 @@ class Pssm:
         object.__setattr__(self, "path", os.fspath(self.path))
 
 
-def _query(query: Sequences | Pssm) -> tuple[bytes | str, str] | str:
+@dataclass(frozen=True)
+class Alignment:
+    """An alignment file as the query of a search: the value of `-in_msa` of psiblast.
+
+    The search reads the file as the command line reads it and makes the query's PSSM from it, as
+    NCBI BLAST+ does; its one query is the alignment's master, query 0 of the results. The master
+    is the first row, or the row that the search's `msa_master_idx` names; `ignore_msa_master`
+    builds the PSSM without counting it. The two options need an `Alignment` as the query.
+    """
+
+    path: str
+
+    @classmethod
+    def from_file(cls, path: str | os.PathLike[str]) -> Self:
+        """The alignment file `path`, read when a search starts."""
+        return cls(os.fspath(path))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", os.fspath(self.path))
+
+
+def _query(query: Sequences | Pssm | Alignment) -> tuple[bytes | str, str] | str | dict[str, str]:
     if isinstance(query, Pssm):
         return query.path
+    if isinstance(query, Alignment):
+        return {"alignment": query.path}
     if not isinstance(query, Sequences):
         raise TypeError(
-            "the query is a Sequences (from_fasta, from_text or from_pairs) "
-            f"or a Pssm (from_file), not {query!r}"
+            "the query is a Sequences (from_fasta, from_text or from_pairs), "
+            f"a Pssm (from_file) or an Alignment (from_file), not {query!r}"
         )
     return _input(query, "query")
 
@@ -322,8 +346,14 @@ class Outcome:
     1's (`rounds`)."""
     rounds: list[QueryRounds] = field(repr=False)
     """By query record: the statistics of each of its rounds and whether they converged."""
-    diagnostics: str
-    """What the command line writes to its standard error for this search."""
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this search: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart (a byte
+        that is not UTF-8, from a title read from a Latin-1 file, for example)."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
     def queries(self) -> list[QueryHits]:
         """The results of each query record, also of those without hits."""
@@ -338,6 +368,20 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class FileOutcome:
+    """What `Search.run_to_file` returned; the report is in its file."""
+
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this search: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart (a byte
+        that is not UTF-8, from a title read from a Latin-1 file, for example)."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
+
+
+@dataclass(frozen=True)
 class Batch:
     """The results of one of NCBI's query batches."""
 
@@ -349,8 +393,13 @@ class Batch:
     """One entry per query of `query_indices`."""
     rounds: list[QueryRounds] = field(repr=False)
     """One entry per query of `query_indices`, as in `Outcome.rounds`."""
-    diagnostics: str
-    """What the command line writes to its standard error for this batch."""
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this batch: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
     def queries(self) -> list[QueryHits]:
         """The results of each query of the batch."""
@@ -387,11 +436,12 @@ class Search:
     """A program and its options, checked by the command line's parser.
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
-    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are
-    not options here: the inputs are `Sequences`, `Database` and `Pssm` (the PSSM query of psiblast
-    and tblastn); psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
+    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and
+    `-outfmt` are not options here: the inputs are `Sequences`, `Database`, `Pssm` (the PSSM query of
+    psiblast and tblastn) and `Alignment` (the alignment query of psiblast, whose master
+    `msa_master_idx` and `ignore_msa_master` choose); psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
     command line writes them. The search itself
-    is `run`, `batches` or `run_to_file`. The NCBI C++ Toolkit's `-logfile`, `-conffile` and
+    is `run`, `batches` or `run_to_file`. `-logfile`, `-conffile` and
     `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
     and loads the file of `-conffile`, and `dry_run` tells a search that searches nothing.
     """
@@ -474,7 +524,7 @@ class Search:
 
     def run(
         self,
-        query: Sequences | Pssm,
+        query: Sequences | Pssm | Alignment,
         subject: Sequences | Database,
         *,
         outfmt: str | Sequence[str] = (),
@@ -498,27 +548,29 @@ class Search:
 
     def run_to_file(
         self,
-        query: Sequences | Pssm,
+        query: Sequences | Pssm | Alignment,
         subject: Sequences | Database,
         *,
         outfmt: str,
         path: str | os.PathLike[str],
-    ) -> str:
+    ) -> FileOutcome:
         """Runs the search and writes the report of `outfmt` to the file `path`, as `-out path`.
 
         Outfmt 13 and 14 come through here: their side files lie next to `path`. Returns what the
-        command line writes to its standard error. The GIL is released.
+        command line writes to its standard error (`FileOutcome`). The GIL is released.
         """
-        return _pylosat.run_to_file(
-            self._program,
-            list(self._argv),
-            _query(query),
-            _subject(subject),
-            outfmt,
-            os.fspath(path),
+        return FileOutcome(
+            _pylosat.run_to_file(
+                self._program,
+                list(self._argv),
+                _query(query),
+                _subject(subject),
+                outfmt,
+                os.fspath(path),
+            )
         )
 
-    def batches(self, query: Sequences | Pssm, subject: Sequences | Database) -> Batches:
+    def batches(self, query: Sequences | Pssm | Alignment, subject: Sequences | Database) -> Batches:
         """The search as an iterator of `Batch`, one of NCBI's query batches at a time."""
         return Batches(
             _pylosat.Batches(
@@ -535,11 +587,20 @@ class ToolOutput:
     """What a database program writes: its standard output and its standard error."""
 
     bytes: bytes
-    diagnostics: str
+    """The standard output's bytes."""
+    # `builtins.bytes`: in the class body, the field above has the type's name.
+    diagnostics_bytes: builtins.bytes
+    """The standard error's bytes."""
 
     @property
     def text(self) -> str:
-        return self.bytes.decode(errors="replace")
+        """`bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.bytes.decode("utf-8", "replace")
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
 
 def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:
@@ -588,6 +649,18 @@ def segmasker(*words: str, input: bytes | str = b"") -> ToolOutput:
     return ToolOutput(*_pylosat.segmasker(list(words), data))
 
 
+def windowmasker(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `windowmasker` with the command line's words, which masks the repeats of nucleotide
+    sequences from a file of unit counts (`-ustat`).
+
+    `input` is what the command line reads as standard input (`-in -`, and without `-in`), so
+    sequences in memory can be masked. A failure raises `SearchError` with what the command line
+    writes to its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.windowmasker(list(words), data))
+
+
 def convert2blastmask(*words: str, input: bytes | str = b"") -> ToolOutput:
     """Runs `convert2blastmask` with the command line's words, which turns the lower case
     letters of FASTA input into the masking information that `makeblastdb -mask_data` reads.
@@ -598,3 +671,16 @@ def convert2blastmask(*words: str, input: bytes | str = b"") -> ToolOutput:
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.convert2blastmask(list(words), data))
+
+
+def makembindex(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `makembindex` with the command line's words, which writes the megablast index of a
+    BLAST database (`-input`) or, with `-old_style_index true`, of FASTA input.
+
+    `input` is what the command line reads as standard input (FASTA input without `-input`).
+    The index files are written where the command line writes them; `diagnostics` holds its
+    `creating ...` lines. A failure raises `SearchError` with what the command line writes to its
+    standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.makembindex(list(words), data))

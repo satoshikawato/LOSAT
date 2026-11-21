@@ -1,6 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, ProgramId, RecordKey, RunFile } from 'losat/domain';
+import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
 
 export type RunStatus =
@@ -84,6 +84,11 @@ export interface RunSnapshot {
   readonly conffile?: ConffileSnapshot;
   /** The argv has `-dryrun` (the engine's start says so): the run reads the arguments and the settings and searches nothing. */
   readonly dryRun?: true;
+  /**
+   * The run prints the command line's help or version in place of a search (the engine's start says so; line WQA's D14,
+   * 2026-11-20): it reads no input (its query and subject are empty) and its text is `RunRecord.printed`.
+   */
+  readonly prints?: PrintedKind;
   readonly queuedAt: number;
   /**
    * The group of runs queued together as separate searches (plan §5.2, Separate): one
@@ -114,6 +119,16 @@ export interface RunRecord {
   };
   /** The engine searched the subject that it held from an earlier search (R1). */
   readonly subjectRetained?: boolean;
+  /**
+   * Where the run's messages went, as the engine said (`RuntimeInfo.messages`): its Warnings (stream 3), or, for TBLASTX
+   * with -logfile, the file of -logfile or nowhere (line WQA's sweep, D7, 2026-11-20). Set when the run completes.
+   */
+  readonly messages?: MessagePlace;
+  /**
+   * The IDs that the run's outputs show for its records, where the engine read them from the
+   * deflines (-parse_deflines; line WQA's sweep, D7, 2026-11-19): the names of the records in the results.
+   */
+  readonly shownIds?: ShownIds;
   /** What the run did with its WindowMasker counts file. */
   readonly windowMasker?: CountsRecord;
   /**
@@ -121,11 +136,20 @@ export interface RunRecord {
    * them: kept for a completed run and for a failed one (TBLASTX's file then holds NCBI's error).
    */
   readonly runFiles?: readonly RunFile[];
+  /** The text that the run printed in place of a search (`RunSnapshot.prints`), as the engine wrote it. */
+  readonly printed?: Uint8Array;
   readonly startedAt?: number;
   /** When each engine phase started. */
   readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
   readonly endedAt?: number;
   readonly error?: string;
+  /**
+   * What a failed run wrote to the command line's standard error before its error (engine stream 3:
+   * its warnings, as NCBI's `Subject sequence contains no data` before `The average subject length is
+   * too short`), as the engine wrote it; a completed run's are in its results (line WQA's sweep, D3,
+   * 2026-11-19).
+   */
+  readonly diagnostics?: string;
 }
 
 export function isTerminal(status: RunStatus): boolean {

@@ -14,22 +14,6 @@ use std::io::Read;
 /// `m_BufferSize`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:433-446
-/// ```c++
-/// CBufferedLineReader::CBufferedLineReader(CNcbiIstream& is,
-///                                          EOwnership ownership)
-///     : m_Reader(new CStreamReader(is, ownership)),
-///       m_Eof(false),
-///       m_UngetLine(false),
-///       m_BufferSize(32*1024),
-///       m_Buffer(new char[m_BufferSize]),
-///       m_Pos(m_Buffer.get()),
-///       m_End(m_Pos),
-///       m_InputPos(0),
-///       m_LineNumber(0)
-/// {
-///     x_ReadBuffer();
-/// }
-/// ```
 pub(super) const BUFFER_SIZE: usize = 32 * 1024;
 
 /// What `m_Line` points to.
@@ -100,40 +84,11 @@ impl<R: Read> BufferedLineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:469-472
-    /// ```c++
-    /// bool CBufferedLineReader::AtEOF(void) const
-    /// {
-    ///     return m_Eof && !m_UngetLine;
-    /// }
-    /// ```
     pub(super) fn at_eof(&self) -> bool {
         self.eof && !self.unget_line
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:475-495
-    /// ```c++
-    /// char CBufferedLineReader::PeekChar(void) const
-    /// {
-    ///     _ASSERT(!AtEOF());
-    ///     /* If at EOF - undefined behavior */
-    ///     if (AtEOF()) {
-    ///         return *m_Pos;
-    ///     }
-    ///     /* If line was ungot - return its first symbol */
-    ///     if (m_UngetLine) {
-    ///         /* if line is empty - return 0 */
-    ///         if (m_Line.empty()) {
-    ///             return 0;
-    ///         }
-    ///         return *m_Line.begin();
-    ///     }
-    ///     /* If line is empty - return 0 */
-    ///     if (*m_Pos == '\n' || *m_Pos == '\r') {
-    ///         return 0;
-    ///     }
-    ///     return *m_Pos;
-    /// }
-    /// ```
     /// `*m_Pos` with `m_Pos == m_End` (the case of the module comment) is the byte that an
     /// earlier read left in the buffer; the buffer is 32 KiB, so the byte exists. The reader
     /// never calls this at the end of the input.
@@ -148,17 +103,6 @@ impl<R: Read> BufferedLineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:498-506
-    /// ```c++
-    /// void CBufferedLineReader::UngetLine(void)
-    /// {
-    ///     _ASSERT(!m_UngetLine && m_Line.begin());
-    ///     /* If after UngetLine() or after constructor - noop */
-    ///     if (m_UngetLine || m_Line.begin() == NULL)
-    ///         return;
-    ///     --m_LineNumber;
-    ///     m_UngetLine = true;
-    /// }
-    /// ```
     pub(super) fn unget_line(&mut self) {
         if self.unget_line || self.line == Line::Null {
             return;
@@ -170,68 +114,6 @@ impl<R: Read> BufferedLineReader<R> {
     /// `operator++`: reads the next line.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:509-568
-    /// ```c++
-    /// CBufferedLineReader& CBufferedLineReader::operator++(void)
-    /// {
-    ///     /* If at EOF - noop */
-    ///     if (AtEOF()) {
-    ///         m_Line = CTempString(NULL);
-    ///         return *this;
-    ///     }
-    ///     ++m_LineNumber;
-    ///     if ( m_UngetLine ) {
-    ///         _ASSERT(m_Line.begin());
-    ///         m_UngetLine = false;
-    ///         return *this;
-    ///     }
-    ///     // check if we are at the buffer end
-    ///     const char* start = m_Pos;
-    ///     const char* end = m_End;
-    ///     for ( const char* p = start; p < end; ++p ) {
-    ///         if ( *p == '\n' ) {
-    ///             m_Line = CTempString(start, p - start);
-    ///             m_LastReadSize = p + 1 - start;
-    ///             m_Pos = ++p;
-    ///             if ( p == end ) {
-    ///                 m_String = m_Line;
-    ///                 m_Line = m_String;
-    ///                 x_ReadBuffer();
-    ///             }
-    ///             return *this;
-    ///         }
-    ///         else if ( *p == '\r' ) {
-    ///             m_Line = CTempString(start, p - start);
-    ///             m_LastReadSize = p + 1 - start;
-    ///             m_Pos = ++p;
-    ///             if ( p == end ) {
-    ///                 m_String = m_Line;
-    ///                 m_Line = m_String;
-    ///                 if ( x_ReadBuffer() ) {
-    ///                     p = m_Pos;
-    ///                     if ( *p == '\n' ) {
-    ///                         m_Pos = p+1;
-    ///                         ++m_LastReadSize;
-    ///                     }
-    ///                 }
-    ///                 return *this;
-    ///             }
-    ///             if ( *p != '\n' ) {
-    ///                 return *this;
-    ///             }
-    ///             ++m_LastReadSize;
-    ///             m_Pos = ++p;
-    ///             if ( p == end ) {
-    ///                 m_String = m_Line;
-    ///                 m_Line = m_String;
-    ///                 x_ReadBuffer();
-    ///             }
-    ///             return *this;
-    ///         }
-    ///     }
-    ///     x_LoadLong();
-    ///     return *this;
-    /// }
-    /// ```
     /// `m_LastReadSize` serves `GetPosition` only, which the FASTA reader does not call.
     pub(super) fn next_line(&mut self) {
         if self.at_eof() {
@@ -278,7 +160,8 @@ impl<R: Read> BufferedLineReader<R> {
         }
     }
 
-    /// `m_String = m_Line; m_Line = m_String;` before the buffer is read again.
+    /// Copies the line into `m_String` and makes `m_Line` refer to it, before the buffer is read
+    /// again.
     fn keep_line(&mut self) {
         if let Line::Buffer { start, end } = self.line {
             self.string.clear();
@@ -288,54 +171,6 @@ impl<R: Read> BufferedLineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:571-616
-    /// ```c++
-    /// void CBufferedLineReader::x_LoadLong(void)
-    /// {
-    ///     const char* start = m_Pos;
-    ///     const char* end = m_End;
-    ///     m_String.assign(start, end);
-    ///     while ( x_ReadBuffer() ) {
-    ///         start = m_Pos;
-    ///         end = m_End;
-    ///         for ( const char* p = start; p < end; ++p ) {
-    ///             char c = *p;
-    ///             if ( c == '\r' || c == '\n' ) {
-    ///                 m_String.append(start, p - start);
-    ///                 m_Line = m_String;
-    ///                 m_LastReadSize = m_Line.size() + 1;
-    ///                 if ( ++p == end ) {
-    ///                     m_String = m_Line;
-    ///                     m_Line = m_String;
-    ///                     if ( x_ReadBuffer() ) {
-    ///                         p = m_Pos;
-    ///                         end = m_End;
-    ///                         if ( p < end && c == '\r' && *p == '\n' ) {
-    ///                             ++p;
-    ///                             m_Pos = p;
-    ///                             ++m_LastReadSize;
-    ///                         }
-    ///                     }
-    ///                 }
-    ///                 else {
-    ///                     if ( c == '\r' && *p == '\n' ) {
-    ///                         if ( ++p == end ) {
-    ///                             x_ReadBuffer();
-    ///                             p = m_Pos;
-    ///                             ++m_LastReadSize;
-    ///                         }
-    ///                     }
-    ///                     m_Pos = p;
-    ///                 }
-    ///                 return;
-    ///             }
-    ///         }
-    ///         m_String.append(start, end - start);
-    ///     }
-    ///     m_Line = m_String;
-    ///     m_LastReadSize = m_Line.size();
-    ///     return;
-    /// }
-    /// ```
     fn load_long(&mut self) {
         self.string.clear();
         self.string
@@ -376,64 +211,10 @@ impl<R: Read> BufferedLineReader<R> {
     /// Fills the buffer from its start; false at the end of the input.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:619-653
-    /// ```c++
-    /// bool CBufferedLineReader::x_ReadBuffer()
-    /// {
-    ///     _ASSERT(m_Reader);
-    ///
-    ///     if ( m_Eof ) {
-    ///         return false;
-    ///     }
-    ///
-    ///     m_InputPos += CT_OFF_TYPE(m_End - m_Buffer.get());
-    ///     m_Pos = m_End = m_Buffer.get();
-    ///     for (bool flag = true; flag; ) {
-    ///         size_t size;
-    ///         ERW_Result result =
-    ///             m_Reader->Read(m_Buffer.get(), m_BufferSize, &size);
-    ///         switch (result) {
-    ///         case eRW_NotImplemented:
-    ///         case eRW_Error:
-    ///             NCBI_THROW(CIOException, eRead, "Read error");
-    ///             /*NOTREACHED*/
-    ///             break;
-    ///         case eRW_Timeout:
-    ///             // keep spinning around
-    ///             break;
-    ///         case eRW_Eof:
-    ///             m_Eof = true;
-    ///             // fall through
-    ///         case eRW_Success:
-    ///             m_End = m_Pos + size;
-    ///             return (result == eRW_Success  ||  size > 0);
-    ///         default:
-    ///             _ASSERT(0);
-    ///         }
-    ///     } // for
-    ///     return false;
-    /// }
-    /// ```
     /// `CStreamReader::Read` takes the bytes with `sgetn`, which returns fewer than asked
     /// only at the end of the input, and answers `eRW_Eof` when it got none:
     ///
     /// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:604-622
-    /// ```c++
-    ///     streambuf* sb = m_Stream->rdbuf();
-    ///     bool       ok = sb  &&  m_Stream->good();
-    ///     streamsize r  = ok ? sb->sgetn(static_cast<char*>(buf), count) : 0;
-    ///     ...
-    ///     ERW_Result result = eRW_Success;
-    ///     if ( bytes_read ) {
-    ///         *bytes_read = (size_t) r;
-    ///     } else if ((size_t) r < count) {
-    ///         result = eRW_Error;
-    ///     }
-    ///     if (!r) {
-    ///         m_Stream->setstate(!sb  ? NcbiBadbit
-    ///                            : ok ? NcbiEofbit : NcbiFailbit);
-    ///         result = ok ? eRW_Eof : eRW_Error;
-    ///     }
-    /// ```
     /// A read that fails ends the input here and is reported by the source (LOSAT's: a
     /// Rust reader returns the error, where `sgetn` returns a short count or throws).
     fn read_buffer(&mut self) -> bool {
@@ -465,22 +246,6 @@ impl<R: Read> BufferedLineReader<R> {
     /// `operator*`: the current line, without its end.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:656-669
-    /// ```c++
-    /// CTempString CBufferedLineReader::operator*(void) const
-    /// {
-    ///     _ASSERT(!m_UngetLine);
-    ///     /* After UngetLine() - undefined behavior */
-    ///     if (m_UngetLine) {
-    ///         return CTempString(NULL);
-    ///     }
-    ///     /* Right after constructor (m_LineNumber is 0 and UngetLine() was not run,
-    ///     the latter was already checked) - returns NULL */
-    ///     if (m_Line.begin() == NULL) {
-    ///         return CTempString(NULL);
-    ///     }
-    ///     return m_Line;
-    /// }
-    /// ```
     /// The reader takes the line only after `next_line` (never after `unget_line`).
     pub(super) fn line(&self) -> &[u8] {
         match self.line {
@@ -491,17 +256,6 @@ impl<R: Read> BufferedLineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:682-690
-    /// ```c++
-    /// Uint8 CBufferedLineReader::GetLineNumber(void) const
-    /// {
-    ///     /* Right after constructor (m_LineNumber is 0 and UngetLine() was not run)
-    ///        - 0 */
-    ///     /* If at EOF - returns the number of the last string */
-    ///     /* After UngetLine() - number of the previous string */
-    ///     /* Not at EOF, not after UngetLine() - number of the current string */
-    ///     return m_LineNumber;
-    /// }
-    /// ```
     pub(super) fn line_number(&self) -> u64 {
         self.line_number
     }

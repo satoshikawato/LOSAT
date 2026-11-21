@@ -1,0 +1,415 @@
+# NCBI blastn 2.17.0 (official Linux x64 build) and rpsbproc 0.5.1 (bioconda env_rpsbproc-0.5.1) with st_blksize changed to N by obs/blk/blktrace.c (ptrace on the
+# kernel's stat answer; descriptor 1 only for stdout rows, every descriptor for the -out rows). host ws, glibc 2.35, 2026-11-21 (obs/blk/ws_ncbi_blk.sh).
+# blastn: `-query id.fa -subject id.fa -outfmt "6 qseqid sseqid"` with a query id of L bytes: the row is id, tab, id, newline (four insertions of L, 1, L, 1 bytes);
+#   blastn_stdout: standard output pipe/file/pty, columns: case, N, L, destination, write calls (fd:size, descriptor 1 = standard output) ; blastn_out: `-out out.txt` (fd 6).
+# rpsbproc_longdb: `-i arch/bad/matrix_integer_longdb.asn -d data -logfile /dev/stdout` (tests/fixtures/rpsbproc), L is -; fd 1 = standard output, 5 = the log's descriptor.
+blastn_out	100	100	file	6:202
+blastn_out	100	101	file	6:204
+blastn_out	100	200	file	6:402
+blastn_out	100	99	file	6:200
+blastn_out	1000	100	file	6:202
+blastn_out	1000	1000	file	6:2002
+blastn_out	1000	1001	file	6:2004
+blastn_out	1000	2000	file	6:4002
+blastn_out	1000	999	file	6:2000
+blastn_out	1048576	100	file	6:202
+blastn_out	1048576	1048575	file	6:1048575 6:1048576 6:1
+blastn_out	1048576	1048576	file	6:1048576 6:1048577 6:1
+blastn_out	1048576	1048577	file	6:1048577 6:1048578 6:1
+blastn_out	1048576	2097152	file	6:2097152 6:2097153 6:1
+blastn_out	131072	100	file	6:202
+blastn_out	131072	131071	file	6:131071 6:131072 6:1
+blastn_out	131072	131072	file	6:131072 6:131073 6:1
+blastn_out	131072	131073	file	6:131073 6:131074 6:1
+blastn_out	131072	262144	file	6:262144 6:262145 6:1
+blastn_out	1536	100	file	6:202
+blastn_out	1536	1535	file	6:3072
+blastn_out	1536	1536	file	6:3074
+blastn_out	1536	1537	file	6:3076
+blastn_out	1536	3072	file	6:6146
+blastn_out	16384	100	file	6:202
+blastn_out	16384	16383	file	6:16383 6:16384 6:1
+blastn_out	16384	16384	file	6:16384 6:16385 6:1
+blastn_out	16384	16385	file	6:16385 6:16386 6:1
+blastn_out	16384	32768	file	6:32768 6:32769 6:1
+blastn_out	2	1	file	6:4
+blastn_out	2	100	file	6:202
+blastn_out	2	2	file	6:6
+blastn_out	2	3	file	6:8
+blastn_out	2	4	file	6:10
+blastn_out	3	100	file	6:202
+blastn_out	3	2	file	6:6
+blastn_out	3	3	file	6:8
+blastn_out	3	4	file	6:10
+blastn_out	3	6	file	6:14
+blastn_out	3000	100	file	6:202
+blastn_out	3000	2999	file	6:6000
+blastn_out	3000	3000	file	6:6002
+blastn_out	3000	3001	file	6:6004
+blastn_out	3000	6000	file	6:12001 6:1
+blastn_out	4096	100	file	6:202
+blastn_out	4096	4095	file	6:8191 6:1
+blastn_out	4096	4096	file	6:8193 6:1
+blastn_out	4096	4097	file	6:8195 6:1
+blastn_out	4096	8192	file	6:8192 6:8193 6:1
+blastn_out	4194304	100	file	6:202
+blastn_out	4194304	4194303	file	6:4194303 6:4194304 6:1
+blastn_out	4194304	4194304	file	6:4194304 6:4194305 6:1
+blastn_out	4194304	4194305	file	6:4194305 6:4194306 6:1
+blastn_out	4194304	8388608	file	6:8388608 6:8388609 6:1
+blastn_out	511	100	file	6:202
+blastn_out	511	1022	file	6:2046
+blastn_out	511	510	file	6:1022
+blastn_out	511	511	file	6:1024
+blastn_out	511	512	file	6:1026
+blastn_out	512	100	file	6:202
+blastn_out	512	1024	file	6:2050
+blastn_out	512	511	file	6:1024
+blastn_out	512	512	file	6:1026
+blastn_out	512	513	file	6:1028
+blastn_out	6000	100	file	6:202
+blastn_out	6000	12000	file	6:12000 6:12001 6:1
+blastn_out	6000	5999	file	6:11999 6:1
+blastn_out	6000	6000	file	6:12001 6:1
+blastn_out	6000	6001	file	6:12003 6:1
+blastn_out	65536	100	file	6:202
+blastn_out	65536	131072	file	6:131072 6:131073 6:1
+blastn_out	65536	65535	file	6:65535 6:65536 6:1
+blastn_out	65536	65536	file	6:65536 6:65537 6:1
+blastn_out	65536	65537	file	6:65537 6:65538 6:1
+blastn_out	8191	100	file	6:202
+blastn_out	8191	16382	file	6:16382 6:16383 6:1
+blastn_out	8191	8190	file	6:8191 6:8191
+blastn_out	8191	8191	file	6:8191 6:8192 6:1
+blastn_out	8191	8192	file	6:8192 6:8193 6:1
+blastn_out	8192	100	file	6:202
+blastn_out	8192	16384	file	6:16384 6:16385 6:1
+blastn_out	8192	8191	file	6:8191 6:8192 6:1
+blastn_out	8192	8192	file	6:8192 6:8193 6:1
+blastn_out	8192	8193	file	6:8193 6:8194 6:1
+blastn_out	8193	100	file	6:202
+blastn_out	8193	16386	file	6:16386 6:16387 6:1
+blastn_out	8193	8192	file	6:8192 6:8193 6:1
+blastn_out	8193	8193	file	6:8193 6:8194 6:1
+blastn_out	8193	8194	file	6:8194 6:8195 6:1
+blastn_stdout	100	100	file	1:100 1:100 1:1 1:1
+blastn_stdout	100	100	pipe	1:100 1:100 1:1 1:1
+blastn_stdout	100	100	pty	1:100 1:100 1:1 1:1
+blastn_stdout	100	101	file	1:101 1:100 1:2 1:1
+blastn_stdout	100	101	pipe	1:101 1:100 1:2 1:1
+blastn_stdout	100	101	pty	1:101 1:100 1:2 1:1
+blastn_stdout	100	200	file	1:200 1:100 1:101 1:1
+blastn_stdout	100	200	pipe	1:200 1:100 1:101 1:1
+blastn_stdout	100	200	pty	1:200 1:100 1:101 1:1
+blastn_stdout	100	99	file	1:99 1:100 1:1
+blastn_stdout	100	99	pipe	1:99 1:100 1:1
+blastn_stdout	100	99	pty	1:99 1:100 1:1
+blastn_stdout	1000	100	file	1:202
+blastn_stdout	1000	100	pipe	1:202
+blastn_stdout	1000	100	pty	1:202
+blastn_stdout	1000	1000	file	1:1000 1:1000 1:2
+blastn_stdout	1000	1000	pipe	1:1000 1:1000 1:2
+blastn_stdout	1000	1000	pty	1:1000 1:1000 1:2
+blastn_stdout	1000	1001	file	1:1000 1:1000 1:4
+blastn_stdout	1000	1001	pipe	1:1000 1:1000 1:4
+blastn_stdout	1000	1001	pty	1:1000 1:1000 1:4
+blastn_stdout	1000	2000	file	1:2000 1:1000 1:1000 1:2
+blastn_stdout	1000	2000	pipe	1:2000 1:1000 1:1000 1:2
+blastn_stdout	1000	2000	pty	1:2000 1:1000 1:1000 1:2
+blastn_stdout	1000	999	file	1:1000 1:1000
+blastn_stdout	1000	999	pipe	1:1000 1:1000
+blastn_stdout	1000	999	pty	1:1000 1:1000
+blastn_stdout	1048576	100	file	1:202
+blastn_stdout	1048576	100	pipe	1:202
+blastn_stdout	1048576	100	pty	1:202
+blastn_stdout	1048576	1048575	file	1:1040384 1:8192 1:1040384 1:8192
+blastn_stdout	1048576	1048575	pipe	1:1040384 1:8192 1:1040384 1:8192
+blastn_stdout	1048576	1048575	pty	1:1040384 1:8192 1:1040384 1:8192
+blastn_stdout	1048576	1048576	file	1:1048576 1:8192 1:1040384 1:2
+blastn_stdout	1048576	1048576	pipe	1:1048576 1:8192 1:1040384 1:2
+blastn_stdout	1048576	1048576	pty	1:1048576 1:8192 1:1040384 1:2
+blastn_stdout	1048576	1048577	file	1:1048576 1:8192 1:1040384 1:4
+blastn_stdout	1048576	1048577	pipe	1:1048576 1:8192 1:1040384 1:4
+blastn_stdout	1048576	1048577	pty	1:1048576 1:8192 1:1040384 1:4
+blastn_stdout	1048576	2097152	file	1:2097152 1:8192 1:2088960 1:2
+blastn_stdout	1048576	2097152	pipe	1:2097152 1:8192 1:2088960 1:2
+blastn_stdout	1048576	2097152	pty	1:2097152 1:8192 1:2088960 1:2
+blastn_stdout	131072	100	file	1:202
+blastn_stdout	131072	100	pipe	1:202
+blastn_stdout	131072	100	pty	1:202
+blastn_stdout	131072	131071	file	1:122880 1:8192 1:122880 1:8192
+blastn_stdout	131072	131071	pipe	1:122880 1:8192 1:122880 1:8192
+blastn_stdout	131072	131071	pty	1:122880 1:8192 1:122880 1:8192
+blastn_stdout	131072	131072	file	1:131072 1:8192 1:122880 1:2
+blastn_stdout	131072	131072	pipe	1:131072 1:8192 1:122880 1:2
+blastn_stdout	131072	131072	pty	1:131072 1:8192 1:122880 1:2
+blastn_stdout	131072	131073	file	1:131072 1:8192 1:122880 1:4
+blastn_stdout	131072	131073	pipe	1:131072 1:8192 1:122880 1:4
+blastn_stdout	131072	131073	pty	1:131072 1:8192 1:122880 1:4
+blastn_stdout	131072	262144	file	1:262144 1:8192 1:253952 1:2
+blastn_stdout	131072	262144	pipe	1:262144 1:8192 1:253952 1:2
+blastn_stdout	131072	262144	pty	1:262144 1:8192 1:253952 1:2
+blastn_stdout	1536	100	file	1:202
+blastn_stdout	1536	100	pipe	1:202
+blastn_stdout	1536	100	pty	1:202
+blastn_stdout	1536	1535	file	1:1536 1:1536
+blastn_stdout	1536	1535	pipe	1:1536 1:1536
+blastn_stdout	1536	1535	pty	1:1536 1:1536
+blastn_stdout	1536	1536	file	1:1536 1:1536 1:2
+blastn_stdout	1536	1536	pipe	1:1536 1:1536 1:2
+blastn_stdout	1536	1536	pty	1:1536 1:1536 1:2
+blastn_stdout	1536	1537	file	1:1536 1:1536 1:4
+blastn_stdout	1536	1537	pipe	1:1536 1:1536 1:4
+blastn_stdout	1536	1537	pty	1:1536 1:1536 1:4
+blastn_stdout	1536	3072	file	1:3072 1:1536 1:1536 1:2
+blastn_stdout	1536	3072	pipe	1:3072 1:1536 1:1536 1:2
+blastn_stdout	1536	3072	pty	1:3072 1:1536 1:1536 1:2
+blastn_stdout	16384	100	file	1:202
+blastn_stdout	16384	100	pipe	1:202
+blastn_stdout	16384	100	pty	1:202
+blastn_stdout	16384	16383	file	1:8192 1:8192 1:8192 1:8192
+blastn_stdout	16384	16383	pipe	1:8192 1:8192 1:8192 1:8192
+blastn_stdout	16384	16383	pty	1:8192 1:8192 1:8192 1:8192
+blastn_stdout	16384	16384	file	1:16384 1:8192 1:8192 1:2
+blastn_stdout	16384	16384	pipe	1:16384 1:8192 1:8192 1:2
+blastn_stdout	16384	16384	pty	1:16384 1:8192 1:8192 1:2
+blastn_stdout	16384	16385	file	1:16384 1:8192 1:8192 1:4
+blastn_stdout	16384	16385	pipe	1:16384 1:8192 1:8192 1:4
+blastn_stdout	16384	16385	pty	1:16384 1:8192 1:8192 1:4
+blastn_stdout	16384	32768	file	1:32768 1:8192 1:24576 1:2
+blastn_stdout	16384	32768	pipe	1:32768 1:8192 1:24576 1:2
+blastn_stdout	16384	32768	pty	1:32768 1:8192 1:24576 1:2
+blastn_stdout	2	1	file	1:1 1:2 1:1
+blastn_stdout	2	1	pipe	1:1 1:2 1:1
+blastn_stdout	2	1	pty	1:1 1:2 1:1
+blastn_stdout	2	100	file	1:100 1:2 1:99 1:1
+blastn_stdout	2	100	pipe	1:100 1:2 1:99 1:1
+blastn_stdout	2	100	pty	1:100 1:2 1:99 1:1
+blastn_stdout	2	2	file	1:2 1:2 1:1 1:1
+blastn_stdout	2	2	pipe	1:2 1:2 1:1 1:1
+blastn_stdout	2	2	pty	1:2 1:2 1:1 1:1
+blastn_stdout	2	3	file	1:3 1:2 1:2 1:1
+blastn_stdout	2	3	pipe	1:3 1:2 1:2 1:1
+blastn_stdout	2	3	pty	1:3 1:2 1:2 1:1
+blastn_stdout	2	4	file	1:4 1:2 1:3 1:1
+blastn_stdout	2	4	pipe	1:4 1:2 1:3 1:1
+blastn_stdout	2	4	pty	1:4 1:2 1:3 1:1
+blastn_stdout	3	100	file	1:100 1:3 1:98 1:1
+blastn_stdout	3	100	pipe	1:100 1:3 1:98 1:1
+blastn_stdout	3	100	pty	1:100 1:3 1:98 1:1
+blastn_stdout	3	2	file	1:2 1:3 1:1
+blastn_stdout	3	2	pipe	1:2 1:3 1:1
+blastn_stdout	3	2	pty	1:2 1:3 1:1
+blastn_stdout	3	3	file	1:3 1:3 1:1 1:1
+blastn_stdout	3	3	pipe	1:3 1:3 1:1 1:1
+blastn_stdout	3	3	pty	1:3 1:3 1:1 1:1
+blastn_stdout	3	4	file	1:4 1:3 1:2 1:1
+blastn_stdout	3	4	pipe	1:4 1:3 1:2 1:1
+blastn_stdout	3	4	pty	1:4 1:3 1:2 1:1
+blastn_stdout	3	6	file	1:6 1:3 1:4 1:1
+blastn_stdout	3	6	pipe	1:6 1:3 1:4 1:1
+blastn_stdout	3	6	pty	1:6 1:3 1:4 1:1
+blastn_stdout	3000	100	file	1:202
+blastn_stdout	3000	100	pipe	1:202
+blastn_stdout	3000	100	pty	1:202
+blastn_stdout	3000	2999	file	1:3000 1:3000
+blastn_stdout	3000	2999	pipe	1:3000 1:3000
+blastn_stdout	3000	2999	pty	1:3000 1:3000
+blastn_stdout	3000	3000	file	1:3000 1:3000 1:2
+blastn_stdout	3000	3000	pipe	1:3000 1:3000 1:2
+blastn_stdout	3000	3000	pty	1:3000 1:3000 1:2
+blastn_stdout	3000	3001	file	1:3000 1:3000 1:4
+blastn_stdout	3000	3001	pipe	1:3000 1:3000 1:4
+blastn_stdout	3000	3001	pty	1:3000 1:3000 1:4
+blastn_stdout	3000	6000	file	1:6000 1:3000 1:3000 1:2
+blastn_stdout	3000	6000	pipe	1:6000 1:3000 1:3000 1:2
+blastn_stdout	3000	6000	pty	1:6000 1:3000 1:3000 1:2
+blastn_stdout	4096	100	file	1:202
+blastn_stdout	4096	100	pipe	1:202
+blastn_stdout	4096	100	pty	1:202
+blastn_stdout	4096	4095	file	1:4096 1:4096
+blastn_stdout	4096	4095	pipe	1:4096 1:4096
+blastn_stdout	4096	4095	pty	1:4096 1:4096
+blastn_stdout	4096	4096	file	1:4096 1:4096 1:2
+blastn_stdout	4096	4096	pipe	1:4096 1:4096 1:2
+blastn_stdout	4096	4096	pty	1:4096 1:4096 1:2
+blastn_stdout	4096	4097	file	1:4096 1:4096 1:4
+blastn_stdout	4096	4097	pipe	1:4096 1:4096 1:4
+blastn_stdout	4096	4097	pty	1:4096 1:4096 1:4
+blastn_stdout	4096	8192	file	1:8192 1:4096 1:4096 1:2
+blastn_stdout	4096	8192	pipe	1:8192 1:4096 1:4096 1:2
+blastn_stdout	4096	8192	pty	1:8192 1:4096 1:4096 1:2
+blastn_stdout	4194304	100	file	1:202
+blastn_stdout	4194304	100	pipe	1:202
+blastn_stdout	4194304	100	pty	1:202
+blastn_stdout	4194304	4194303	file	1:4186112 1:8192 1:4186112 1:8192
+blastn_stdout	4194304	4194303	pipe	1:4186112 1:8192 1:4186112 1:8192
+blastn_stdout	4194304	4194303	pty	1:4186112 1:8192 1:4186112 1:8192
+blastn_stdout	4194304	4194304	file	1:4194304 1:8192 1:4186112 1:2
+blastn_stdout	4194304	4194304	pipe	1:4194304 1:8192 1:4186112 1:2
+blastn_stdout	4194304	4194304	pty	1:4194304 1:8192 1:4186112 1:2
+blastn_stdout	4194304	4194305	file	1:4194304 1:8192 1:4186112 1:4
+blastn_stdout	4194304	4194305	pipe	1:4194304 1:8192 1:4186112 1:4
+blastn_stdout	4194304	4194305	pty	1:4194304 1:8192 1:4186112 1:4
+blastn_stdout	4194304	8388608	file	1:8388608 1:8192 1:8380416 1:2
+blastn_stdout	4194304	8388608	pipe	1:8388608 1:8192 1:8380416 1:2
+blastn_stdout	4194304	8388608	pty	1:8388608 1:8192 1:8380416 1:2
+blastn_stdout	511	100	file	1:202
+blastn_stdout	511	100	pipe	1:202
+blastn_stdout	511	100	pty	1:202
+blastn_stdout	511	1022	file	1:1022 1:511 1:511 1:2
+blastn_stdout	511	1022	pipe	1:1022 1:511 1:511 1:2
+blastn_stdout	511	1022	pty	1:1022 1:511 1:511 1:2
+blastn_stdout	511	510	file	1:511 1:511
+blastn_stdout	511	510	pipe	1:511 1:511
+blastn_stdout	511	510	pty	1:511 1:511
+blastn_stdout	511	511	file	1:511 1:511 1:2
+blastn_stdout	511	511	pipe	1:511 1:511 1:2
+blastn_stdout	511	511	pty	1:511 1:511 1:2
+blastn_stdout	511	512	file	1:511 1:511 1:4
+blastn_stdout	511	512	pipe	1:511 1:511 1:4
+blastn_stdout	511	512	pty	1:511 1:511 1:4
+blastn_stdout	512	100	file	1:202
+blastn_stdout	512	100	pipe	1:202
+blastn_stdout	512	100	pty	1:202
+blastn_stdout	512	1024	file	1:1024 1:512 1:512 1:2
+blastn_stdout	512	1024	pipe	1:1024 1:512 1:512 1:2
+blastn_stdout	512	1024	pty	1:1024 1:512 1:512 1:2
+blastn_stdout	512	511	file	1:512 1:512
+blastn_stdout	512	511	pipe	1:512 1:512
+blastn_stdout	512	511	pty	1:512 1:512
+blastn_stdout	512	512	file	1:512 1:512 1:2
+blastn_stdout	512	512	pipe	1:512 1:512 1:2
+blastn_stdout	512	512	pty	1:512 1:512 1:2
+blastn_stdout	512	513	file	1:512 1:512 1:4
+blastn_stdout	512	513	pipe	1:512 1:512 1:4
+blastn_stdout	512	513	pty	1:512 1:512 1:4
+blastn_stdout	6000	100	file	1:202
+blastn_stdout	6000	100	pipe	1:202
+blastn_stdout	6000	100	pty	1:202
+blastn_stdout	6000	12000	file	1:12000 1:6000 1:6000 1:2
+blastn_stdout	6000	12000	pipe	1:12000 1:6000 1:6000 1:2
+blastn_stdout	6000	12000	pty	1:12000 1:6000 1:6000 1:2
+blastn_stdout	6000	5999	file	1:6000 1:6000
+blastn_stdout	6000	5999	pipe	1:6000 1:6000
+blastn_stdout	6000	5999	pty	1:6000 1:6000
+blastn_stdout	6000	6000	file	1:6000 1:6000 1:2
+blastn_stdout	6000	6000	pipe	1:6000 1:6000 1:2
+blastn_stdout	6000	6000	pty	1:6000 1:6000 1:2
+blastn_stdout	6000	6001	file	1:6000 1:6000 1:4
+blastn_stdout	6000	6001	pipe	1:6000 1:6000 1:4
+blastn_stdout	6000	6001	pty	1:6000 1:6000 1:4
+blastn_stdout	65536	100	file	1:202
+blastn_stdout	65536	100	pipe	1:202
+blastn_stdout	65536	100	pty	1:202
+blastn_stdout	65536	131072	file	1:131072 1:8192 1:122880 1:2
+blastn_stdout	65536	131072	pipe	1:131072 1:8192 1:122880 1:2
+blastn_stdout	65536	131072	pty	1:131072 1:8192 1:122880 1:2
+blastn_stdout	65536	65535	file	1:57344 1:8192 1:57344 1:8192
+blastn_stdout	65536	65535	pipe	1:57344 1:8192 1:57344 1:8192
+blastn_stdout	65536	65535	pty	1:57344 1:8192 1:57344 1:8192
+blastn_stdout	65536	65536	file	1:65536 1:8192 1:57344 1:2
+blastn_stdout	65536	65536	pipe	1:65536 1:8192 1:57344 1:2
+blastn_stdout	65536	65536	pty	1:65536 1:8192 1:57344 1:2
+blastn_stdout	65536	65537	file	1:65536 1:8192 1:57344 1:4
+blastn_stdout	65536	65537	pipe	1:65536 1:8192 1:57344 1:4
+blastn_stdout	65536	65537	pty	1:65536 1:8192 1:57344 1:4
+blastn_stdout	8191	100	file	1:202
+blastn_stdout	8191	100	pipe	1:202
+blastn_stdout	8191	100	pty	1:202
+blastn_stdout	8191	16382	file	1:16382 1:8191 1:8191 1:2
+blastn_stdout	8191	16382	pipe	1:16382 1:8191 1:8191 1:2
+blastn_stdout	8191	16382	pty	1:16382 1:8191 1:8191 1:2
+blastn_stdout	8191	8190	file	1:8191 1:8191
+blastn_stdout	8191	8190	pipe	1:8191 1:8191
+blastn_stdout	8191	8190	pty	1:8191 1:8191
+blastn_stdout	8191	8191	file	1:8191 1:8191 1:2
+blastn_stdout	8191	8191	pipe	1:8191 1:8191 1:2
+blastn_stdout	8191	8191	pty	1:8191 1:8191 1:2
+blastn_stdout	8191	8192	file	1:8191 1:8191 1:4
+blastn_stdout	8191	8192	pipe	1:8191 1:8191 1:4
+blastn_stdout	8191	8192	pty	1:8191 1:8191 1:4
+blastn_stdout	8192	100	file	1:202
+blastn_stdout	8192	100	pipe	1:202
+blastn_stdout	8192	100	pty	1:202
+blastn_stdout	8192	16384	file	1:16384 1:8192 1:8192 1:2
+blastn_stdout	8192	16384	pipe	1:16384 1:8192 1:8192 1:2
+blastn_stdout	8192	16384	pty	1:16384 1:8192 1:8192 1:2
+blastn_stdout	8192	8191	file	1:8192 1:8192
+blastn_stdout	8192	8191	pipe	1:8192 1:8192
+blastn_stdout	8192	8191	pty	1:8192 1:8192
+blastn_stdout	8192	8192	file	1:8192 1:8192 1:2
+blastn_stdout	8192	8192	pipe	1:8192 1:8192 1:2
+blastn_stdout	8192	8192	pty	1:8192 1:8192 1:2
+blastn_stdout	8192	8193	file	1:8192 1:8192 1:4
+blastn_stdout	8192	8193	pipe	1:8192 1:8192 1:4
+blastn_stdout	8192	8193	pty	1:8192 1:8192 1:4
+blastn_stdout	8193	100	file	1:202
+blastn_stdout	8193	100	pipe	1:202
+blastn_stdout	8193	100	pty	1:202
+blastn_stdout	8193	16386	file	1:16384 1:8192 1:8192 1:6
+blastn_stdout	8193	16386	pipe	1:16384 1:8192 1:8192 1:6
+blastn_stdout	8193	16386	pty	1:16384 1:8192 1:8192 1:6
+blastn_stdout	8193	8192	file	1:8192 1:8192 1:2
+blastn_stdout	8193	8192	pipe	1:8192 1:8192 1:2
+blastn_stdout	8193	8192	pty	1:8192 1:8192 1:2
+blastn_stdout	8193	8193	file	1:8192 1:8192 1:4
+blastn_stdout	8193	8193	pipe	1:8192 1:8192 1:4
+blastn_stdout	8193	8193	pty	1:8192 1:8192 1:4
+blastn_stdout	8193	8194	file	1:8192 1:8192 1:6
+blastn_stdout	8193	8194	pipe	1:8192 1:8192 1:6
+blastn_stdout	8193	8194	pty	1:8192 1:8192 1:6
+rpsbproc_longdb	100	-	file	1:1122 1:5 1:100 1:4925 5:128 5:168 1:1
+rpsbproc_longdb	100	-	pipe	1:1122 1:5 1:100 1:4925 5:128 5:168 1:1
+rpsbproc_longdb	100	-	pty	1:1122 1:5 1:100 1:4925 5:128 5:168 1:1
+rpsbproc_longdb	1000	-	file	1:1000 1:127 1:1000 1:4000 5:128 5:168 1:26
+rpsbproc_longdb	1000	-	pipe	1:1000 1:127 1:1000 1:4000 5:128 5:168 1:26
+rpsbproc_longdb	1000	-	pty	1:1000 1:17 1:25 1:9 1:71 1:5 1:1000 1:4000 5:128 5:168 1:26
+rpsbproc_longdb	1048576	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	1048576	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	1048576	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	131072	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	131072	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	131072	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	1536	-	file	1:1127 1:1536 1:3072 5:128 5:168 1:418
+rpsbproc_longdb	1536	-	pipe	1:1127 1:1536 1:3072 5:128 5:168 1:418
+rpsbproc_longdb	1536	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 1:1536 1:3072 5:128 5:168 1:418
+rpsbproc_longdb	16384	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	16384	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	16384	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	2	-	file	1:1122 1:2 1:2 1:1 1:2 1:5 1:2 1:2 1:5 1:2 1:6 1:2 1:4999 5:128 5:168 1:1
+rpsbproc_longdb	2	-	pipe	1:1122 1:2 1:2 1:1 1:2 1:5 1:2 1:2 1:5 1:2 1:6 1:2 1:4999 5:128 5:168 1:1
+rpsbproc_longdb	2	-	pty	1:1122 1:2 1:2 1:1 1:2 1:5 1:2 1:2 1:5 1:2 1:6 1:2 1:4999 5:128 5:168 1:1
+rpsbproc_longdb	3	-	file	1:1122 1:3 1:1 1:1 1:3 1:4 1:3 1:6 1:3 1:5 1:3 1:4998 5:128 5:168 1:1
+rpsbproc_longdb	3	-	pipe	1:1122 1:3 1:1 1:1 1:3 1:4 1:3 1:6 1:3 1:5 1:3 1:4998 5:128 5:168 1:1
+rpsbproc_longdb	3	-	pty	1:1122 1:3 1:1 1:1 1:3 1:4 1:3 1:6 1:3 1:5 1:3 1:4998 5:128 5:168 1:1
+rpsbproc_longdb	3000	-	file	1:1127 1:3000 5:128 5:168 1:2026
+rpsbproc_longdb	3000	-	pipe	1:1127 1:3000 5:128 5:168 1:2026
+rpsbproc_longdb	3000	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 1:3000 5:128 5:168 1:2026
+rpsbproc_longdb	4096	-	file	1:1127 1:4096 5:128 5:168 1:930
+rpsbproc_longdb	4096	-	pipe	1:1127 1:4096 5:128 5:168 1:930
+rpsbproc_longdb	4096	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 1:4096 5:128 5:168 1:930
+rpsbproc_longdb	4194304	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	4194304	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	4194304	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	511	-	file	1:1022 1:105 1:511 1:4088 5:128 5:168 1:427
+rpsbproc_longdb	511	-	pipe	1:1022 1:105 1:511 1:4088 5:128 5:168 1:427
+rpsbproc_longdb	511	-	pty	1:1022 1:20 1:9 1:71 1:5 1:511 1:4088 5:128 5:168 1:427
+rpsbproc_longdb	512	-	file	1:1024 1:103 1:512 1:4096 5:128 5:168 1:418
+rpsbproc_longdb	512	-	pipe	1:1024 1:103 1:512 1:4096 5:128 5:168 1:418
+rpsbproc_longdb	512	-	pty	1:1024 1:18 1:9 1:71 1:5 1:512 1:4096 5:128 5:168 1:418
+rpsbproc_longdb	6000	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	6000	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	6000	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	65536	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	65536	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	65536	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	8191	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8191	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8191	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	8192	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8192	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8192	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026
+rpsbproc_longdb	8193	-	file	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8193	-	pipe	1:1127 5:128 5:168 1:5026
+rpsbproc_longdb	8193	-	pty	1:34 1:1 1:53 1:28 1:26 1:22 1:21 1:50 1:38 1:24 1:6 1:82 1:60 1:9 1:158 1:23 1:12 1:7 1:134 1:23 1:10 1:8 1:80 1:23 1:11 1:21 1:23 1:30 1:25 1:9 1:71 1:5 5:128 5:168 1:5026

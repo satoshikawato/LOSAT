@@ -1,0 +1,36 @@
+source	case	role	file	sequences	residues	disk_bytes	sha256	db_name
+j2	bp	query	sp4_first3000.fa	3000	1196107		7bb9ca5039451bbdc6f0f116850d272ca6b2f7f9cc2d259f8d5d2bcaf642cbdf	
+j2	bp	subject (NCBI -db built from this FASTA)	Species6.fa	6600	2914067		cf37321c9616263b716759f0054c7b00070324a12d9548c4bf49efbe849b354d	BlastDBSpecies6
+j2	bpff	query	Species4.fa	23879	13375567		0f3be53c7acdd48e10ed0e2fc8f3de87e366ff416d6ffc4b77b5732da59cc1dc	
+j2	bpff	subject (NCBI -db built from this FASTA)	Species6.fa	6600	2914067		cf37321c9616263b716759f0054c7b00070324a12d9548c4bf49efbe849b354d	BlastDBSpecies6
+j2	mb	query	q100.fna	100	143418		145ffef191fc7af4bf695f322f3dce463127d8bd250ac2f81f34a6e82065e57b	
+j2	mb	subject (NCBI -db built from this FASTA)	16s_all.fna	28036	40608964		7c5eec160a6291c5df0c14f8d5350cf94665eac2016a6fbcd06a73282fae01b5	16s_all
+j2	bn	query	dmel_cdna_first31168.fa	31168	89286901		6a6df0c6deff38313ef529a6b0308d02f7d81ca0d92de33970df9e18704ca6e0	
+j2	bn	subject (NCBI -db built from this FASTA)	dmel_dna_3M.fa	1	3000000		d024fa36a070767625be4968e566bb6ff97b59006ac58d7a81cf324d8babfb6c	dmel_dna_3M
+j2	dc	query	dmel_cdna_first31168.fa	31168	89286901		6a6df0c6deff38313ef529a6b0308d02f7d81ca0d92de33970df9e18704ca6e0	
+j2	dc	subject (NCBI -db built from this FASTA)	dmel_dna_3M.fa	1	3000000		d024fa36a070767625be4968e566bb6ff97b59006ac58d7a81cf324d8babfb6c	dmel_dna_3M
+j2	bns	query	short_q30000.fa	30000	720000		e6959ab60e516c91b9af0437d16da5b9cedc8512a633fa08c2a6d9b8d90e67cc	
+j2	bns	subject (NCBI -db built from this FASTA)	dmel_dna_3M.fa	1	3000000		d024fa36a070767625be4968e566bb6ff97b59006ac58d7a81cf324d8babfb6c	dmel_dna_3M
+j2	tbn	query	hsap_p1.faa	1	411		73969385b37df10e47d30f573d6811f8b10ba9595bc382bccaf9b42ee2bb7ab2	
+j2	tbn	db (same for LOSAT -db and NCBI)	hsap_dna	194	3099750718		BLAST db prefix, sha256 of .nin: ec68552cfef10259d43a87474d56b65fb0e4304e2688bf75109d1685b9619de8	hsap_dna
+j2	bx	query	g2l50k.fa	1	50000		b98274f6f667c165b73d3ec89ca9aaeeaf44bae5b9486ee0dca3288bf60cc7e9	
+j2	bx	db (same for LOSAT -db and NCBI)	dmel_pep	30802	20379496		BLAST db prefix, sha256 of .pin: ae5b6ec32d08d98fbf8eed80875f1fd2482005d082ede66c740b371bcfd155b9	dmel_pep
+j2	tbx	query	txB_q.fa	3	1911341		794e3ae6d16336acb2aa379091bd521a7a80af204238e48716648bcb73bc18dd	
+j2	tbx	subject (NCBI -db built from this FASTA)	txB_s.fa	3	1883924		5aa1f8711aaad462326576475d77398383fa77b53d4411d52e18e05e4b80c586	txB_s
+bench_v020_ext	psi	query	ecoli_s20.faa	20	5882	7717	42e8d5cb17b3476559f3b59c441027a834ca0f2fcf099fe13a183cf105838ca7	
+bench_v020_ext	psi	db	swissprot	487728	186063409	365853647	-	
+bench_v020_ext	rps	query	mg1655_300.faa	300	98758	128287	82dbf3c66c26fa7f6804ddc15741c2016b61a2caa71099744439bee16ff56a05	
+bench_v020_ext	rps	db	Cdd	71136	15821058	4239194013	-	
+bench_v020_ext	rpstbn	query	mg5k_100.fna	100	500000	509455	f1a52199e00867635469e33eb00fb8cd1f7f3ec045391c994c611b5cf23f0402	
+bench_v020_ext	rpstbn	db	Cdd	71136	15821058	4239194013	-	
+bench_v020_ext	mkdb_16s	input	16s_all.fna	28036	40608964	43598728	7c5eec160a6291c5df0c14f8d5350cf94665eac2016a6fbcd06a73282fae01b5	
+bench_v020_ext	mkdb_sprot	input	uniprot_sprot.fasta	575748	209017843	288201213	1372f18e218d761027616bf17479bcf450b30314fc0a8095fcb0e97e85d6ecf9	
+bench_v020_ext	m2_1e4	query	reads1e4.fa	10000	1500000	1678894	bb1ea223a38cc9d5cf2e0fb0168adae887bdd5d24f2f0cbd5f640ce4b9d4e2ec	
+bench_v020_ext	m2_1e5	query	reads1e5.fa	100000	15000000	16888895	cc424fb5449ed88cb2c916b66bf36c8d08b2dda65053006b3d3a75419b0871ea	
+bench_v020_ext	m2_1e6	query	reads1e6.fa	1000000	150000000	169888896	4c4d299f2bca0d431631abd882eaf05bcdb726e7558f0ebdfa0cb91fea5cb963	
+bench_v020_ext	m2	db	16s_all	28036	40608964	15310946	-	
+bench_v020_ext	m3	query	draft200.fa	210	5498578	5584174	da753273a6a6a3f9eacba69a609d3c1278470059fe63684bcc21273b1264055c	
+bench_v020_ext	m3_abr	db	abr_genes	340	324988	157589	-	
+bench_v020_ext	m3_16s	db	16s_all	28036	40608964	15310946	-	
+bench_v020_ext	m3_rpr	db	ref_prok_rep_genomes	1135884	105688350422	26786288178	-	
+bench_v020_ext	m3_cnt	db	core_nt	132327666	1091603847536	319405349368	-	

@@ -3,12 +3,6 @@
 //! below a constant per added thread.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3224-3236
-//! ```c++
-//!         // This is temporarily ignored (per SB-635)
-//!         if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
-//!             m_NumThreads != CThreadable::kMinNumThreads) {
-//!             m_NumThreads = CThreadable::kMinNumThreads;
-//! ```
 //! No NCBI counterpart for the property: NCBI searches a `-subject` on one thread whatever
 //! `-num_threads` says, and LOSAT honors `-num_threads` there (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`),
 //! so the extra is LOSAT's own. A workspace made per piece of work instead of per thread, kept at the

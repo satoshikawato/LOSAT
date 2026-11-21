@@ -221,7 +221,7 @@ fn refused(what: &str, run: &Run) {
     );
 }
 
-const READER_ERROR: &str = "BLAST query error: CFastaReader: Near line";
+const READER_ERROR: &str = "LOSAT query error: CFastaReader: Near line";
 
 #[test]
 fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused() {
@@ -457,7 +457,7 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
     }
 }
 
-const NO_DATA: &str = "BLAST engine error: Warning: Sequence contains no data";
+const NO_DATA: &str = "LOSAT engine error: Warning: Sequence contains no data";
 
 #[test]
 fn the_title_before_a_last_batch_without_letters_is_not_refused() {
@@ -623,7 +623,7 @@ fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes(
         (result, sinks)
     };
     let (result, sinks) = call(&["16"]);
-    let message = result.expect_err("NCBI's error").message().to_string();
+    let message = result.expect_err("NCBI's error").to_string();
     assert!(message.contains("Sequence contains no data"), "{message}");
     assert_eq!(
         String::from_utf8_lossy(&sinks[0])
@@ -634,7 +634,7 @@ fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes(
     );
     for formats in [["16", "5"], ["5", "16"]] {
         let (result, sinks) = call(&formats);
-        let message = result.expect_err("the refusal").message().to_string();
+        let message = result.expect_err("the refusal").to_string();
         assert!(message.contains(REFUSAL), "{formats:?}: {message}");
         assert!(
             sinks.iter().all(Vec::is_empty),

@@ -30,9 +30,18 @@ export interface HighMemorySearch {
 
 export interface HighMemoryRequest {
   readonly threads: number;
-  readonly faultChannel: string;
   readonly cases: readonly HighMemorySearch[];
 }
+
+/**
+ * From the high-memory worker to the page: the result, an error, the page's end of a link of a thread worker or the
+ * keeper (link.ts), or a fault of its thread host, as the Engine worker posts them.
+ */
+export type HighMemoryEvent =
+  | { readonly type: 'result'; readonly result: HighMemoryResult }
+  | { readonly type: 'error'; readonly message: string }
+  | { readonly type: 'link'; readonly port: MessagePort }
+  | { readonly type: 'fault'; readonly message: string };
 
 /** SHA-256 and length of every stream that a search emitted (0, 6, 7, 1 and 3). */
 export interface HighMemoryCase {

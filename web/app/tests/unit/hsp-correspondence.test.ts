@@ -2,10 +2,12 @@
 // TD-3): for every outfmt 0 fixture of the programs that LOSAT Web runs
 // (LOSAT/tests/outfmt0_manifest.tsv; BLASTX joins in SX), the serial reactor runs the
 // search in Node, and
-// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture (a fixture of an
-//   outfmt 6 or 7 field list only adds its search; for the approved
-//   -db_gencode exception, NCBI's database search outside the lines that name the database,
-//   as docs/evidence/losat_web_e2a/check_losat.py compares them),
+// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture in LOSAT's words (LOSAT
+//   states its own version, LOSAT/src/wording.rs; the frozen hash judges LOSAT's output read back
+//   in NCBI's words, `losat_wording.py hash-form`) (a fixture of an outfmt 6 or 7 field list only
+//   adds its search; for the approved -db_gencode exception, NCBI's database search in LOSAT's
+//   words outside the lines that name the database, as docs/evidence/losat_web_e2a/check_losat.py
+//   compares them),
 // - the HSP records' `out6` ranges tile the outfmt 6 text in the order of the records, and
 //   each row's coordinates are the record's,
 // - outfmt 0 has as many sections and subject headings as the records point to, except in a run
@@ -21,6 +23,7 @@
 //   linked only where the outfmt 0 search has exactly its HSPs, so there is no such order),
 // - the results screen's index (domain/result-index.ts) groups the same HSPs.
 // It needs LOSAT_WEB_REACTORS; the gate runs it (docs/evidence/losat_web_w4/run_gate.sh).
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -66,8 +69,6 @@ function fixtures(): Map<string, Fixture[]> {
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;
-    // LOSAT Web refuses the option: it registers a record before the options of a run are known.
-    if (words.includes('-parse_deflines')) continue;
     const stream = ({ '': 0, '0': 0, '6': 6, '7': 7 } as const)[row['outfmt'] ?? ''];
     const fixture: Fixture = {
       id: row['fixture_id']!,
@@ -95,6 +96,8 @@ interface Outputs {
   /** The ids of the registered records (the `id` of the register responses). */
   readonly queryIds: readonly string[];
   readonly subjectIds: readonly string[];
+  /** The IDs that the outputs show for the subjects, where the engine read the deflines' ids (-parse_deflines). */
+  readonly shownSubjectIds?: readonly string[];
 }
 
 /**
@@ -122,10 +125,14 @@ const searchedTwice = (fixture: Fixture): boolean => hitListSize(fixture.words, 
 
 function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const parts = new Map<number, Uint8Array[]>();
-  const query = abi.register(fixture.program, ROLE_QUERY, readFileSync(join(ENGINE, fixture.query)));
-  const subject = abi.register(fixture.program, ROLE_SUBJECT, readFileSync(join(ENGINE, fixture.subject)));
+  const argv = [fixture.program, '-query', fixture.query, '-subject', fixture.subject, ...fixture.words, '-num_threads', '1'];
+  const [queryBytes, subjectBytes] = [readFileSync(join(ENGINE, fixture.query)), readFileSync(join(ENGINE, fixture.subject))];
+  const started = abi.start(argv);
+  // A run with -parse_deflines reads its inputs together for its argv (line WQA's sweep, D7, 2026-11-19), as the app's runs do.
+  const together = started.ok && started.start.registerInputs ? abi.registerInputs(argv, queryBytes, subjectBytes) : undefined;
+  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, queryBytes);
+  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, subjectBytes);
   try {
-    const argv = [fixture.program, '-query', fixture.query, '-subject', fixture.subject, ...fixture.words, '-num_threads', '1'];
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => parts.set(stream, [...(parts.get(stream) ?? []), bytes.slice()]));
   } finally {
     abi.release(query.handle);
@@ -135,10 +142,28 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   for (const [stream, chunks] of parts) streams.set(stream, Buffer.concat(chunks));
   const text = new TextDecoder().decode(streams.get(1) ?? new Uint8Array());
   const records = text.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as HspRecord);
-  return { streams, records, queryIds: query.records.map((r) => r.id), subjectIds: subject.records.map((r) => r.id) };
+  return {
+    streams,
+    records,
+    queryIds: query.records.map((r) => r.id),
+    subjectIds: subject.records.map((r) => r.id),
+    ...(together === undefined ? {} : { shownSubjectIds: together.shownIds.subject }),
+  };
 }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+/** The one mapping between NCBI's words and LOSAT's (LOSAT/tests/losat_wording.py, the port of
+ * LOSAT/src/wording.rs): `map-output` gives LOSAT's bytes of NCBI's output, `hash-form` LOSAT's
+ * output read back in NCBI's words (`ncbi-words: ...` when it still writes NCBI's words). */
+function wording(command: 'map-output' | 'hash-form', bytes: Uint8Array): Uint8Array | string {
+  const run = spawnSync('python3', ['-I', join(ENGINE, 'tests/losat_wording.py'), command, '-'], {
+    input: bytes,
+    maxBuffer: 1 << 30,
+  });
+  if (run.error) throw run.error;
+  return run.status === 0 ? new Uint8Array(run.stdout) : `ncbi-words: ${run.stderr.toString()}`;
+}
 
 /**
  * check_losat.py's normalize_database_lines: a report without the lines that name the
@@ -175,7 +200,8 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const bytes = outputs.streams.get(stream) ?? new Uint8Array();
   const label = `${fixture.id}: NCBI's frozen outfmt ${stream}`;
   if (database === undefined) {
-    expect(sha256(bytes), label).toBe(frozen);
+    const read = wording('hash-form', bytes);
+    expect(typeof read === 'string' ? read : sha256(read), label).toBe(frozen);
     return 'bytes';
   }
   const oracle = readFileSync(join(ENGINE, database));
@@ -183,8 +209,10 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const posted = Buffer.from(oracle.toString('latin1').replace(/^( {4}Posted date: {2}).*$/gm, '$1(the time makeblastdb ran)'), 'latin1');
   expect(sha256(posted), `${fixture.id}: ${database}`).toBe(frozen);
   const decoder = new TextDecoder();
+  const inLosatWords = wording('map-output', oracle);
+  if (typeof inLosatWords === 'string') throw new Error(inLosatWords);
   expect(withoutDatabaseLines(decoder.decode(bytes)), `${label} (database search, -db_gencode exception)`).toBe(
-    withoutDatabaseLines(decoder.decode(oracle)),
+    withoutDatabaseLines(decoder.decode(inLosatWords)),
   );
   return 'database';
 }
@@ -193,10 +221,13 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
 /**
  * The first and last coordinates of the label's lines of one section. With -line_length 1 NCBI writes
  * the first Query line without its start (`Query       T`, the frozen bytes of the t1.*.ll1 rows); the
- * start is then undefined and only the end can be compared.
+ * start is then undefined and only the end can be compared. The section of an HSP of length 0
+ * (BLASTP `-ungapped -window_size 0`, the ungapped.blastp.len0.* rows) has its score lines and no
+ * alignment lines: undefined.
  */
-function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] {
+function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] | undefined {
   const lines = section.split('\n').filter((line) => line.startsWith(`${label} `));
+  if (lines.length === 0) return undefined;
   const parse = (line: string) => line.trim().split(/\s+/);
   const first = parse(lines[0]!);
   const last = parse(lines.at(-1)!);
@@ -212,7 +243,7 @@ function shownEnds(ends: [number | undefined, number], start: number, end: numbe
 /** The raw score, the first and last coordinates of one HSP section of outfmt 0, as a comparable text. */
 function sectionKey(section: string): string {
   const raw = /^ Score = +[\d.]+ bits \((\d+)\)/.exec(section)?.[1];
-  return JSON.stringify([Number(raw), ...alignmentEnds(section, 'Query'), ...alignmentEnds(section, 'Sbjct')]);
+  return JSON.stringify([Number(raw), ...(alignmentEnds(section, 'Query') ?? []), ...(alignmentEnds(section, 'Sbjct') ?? [])]);
 }
 
 /**
@@ -262,6 +293,8 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   const out0 = outputs.streams.get(0) ?? new Uint8Array();
   const records = [...outputs.records].sort((a, b) => a.index - b.index);
   const where = (record: HspRecord) => `${fixture.id} HSP ${record.index}`;
+  /** The name of each subject's heading, by subject (-parse_deflines). */
+  const headingNames = new Map<number, string>();
 
   // outfmt 6: one row per record, in the order of the records, covering the text exactly.
   const rows = decoder.decode(out6).split('\n').filter((l) => l !== '');
@@ -283,10 +316,20 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // -sorthits and -sorthsps sort the pairwise output only (NCBI: "Not applicable for outfmt > 4";
   // blast_format.cpp:1523-1530), so with them the sections follow that order, not the records'.
   const sortsPairwise = fixture.words.includes('-sorthits') || fixture.words.includes('-sorthsps');
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = decoder.decode(out0.subarray(0, 9)) === 'RMBLASTN ';
   let previousEnd = 0;
   const headings = new Map<string, readonly [number, number] | null>();
   let sections = 0;
   let unshown = 0;
+  // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty heading, and
+  // NCBI's line stands in place of each of its alignments (c++/src/objtools/align_format/showalign.cpp:1976-1981; LOSAT's
+  // report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
+  const skippedLine = /^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/;
+  const skippedHeadings = new Set<number>();
+  let skipped = 0;
   for (const record of records) {
     const pair = `${record.q_idx}:${record.s_idx}`;
     expect(record.out0 === null, `${where(record)} section and heading`).toBe(record.out0_subject === null);
@@ -296,11 +339,19 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       unshown++;
       continue;
     }
-    sections++;
     const [start, end] = record.out0;
     if (!sortsPairwise) expect(start, `${where(record)} section order`).toBeGreaterThanOrEqual(previousEnd);
     const [hStart, hEnd] = record.out0_subject!;
     expect(hEnd, `${where(record)} heading before section`).toBeLessThanOrEqual(start);
+    const section = decoder.decode(out0.subarray(start, end));
+    if (skippedLine.test(section)) {
+      expect(hEnd, `${where(record)} the empty heading of a skipped alignment`).toBe(hStart);
+      skippedHeadings.add(hStart);
+      skipped++;
+      previousEnd = end;
+      continue;
+    }
+    sections++;
     const heading = decoder.decode(out0.subarray(hStart, hEnd));
     expect(heading.startsWith('>'), `${where(record)} heading text`).toBe(true);
     expect(heading, `${where(record)} heading Length=`).toMatch(/\nLength=\d+\n/);
@@ -308,25 +359,44 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     // no name in the heading, or NCBI's `unnamed`.
     const named = heading.slice(1).split('\n')[0]!.trim().split(/\s+/)[0]!;
     const subjectId = outputs.subjectIds[record.s_idx]!;
-    expect(subjectId === '' ? ['', 'unnamed'] : [subjectId], `${where(record)} heading names the record's subject`).toContain(named);
-    const section = decoder.decode(out0.subarray(start, end));
+    if (outputs.shownSubjectIds === undefined) {
+      expect(subjectId === '' ? ['', 'unnamed'] : [subjectId], `${where(record)} heading names the record's subject`).toContain(named);
+    } else {
+      // Under -parse_deflines NCBI's heading names a subject by an ID of its choice (`NP_000006.1` of
+      // `gi|6|ref|NP_000006.1|`, `2DEF_B` of `pdb|2DEF|B`): each subject's headings have one name, which
+      // no subject of another shown ID has (checked below).
+      expect(named, `${where(record)} heading names the record's subject`).toBe(headingNames.get(record.s_idx) ?? named);
+      headingNames.set(record.s_idx, named);
+    }
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
-    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
+    if (rawScoreOnly) expect(section, `${where(record)} section raw score`).toMatch(new RegExp(`^ Score = ${record.raw_score}\n`));
+    else expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     const queryEnds = alignmentEnds(section, 'Query');
     const subjectEnds = alignmentEnds(section, 'Sbjct');
-    expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
-    expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    if (queryEnds === undefined || subjectEnds === undefined) {
+      // An HSP of length 0: no alignment lines, and the record's ranges end one before they start.
+      expect([queryEnds, subjectEnds], `${where(record)} a section without alignment lines`).toEqual([undefined, undefined]);
+      expect(section, `${where(record)} the section of an HSP of length 0`).toMatch(/^ Identities = 0\/0 \(100%\),/m);
+      expect([record.q_end - record.q_start, record.s_end - record.s_start], `${where(record)} length 0`).toEqual([-1, -1]);
+    } else {
+      expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
+      expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    }
     previousEnd = end;
   }
+  const subjectsNamed = new Map<string, Set<string>>();
+  for (const [sIdx, name] of headingNames) subjectsNamed.set(name, (subjectsNamed.get(name) ?? new Set()).add(outputs.shownSubjectIds![sIdx]!));
+  for (const [name, shown] of subjectsNamed) expect([...shown], `${fixture.id}: the heading ${name} names one subject`).toHaveLength(1);
   // The text has as many sections and subject headings as the records point to: no section or
   // heading of outfmt 0 lacks its records. In a run of two searches outfmt 0 has a hit list of its own:
   // a section or heading that no record points to is a pair whose records are absent or differ.
   const text = decoder.decode(out0);
-  const pointed = new Set([...headings.values()].flatMap((range) => (range === null ? [] : [range[0]])));
+  const pointed = new Set([...headings.values()].flatMap((range) => (range === null || skippedHeadings.has(range[0]) ? [] : [range[0]])));
   const twice = searchedTwice(fixture);
   let unpointed = 0;
   if (!twice) {
     expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
+    expect(text.match(/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped$/gm)?.length ?? 0, `${fixture.id}: skipped alignments`).toBe(skipped);
     expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
   } else {
     const recordsOf = new Map<string, string[]>();
@@ -375,7 +445,18 @@ const reactors = findReactors();
 describe.skipIf(reactors === undefined)('HSP records and the rows and sections of outfmt 6 and 0 (every outfmt 0 fixture)', () => {
   const searches = reactors === undefined ? new Map<string, Fixture[]>() : fixtures();
   const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
-  const summary = { searches: 0, twice: 0, hsps: 0, sections: 0, unshown: 0, unpointed: 0, programs: new Set<string>(), frozen: { bytes: 0, database: 0, none: 0 } };
+  const summary = {
+    searches: 0,
+    twice: 0,
+    hsps: 0,
+    sections: 0,
+    unshown: 0,
+    unpointed: 0,
+    parsed: 0,
+    refused: 0,
+    programs: new Set<string>(),
+    frozen: { bytes: 0, database: 0, none: 0 },
+  };
 
   it(
     'agree for every search',
@@ -386,7 +467,19 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
         // A fresh instance now and then keeps the instance's memory small.
         if (abi === undefined || runs++ % 20 === 0) abi = (await instantiateSerial(module!)).abi;
         const fixture = group[0]!;
-        const outputs = search(abi, fixture);
+        let outputs: Outputs;
+        try {
+          outputs = search(abi, fixture);
+        } catch (error) {
+          // The search of these fixtures is outfmt 0 (the fixture's other format only adds its search):
+          // LOSAT refuses outfmt 0 of a record that is both a query and a subject and has masks, as on the
+          // command line (the pd.self rows of formats other than 0).
+          const shared = /is both a query and a subject under -parse_deflines and has masks/.test(String(error));
+          if (!shared || !fixture.words.includes('-parse_deflines')) throw error;
+          summary.refused++;
+          continue;
+        }
+        if (outputs.shownSubjectIds !== undefined) summary.parsed++;
         for (const frozen of group) summary.frozen[expectFrozen(frozen, outputs)]++;
         const seen = check(fixture, outputs);
         summary.searches++;
@@ -401,7 +494,7 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
         `HSP correspondence: ${summary.searches} searches (${[...summary.programs].sort().join(', ')}), ${summary.hsps} HSPs, ` +
           `${summary.sections} outfmt 0 sections, ${summary.unshown} HSPs that outfmt 0 does not show; ${summary.twice} searches of two hit list sizes, ${summary.unpointed} outfmt 0 sections no record points to; fixtures equal to NCBI: ` +
           `${summary.frozen.bytes} byte for byte, ${summary.frozen.database} as the database search (-db_gencode exception), ` +
-          `${summary.frozen.none} field lists not compared`,
+          `${summary.frozen.none} field lists not compared; ${summary.parsed} searches with -parse_deflines, ${summary.refused} refused as on the command line`,
       );
       expect([...summary.programs].sort()).toEqual(['blastn', 'blastp', 'tblastn', 'tblastx']);
       expect(summary.unshown, 'the fixtures include HSPs that outfmt 0 does not show').toBeGreaterThan(0);
@@ -409,6 +502,7 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
       expect(summary.unpointed, 'the split fixture has an outfmt 0 section that no record points to').toBeGreaterThan(0);
       expect(summary.frozen.bytes, 'fixtures compared byte for byte').toBeGreaterThan(0);
       expect(summary.frozen.database, 'fixtures of the -db_gencode exception compared').toBeGreaterThan(0);
+      expect(summary.parsed, 'searches with -parse_deflines').toBeGreaterThan(0);
     },
     1_800_000,
   );

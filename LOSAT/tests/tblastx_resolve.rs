@@ -7,16 +7,6 @@
 //! from its stored codes.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:443-450
-//! ```c
-//!         if (c  != 0xFF) {
-//!             // No ambiguities, so we can do this the easy way.
-//!             ncbi2na[i] = c;
-//!
-//!         } else {
-//!             if (b == 0 || b == 0x0F) {
-//!                 //gap or N
-//!                 ncbi2na[i] = random.GetRand() & 0x3;
-//! ```
 //! The walk gives the letter-by-letter walk's frames for every record (the unit test of
 //! `subjects.rs` compares them in one process), so the property under test is that the report does
 //! not depend on the switch. Since `LOSAT_X_TBXSTORE` the command line reads its records packed, so

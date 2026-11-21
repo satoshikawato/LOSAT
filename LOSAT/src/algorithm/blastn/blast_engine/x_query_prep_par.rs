@@ -4,25 +4,7 @@
 //! (`algorithm/blastn/x_query_dust_par.rs`, formerly LOSAT_X_QDUSTPAR, folded in on 2026-11-01).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
-//! ```c++
-//! int buflen = QueryInfo_GetSeqBufLen(qinfo);
-//! TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-//! ...
-//! sequence = queries.GetBlastSequence(index, encoding, strand, eSentinels);
-//! ...
-//! memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2754-2784
-//! ```c
-//!     for (context = query_info->first_context;
-//!          context <= query_info->last_context; context++) {
-//! ...
-//!         Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-//!         sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-//!         BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-//!         sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-//!         loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-//! ```
 //! NCBI encodes the queries of a batch one after the other into one buffer and computes the
 //! ungapped Karlin block of each context one after the other. `search_query_batch` does the
 //! same, serially, before the lookup table is built (about 0.03 s for a batch of 5 Mb of

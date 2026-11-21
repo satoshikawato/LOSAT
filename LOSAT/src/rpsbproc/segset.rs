@@ -3,26 +3,6 @@
 //! (`ori_from`), and the set algebra that the domain classification uses.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/segset.hpp:15-45,62-131
-//! ```c++
-//! struct TSeg_base: public Cacheable
-//! {
-//! 	...
-//! 	SeqPos_t from;
-//! 	SeqPos_t to;
-//!
-//! 	// -- The ori_from should always be pointing to the position on original sequence that corresponding to the "from" of the current mapped position. ...
-//! 	SeqPos_t ori_from;
-//! 	...
-//! 	TSeg_base(SeqPos_t f = 0, SeqPos_t t = 0): from(f), to(t), ori_from(f) {};
-//! 	bool IsValid(void) const;
-//! ...
-//! template <typename SEGTYPE>
-//! class CSegSetTmpl: public Cacheable
-//! {
-//! 	...
-//! 	typedef std::list<SEGTYPE> TSegs;
-//! 	CSegSetTmpl(void): m_iFactor(1), m_lstContainer(), m_ulGapThreshold(k_SeqLen_Max) {};
-//! ```
 //!
 //! NCBI keeps the ranges in a `std::list` and changes it in place; LOSAT keeps them in a `Vec`
 //! and builds the changed set in one pass over the old ranges (`merge`, `cross`, `clip`), which
@@ -58,12 +38,6 @@ impl Seg {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/segset.cpp:4-7
-    // ```c++
-    // bool TSeg_base::IsValid(void) const
-    // {
-    // 	return (to >= from);
-    // }
-    // ```
     fn is_valid(&self) -> bool {
         self.to >= self.from
     }
@@ -103,52 +77,6 @@ impl SegSet {
 
     /// `AddSeg(seg)`: inserts the range, merging it with the ranges it overlaps or touches.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:63-108
-    // ```c++
-    // void CSegSetTmpl<SEGTYPE>::AddSeg(const SEGTYPE& seg)
-    // {
-    // 	if (!seg.IsValid()) return;
-    // 	typename TSegs::iterator curr = m_lstContainer.begin(), dstEnd = m_lstContainer.end();
-    //
-    // 	while (dstEnd != curr && curr -> to < seg.from - 1) ++curr;
-    // 	if (curr == m_lstContainer.end())	//add to end
-    // 	{
-    // 		m_lstContainer.emplace(dstEnd, seg);
-    // 		return;
-    // 	}
-    // 	else if (curr->from > seg.to + 1)	// gap big enough
-    // 	{
-    // 		m_lstContainer.emplace(curr, seg);
-    // 		return;
-    // 	}
-    // 	else	//merge the seg in
-    // 	{
-    // 		if (curr->from > seg.from)
-    // 		{
-    // 			curr->ori_from -= (curr->from - seg.from) / m_iFactor;
-    // 			curr->from = seg.from;	//extended left
-    //
-    // 		}
-    // 		if (curr->to < seg.to)
-    // 		{
-    // 			curr->to = seg.to;	//extended right
-    // 		}
-    //
-    // 		typename TSegs::iterator nxt = curr;
-    //
-    // 		++nxt;
-    // 		while (nxt != dstEnd && nxt->from <= curr->to + 1)
-    // 		{
-    // 			if (curr->to < nxt->to)
-    // 			{
-    // 				curr->to = nxt->to;	//merge next
-    // 			}
-    // 			m_lstContainer.erase(nxt);
-    // 			nxt = curr;
-    // 			++nxt;
-    // 		}
-    // 	}
-    // }
-    // ```
     pub(crate) fn add_seg(&mut self, seg: Seg) {
         if !seg.is_valid() {
             return;
@@ -185,56 +113,6 @@ impl SegSet {
 
     /// `Merge(src)`: the union, keeping this set's `ori_from` where ranges merge.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:111-159
-    // ```c++
-    // void CSegSetTmpl<SEGTYPE>::Merge(const CSegSetTmpl<SEGTYPE> &src)
-    // {
-    // 	typename TSegs::iterator curr = m_lstContainer.begin();
-    // 	typename TSegs::const_iterator scur = src.m_lstContainer.begin();
-    //
-    // 	while (curr!= m_lstContainer.end() && scur != src.m_lstContainer.end())
-    // 	{
-    // 		if (curr->to < scur->from - 1) ++curr;
-    // 		else if (scur->to < curr->from - 1)
-    // 		{
-    // 			m_lstContainer.emplace(curr, *scur);
-    // 			++scur;
-    // 		}
-    // 		else
-    // 		{
-    // 			// -- merge this src seg
-    // 			if (curr->from > scur->from)
-    // 			{
-    // 				curr->ori_from -= (curr->from - scur->from) / m_iFactor;
-    // 				curr->from = scur->from;
-    // 			}
-    // 			if (curr->to < scur->to)
-    // 			{
-    // 				curr->to = scur->to;
-    // 			}
-    // 			// -- to next src seg
-    // 			++scur;
-    //
-    // 			// maintain this set
-    // 			typename TSegs::iterator nxt = curr;
-    // 			++nxt;
-    // 			while (nxt != m_lstContainer.end() && nxt->from <= curr->to + 1)
-    // 			{
-    // 				if (curr->to < nxt->to)
-    // 				{
-    // 					curr->to = nxt->to;	//merge next
-    // 				}
-    // 				m_lstContainer.erase(nxt);
-    // 				nxt = curr;
-    // 				++nxt;
-    // 			}
-    // 		}
-    // 	}
-    // 	// -- add the rest segs in
-    //
-    // 	while (scur != src.m_lstContainer.end())
-    // 		m_lstContainer.emplace_back(*scur++);
-    // }
-    // ```
     pub(crate) fn merge(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
         let mut out = Vec::with_capacity(old.len() + src.segs.len());
@@ -277,55 +155,6 @@ impl SegSet {
 
     /// `Cross(src)`: the intersection.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:161-208
-    // ```c++
-    // void CSegSetTmpl<SEGTYPE>::Cross(const CSegSetTmpl<SEGTYPE> & src)
-    // {
-    // 	typename TSegs::iterator curr = m_lstContainer.begin();
-    // 	typename TSegs::const_iterator scur = src.m_lstContainer.begin();
-    //
-    // 	while (curr!= m_lstContainer.end() && scur != src.m_lstContainer.end())
-    // 	{
-    // 		if (curr->to < scur->from)
-    // 		{
-    // 			typename TSegs::iterator del = curr;
-    // 			++curr;
-    // 			m_lstContainer.erase(del);
-    // 		}
-    // 		else if (scur->to < curr->from)
-    // 		{
-    // 			++scur;
-    // 		}
-    // 		else
-    // 		{
-    // 			if (curr->from < scur->from)
-    // 			{
-    // 				curr->ori_from += (scur->from - curr->from) / m_iFactor;
-    // 				curr->from = scur->from;
-    // 			}
-    // 			if (curr->to > scur->to + 1)
-    // 			{
-    // 				SEGTYPE temp(curr->from, scur->to);
-    // 				temp.ori_from = curr->ori_from;
-    // 				m_lstContainer.emplace(curr, temp);
-    //
-    // 				curr->ori_from += (scur->to + 2 - curr->from) / m_iFactor;
-    // 				curr->from = scur->to + 2;
-    // 				++scur;
-    // 			}
-    // 			else
-    // 			{
-    // 				if (curr->to > scur->to)
-    // 				{
-    // 					curr->to = scur->to;
-    // 					++scur;
-    // 				}
-    // 				++curr;
-    // 			}
-    // 		}
-    // 	}
-    // 	m_lstContainer.erase(curr, m_lstContainer.end());
-    // }
-    // ```
     pub(crate) fn cross(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
         let mut out = Vec::with_capacity(old.len() + src.segs.len());
@@ -364,46 +193,6 @@ impl SegSet {
 
     /// `Clip(src)`: this set less `src`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:210-248
-    // ```c++
-    // void CSegSetTmpl<SEGTYPE>::Clip(const CSegSetTmpl<SEGTYPE>& src)
-    // {
-    // 	typename TSegs::iterator curr = m_lstContainer.begin();
-    // 	typename TSegs::const_iterator scur = src.m_lstContainer.begin();
-    //
-    // 	while (curr!= m_lstContainer.end() && scur != src.m_lstContainer.end())
-    // 	{
-    // 		if (curr->to < scur->from)
-    // 		{
-    // 			++curr;
-    // 		}
-    // 		else if (scur->to < curr->from)
-    // 		{
-    // 			++scur;
-    // 		}
-    // 		else
-    // 		{
-    // 			if (curr->from < scur->from)
-    // 			{
-    // 				SEGTYPE temp(curr->from, scur->from - 1);
-    // 				temp.ori_from = curr->ori_from;
-    // 				m_lstContainer.emplace(curr, temp);
-    // 			}
-    // 			if (curr->to <= scur->to)
-    // 			{
-    // 				typename TSegs::iterator del = curr;
-    // 				++curr;
-    // 				m_lstContainer.erase(del);
-    // 			}
-    // 			else
-    // 			{
-    // 				curr->ori_from += (scur->to + 1 - curr->from) / m_iFactor;
-    // 				curr->from = scur->to + 1;
-    // 				++scur;
-    // 			}
-    // 		}
-    // 	}
-    // }
-    // ```
     pub(crate) fn clip(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
         let mut out = Vec::with_capacity(old.len() + src.segs.len());
@@ -436,17 +225,6 @@ impl SegSet {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:281-291
-    // ```c++
-    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetLeft(void) const
-    // {
-    // 	return IsEmpty() ? -1 : m_lstContainer.begin()->from;
-    // }
-    //
-    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetRight(void) const
-    // {
-    // 	return IsEmpty() ? -1 : m_lstContainer.rbegin()->to;
-    // }
-    // ```
     pub(crate) fn left(&self) -> i64 {
         self.segs.first().map_or(-1, |seg| seg.from)
     }
@@ -458,14 +236,6 @@ impl SegSet {
 
     /// `GetOriTo(citer)` of a range: `ori_from + (to - from) / m_iFactor`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:332-337
-    // ```c++
-    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetOriTo(typename TSegs::const_iterator citer, SeqPos_t pos) const
-    // {
-    // 	//return citer->ori_from + (citer->to - citer->from) / m_iFactor;
-    // 	if (pos < 0) pos = citer->to;
-    // 	return citer->ori_from + (pos - citer->from) / m_iFactor;
-    // }
-    // ```
     pub(crate) fn ori_to(seg: &Seg) -> i64 {
         seg.ori_from + (seg.to - seg.from)
     }
@@ -474,77 +244,6 @@ impl SegSet {
     /// the model, the slave row) turned into positions on the query (the master row) along the
     /// aligned segments (`m_vecMStarts`, `m_vecSStarts`, `m_vecLens`), keeping `ori_from`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1180-1250
-    // ```c++
-    // void TSeqAlignment::MapSegSet(CSegSet &segset, bool doConvert) const
-    // {
-    // 	if (segset.IsEmpty()) return;
-    //
-    // 	CSegSet::TSegs::iterator iter = segset.m_lstContainer.begin();
-    // 	size_t idx = 0;
-    //
-    // 	while (iter != segset.m_lstContainer.end())
-    // 	{
-    // 		if (idx >= m_vecLens.size() || m_vecSStarts[idx] > iter->to)	// discard this seg
-    // 		{
-    // 			CSegSet::TSegs::iterator temp = iter;
-    // 			++iter;
-    // 			segset.m_lstContainer.erase(temp);
-    // 		}
-    // 		else
-    // 		{
-    // 			SeqPos_t diff = m_vecSStarts[idx] - m_vecMStarts[idx];
-    // 			SeqPos_t end = m_vecSStarts[idx] + m_vecLens[idx] - 1;
-    // 			if (end >= iter->to)	//No trunction from right side
-    // 			{
-    // 				if (iter->from < m_vecSStarts[idx])	//segment shrinked from left. deal with ori_from
-    // 				{
-    // 					iter->ori_from += (m_vecSStarts[idx] - iter->from);// / segset.m_iFactor;
-    // 					iter->from = m_vecSStarts[idx];
-    // 				}
-    //
-    // 				if (end == iter->to)	//seg happens to end at aligned seg
-    // 					++idx;	//here is the chance to advance idx
-    //
-    //
-    // 				// -- mapping
-    // 				iter->from -= diff;
-    // 				iter->to -= diff;
-    //
-    // 				++iter;
-    // 			}
-    // 			else if (end >= iter->from)	//end < iter->to, truncate from right side
-    // 			{
-    // 				CSegSet::TSeg temp(iter->from, end);
-    // 				temp.ori_from = iter->ori_from;
-    //
-    // 				if (temp.from < m_vecSStarts[idx])
-    // 				{
-    // 					temp.ori_from += (m_vecSStarts[idx] - temp.from);// / segset.m_iFactor;
-    // 					temp.from = m_vecSStarts[idx];
-    // 				}
-    //
-    // 				// -- mapping
-    // 				temp.from -= diff;
-    // 				temp.to -= diff;
-    // 				segset.m_lstContainer.emplace(iter, temp);
-    //
-    // 				// -- cut original seg for next round
-    // 				iter->ori_from += (end - iter->from + 1);// / segset.m_iFactor;
-    // 				iter->from = end + 1;
-    // 				//iter->ori_from += (iter->from) / segset.m_iFactor;
-    // 				++idx;
-    // 			}
-    // 			else	//end < iter->from, step to next denseg
-    // 				++idx;
-    // 		}
-    // 	}
-    //
-    // 	// -- check motif
-    // 	...
-    // 	// -- if protein to na, convert to na coord
-    // 	if (doConvert) Pr2NaConvert(segset);
-    // }
-    // ```
     // (rpsbproc calls it with `doConvert` false everywhere; the conversion of a nucleotide
     // query's motifs is `domains::pr2na_ends`. NCBI changes the list in place; LOSAT writes the
     // new ranges in order into a new list. `m_vecSStarts[idx] + m_vecLens[idx] - 1` adds an
@@ -603,17 +302,6 @@ impl SegSet {
 
     /// `GetTotalResidues`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:293-302
-    // ```c++
-    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetTotalResidues(void) const
-    // {
-    // 	SeqPos_t iResult = 0;
-    // 	for (typename TSegs::const_iterator iter = m_lstContainer.begin(); iter != m_lstContainer.end(); ++iter)
-    // 	{
-    // 		iResult += iter->to - iter->from + 1;
-    // 	}
-    // 	return iResult/abs(m_iFactor);
-    // }
-    // ```
     pub(crate) fn total_residues(&self) -> i64 {
         self.segs.iter().map(|seg| seg.to - seg.from + 1).sum()
     }

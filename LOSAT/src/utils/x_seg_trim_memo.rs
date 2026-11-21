@@ -5,23 +5,6 @@
 //! window of every length from the segment's length down to `max(1, length - maxtrim) + 1`:
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1988-1992,1998-2001,2007-2008,2013-2014
-//! ```c
-//!    if ((seq->length-maxtrim)>minlen)
-//!         minlen = seq->length-maxtrim;
-//!    minprob = 1.;
-//!    for (len=seq->length; len>minlen; len--)
-//! ...
-//!       while (shift)
-//!       {
-//!          prob = s_GetProb(win->state, len, win->palpha);
-//!          if (prob<minprob)
-//! ...
-//!          shift = s_ShiftWin1(win);
-//!          i++;
-//! ...
-//!    *leftend = *leftend + lend;
-//!    *rightend = *rightend - (seq->length - rend - 1);
-//! ```
 //!
 //! The pair (lend, rend) is a function of the segment's letters, `maxtrim` and the alphabet;
 //! no position, no entropy value and no other state of the caller enters it. The fast path

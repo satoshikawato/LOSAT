@@ -15,35 +15,7 @@
 //! the messages of the scanners.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/readers/aln_error_reporter.cpp:130-136
-//! ```c++
-//!     string message(descr);
-//!     if (!seqId.empty()) {
-//!         message = "At ID \'" + seqId + "\': " + descr;
-//!     }
-//!     if (!mpEl) {
-//!         NCBI_THROW2(CObjReaderParseException, eFormat, message, 0);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:122-138
-//! ```c++
-//!     CAlnReader reader(input_file);
-//!     reader.SetClustal(CAlnReader::eAlpha_Protein);
-//!     try {
-//!         reader.Read(false, true);
-//!     } catch (const CObjReaderParseException& e) {
-//!         // Workaround to provide a more useful error message when repeated
-//!         // Seq-IDs are encountered
-//!         if ((e.GetErrCode() == CObjReaderParseException::eFormat) &&
-//!             (NStr::Find(e.GetMsg(), "Not all sequences have same length") != NPOS)) {
-//!             string msg("Repeated Seq-IDs detected in multiple sequence ");
-//!             msg += "alignment file, please ensure all Seq-IDs are unique ";
-//!             msg += "before proceeding.";
-//!             NCBI_THROW(CBlastException, eInvalidOptions, msg);
-//!         }
-//!     }
-//!     m_AsciiMsa = reader.GetSeqs();
-//!     m_SeqEntry = reader.GetSeqEntry();
-//! ```
 //! (No report of the readers has that text, so the branch never runs.)
 
 mod clustal;
@@ -107,7 +79,7 @@ pub(crate) enum AlnError {
     Internal(&'static str),
 }
 
-/// The flags of `x_ParseAndValidateSeqIds` (`fParse_AnyLocal | fParse_RawText`, quoted at
+/// The flags of `x_ParseAndValidateSeqIds` (`fParse_AnyLocal | fParse_RawText`, cited at
 /// [`row_ids`]).
 const ID_PARSE_FLAGS: u32 = parse_flags::ANY_LOCAL | parse_flags::RAW_TEXT;
 
@@ -149,29 +121,6 @@ fn format_name(format: AlignFormat) -> &'static str {
 /// input.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:319-339
-/// ```c++
-/// void CAlnReader::Read(
-///     bool /*guess*/,
-///     bool generate_local_ids,
-///     ncbi::objects::ILineErrorListener* /*pErrorListener*/)
-/// {
-///     // read the alignment stream
-///     SAlignmentFile alignmentInfo;
-///     try {
-///         ReadAlignmentFile(
-///             m_IS, generate_local_ids, m_UseNexusInfo, mSequenceInfo, alignmentInfo);
-///         TReadFlags flags = 0;
-///         x_VerifyAlignmentInfo(alignmentInfo, flags);
-///     }
-///     catch (const SShowStopper& showStopper) {
-///         theErrorReporter->Fatal(showStopper);
-///         return;
-///     }
-///     m_Dim = m_IdStrings.size();
-///     m_ReadDone = true;
-///     m_ReadSucceeded = true;
-/// }
-/// ```
 /// A format other than Clustal and the unknown one is refused by name (the scanners of PS6b);
 /// the unknown format's scanner throws "Input file format not recognized.".
 pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
@@ -191,35 +140,6 @@ pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
 /// and checked ([`row_ids`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:377-403
-/// ```c++
-///     const auto num_sequences = alignmentInfo.NumSequences();
-///
-///     if (num_sequences == 0) {
-///         throw SShowStopper(
-///             -1,
-///             eAlnSubcode_BadSequenceCount,
-///             "No sequence data was detected in alignment file.");
-///     }
-///
-///
-///     if (num_sequences == 1) {
-///         throw SShowStopper(
-///         -1,
-///         eAlnSubcode_BadSequenceCount,
-///         "Only one sequence was detected in the alignment file. An alignment file must contain more than one sequence.");
-///     }
-///
-///
-///     m_Seqs.assign(alignmentInfo.mSequences.begin(), alignmentInfo.mSequences.end());
-///
-///
-///     for (auto seqIdInfo : alignmentInfo.mIds) {
-///         m_IdStrings.push_back(seqIdInfo.mData); // m_IdStrings is redundant and should be removed
-///         TIdList ids;
-///         x_ParseAndValidateSeqIds(seqIdInfo, flags, ids);
-///         m_Ids.push_back(ids);
-///     }
-/// ```
 fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeqId>>, AlnError> {
     if scanned.rows.len() < 2 {
         return Err(AlnError::NotAvailable);
@@ -232,28 +152,6 @@ fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeq
 /// throws: no listener).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:349-368
-/// ```c++
-///     CSeq_id::TParseFlags parseFlags = CSeq_id::fParse_AnyLocal;
-///     if (flags^fGenerateLocalIDs) {
-///         parseFlags |= CSeq_id::fParse_RawText;
-///     }
-///
-///
-///     try {
-///         CSeq_id::ParseIDs(ids, idString, parseFlags);
-///     }
-///     catch (...) {  // report an error and interpret the id string as a local ID
-///         theErrorReporter->Error(
-///                 seqIdInfo.mNumLine,
-///                 EAlnSubcode::eAlnSubcode_IllegalSequenceId,
-///                 "Unable to parse sequence ID string.");
-///         ids.push_back(Ref(new CSeq_id(CSeq_id::e_Local, idString)));
-///     }
-///
-///     if (m_fValidateIds) {
-///         m_fValidateIds(ids, seqIdInfo.mNumLine, theErrorReporter.get());
-///     }
-/// ```
 /// (`flags` is 0 here, so `flags^fGenerateLocalIDs` is not 0 and the raw text flag is set.)
 ///
 /// Two states cannot come out of the parser for a row's id, and each is LOSAT's internal error
@@ -284,63 +182,9 @@ pub(crate) fn row_ids(id: &[u8]) -> Result<Vec<ParsedSeqId>, AlnError> {
 /// that names none, of its letters (`x_GetSequenceMolType`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:749-769
-/// ```c++
-///     for (TNumrow row_i = 0; row_i < m_Dim; row_i++) {
-///         const string& seq_str     = m_SeqVec[row_i];
-///         auto pSubEntry = Ref(new CSeq_entry());
-///
-///         // seq-id(s)
-///         auto& ids = pSubEntry->SetSeq().SetId();
-///         ids = m_Ids[row_i];
-///
-///         // mol
-///         CSeq_inst::EMol mol   = CSeq_inst::eMol_not_set;
-///         CSeq_id::EAccessionInfo ai = ids.front()->IdentifyAccession();
-///         if (ai & CSeq_id::fAcc_nuc) {
-///             mol = CSeq_inst::eMol_na;
-///         } else if (ai & CSeq_id::fAcc_prot) {
-///             mol = CSeq_inst::eMol_aa;
-///         } else {
-///             const string seqId = ids.front()->AsFastaString();
-///             mol = x_GetSequenceMolType(GetAlphabet(), seq_str, seqId, pErrorListener);
-///         }
-///         // seq-inst
-///         auto pSeqInst = x_GetSeqInst(mol, seq_str);
-/// ```
 /// `x_GetSequenceMolType` (the alphabet has 53 letters, so an undefined guess is protein):
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:670-698
-/// ```c++
-///     auto formatGuess = CFormatGuess::SequenceType(seqChars.data(), seqChars.length());
-///     if (formatGuess == CFormatGuess::eProtein) {
-///         return CSeq_inst::eMol_aa;
-///     }
-///
-///     //if alphabet contains full complement (26) of protein chars then
-///     // it's definitely protein. It may also contain stop-codon characters:
-///     if (formatGuess == CFormatGuess::eUndefined &&
-///         alphabet.size() >= 2*26) {
-///         return CSeq_inst::eMol_aa;
-///     }
-///
-///     auto posFirstT = seqChars.find_first_of("Tt");
-///     auto posFirstU = seqChars.find_first_of("Uu");
-///     if (posFirstT != string::npos  &&  posFirstU != string::npos) {
-///         string msg = "Invalid Mol Type: "
-///                      "U and T cannot appear in the same nucleotide sequence. "
-///                      "Reinterpreting as protein.";
-///         sReportError(pErrorListener,
-///                      eDiag_Error,
-///                      eReader_Alignment,
-///                      eAlnSubcode_InconsistentMolType,
-///                      seqId, 0, msg);
-///
-///
-///         //impossible NA- can't contain both
-///         return CSeq_inst::eMol_aa;
-///     }
-///     return (posFirstU == string::npos  ?  CSeq_inst::eMol_dna : CSeq_inst::eMol_rna);
-/// ```
 /// (`sReportError` throws `CObjReaderParseException`: no listener. The letters are upper case with
 /// no gap: `m_SeqVec`; the missing characters of the sequence info are none.) An id that names a
 /// molecule decides before the letters are looked at.

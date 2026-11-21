@@ -22,20 +22,7 @@ use crate::blastinput::seq_range::Placements;
 use crate::report::pairwise::PairwiseHit;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:817-826
-// ```c++
-//             s_SeqLoc2MaskedSubjRanges(masks, &*range, length,  masked_ranges);
-//             if ( !masked_ranges.empty() ) {
-//                 ...
-//             	subj->length = length;
-//                 BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
-//                                     static_cast<Uint4>(masked_ranges.size()) + 1, true, eSoftSubjMasking);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213
-// ```c
-//     // Fill out the boundary of the sequence to compliment the masks
-//     tmp[0].left = 0;
-//     tmp[num_seq_ranges - 1].right = seq_blk->length;
-// ```
 /// The scan ranges of `letters` (a subject as it is searched, cut to `-subject_loc`): `(left,
 /// right)`, one more than its lower-case runs. The array of pairs is read one place along, so each
 /// range runs from the last letter of a run (inclusive) to the first letter of the next. Empty
@@ -74,28 +61,7 @@ pub(super) fn x_keep_whole_letters(records: &mut [FastaRecord]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-59
-// ```c
-//     while (range[1] > range[2]) {
-//         range[0]++;
-//         if (range[0] >= (Int4)subject->num_seq_ranges) {
-//             return FALSE;
-//         }
-//         range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-//         range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
-//     }
-//     return TRUE;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (`s_BlastAaScanSubject`)
-// ```c
-//     while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-//     s_first=subject->sequence + s_range[1];
-//     s_last=subject->sequence + s_range[2];
-//     /* prime the index */
-//     index = ComputeTableIndex(word_length - 1, lookup->charsize, s_first);
-//     for (s = s_first; s <= s_last; s++) {
-//         index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//         if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-// ```
 /// The scan of the standard table over `ranges`, from `range` on: each hit in the order of NCBI's
 /// buffer. A clamped first range can hold a word that runs past the sentinel, whose letters are read
 /// as sentinels (as `x_seed_fused::x_scan_cells`).
@@ -141,27 +107,7 @@ fn scan_standard<K: XCell>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505 (`s_BlastAaWordFinder_TwoHit`)
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-769 (`s_BlastAaWordFinder_OneHit`)
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     while (scan_range[1] <= scan_range[2]) {
-// ```
 /// The word finders' scan over `ranges`: each word hit in NCBI's order. `clamps_scan_end` is the
 /// two-hit search's raise of the first range's end, which scans one word of a first range too short
 /// for it; the one-hit search scans nothing at all then, later ranges included. A subject longer
@@ -254,34 +200,11 @@ fn scan(
     }
 }
 
-// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, blast_gapalign.h:54) and the overlap of two
+// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54) and the overlap of two
 // subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192): the one copy of both macros.
 use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (`s_GetNextSubjectChunk`)
-// ```c
-//     if (backup->offset + MAX_DBSEQ_LEN <
-//         backup->hard_ranges[backup->hm_index].right) {
-//         subject->length = MAX_DBSEQ_LEN;
-//         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-//     } else {
-//         subject->length = backup->hard_ranges[backup->hm_index].right
-//                         - backup->offset;
-//     ...
-//     while (backup->soft_ranges[i].right < start) ++i;
-//     start = i;
-//     while (i < backup->num_soft_ranges
-//         && backup->soft_ranges[i].left < len) ++i;
-//     len = i - start;
-//     backup->sm_index = i - 1;
-//     ...
-//     if (len == 0) return SUBJECT_SPLIT_NO_RANGE;
-//     ...
-//     if (subject->seq_ranges[0].left < 0)
-//         subject->seq_ranges[0].left = 0;
-//     if (subject->seq_ranges[len-1].right > subject->length)
-//         subject->seq_ranges[len-1].right = subject->length;
-// ```
 /// The words that NCBI's word finder scans in the chunks of a subject of `length` letters with the
 /// scan ranges `ranges`, as `(first, last)` word starts of the subject, in order and merged, and the
 /// raised words of the chunks after the first. Each chunk takes its own ranges and its own start of
@@ -360,7 +283,7 @@ fn chunk_scans(
     (scans, raised)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (cited at
 // `x_seed_fused::x_test_hit`)
 /// The two-hit test of each hit of [`x_for_each_hit`], in scan order; `candidate(query_offset,
 /// subject_offset, last_hit, diff, entry)` as for `x_seed_fused::x_scan_two_hit`.
@@ -392,9 +315,6 @@ pub(super) fn x_scan_two_hit_ranges<F>(
             let subject_offset = pair.s_off as i32;
             let entry = &mut diag_array[((query_offset - subject_offset) & diag_mask) as usize];
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:172
-            // ```c
-            //         ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-            // ```
             // A chunk's diagonals start past every hit of the chunk before, so the raised word of
             // a later chunk only becomes its diagonal's last hit (`x_test_hit` with a hit a window
             // or more back, or a flag that it clears).
@@ -412,39 +332,9 @@ pub(super) fn x_scan_two_hit_ranges<F>(
     );
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
-// ```c++
-//         // Union subject sequence ranges
-//         vector <TSeqRange> ranges;
-//         for (int i=0; i<hsp_list->hspcnt; i++) {
-//             const BlastHSP* hsp = hsp_list->hsp_array[i];
-//             TSeqRange rg;
-//             rg.SetFrom(hsp->subject.offset);
-//             rg.SetTo(hsp->subject.end);
-//             ranges.push_back(rg);
-//         }
-//
-//         // Extract subject masks
-//         TMaskedSubjRegions masks;
-//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
-// ```
-// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
-// ```c++
-//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
-//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
-//            loc.IntersectingWith(target_ranges[ir])) {
-//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
-//            retval.push_back(sli);
-//            return;
-//         }
-//     }
-// ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2518-2521
-// ```c++
-//                     } else if (m_SeqLocChar==eLowerCase){
-//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-//                     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
 /// The subject masks of each query's hits (`GetSubjectMasks` of the query's results, by (query,
 /// subject)): the lower-case runs of the subject's record (record coordinates, inclusive) that
 /// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
@@ -530,7 +420,7 @@ pub(super) fn x_masked_subject_rows(
 mod tests {
     use super::*;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213 (cited at
     // `scan_ranges`): the left end is the last letter of the run before, included.
     #[test]
     fn scan_ranges_run_from_the_last_lower_case_letter() {
@@ -541,7 +431,7 @@ mod tests {
         assert_eq!(scan_ranges(b"mkv"), [(0, 0), (2, 3)]);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (cited at
     // `chunk_scans`): an 11,200,000-letter subject is cut at 4,999,900 and 9,999,800. A chunk
     // starts with the last range of the chunk before; when that range reaches into it by fewer
     // letters than a word, its one-hit scan stops at once (aa_ungapped.c:762-766) and its two-hit

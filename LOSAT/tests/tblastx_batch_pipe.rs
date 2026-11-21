@@ -8,13 +8,6 @@
 //! started; `LOSAT_X_TBXPIPEHSPS=0` admits no early start.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-195
-//! ```c
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!                 results = lcl_blast.Run();
-//! ```
 //! The property under test is that the reports, the messages and the exit status do not depend on
 //! the switch or on the thread count: the searches are compared with the same LOSAT searches with
 //! the switch off. Each query record below is longer than TBLASTX's batch size (10,002 letters),

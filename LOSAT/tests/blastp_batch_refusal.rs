@@ -22,14 +22,6 @@
 //! (review 3 of X4; row `db.x4.chunk.neg.gap.6`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//!                 results = lcl_blast.Run();
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

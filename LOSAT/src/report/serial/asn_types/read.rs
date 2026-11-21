@@ -256,35 +256,7 @@ impl TypedReader<'_> {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-900 and 959-969
-    // ```c++
-    // void CObjectIStream::SkipFileHeader(TTypeInfo typeInfo)
-    // {
-    //     ...
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     string name = ReadFileHeader();
-    //     const string& tname = typeInfo->GetName();
-    //     if ( !name.empty() && !tname.empty() && name != tname ) {
-    //         ThrowError(fFormatError,
-    //                    "incompatible type "+name+"<>"+typeInfo->GetName());
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ...
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo, ENoFileHeader)
-    // {
-    //     // root object
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     ReadObject(object, typeInfo);
-    //
-    //     EndOfRead();
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-959 and 959-969
     fn document(&mut self, root: u16) -> R<Value> {
         let name = super::type_info(root).name();
         self.push(FrameKind::Named, Some(name), false);
@@ -430,34 +402,6 @@ impl TypedReader<'_> {
     /// value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
     /// members after it checked, `}`, the class frame left.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:86-111
-    // ```c++
-    // #define ClassSequentialContentsBegin(classType) \
-    // { \
-    //     CClassTypeInfo::CIterator pos(classType); \
-    //     BEGIN_OBJECT_FRAME(eFrameClassMember); \
-    //     {
-    //
-    // #define ClassSequentialContentsMember(Func, Args) \
-    //     { \
-    //         const CMemberInfo* memberInfo = classType->GetMemberInfo(index); \
-    //         SetTopMemberId(memberInfo->GetId()); \
-    //         for ( TMemberIndex i = *pos; i < index; ++i ) { \
-    //             classType->GetMemberInfo(i)->NCBI_NAME2(Func,MissingMember)Args; \
-    //         } \
-    //         { \
-    //             memberInfo->NCBI_NAME2(Func,Member)Args; \
-    //         } \
-    //         pos.SetIndex(index + 1); \
-    //     }
-    //
-    // #define ClassSequentialContentsEnd(Func, Args) \
-    //     } \
-    //     END_OBJECT_FRAME(); \
-    //     for ( ; pos.Valid(); ++pos ) { \
-    //         classType->GetMemberInfo(pos)->NCBI_NAME2(Func,MissingMember)Args; \
-    //     } \
-    // }
-    // ```
     fn next_member(
         &mut self,
         ty: u16,
@@ -509,20 +453,6 @@ impl TypedReader<'_> {
     /// `ReadMemberId(SkipWhiteSpace())` and `GetMemberIndex(classType, id, pos)` (from `pos`,
     /// `in_class`) or `GetChoiceIndex(choiceType, id)`: the member or variant named or tagged.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:407-424
-    // ```c++
-    //     TMemberIndex idx;
-    //     if (!id.empty()  &&  isdigit((unsigned char) id[0])) {
-    //         idx = classType->GetMembers().Find
-    //             (CMemberId::TTag(NStr::StringToInt(id)), CAsnBinaryDefs::eContextSpecific, pos);
-    //     }
-    //     else {
-    //         idx = classType->GetMembers().Find(id, pos);
-    //         if (idx == kInvalidMember) {
-    //             idx = GetAltItemIndex(classType,id,pos);
-    //         }
-    //     }
-    //     return idx;
-    // ```
     // `GetAltItemIndex` (366-387) tries the name with its first letter in upper case and takes it
     // only for an item without a prefix, which no member of an ASN.1 module is (its names start
     // with a lower-case letter): an upper-case first letter is never a member here (c21 of
@@ -556,31 +486,7 @@ impl TypedReader<'_> {
     /// The delayed member: `StartDelayBuffer` (white space skipped), then the value skipped
     /// (`Open::Delayed`), the text kept (`Value::Delayed`).
     // NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869
-    // ```c++
-    // void CMemberInfoFunctions::ReadLongMember(CObjectIStream& in,
-    //                                           const CMemberInfo* memberInfo,
-    //                                           TObjectPtr classPtr)
-    // {
-    //     if ( memberInfo->CanBeDelayed() ) {
-    //         CDelayBuffer& buffer = memberInfo->GetDelayBuffer(classPtr);
-    //         if ( !buffer ) {
-    //             if (!in.ShouldParseDelayBuffer()) {
-    //                 memberInfo->UpdateSetFlagYes(classPtr);
-    //                 in.StartDelayBuffer();
-    //                 memberInfo->GetTypeInfo()->SkipData(in);
-    //                 in.EndDelayBuffer(buffer, memberInfo, classPtr);
-    //                 return;
-    //             }
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1648-1652
-    // ```c++
-    // void CObjectIStreamAsn::StartDelayBuffer(void)
-    // {
-    //     SkipWhiteSpace();
-    //     CObjectIStream::StartDelayBuffer();
-    // }
-    // ```
     // (psiblast and tblastn set no hook on their stream: `ShouldParseDelayBuffer` is false,
     // objistr.cpp:745-760.)
     fn delay_start(&mut self) -> R<usize> {
@@ -591,30 +497,8 @@ impl TypedReader<'_> {
     /// `ReadChoiceSimple` / `SkipChoiceSimple`: the variant of the CHOICE `ty`; a read (not a skip)
     /// runs the class's variant hooks before its value (`hooks::pre_read_variant`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501
-    // ```c++
-    // void CObjectIStream::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
-    //                                       TObjectPtr choicePtr)
-    // {
-    //     BEGIN_OBJECT_FRAME3(eFrameChoice, choiceType, choicePtr);
-    //     BeginChoice(choiceType);
-    //     BEGIN_OBJECT_FRAME(eFrameChoiceVariant);
-    //     TMemberIndex index = BeginChoiceVariant(choiceType);
-    //     if ( index == kInvalidMember ) {
-    //         ThrowError(fFormatError,"choice variant id expected");
-    //     }
-    //     const CVariantInfo* variantInfo = choiceType->GetVariantInfo(index);
-    //     SetTopMemberId(variantInfo->GetId());
-    //
-    //     variantInfo->ReadVariant(*this, choicePtr);
-    //
-    //     EndChoiceVariant();
-    //     END_OBJECT_FRAME();
-    //     EndChoice();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (`BeginChoiceVariant`,
-    // quoted at `Reader::choice`: `NextElement` at the choice's start, then the variant's id)
+    // cited at `Reader::choice`: `NextElement` at the choice's start, then the variant's id)
     fn start_choice(
         &mut self,
         ty: u16,
@@ -642,26 +526,6 @@ impl TypedReader<'_> {
 
     /// `ReadContainer` / `SkipContainer`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1245-1274
-    // ```c++
-    // void CObjectIStreamAsn::ReadContainer(const CContainerTypeInfo* contType,
-    //                                       TObjectPtr contPtr)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameArray, contType);
-    //     StartBlock();
-    //
-    //     BEGIN_OBJECT_FRAME(eFrameArrayElement);
-    //     ...
-    //     while ( NextElement() ) {
-    //         ...
-    //             contType->AddElement(contPtr, *this);
-    //     }
-    //     ...
-    //     END_OBJECT_FRAME();
-    //
-    //     EndBlock();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     // The container's type information is anonymous (an implicit class such as `Seq-descr` has
     // no frame of its own, `ReadImplicitMember`, classinfo.cpp:289-306): `Object type= ` names
     // nothing (c07 of SURVEY_D3).
@@ -744,52 +608,6 @@ impl TypedReader<'_> {
     /// `GetInt4`, `GetUint4` (`signed` false: no `-`) and `GetInt8` after `SkipWhiteSpace`, the
     /// digits checked against `max` as NCBI checks them.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    // ```c++
-    // Int4 CIStreamBuffer::GetInt4(void)
-    //     THROWS1((CIOException,CUtilException))
-    // {
-    //     bool sign;
-    //     char c = SkipWs();
-    //     switch ( c ) {
-    //     case '-':
-    //         sign = true;
-    //         c = GetChar();
-    //         break;
-    //     case '+':
-    //         sign = false;
-    //         c = GetChar();
-    //         break;
-    //     default:
-    //         sign = false;
-    //         break;
-    //     }
-    //
-    //     Uint4 n = c - '0';
-    //     if ( n > 9 )
-    //         BadNumber();
-    //
-    //     // overflow limits
-    //     const Uint4 kMaxBeforeMul = kMax_I4/10;
-    //     const Uint1 kMaxLimitAdd = Uint1(kMax_I4%10 + sign);
-    //
-    //     for ( ;; ) {
-    //         Uint1 d = (Uint1)(PeekCharNoEOF() - '0');
-    //         if ( d > 9 )
-    //             break;
-    //         SkipChar();
-    //
-    //         // check multiplication overflow
-    //         if ( n > kMaxBeforeMul || (n == kMaxBeforeMul && d > kMaxLimitAdd) )
-    //             NumberOverflow();
-    //
-    //         n = n * 10 + d;
-    //     }
-    //     if ( sign )
-    //         return -Int4(n);
-    //     else
-    //         return n;
-    // }
-    // ```
     // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
     fn get_number(&mut self, max: u64, signed: bool) -> R<i64> {
         // The position is kept in a local and written once (`Reader::white_space_at`).
@@ -851,16 +669,6 @@ impl TypedReader<'_> {
 
     /// An INTEGER of storage `storage` (`ReadStd`), or its skip (`SkipSNumber`, `SkipUNumber`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704
-    // ```c++
-    // Int2 CObjectIStream::ReadInt2(void)
-    // {
-    //     Int4 data = ReadInt4();
-    //     Int2 ret = Int2(data);
-    //     if ( ret != data )
-    //         ThrowError(fOverflow, "integer overflow");
-    //     return ret;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1780-1808 (the skips of every size:
     // `SkipSNumber` for the signed ones, `SkipUNumber` for the unsigned ones)
     fn integer(&mut self, storage: Storage, skip: bool) -> R<Value> {
@@ -894,33 +702,6 @@ impl TypedReader<'_> {
     /// `SkipSNumber` (`signed`) and `SkipUNumber`: an optional sign (`+` only for the unsigned)
     /// right before a digit, then digits, with no range.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1024-1048
-    // ```c++
-    // void CObjectIStreamAsn::SkipSNumber(void)
-    // {
-    //     size_t i;
-    //     char c = SkipWhiteSpace();
-    //     switch ( c ) {
-    //     case '-':
-    //     case '+':
-    //         c = m_Input.PeekChar(1);
-    //         // next char
-    //         i = 2;
-    //         break;
-    //     default:
-    //         // next char
-    //         i = 1;
-    //         break;
-    //     }
-    //     if ( c < '0' || c > '9' ) {
-    //         ThrowError(fFormatError, "bad signed integer in line "
-    //             + NStr::SizetToString(m_Input.GetLine()));
-    //     }
-    //     while ( (c = m_Input.PeekChar(i)) >= '0' && c <= '9' ) {
-    //         ++i;
-    //     }
-    //     m_Input.SkipChars(i);
-    // }
-    // ```
     // (`SkipUNumber`, 1050-1074, takes only `+` and peeks past the digits with `PeekCharNoEOF`.)
     fn skip_number(&mut self, signed: bool) -> R<()> {
         // The position is kept in a local and written once (`Reader::white_space_at`).
@@ -963,39 +744,7 @@ impl TypedReader<'_> {
     /// name of the list, or a number (one of the list for an ENUMERATED); an exception that is not
     /// a `CSerialException` gets the line of the type's `NCBI_RETHROW_SAME`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
-    // ```c++
-    // TEnumValueType CObjectIStreamAsn::ReadEnum(const CEnumeratedTypeValues& values)
-    // {
-    //     // not integer
-    //     CTempString id = ReadLCaseId(SkipWhiteSpace());
-    //     if ( !id.empty() ) {
-    //         // enum element by name
-    //         return values.FindValue(id);
-    //     }
-    //     // enum element by value
-    //     TEnumValueType value = m_Input.GetInt4();
-    //     if ( !values.IsInteger() ) // check value
-    //         values.FindName(value, false);
-    //
-    //     return value;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:416-432
-    // ```c++
-    // void CEnumeratedTypeInfo::ReadEnum(CObjectIStream& in,
-    //                                    TTypeInfo objectType,
-    //                                    TObjectPtr objectPtr)
-    // {
-    //     const CEnumeratedTypeInfo* enumType =
-    //         CTypeConverter<CEnumeratedTypeInfo>::SafeCast(objectType);
-    //     try {
-    //         enumType->m_ValueType->SetValueInt(objectPtr,
-    //                                            in.ReadEnum(enumType->Values()));
-    //     }
-    //     catch ( CException& e ) {
-    //         NCBI_RETHROW_SAME(e,"invalid enum value");
-    //     }
-    // ```
     // (`SkipEnum`, 468-484, reads the value the same way and rethrows at 478.)
     fn enumerated(&mut self, values: &'static [EnumValue], integer: bool, skip: bool) -> R<Value> {
         let result = self.enum_value(values, integer);
@@ -1037,26 +786,8 @@ impl TypedReader<'_> {
 
     /// `ReadDouble` / `SkipFNumber`: a word, or `{ mantissa, base, exponent }` whose base is read
     /// with `ReadUint4` (a `CUtilException` for a `-`) and exponent with `ReadInt4`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (quoted at `Reader::real`)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1076-1091
-    // ```c++
-    // void CObjectIStreamAsn::SkipFNumber(void)
-    // {
-    //     if (PeekChar(true) != '{') {
-    //         ScanEndOfId(true);
-    //         return;
-    //     }
-    //     Expect('{', true);
-    //     SkipSNumber();
-    //     Expect(',', true);
-    //     unsigned base = ReadUint4();
-    //     Expect(',', true);
-    //     SkipSNumber();
-    //     Expect('}', true);
-    //     if ( base != 2 && base != 10 )
-    //         ThrowError(fFormatError, "illegal REAL base (must be 2 or 10)");
-    // }
-    // ```
     fn real(&mut self, skip: bool) -> R<Value> {
         Ok(self.real_number(skip)?.map_or(Value::Null, Value::Real))
     }
@@ -1114,15 +845,9 @@ impl TypedReader<'_> {
         Ok(out)
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (quoted at
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
     // `report::serial::encoder::ReplacedChar`)
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:807-810
-    // ```c++
-    // string CObjectIStream::GetPosition(void) const
-    // {
-    //     return "line "+NStr::SizetToString(m_Input.GetLine());
-    // }
-    // ```
     // (`CObjectIStreamAsn` keeps `GetPosition` of its base; `CIStreamBuffer::GetLine` is the line
     // of the reader.)
     fn post_bad_char(&mut self, line: usize, byte: u8, string: &[u8]) {
@@ -1136,31 +861,6 @@ impl TypedReader<'_> {
 
     /// `ReadBytes` / `SkipByteBlock` (the skip takes `H` or `B` after white space).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1170-1197
-    // ```c++
-    // void CObjectIStreamAsn::SkipByteBlock(void)
-    // {
-    //     Expect('\'', true);
-    //     for ( ;; ) {
-    //         char c = GetChar();
-    //         if ( c >= '0' && c <= '9' ) {
-    //             continue;
-    //         }
-    //         ...
-    //         else if ( c == '\'' ) {
-    //             break;
-    //         }
-    //         else if ( c == '\r' || c == '\n' ) {
-    //             SkipEndOfLine(c);
-    //         }
-    //         else {
-    //             m_Input.UngetChar(c);
-    //             ThrowError(fFormatError, "bad char in octet string: #"
-    //                 + NStr::IntToString(c));
-    //         }
-    //     }
-    //     Expect('H', 'B', true);
-    // }
-    // ```
     fn octets(&mut self, skip: bool) -> R<Value> {
         if !skip {
             return Ok(Value::Octets(self.r.octets()?));
@@ -1195,15 +895,6 @@ impl TypedReader<'_> {
 /// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
 /// (`CSerialException`, NCBI's default verification).
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
-// ```c++
-// bool CObjectIStream::ExpectedMember(const CMemberInfo* memberInfo)
-// {
-//     const CItemInfo* info = CItemsInfo::FindNextMandatory(memberInfo);
-//     if (info) {
-//         if (GetVerifyData() == eSerialVerifyData_Yes) {
-//             ThrowError(fFormatError,
-//                     "member "+info->GetId().ToString()+" expected");
-// ```
 fn expected_member(member: &Member) -> R<()> {
     if member.optional() {
         return Ok(());

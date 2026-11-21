@@ -9,13 +9,6 @@
 //! STRING and REAL values, and the skipping of one value of any type.
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243
-//! ```c++
-//! char CObjectIStreamAsn::SkipWhiteSpace(void)
-//! {
-//!     try { // catch CEofException
-//!         for ( ;; ) {
-//!             char c = m_Input.SkipSpaces();
-//! ```
 //!
 //! The text comes from an `AsnSource`: a slice (`SliceSource`, the PSSM file read whole) or a
 //! stream read in blocks (`StreamSource`, an archive of any size: only the bytes not yet read
@@ -84,18 +77,8 @@ const fn asn_site(line: u32, kind: &'static str, function: &'static str) -> Thro
 
 const FORMAT_ERROR: &str = "CSerialException::eFormatError";
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243 (quoted at the module and at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243 (cited at the module and at
 // `Reader::skip_white_space`)
-// ```c++
-//     } catch (CEofException& e) {
-//         if (GetStackDepth() <= 2) {
-//             throw;
-//         } else {
-//             // There should be no eof here, report as error
-//             ThrowError(fEOF, e.what());
-//         }
-//     }
-// ```
 /// `SkipWhiteSpace`'s `ThrowError(fEOF, e.what())` ([`NcbiThrow::WhiteSpaceEof`]).
 pub(crate) const SKIP_WHITE_SPACE_EOF: ThrowSite = asn_site(
     239,
@@ -103,17 +86,6 @@ pub(crate) const SKIP_WHITE_SPACE_EOF: ThrowSite = asn_site(
     "ncbi::CObjectIStreamAsn::SkipWhiteSpace",
 );
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:177-185
-// ```c++
-// void CObjectIStreamAsn::Expect(char expect, bool skipWhiteSpace)
-// {
-//     if ( !GetChar(expect, skipWhiteSpace) ) {
-//         string msg("\'");
-//         msg += expect;
-//         msg += "' expected";
-//         ThrowError(fFormatError, msg);
-//     }
-// }
-// ```
 const EXPECT: ThrowSite = asn_site(183, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::Expect");
 const READ_TYPE_ID: ThrowSite = asn_site(299, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadTypeId");
 const READ_MEMBER_ID: ThrowSite =
@@ -123,14 +95,6 @@ const READ_FILE_HEADER: ThrowSite =
     asn_site(719, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadFileHeader");
 const READ_BOOL: ThrowSite = asn_site(762, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadBool");
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:866-871
-// ```c++
-// void CObjectIStreamAsn::UnendedString(size_t startLine)
-// {
-//     ThrowError(fFormatError,
-//                "unclosed string starts at line "+
-//                NStr::SizetToString(startLine));
-// }
-// ```
 const UNENDED_STRING: ThrowSite =
     asn_site(869, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::UnendedString");
 const NEXT_ELEMENT: ThrowSite =
@@ -142,21 +106,6 @@ pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
     "ncbi::CObjectIStreamAsn::UnexpectedMember",
 );
 // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:123-160
-// ```c++
-// TEnumValueType CEnumeratedTypeValues::FindValue(const CTempString& name) const
-// {
-//     ...
-//         if ( i == m.end() ) {
-//             NCBI_THROW(CSerialException,eInvalidData,
-//                        "invalid value of enumerated type: " + string(name));
-//     ...
-// const string& CEnumeratedTypeValues::FindName(TEnumValueType value,
-//                                               bool allowBadValue) const
-// {
-//     ...
-//             NCBI_THROW(CSerialException,eInvalidData,
-//                        "invalid value of enumerated type: " + NStr::NumericToString(value));
-// ```
 // (NCBI's report of these two names no function.)
 const FIND_VALUE: ThrowSite = ThrowSite {
     file: "src/serial/enumerated.cpp",
@@ -173,24 +122,6 @@ pub(crate) const FIND_NAME: ThrowSite = ThrowSite {
     function: None,
 };
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:570-584
-// ```c++
-// void CIStreamBuffer::BadNumber(void)
-//     THROWS1((CUtilException))
-// {
-//     m_Error = "bad number";
-//     NCBI_THROW_FMT(CUtilException, eWrongData,
-//                    "bad number in line " << GetLine());
-// }
-//
-//
-// void CIStreamBuffer::NumberOverflow(void)
-//     THROWS1((CUtilException))
-// {
-//     m_Error = "number overflow";
-//     NCBI_THROW_FMT(CUtilException, eWrongData,
-//                    "number overflow in line " << GetLine());
-// }
-// ```
 /// `CIStreamBuffer::BadNumber`: the readers of numbers in ASN.1 text (this one and
 /// `report::serial::asn_types::read`).
 pub(crate) const BAD_NUMBER: ThrowSite = ThrowSite {
@@ -314,17 +245,6 @@ impl AsnSource for SliceSource<'_> {
 /// `release_before` on (dropping the bytes before it once they make up most of the buffer), so
 /// its memory is about the largest value read between two releases, not the whole text.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:125-139
-// ```c++
-// void CIStreamBuffer::Close(void)
-// {
-//     if ( m_Input ) {
-//         size_t unused = m_DataEndPos - m_CurrentPos;
-//         if ( unused ) {
-//             m_Input->Pushback(m_CurrentPos, unused);
-//         }
-//         m_Input.reset();
-//     }
-// ```
 // NCBI's object stream reads its input in blocks too and gives the bytes it did not use back
 // to the stream when an object ends, so the next object is read from the byte after the last
 // one. The reader of a stream of objects keeps one `StreamSource` for all of them.
@@ -424,12 +344,6 @@ pub(crate) fn is_first_id_char(c: u8) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:123-127
-// ```c++
-// bool CObjectIStreamAsn::IdChar(char c)
-// {
-//     return isalnum((unsigned char) c) || c == '_' || c == '.';
-// }
-// ```
 pub(crate) fn is_id_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
 }
@@ -609,14 +523,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `SkipEndOfLine(c)` after the end-of-line byte `c` was taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
-    // ```c++
-    //     m_Line++;
-    //     char nextChar = PeekCharNoEOF();
-    //     // lastChar either '\r' or \n'
-    //     // if nextChar is compliment, skip it
-    //     if ( (lastChar + nextChar) == ('\r' + '\n') )
-    //         SkipChar();
-    // ```
     pub(crate) fn skip_end_of_line(&mut self, c: u8) {
         self.line += 1;
         if c as u32 + self.peek_at(0) as u32 == b'\r' as u32 + b'\n' as u32 {
@@ -627,57 +533,7 @@ impl<S: AsnSource> Reader<S> {
     /// `SkipWhiteSpace`: the next byte that is not white space or in a comment, not taken. The
     /// end of the text is an error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243
-    // ```c++
-    //         for ( ;; ) {
-    //             char c = m_Input.SkipSpaces();
-    //             switch ( c ) {
-    //             case '\t':
-    //                 m_Input.SkipChar();
-    //                 continue;
-    //             case '\r':
-    //             case '\n':
-    //                 m_Input.SkipChar();
-    //                 SkipEndOfLine(c);
-    //                 continue;
-    //             case '-':
-    //                 // check for comments
-    //                 if ( m_Input.PeekChar(1) != '-' ) {
-    //                     return '-';
-    //                 }
-    //                 m_Input.SkipChars(2);
-    //                 // skip comments
-    //                 SkipComments();
-    //                 continue;
-    //             default:
-    //                 return c;
-    //             }
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:245-274
-    // ```c++
-    //         for ( ;; ) {
-    //             char c = GetChar();
-    //             switch ( c ) {
-    //             case '\r':
-    //             case '\n':
-    //                 SkipEndOfLine(c);
-    //                 return;
-    //             case '-':
-    //                 c = GetChar();
-    //                 switch ( c ) {
-    //                 case '\r':
-    //                 case '\n':
-    //                     SkipEndOfLine(c);
-    //                     return;
-    //                 case '-':
-    //                     return;
-    //                 }
-    //                 continue;
-    //             default:
-    //                 continue;
-    //             }
-    //         }
-    // ```
     #[inline]
     pub(crate) fn skip_white_space(&mut self) -> Result<u8> {
         let (pos, c) = self.white_space_at(self.pos)?;
@@ -840,23 +696,6 @@ impl<S: AsnSource> Reader<S> {
     /// `ScanEndOfId(is_id)` at the current byte: the byte, then the identifier bytes and the `-`
     /// before one; empty when `is_id` is false. Returns the positions of the identifier.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:276-290
-    // ```c++
-    // CTempString CObjectIStreamAsn::ScanEndOfId(bool isId)
-    // {
-    //     if ( isId ) {
-    //         for ( size_t i = 1; ; ++i ) {
-    //             char c = m_Input.PeekCharNoEOF(i);
-    //             if ( !IdChar(c) &&
-    //                  (c != '-' || !IdChar(m_Input.PeekChar(i + 1))) ) {
-    //                 const char* ptr = m_Input.GetCurrentPos();
-    //                 m_Input.SkipChars(i);
-    //                 return CTempString(ptr, i);
-    //             }
-    //         }
-    //     }
-    //     return CTempString();
-    // }
-    // ```
     pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Result<Range<usize>> {
         let start = self.pos;
         if !is_id {
@@ -890,37 +729,7 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadMemberId(SkipWhiteSpace())`: a member or variant name, bare (from a lower-case letter)
     /// or between `[` and `]` on one line (the positions of the text between them).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-363
-    // ```c++
-    // CTempString CObjectIStreamAsn::ReadMemberId(char c)
-    // {
-    //     if ( c == '[' ) {
-    //         for ( size_t i = 1; ; ++i ) {
-    //             switch ( m_Input.PeekChar(i) ) {
-    //             case '\r':
-    //             case '\n':
-    //                 ThrowError(fFormatError, "end of line: expected ']'");
-    //                 break;
-    //             case ']':
-    //                 {
-    //                     const char* ptr = m_Input.GetCurrentPos();
-    //                     m_Input.SkipChars(++i);
-    //                     return CTempString(ptr + 1, i - 2);
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     else {
-    //         return ScanEndOfId(islower((unsigned char) c) != 0);
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:394-397
-    // ```c++
-    //     if (!id.empty()  &&  isdigit((unsigned char) id[0])) {
-    //         idx = classType->GetMembers().Find
-    //             (CMemberId::TTag(NStr::StringToInt(id)), CAsnBinaryDefs::eContextSpecific);
-    //     }
-    // ```
     // An id in brackets that starts with a digit names the member or variant by its tag
     // (`GetMemberIndex`, and `GetChoiceIndex` at :431-433), which depends on the tags NCBI's
     // generated type information gives each member: `member_or_tag` returns it for a reader that
@@ -989,44 +798,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadFileHeader`: the type name before `::=` (empty when there is none), the `::=` taken.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:292-313,709-721
-    // ```c++
-    // CTempString CObjectIStreamAsn::ReadTypeId(char c)
-    // {
-    //     if ( c == '[' ) {
-    //         for ( size_t i = 1; ; ++i ) {
-    //             switch ( m_Input.PeekChar(i) ) {
-    //             case '\r':
-    //             case '\n':
-    //                 ThrowError(fFormatError, "end of line: expected ']'");
-    //                 break;
-    //             case ']':
-    //                 {
-    //                     const char* ptr = m_Input.GetCurrentPos();
-    //                     m_Input.SkipChars(i);
-    //                     return CTempString(ptr + 1, i - 2);
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     else {
-    //         return ScanEndOfId(FirstIdChar(c));
-    //     }
-    // }
-    // ...
-    // string CObjectIStreamAsn::ReadFileHeader()
-    // {
-    //     CTempString id = ReadTypeId(SkipWhiteSpace());
-    //     string s(id);
-    //     if ( SkipWhiteSpace() == ':' &&
-    //          m_Input.PeekCharNoEOF(1) == ':' &&
-    //          m_Input.PeekCharNoEOF(2) == '=' ) {
-    //         m_Input.SkipChars(3);
-    //     }
-    //     else
-    //         ThrowError(fFormatError, "'::=' expected");
-    //     return s;
-    // }
-    // ```
     // A type name in brackets stops before its `]` (`SkipChars(i)`), so the `::=` test that
     // follows always fails.
     pub(crate) fn file_header(&mut self) -> Result<Range<usize>> {
@@ -1059,7 +830,7 @@ impl<S: AsnSource> Reader<S> {
         Ok(id)
     }
 
-    /// `ReadTypeId(SkipWhiteSpace())` (quoted at `file_header`), as `ReadOtherPointer` reads the
+    /// `ReadTypeId(SkipWhiteSpace())` (cited at `file_header`), as `ReadOtherPointer` reads the
     /// type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
     /// otherwise), or the text between `[` and `]` on one line, which NCBI takes without its last
     /// byte (`CTempString(ptr + 1, i - 2)`), leaving the `]` unread (`SkipChars(i)`). `None` for
@@ -1094,34 +865,6 @@ impl<S: AsnSource> Reader<S> {
     /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
     /// a name that is not one of them is an error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1475
-    // ```c++
-    // void CObjectIStreamAsn::BeginChoice(const CChoiceTypeInfo* choiceType)
-    // {
-    //     if (choiceType->GetVariantInfo(kFirstMemberIndex)->GetId().IsAttlist()) {
-    //         ...
-    //     }
-    //     m_BlockStart = true;
-    // }
-    // ...
-    // TMemberIndex CObjectIStreamAsn::BeginChoiceVariant(const CChoiceTypeInfo* choiceType)
-    // {
-    //     bool skipname = !m_BlockStart;
-    //     if ( !NextElement() )
-    //         return kInvalidMember;
-    //     CTempString id = ReadMemberId(SkipWhiteSpace());
-    //     ...
-    //     if ( id.empty() )
-    //         ThrowError(fFormatError, "choice variant id expected");
-    //
-    //     TMemberIndex index = GetChoiceIndex(choiceType, id);
-    //     if ( index == kInvalidMember ) {
-    //         if (CanSkipUnknownVariants()) {
-    //             SetFailFlags(fUnknownValue);
-    //         } else {
-    //             UnexpectedMember(id, choiceType->GetVariants());
-    //         }
-    //     }
-    // ```
     // (`NextElement` at the choice's start fails at a `}`, which reads as no id here; the variant
     // names of the modules LOSAT reads are their ASN.1 names, `GetChoiceIndex` (:426-442).)
     pub(crate) fn choice(&mut self, names: &[&str]) -> Result<usize> {
@@ -1148,24 +891,6 @@ impl<S: AsnSource> Reader<S> {
     /// `NextElement`: whether another element follows (its `,` taken), or the block ends. The
     /// bytes before it are not read again (`AsnSource::release_before`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1205-1223
-    // ```c++
-    //     char c = SkipWhiteSpace();
-    //     if ( m_BlockStart ) {
-    //         // first element
-    //         m_BlockStart = false;
-    //         return c != '}';
-    //     }
-    //     else {
-    //         // next element
-    //         if ( c == ',' ) {
-    //             m_Input.SkipChar();
-    //             return true;
-    //         }
-    //         else if ( c != '}' )
-    //             ThrowError(fFormatError, "',' or '}' expected");
-    //         return false;
-    //     }
-    // ```
     pub(crate) fn next_element(&mut self, block_start: &mut bool) -> Result<bool> {
         let (pos, more) = self.next_element_at(self.pos, block_start)?;
         self.pos = pos;
@@ -1246,27 +971,6 @@ impl<S: AsnSource> Reader<S> {
     /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4` / `ReadInt8`): an optional sign and digits,
     /// in `min..=max`.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    // ```c++
-    //     bool sign;
-    //     char c = SkipWs();
-    //     switch ( c ) {
-    //     case '-':
-    //         sign = true;
-    //         c = GetChar();
-    //         break;
-    //     case '+':
-    //         sign = false;
-    //         c = GetChar();
-    //         break;
-    //     ...
-    //     Uint4 n = c - '0';
-    //     if ( n > 9 )
-    //         BadNumber();
-    //     ...
-    //         // check multiplication overflow
-    //         if ( n > kMaxBeforeMul || (n == kMaxBeforeMul && d > kMaxLimitAdd) )
-    //             NumberOverflow();
-    // ```
     pub(crate) fn integer(&mut self, min: i128, max: i128) -> Result<i128> {
         let (pos, c) = self.white_space_at(self.pos)?;
         let (mut pos, mut c) = self.ws_at(pos, c)?;
@@ -1337,15 +1041,6 @@ impl<S: AsnSource> Reader<S> {
     /// which `SkipWhiteSpace` stops at) is skipped, line ends uncounted, comments not seen. Returns
     /// the next byte, not taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-624
-    // ```c++
-    // char CIStreamBuffer::SkipWs(void)
-    // {
-    //     char c;
-    //     while (isspace((unsigned char)(c = GetChar())))
-    //     ;
-    //     return c;
-    // }
-    // ```
     // `c` is the byte at `pos`, which `SkipWhiteSpace` found.
     #[inline]
     pub(crate) fn ws_at(&mut self, pos: usize, c: u8) -> Result<(usize, u8)> {
@@ -1374,41 +1069,7 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadUint4`: `GetUint4` after `SkipWhiteSpace`, an optional `+` and digits; a `-` is not a
     /// sign there (`'-' - '0'` is more than 9: "bad number", even for `-0`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
-    // ```c++
-    // Uint4 CObjectIStreamAsn::ReadUint4(void)
-    // {
-    //     SkipWhiteSpace();
-    //     return m_Input.GetUint4();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
-    // ```c++
-    //     char c = SkipWs();
-    //     if ( c == '+' )
-    //         c = GetChar();
-    //
-    //     Uint4 n = c - '0';
-    //     if ( n > 9 )
-    //         BadNumber();
-    //
-    //     // overflow limits
-    //     const Uint4 kMaxBeforeMul = kMax_UI4/10;
-    //     const Uint1 kMaxLimitAdd = Uint1(kMax_UI4%10);
-    //
-    //     for ( ;; ) {
-    //         Uint1 d = (Uint1)(PeekCharNoEOF() - '0');
-    //         if  ( d > 9 )
-    //             break;
-    //         SkipChar();
-    //
-    //         // check multiplication overflow
-    //         if ( n > kMaxBeforeMul || (n == kMaxBeforeMul && d > kMaxLimitAdd) )
-    //             NumberOverflow();
-    //
-    //         n = n * 10 + d;
-    //     }
-    //     return n;
-    // ```
     pub(crate) fn uint4(&mut self) -> Result<u32> {
         let (pos, c) = self.white_space_at(self.pos)?;
         let (mut pos, mut c) = self.ws_at(pos, c)?;
@@ -1454,21 +1115,6 @@ impl<S: AsnSource> Reader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:739-764
-    // ```c++
-    //     switch ( SkipWhiteSpace() ) {
-    //     case 'T':
-    //         if ( m_Input.PeekCharNoEOF(1) == 'R' &&
-    //              m_Input.PeekCharNoEOF(2) == 'U' &&
-    //              m_Input.PeekCharNoEOF(3) == 'E' &&
-    //              !IdChar(m_Input.PeekCharNoEOF(4)) ) {
-    //             m_Input.SkipChars(4);
-    //             return true;
-    //         }
-    //         break;
-    //     case 'F':
-    //         ...
-    //     ThrowError(fFormatError, "TRUE or FALSE expected");
-    // ```
     pub(crate) fn boolean(&mut self) -> Result<bool> {
         let c = self.skip_white_space()?;
         if c == b'T'
@@ -1495,20 +1141,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadNull`: the word `NULL`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:444-455
-    // ```c++
-    // void CObjectIStreamAsn::ReadNull(void)
-    // {
-    //     if ( SkipWhiteSpace() == 'N' &&
-    //          m_Input.PeekCharNoEOF(1) == 'U' &&
-    //          m_Input.PeekCharNoEOF(2) == 'L' &&
-    //          m_Input.PeekCharNoEOF(3) == 'L' &&
-    //          !IdChar(m_Input.PeekCharNoEOF(4)) ) {
-    //         m_Input.SkipChars(4);
-    //     }
-    //     else
-    //         ThrowError(fFormatError, "'NULL' expected");
-    // }
-    // ```
     pub(crate) fn null(&mut self) -> Result<()> {
         let c = self.skip_white_space()?;
         if self.take_null_word(c) {
@@ -1535,39 +1167,7 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadPointerType`: `NULL`, `@` or `:` (taken), or the value of the declared type (nothing
     /// taken), after `SkipWhiteSpace` (`PeekChar(true)`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1606-1630
-    // ```c++
-    // CObjectIStream::EPointerType CObjectIStreamAsn::ReadPointerType(void)
-    // {
-    //     switch ( PeekChar(true) ) {
-    //     case 'N':
-    //         if ( m_Input.PeekCharNoEOF(1) == 'U' &&
-    //              m_Input.PeekCharNoEOF(2) == 'L' &&
-    //              m_Input.PeekCharNoEOF(3) == 'L' &&
-    //              !IdChar(m_Input.PeekCharNoEOF(4)) ) {
-    //             // "NULL"
-    //             m_Input.SkipChars(4);
-    //             return eNullPointer;
-    //         }
-    //         break;
-    //     case '@':
-    //         m_Input.SkipChar();
-    //         return eObjectPointer;
-    //     case ':':
-    //         m_Input.SkipChar();
-    //         return eOtherPointer;
-    //     default:
-    //         break;
-    //     }
-    //     return eThisPointer;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:161-164
-    // ```c++
-    // char CObjectIStreamAsn::PeekChar(bool skipWhiteSpace)
-    // {
-    //     return skipWhiteSpace? SkipWhiteSpace(): m_Input.PeekChar();
-    // }
-    // ```
     pub(crate) fn pointer_type(&mut self) -> Result<PointerType> {
         let c = self.skip_white_space()?;
         if self.take_null_word(c) {
@@ -1588,17 +1188,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
-    // ```c++
-    //     CTempString id = ReadLCaseId(SkipWhiteSpace());
-    //     if ( !id.empty() ) {
-    //         // enum element by name
-    //         return values.FindValue(id);
-    //     }
-    //     // enum element by value
-    //     TEnumValueType value = m_Input.GetInt4();
-    //     if ( !values.IsInteger() ) // check value
-    //         values.FindName(value, false);
-    // ```
     pub(crate) fn enumerated(
         &mut self,
         values: &[(&'static str, i32)],
@@ -1658,35 +1247,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadStringValue`: a quoted string, its lines joined, `""` read as one quote.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986
-    // ```c++
-    //     Expect('\"', true);
-    //     ...
-    //         for (;;) {
-    //             char c = m_Input.PeekChar(i);
-    //             switch ( c ) {
-    //             case '\r':
-    //             case '\n':
-    //                 // flush string
-    //                 AppendLongStringData(s, i, fix_method, startLine);
-    //                 m_Input.SkipChar(); // '\r' or '\n'
-    //                 i = 0;
-    //                 // skip end of line
-    //                 SkipEndOfLine(c);
-    //                 break;
-    //             case '\"':
-    //                 s.reserve(s.size() + i);
-    //                 AppendStringData(s, i, fix_method, startLine);
-    //                 m_Input.SkipChar(); // quote
-    //                 if ( m_Input.PeekCharNoEOF() != '\"' ) {
-    //                     // end of string
-    //                     return;
-    //                 }
-    //                 else {
-    //                     // double quote -> one quote
-    //                     i = 1;
-    //                 }
-    //                 break;
-    // ```
     pub(crate) fn string(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.string_into(&mut out)?;
@@ -1695,12 +1255,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// A UTF8String: `string` with any byte, as NCBI reads that type (`eFNP_Allow`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
-    // ```c++
-    // void CObjectIStreamAsn::ReadString(string& s, EStringType type)
-    // {
-    //     ReadStringValue(s, type == eStringTypeUTF8? eFNP_Allow: x_FixCharsMethod());
-    // }
-    // ```
     pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
         self.string_as_read()
     }
@@ -1756,12 +1310,6 @@ impl<S: AsnSource> Reader<S> {
                 }
                 _ => {
                     // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-                    // ```c++
-                    // bool GoodVisibleChar(char c)
-                    // {
-                    //     return c >= ' ' && c <= '~';
-                    // }
-                    // ```
                     // (Only `visible_only` stops at such a byte.)
                     self.pos = pos;
                     self.line = line;
@@ -1776,7 +1324,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// The `CEofException` inside a string, which `ReadStringValue` turns into its error
-    /// (`UnendedString`, quoted at [`UNENDED_STRING`]) at the line where the text ends.
+    /// (`UnendedString`, cited at [`UNENDED_STRING`]) at the line where the text ends.
     fn unended_string(&self, start_line: usize) -> AsnTextError {
         self.error_at(
             NcbiThrow::Stream(UNENDED_STRING),
@@ -1794,40 +1342,9 @@ impl<S: AsnSource> Reader<S> {
     /// reader of a VisibleString in ASN.1 text for the readers that post NCBI's messages (the
     /// PSSM reader, `asn_types::read`, and the mask reader, `writedb::mask_info`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
-    // ```c++
-    //     const char* data = m_Input.GetCurrentPos();
-    //     if ( fix_method != eFNP_Allow ) {
-    //         size_t done = 0, valid = 0;
-    //         for ( size_t i = 0; i < count; ++i ) {
-    //             char c = data[i];
-    //             if ( !GoodVisibleChar(c) ) {
-    //                 ...
-    //                 if (valid == 0) {
-    //                     if ( i > done ) {
-    //                         s.append(data + done, i - done);
-    //                     }
-    //                     c = ReplaceVisibleChar(c, fix_method, this, CTempString(data,count), x_FixCharsSubst());
-    //                     if (c != 0) {
-    //                         s += c;
-    //                     }
-    //                     done = i + 1;
-    //                 }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
     // at `string`; its `catch ( CEofException& )` calls `UnendedString`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1093-1155
-    // ```c++
-    // void CObjectIStreamAsn::SkipString(EStringType type)
-    // {
-    //     ...
-    //             default:
-    //                 if (type == eStringTypeVisible) {
-    //                     if ( !GoodVisibleChar(c) ) {
-    //                         ...
-    //                         if (valid == 0) {
-    //                             c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst());
-    //                         }
-    // ```
     // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163: `valid` stays 0;
     // the fix is `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`, objistr.cpp:302.)
     pub(crate) fn visible_string(
@@ -1921,60 +1438,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// An OCTET STRING: `'`, hex digits across lines, `'H`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1477-1538
-    // ```c++
-    // void CObjectIStreamAsn::BeginBytes(ByteBlock& )
-    // {
-    //     Expect('\'', true);
-    // }
-    //
-    // int CObjectIStreamAsn::GetHexChar(void)
-    // {
-    //     for ( ;; ) {
-    //         char c = GetChar();
-    //         if ( c >= '0' && c <= '9' ) {
-    //             return c - '0';
-    //         }
-    //         else if ( c >= 'A' && c <= 'F' ) {
-    //             return c - 'A' + 10;
-    //         }
-    //         else if ( c >= 'a' && c <= 'f' ) {
-    //             return c - 'a' + 10;
-    //         }
-    //         switch ( c ) {
-    //         case '\'':
-    //             return -1;
-    //         case '\r':
-    //         case '\n':
-    //             SkipEndOfLine(c);
-    //             break;
-    //         default:
-    //             m_Input.UngetChar(c);
-    //             ThrowError(fFormatError, "bad char in octet string: #"
-    //                 + NStr::IntToString(c));
-    //         }
-    //     }
-    // }
-    // ...
-    //         int c1 = GetHexChar();
-    //         if ( c1 < 0 ) {
-    //             block.EndOfBlock();
-    //             return count;
-    //         }
-    //         int c2 = GetHexChar();
-    //         if ( c2 < 0 ) {
-    //             *dst++ = char(c1 << 4);
-    //             count++;
-    //             block.EndOfBlock();
-    //             return count;
-    //         }
-    //         else {
-    //             *dst++ = char((c1 << 4) | c2);
-    //     ...
-    // void CObjectIStreamAsn::EndBytes(const ByteBlock& )
-    // {
-    //     Expect('H');
-    // }
-    // ```
     pub(crate) fn octets(&mut self) -> Result<Vec<u8>> {
         self.expect(b'\'')?;
         let mut out = Vec::new();
@@ -2015,19 +1478,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadNumber`: a sign or a digit, then digits; returns their positions.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:315-329
-    // ```c++
-    //     char c = SkipWhiteSpace();
-    //     if ( c != '-' && c != '+' && !isdigit((unsigned char) c) )
-    //         ThrowError(fFormatError, "invalid number");
-    //     for ( size_t i = 1; ; ++i ) {
-    //         c = m_Input.PeekChar(i);
-    //         if ( !isdigit((unsigned char) c) ) {
-    //             const char* ptr = m_Input.GetCurrentPos();
-    //             m_Input.SkipChars(i);
-    //             return CTempString(ptr, i);
-    //         }
-    //     }
-    // ```
     pub(crate) fn number(&mut self) -> Result<Range<usize>> {
         let (start, c) = self.white_space_at(self.pos)?;
         if c != b'-' && c != b'+' && !c.is_ascii_digit() {
@@ -2052,62 +1502,6 @@ impl<S: AsnSource> Reader<S> {
 
     /// `CObjectIStreamAsn::ReadDouble`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
-    // ```c++
-    //     double result = 0;
-    //     if (PeekChar(true) != '{') {
-    //         CTempString tmp( ScanEndOfId(true) );
-    //         if (NStr::strncasecmp(tmp.data(), "PLUS-INFINITY", 13) == 0) {
-    //             return HUGE_VAL;
-    //         } else if (NStr::strncasecmp(tmp.data(),"MINUS-INFINITY", 14) == 0) {
-    //             return -HUGE_VAL;
-    //         } else if (NStr::strncasecmp(tmp.data(),"NOT-A-NUMBER", 12) == 0) {
-    // 	    return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
-    //         }
-    //         char* endptr;
-    //         return NStr::StringToDoublePosix( string(tmp).c_str(), &endptr, NStr::fDecimalPosixFinite );
-    //     }
-    //     Expect('{', true);
-    //     bool is_negative = PeekChar(true) == '-';
-    //     CTempString mantissaStr = ReadNumber();
-    //     size_t mantissaLength = mantissaStr.size();
-    //     char buffer[128];
-    //     if ( mantissaLength >= sizeof(buffer) - 1 )
-    //         ThrowError(fOverflow, "buffer overflow");
-    //     memcpy(buffer, mantissaStr.data(), mantissaLength);
-    //     buffer[mantissaLength] = '\0';
-    //     char* endptr;
-    //     double mantissa = NStr::StringToDoublePosix(buffer, &endptr);
-    //     if ( *endptr != 0 )
-    //         ThrowError(fFormatError, "bad double in line "
-    //             + NStr::SizetToString(m_Input.GetLine()));
-    //     Expect(',', true);
-    //     unsigned base = ReadUint4();
-    //     Expect(',', true);
-    //     int exp = ReadInt4();
-    //     Expect('}', true);
-    //     if ( base != 2 && base != 10 ) {
-    //         ThrowError(fFormatError, "illegal REAL base (must be 2 or 10)");
-    //     }
-    //     if (mantissa == 0.) {
-    //         return mantissa;
-    //     }
-    //     if (is_negative) {
-    //         mantissa = -mantissa;
-    //     }
-    //
-    //     if ( base == 10 ) {
-    //         result = mantissa * pow((double)10.0, exp);
-    //     } else {
-    //         result = ldexp( mantissa, exp);
-    //     }
-    //
-    //     if (result >= 0 && result <= DBL_MIN) {
-    //         result = DBL_MIN;
-    //     } else if (!finite(result)) {
-    //         result = DBL_MAX;
-    //     }
-    //     return is_negative ? -result : result;
-    // ```
     pub(crate) fn real(&mut self) -> Result<f64> {
         if let Some(word) = self.real_word()? {
             return Ok(word);
@@ -2210,7 +1604,7 @@ impl<S: AsnSource> Reader<S> {
     }
 }
 
-/// The end of `ReadDouble` (quoted at `Reader::real`): the value of the mantissa `mantissa` (read
+/// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
 pub(crate) fn real_of_parts(

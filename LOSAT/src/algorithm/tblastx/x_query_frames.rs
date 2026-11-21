@@ -3,19 +3,6 @@
 //! frame.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
-//! ```c
-//!     for (context = query_info->first_context;
-//!          context <= query_info->last_context; ++context) {
-//!
-//!         BlastSeqLoc *filter_per_context = NULL;
-//!         status = s_GetFilteringLocationsForOneContext(query_blk,
-//!                                                       query_info,
-//!                                                       context,
-//!                                                       program_number,
-//!                                                       filter_options,
-//!                                                       &filter_per_context,
-//!                                                       blast_message);
-//! ```
 //! NCBI filters the contexts of a query batch (for TBLASTX, the six frames of each query) one
 //! after the other. `run_impl` did the same, serially, query by query and frame by frame. For a
 //! genome-sized query that is most of the time outside the search at eight threads (AP027131 x
@@ -86,11 +73,7 @@ pub(super) fn mask_frame(seg: &SegMasker, frame: &mut QueryFrame) {
         // (`sequence_nomask`), then overwrite masked residues in the working
         // query sequence buffer with X.
         //
-        // NCBI reference (verbatim):
-        //   const Uint1 kProtMask = 21;     /* X in NCBISTDAA */
-        //   query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
-        //   query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
-        //   buffer[index] = kMaskingLetter;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:39,1331,1381-1382
         //
         // LOSAT uses NCBISTDAA encoding where X = 21.
         if !frame.seg_masks.is_empty() {
@@ -111,12 +94,6 @@ pub(super) fn mask_frame(seg: &SegMasker, frame: &mut QueryFrame) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
-// ```c
-//     if (!mask_at_hash) {
-//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-//                              program_number);
-//     }
-// ```
 /// As `mask_frame` with `-soft_masking true` (`mask_at_hash`): only the masked intervals into
 /// `seg_masks`, which keep words out of the lookup table (`BLAST_ComplementMaskLocations`,
 /// blast_setup.c:634-637); the
@@ -145,10 +122,6 @@ fn mask_frame_as<const MASK_AT_HASH: bool>(seg: &SegMasker, frame: &mut QueryFra
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
-// ```c
-//     for (context = query_info->first_context;
-//          context <= query_info->last_context; ++context) {
-// ```
 /// The serial loop: every frame of every query, in query and frame order.
 fn serial<const MASK_AT_HASH: bool>(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker) {
     for frames in query_frames.iter_mut() {
@@ -257,12 +230,6 @@ pub(super) fn mask(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker, pool: 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
-// ```c
-//     if (!mask_at_hash) {
-//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-//                              program_number);
-//     }
-// ```
 /// As `mask`, for `-soft_masking true` (`mask_at_hash`): the frames get their SEG intervals in
 /// `seg_masks` and keep their letters. Cold and out of line (no NCBI counterpart: code placement
 /// only), so that the caller, `batch_setup::query_frames`, keeps the default path's code.
@@ -277,21 +244,6 @@ pub(super) fn mask_soft(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256
-// ```c
-//     if (filter_options->segOptions) { ... SeqBufferSeg(...) ... }
-//     ...
-//         BlastSeqLoc *lcase_mask_slp = NULL;
-//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
-//         {
-//             ASSERT(context < query_blk->lcase_mask->total_size);
-//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
-//             /* Set location list to NULL to allow safe memory deallocation,
-//               ownership transferred to filter_out. */
-//             query_blk->lcase_mask->seqloc_array[context] = NULL;
-//         }
-//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
-//         status = BlastSeqLocCombine(filter_out, 0);
-// ```
 // The lower-case runs reach each frame in its protein coordinates (`s_AddMask`,
 // c++/src/algo/blast/api/blast_setup_cxx.cpp:320-350, `UseProteinCoords`: `dna_to_protein_masks`).
 /// `mask` / `mask_soft` for `-lcase_masking`: every frame's SEG intervals (none with `-seg no`) and
@@ -483,12 +435,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
-    // ```c
-    //     if (!mask_at_hash) {
-    //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-    //                              program_number);
-    //     }
-    // ```
     /// `-soft_masking true`: every frame gets the intervals of the hard frame and keeps its letters
     /// (no unmasked copy), in the serial loop and on pools of 1, 2 and 3 threads.
     #[test]

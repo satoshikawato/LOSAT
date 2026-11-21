@@ -292,7 +292,7 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
     )
     .unwrap();
     convert_freq_ratios_to_pssm(&mut internal, &msa.query, &sbp, &seq_weights.std_prob);
-    scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, &sbp).unwrap();
+    scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, &sbp, None).unwrap();
     assert_eq!(msa.num_seqs, 3);
     for i in 0..length {
         if (1..=3).any(|s| msa.cell[s][i].is_aligned) {

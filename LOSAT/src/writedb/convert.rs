@@ -342,6 +342,34 @@ const fn ncbieaa_to_ncbistdaa_table() -> [u8; 256] {
 }
 const NCBIEAA_TO_NCBISTDAA: [u8; 256] = ncbieaa_to_ncbistdaa_table();
 
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1674-1707
+// The table is 0xff except the 26 letters of either case, each the code of its capital in
+// `STDAA_OF_LETTER`.
+const fn iupacaa_to_ncbistdaa_table() -> [u8; 256] {
+    let mut table = [0xFFu8; 256];
+    let mut i = 0;
+    while i < 26 {
+        table[b'A' as usize + i] = STDAA_OF_LETTER[i];
+        table[b'a' as usize + i] = STDAA_OF_LETTER[i];
+        i += 1;
+    }
+    table
+}
+const IUPACAA_TO_NCBISTDAA: [u8; 256] = iupacaa_to_ncbistdaa_table();
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:530-567
+/// The NCBIstdaa codes of a protein's `Seq-data` as CWriteDB writes them
+/// (`WriteDB_StdaaToBinary`, `WriteDB_EaaToBinary`, `WriteDB_IupacaaToBinary`: every letter of
+/// the data, whatever `Seq-inst.length` says), `None` for another coding.
+pub(crate) fn protein_codes(seq_data: &SeqData) -> Option<Vec<u8>> {
+    match seq_data {
+        SeqData::Ncbieaa(v) => Some(convert_1_to_1(v, &NCBIEAA_TO_NCBISTDAA)),
+        SeqData::Iupacaa(v) => Some(convert_1_to_1(v, &IUPACAA_TO_NCBISTDAA)),
+        SeqData::Ncbistdaa(v) => Some(v.clone()),
+        SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other => None,
+    }
+}
+
 fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {
     src.iter().map(|&byte| table[usize::from(byte)]).collect()
 }
@@ -361,6 +389,12 @@ pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
                 .take(length)
                 .map(|&b| NCBIEAA_TO_NCBISTDAA[usize::from(b)]),
         ),
+        SeqData::Iupacaa(v) => hash(
+            v.iter()
+                .take(length)
+                .map(|&b| IUPACAA_TO_NCBISTDAA[usize::from(b)]),
+        ),
+        SeqData::Ncbistdaa(v) => hash(v.iter().take(length).copied()),
         SeqData::Ncbi2na(v) => {
             hash((0..length).map(|i| 1u8 << ((v[i / 4] >> (6 - 2 * (i % 4))) & 3)))
         }
@@ -418,7 +452,9 @@ pub(crate) fn seq_data_to_binary(
         ambig: Vec::new(),
     };
     Ok(match seq_data {
-        SeqData::Ncbieaa(v) => protein(convert_1_to_1(v, &NCBIEAA_TO_NCBISTDAA)),
+        SeqData::Ncbieaa(_) | SeqData::Iupacaa(_) | SeqData::Ncbistdaa(_) => {
+            protein(protein_codes(seq_data).expect("a protein coding"))
+        }
         SeqData::Ncbi2na(v) => ncbi2na_to_binary(v, length),
         SeqData::Ncbi4na(v) => ncbi4na_to_binary(v, length),
         SeqData::Other => return Err(UnprocessableSequence),

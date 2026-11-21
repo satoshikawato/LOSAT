@@ -109,6 +109,12 @@ impl WriteDbFile {
         self.write(&value.to_be_bytes())
     }
 
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:113-118
+    /// `WriteInt8`: a big-endian `Int8`.
+    pub(crate) fn write_int8(&mut self, value: i64) -> Result<u32, WriteDbError> {
+        self.write(&value.to_be_bytes())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:259-265
     /// The end of `Close` (after the file's own `x_Flush`): the stream is closed.
     pub(crate) fn close(&mut self) {

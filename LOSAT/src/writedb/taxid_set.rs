@@ -195,6 +195,22 @@ impl TaxIdSet {
         Ok(failed)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:77-81
+    /// `AddTaxId(seqid, taxid)`: the key of `id` (`AccessionToKey` of its FASTA form) maps to
+    /// `taxid` from now on (makeprofiledb's taxids of the PSSMs' organisms).
+    pub fn add_tax_id(
+        &mut self,
+        id: &ParsedSeqId,
+        taxid: i32,
+        warn: &mut dyn FnMut(SeqIdWarning),
+    ) -> Result<(), NcbiException> {
+        let mut fasta = Vec::new();
+        label::fasta(id, &mut fasta);
+        let key = accession_to_key(&fasta, warn)?;
+        self.map.set(&key, taxid);
+        Ok(())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:84-128
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:162-172
     /// `x_SelectBestTaxid`.

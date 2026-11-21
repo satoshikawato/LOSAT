@@ -762,6 +762,7 @@ fn build_database_with_log(
         Indices {
             full: args.parse_seqids || blastdb_input,
             hash: args.hash_index,
+            trace: false,
         },
     )?;
     if let Some(oid_masks) = args.oid_masks {

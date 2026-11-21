@@ -12,6 +12,9 @@ use crate::seqid::label::content;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqid::parse::{parse_ids, seq_id_from_text, set_typed, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::{BlastDefline, DeflineSet};
 
 /// `GetSeqIdString(true)`.
@@ -227,13 +230,204 @@ pub fn extract_bioseq_deflines(bioseq: &Bioseq, warn: Warn<'_>) -> DeflineSet {
             return deflines;
         }
     }
-    DeflineSet {
+    deflines_of_bioseq(
+        parsed.ids.clone(),
+        parsed.title_descr.clone().unwrap_or_default(),
+        &[],
+    )
+    .expect("a FASTA Bioseq has an id")
+}
+
+/// `x_BuildDeflinesFromBioseq` of a Bioseq of the ids `ids` whose descriptors give the title
+/// `title` (the last title descriptor; empty without one) and the taxids `taxids`
+/// ([`descr_taxids`]): one definition line of all the ids, the title and the first taxid;
+/// `None` for a Bioseq without ids, which leaves NCBI without definition lines ("Error: No
+/// deflines provided.", `x_ExtractDeflines`). The FASTA path ([`extract_bioseq_deflines`]) and
+/// the Bioseqs of PSSMs (makeprofiledb, [`bioseq_deflines`]) build theirs here.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:592-703
+pub(crate) fn deflines_of_bioseq(
+    ids: Vec<ParsedSeqId>,
+    title: Vec<u8>,
+    taxids: &[i32],
+) -> Option<DeflineSet> {
+    if ids.is_empty() {
+        return None;
+    }
+    Some(DeflineSet {
         deflines: vec![BlastDefline {
-            title: Some(parsed.title_descr.clone().unwrap_or_default()),
-            ids: parsed.ids.clone(),
+            title: Some(title),
+            ids,
+            taxid: taxids.first().copied(),
             ..BlastDefline::default()
         }],
+    })
+}
+
+/// Why `CWriteDB::ExtractBioseqDeflines` makes no definition lines of a Bioseq.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BioseqDeflinesError {
+    /// The Bioseq has no ids: NCBI's `CWriteDBException` "Error: No deflines provided.".
+    NoDeflines,
+    /// A user object `ASN1_BlastDefLine` holds the binary definition lines
+    /// (`x_GetBioseqBinaryHeader`), which NCBI decodes from ASN.1 binary (BER): LOSAT does not
+    /// read them yet.
+    BinaryHeader,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:777-836
+// With `scan_bioseq_4_cfastareader_usrobj` false `x_GetFastaReaderDeflines` finds no definition
+// line, so the definition lines are the binary ones of the descriptors or
+// `x_BuildDeflinesFromBioseq`'s.
+/// `CWriteDB::ExtractBioseqDeflines(bioseq, parse_ids, long_ids = false, scan = false)` of a
+/// Bioseq with descriptors (`descr`) and the ids `ids`, without the serialization (the writer
+/// posts its diagnostics: `WriteDb::post_extracted_deflines`).
+pub(crate) fn bioseq_deflines(
+    ids: &[ParsedSeqId],
+    descr: &[Seqdesc],
+) -> Result<DeflineSet, BioseqDeflinesError> {
+    if has_binary_header(descr) {
+        return Err(BioseqDeflinesError::BinaryHeader);
     }
+    let title = descr
+        .iter()
+        .rev()
+        .find_map(|descriptor| match descriptor {
+            Seqdesc::Title(title) => Some(title.clone()),
+            Seqdesc::Other(_) => None,
+        })
+        .unwrap_or_default();
+    deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
+        .ok_or(BioseqDeflinesError::NoDeflines)
+}
+
+/// The variant `name` of the `Seqdesc` CHOICE `descriptor`, when it is that variant.
+fn seqdesc_variant<'a>(descriptor: &'a Seqdesc, name: &str) -> Option<&'a Value> {
+    match descriptor {
+        Seqdesc::Other(Value::Choice(index, value))
+            if usize::from(*index) == member_index(named::SEQDESC, name) =>
+        {
+            Some(value)
+        }
+        _ => None,
+    }
+}
+
+/// The `Object-id` `value`'s `id`, when it is that variant.
+fn object_id_number(value: &Value) -> Option<i64> {
+    match value {
+        Value::Choice(index, id) if usize::from(*index) == member_index(named::OBJECT_ID, "id") => {
+            match id.as_ref() {
+                Value::Int(number) => Some(*number),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The `Object-id` `value`'s `str`, when it is that variant.
+fn object_id_str(value: &Value) -> Option<&[u8]> {
+    match value {
+        Value::Choice(index, text)
+            if usize::from(*index) == member_index(named::OBJECT_ID, "str") =>
+        {
+            match text.as_ref() {
+                Value::Str(text) => Some(text),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The taxids of the `taxon` Dbtags of the `Org-ref` value `org` whose tag is an `id`, in order.
+fn org_taxids(org: &Value) -> impl Iterator<Item = i32> + '_ {
+    let tags = match org.member(member_index(named::ORG_REF, "db")) {
+        Some(Value::List(tags)) => tags.as_slice(),
+        _ => &[],
+    };
+    tags.iter().filter_map(|tag| {
+        let db = tag.member(member_index(named::DBTAG, "db"));
+        if !matches!(db, Some(Value::Str(db)) if db.as_slice() == b"taxon") {
+            return None;
+        }
+        // `CObject_id::TId` is an `int`; the reader keeps the INTEGER of Int4 storage.
+        object_id_number(tag.member(member_index(named::DBTAG, "tag"))?).map(|id| id as i32)
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:608-640
+/// The taxids that `x_BuildDeflinesFromBioseq` collects from `descr`: those of the `taxon` tags
+/// of each `source` descriptor's organism and each `org` descriptor, in order.
+pub(crate) fn descr_taxids(descr: &[Seqdesc]) -> Vec<i32> {
+    let mut taxids = Vec::new();
+    for descriptor in descr {
+        let org = seqdesc_variant(descriptor, "org").or_else(|| {
+            seqdesc_variant(descriptor, "source")?.member(member_index(named::BIOSOURCE, "org"))
+        });
+        if let Some(org) = org {
+            taxids.extend(org_taxids(org));
+        }
+    }
+    taxids
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Org_ref.cpp:71-90
+/// `GetOrg().GetTaxId()` of the first `org` descriptor of `descr` (the first `taxon` tag whose tag
+/// is an `id`, 0 without one); `None` without an `org` descriptor.
+pub(crate) fn first_org_taxid(descr: &[Seqdesc]) -> Option<i32> {
+    let org = descr
+        .iter()
+        .find_map(|descriptor| seqdesc_variant(descriptor, "org"))?;
+    Some(org_taxids(org).next().unwrap_or(0))
+}
+
+/// `kAsnDeflineObjLabel`.
+const ASN_DEFLINE_OBJ_LABEL: &[u8] = b"ASN1_BlastDefLine";
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:441-489
+/// Whether `x_GetBioseqBinaryHeader` finds binary definition lines in `descr`: the first user
+/// object of type `ASN1_BlastDefLine` whose first field has that label and octet strings
+/// (`oss`), the first of which is not empty.
+fn has_binary_header(descr: &[Seqdesc]) -> bool {
+    let field_data = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
+    let oss = member_index(field_data, "oss");
+    for descriptor in descr {
+        let Some(object) = seqdesc_variant(descriptor, "user") else {
+            continue;
+        };
+        let is_label = |value: Option<&Value>| {
+            value.and_then(object_id_str) == Some(ASN_DEFLINE_OBJ_LABEL)
+        };
+        if !is_label(object.member(member_index(named::USER_OBJECT, "type"))) {
+            continue;
+        }
+        let Some(Value::List(fields)) = object.member(member_index(named::USER_OBJECT, "data"))
+        else {
+            continue;
+        };
+        let Some(field) = fields.first() else {
+            continue;
+        };
+        if !is_label(field.member(member_index(named::USER_FIELD, "label"))) {
+            continue;
+        }
+        if let Some(Value::Choice(index, data)) =
+            field.member(member_index(named::USER_FIELD, "data"))
+        {
+            if usize::from(*index) == oss {
+                return match data.as_ref() {
+                    Value::List(strings) => {
+                        matches!(strings.first(), Some(Value::Octets(bytes)) if !bytes.is_empty())
+                    }
+                    _ => false,
+                };
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

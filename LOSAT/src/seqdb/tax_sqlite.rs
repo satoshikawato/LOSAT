@@ -58,6 +58,89 @@ use super::lmdb_read::{ReadAt, ReadError};
 pub const DEFAULT_NAME: &str = "taxonomy4blast.sqlite3";
 
 const TABLE_NAME: &str = "TaxidInfo";
+
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:189-193
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:649-655
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:680-686
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:756-764
+// NCBI reads the file through SQLite, not a mapping: a read of a page that the system fails (any
+// error of `pread`) is SQLite's `SQLITE_IOERR_READ`, extended code 266, "disk I/O error" (NCBI
+// BLAST+ 2.17.0 with the reads of the file failing with EIO from its second page or its third:
+// line WQA D18b round 2, probe L3). The step's error leaves `GetLeafNodeTaxids`, whose statement's
+// destructor finalizes it, which gives the error again; the destructor posts that one
+// (`STD_CATCH_ALL_X(3, ...)` of the module `Db_Sqlite`, error code 1010) before the caller sees
+// the step's.
+/// What NCBI writes where a read of the file fails while `GetLeafNodeTaxids` steps its query
+/// ([`TaxonomySqlite::descendants`]'s [`ReadError::Unreadable`]): the step's exception
+/// ([`QueryReadFailure::step`]), which the caller catches or ends the run with, and the post of
+/// the statement's destructor ([`QueryReadFailure::finalize_post`]), which comes first. A read
+/// that fails before, at the sanity check of the constructor, is one of the constructor's
+/// exceptions, which the callers take as a file that is not there (`ReadError::Unreadable` of
+/// [`TaxonomySqlite::open`]).
+pub struct QueryReadFailure;
+
+impl QueryReadFailure {
+    /// `SQLITE_SAFE_CALL` of a call that failed on SQLite's read error: `s_ProcessErrorCode`'s
+    /// exception, rethrown as the wrapper's `kind` with `message` at `line` of `function`.
+    fn exception(
+        kind: &'static str,
+        line: u32,
+        function: &'static str,
+        message: &str,
+    ) -> crate::ncbi_exception::NcbiException {
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        const FILE: &str = "src/db/sqlite/sqlitewrapp.cpp";
+        NcbiException::new(
+            ThrowSite {
+                file: FILE,
+                line: 193,
+                kind,
+                function: Some("ncbi::s_ProcessErrorCode"),
+            },
+            "Error from sqlite3: [266] disk I/O error",
+        )
+        .rethrow(
+            ThrowSite {
+                file: FILE,
+                line,
+                kind,
+                function: Some(function),
+            },
+            message,
+        )
+    }
+
+    /// The exception of the step that failed (`CSQLITE_Statement::Step`).
+    pub fn step() -> crate::ncbi_exception::NcbiException {
+        Self::exception(
+            "CSQLITE_Exception::eStmtStep",
+            762,
+            "ncbi::CSQLITE_Statement::Step",
+            "Error stepping through statement results",
+        )
+    }
+
+    /// The post of the statement's destructor in the application whose diagnostic prefix is
+    /// `prefix` (`[Error in x_Finalize()] Exception: ` and the finalize's exception report, a line
+    /// of severity `Error` with the error code `1010.3`), in LOSAT's words.
+    pub fn finalize_post(prefix: &str) -> Vec<u8> {
+        let exception = Self::exception(
+            "CSQLITE_Exception::eStmtFinalize",
+            684,
+            "ncbi::CSQLITE_Statement::x_Finalize",
+            "Cannot finalize statement",
+        );
+        crate::ncbi_exception::error_post_line(
+            Some("1010.3"),
+            Some(prefix),
+            &[
+                b"[Error in x_Finalize()] Exception: ".as_slice(),
+                &exception.ncbi_what(),
+            ]
+            .concat(),
+        )
+    }
+}
 const INDEX_NAME: &str = "TaxidInfoCompositeIdx_parent";
 /// Longest chain of b-tree levels followed; SQLite's own limit is 20.
 const MAX_DEPTH: u32 = 24;

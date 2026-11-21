@@ -54,20 +54,24 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:60-67
 /// Why a reader over [`ReadAt`] (this LMDB reader, `tax_files`'s lookup files, `tax_sqlite`) gives
 /// up: the file's bytes are not what it reads (`Format`, LOSAT's text of a damaged or foreign
 /// file, which the callers turn into their own error or NCBI's text), or the system does not give
 /// them (`Unreadable`). The second is a typed boundary so that a read that fails after the file
-/// was opened stays [`super::SeqDbError::Read`], LOSAT's own "cannot be read" (NCBI maps these
-/// files, and such a failure is a SIGBUS there), and not a format refusal (line WQA D18c,
-/// 2026-11-21).
+/// was opened is not a format refusal (line WQA D18c, 2026-11-21): NCBI maps the LMDB and lookup
+/// files, where such a failure is a SIGBUS, so it stays [`super::SeqDbError::Read`], LOSAT's own
+/// "cannot be read"; it reads `taxonomy4blast.sqlite3` through SQLite, where it is SQLite's read
+/// error, which `tax_sqlite`'s callers write as NCBI does (`tax_sqlite::QueryReadFailure`; review
+/// 1 of line WQA D18b, L3).
 #[derive(Debug)]
 pub enum ReadError {
     /// The bytes are not those of the expected format, or a range passes the end of the source.
     Format(String),
     /// The system failed to give bytes of a file after its first byte ([`super::SeqDbError::Read`]:
     /// where NCBI reads its mapping, a SIGBUS, which `report::db_subject::LookupFailure::of_error`
-    /// takes as NCBI's crash; line WQA D18 round 3).
+    /// takes as NCBI's crash, line WQA D18 round 3; of `taxonomy4blast.sqlite3`, SQLite's read
+    /// error, `tax_sqlite::QueryReadFailure`).
     Unreadable(super::SeqDbError),
 }
 

@@ -241,7 +241,7 @@ fn run_inner(
     let list = match args.database_name() {
         Some(_) => args
             .db_filter
-            .resolve(&settings, &mut stderr)
+            .resolve(&settings, "blastx", &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };

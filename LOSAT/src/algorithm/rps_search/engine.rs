@@ -46,10 +46,9 @@ pub struct RpsSearch {
     pub(crate) x_drop_final_bits: Option<f64>,
     /// `-sum_stats true`, refused where the search starts (`rps_hooks::rps_search`).
     pub(crate) sum_stats: bool,
-    /// `-use_sw_tback` (rpsblast): the redo of composition-based statistics 1 to 3 is NCBI's
-    /// Smith-Waterman redo (`RpsRedoParams::smith_waterman`); without them NCBI's traceback does
-    /// not read it. rpstblastn leaves it false (it refuses `-use_sw_tback` with them,
-    /// `TranslatedRpsSearch::check_options`).
+    /// `-use_sw_tback`: the redo of composition-based statistics 1 to 3 is NCBI's
+    /// Smith-Waterman redo (`RpsRedoParams::smith_waterman`), of rpstblastn's frames too (series
+    /// PR, item PS12c); without them NCBI's traceback does not read it.
     pub(crate) use_sw_tback: bool,
 }
 

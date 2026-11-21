@@ -155,9 +155,17 @@ fn options_of_later_items_are_refused() {
             refusal(extra)
         );
     }
-    // The composition-based statistics of later items, once per run (`check_options`).
-    assert!(late_refusal(&["-use_sw_tback"])
-        .contains("-use_sw_tback with composition-based statistics is not supported by LOSAT's RPSTBLASTN yet"));
+    // -use_sw_tback with composition-based statistics (item PS12c): the redo of the frames is
+    // NCBI's Smith-Waterman redo.
+    assert!(search(&["-use_sw_tback"]).search.use_sw_tback);
+    assert!(
+        search(&["-use_sw_tback", "-comp_based_stats", "2"])
+            .search
+            .use_sw_tback
+    );
+    assert!(!search(&[]).search.use_sw_tback);
+    // LOSAT's refusals of options, once per run (`check_options`).
+    assert!(late_refusal(&["-sum_stats", "true"]).contains("-sum_stats true"));
     // -searchsp and -dbsize reach BLASTX's options.
     let args = parse(&[
         "-comp_based_stats",

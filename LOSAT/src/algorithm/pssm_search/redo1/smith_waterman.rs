@@ -1,7 +1,9 @@
 //! The Smith-Waterman redo of one position-based match (`-use_sw_tback` with composition-based
 //! statistics 1 to 3; RPS-BLAST's, series PR, item PS11c-3): NCBI's
 //! `Blast_RedoOneMatchSmithWaterman` for the one window of a protein query and subject, then the
-//! steps of the X-drop redo after it (`RedoMatch::redo_match`). The kernels are
+//! steps of the X-drop redo after it (`RedoMatch::redo_match`); for RPS-TBLASTN's translated
+//! subject (item PS12c) the same function over the windows of the frames, then the steps of the
+//! X-drop redo of frames (`RedoMatch::evaluate_windows`). The kernels are
 //! `core::composition_adjustment::smith_waterman`'s, on the rows of the adjusted PSSM.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
@@ -12,15 +14,18 @@
 //! machine code (DECISIONS 11 and 63 of line PS); the evaluation is a copy (`evaluate`).
 
 use super::{
-    blast_nint, preliminary_test_near_identical, reap_contained, score_compare, Align, RedoMatch,
-    RedoRun, Redone, SCALING_FACTOR,
+    blast_nint, frame_range, frame_windows, old_test_near_identical,
+    preliminary_test_near_identical, reap_contained, score_compare, window_composition, Align,
+    FrameSubject, RedoMatch, RedoRun, Redone, SCALING_FACTOR,
 };
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHspList};
 use crate::algorithm::pssm_search::gapalign::pssm_sw_xdrop_traceback;
 use crate::algorithm::pssm_search::traceback0::final_hsp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
-use crate::core::composition_adjustment::compo_scale::{pssm_composition_based_stats, SwRedo};
+use crate::core::composition_adjustment::compo_scale::{
+    pssm_composition_based_stats, SwFrameRedo, SwRedo,
+};
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::core::composition_adjustment::smith_waterman::{
     smith_waterman_redo_window, SwRedoScratch, SwSignificance, SwWindow, SwWindowRedo,
@@ -32,7 +37,7 @@ use crate::core::composition_adjustment::smith_waterman::{
 pub(crate) type RpsSwScratch = SwRedoScratch<Vec<u8>>;
 
 /// NCBI's redo of a match whose Smith-Waterman loop does not end: the score of 0 is significant,
-/// the window has two or more HSPs and profile row 0 scores the subject's first letter positive.
+/// the window has two or more HSPs and profile row 0 scores the window's first letter positive.
 /// After every positive alignment NCBI makes the alignment of that one cell again and again; its
 /// range changes no score that the scan sees, and the loop stops only when an allocation fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +223,162 @@ impl RedoMatch<'_> {
         };
         alignments.reverse();
         Ok(Some(alignments))
+    }
+
+    /// The Smith-Waterman redo of one match of a translated subject (rpstblastn's
+    /// `-use_sw_tback`, series PR, item PS12c): `Blast_RedoOneMatchSmithWaterman` over the windows
+    /// of the frames, then the steps of the X-drop redo of frames after it
+    /// (`evaluate_windows`). `sw` is the round loop's memory (its `window` is not used: each window
+    /// has its frame's buffer). `heap` is the query's heap of redone matches, which the match's first
+    /// alignment asks (`BlastCompo_HeapWouldInsert`); `Ok(None)` when no HSP is left, also where
+    /// NCBI's redo of the match fails (an alignment without an edit script, in any window).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1353-1548
+    /// The windows are those of the X-drop redo of frames (`s_WindowsFromAligns` of a translated
+    /// subject with a position-based matrix, `frame_windows`). Each window is redone alone: the
+    /// near-identical test of its first alignment `window->align` (`s_preliminaryTestNearIdentical`
+    /// with the window's HSP count; the old test where the cutoff is 0,
+    /// `RedoRun::without_valid_context`), its frame's range (`frame_range`, SEG unless near
+    /// identical, NCBI's `NULL` for `subject_maybe_biased`), the composition of the window around
+    /// that alignment (`s_GetComposition`, `window_composition`) and the adjustment
+    /// (`Blast_AdjustScores`; a window without a true amino acid makes no alignment), the forbidden
+    /// ranges cleared and the round loop on the window's letters (`subject.data` after the zero
+    /// byte that `frame_range` writes before the window, `subject.length` its `end - begin`, none
+    /// where the window ends before it begins). The alignments are shifted by the window's start
+    /// and take its frame (`s_NewAlignmentUsingXdrop`). All windows prepend to the match's one
+    /// list (`alignments[query_index]`), and the heap is asked only while that list is empty.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn redo_windows_smith_waterman(
+        &self,
+        run: &mut RedoRun<'_>,
+        sw: &mut RpsSwScratch,
+        heap: &mut BlastCompoHeap,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &[u8],
+        frames: FrameSubject<'_>,
+    ) -> Result<Option<(BlastpHspList, i32, f64)>, SwEndless> {
+        debug_assert!(self.link.is_none());
+        let query_length = run.query.len();
+        let matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
+        // The match's alignments in the order the windows' rounds made them.
+        let mut made: Vec<Align> = Vec::new();
+        for (window, order) in
+            frame_windows::<SwFrameRedo>(hsps, query_length as i32, subject.len() as i32)
+        {
+            let hspcnt = order.len();
+            let window_align = Align::incoming::<SwFrameRedo>(&hsps[order[0]]);
+            let near_identical = if run.near_identical_cutoff > 0.0 {
+                preliminary_test_near_identical(
+                    query_length as i32,
+                    &window_align,
+                    run.near_identical_cutoff,
+                )
+            } else {
+                old_test_near_identical(query_length as i32, hspcnt, &window_align)
+            };
+            let mut subject_maybe_biased = true;
+            let subject_data = frame_range::<SwFrameRedo>(
+                run,
+                subject,
+                window,
+                &window_align,
+                near_identical,
+                &mut subject_maybe_biased,
+            );
+            let subject_composition =
+                window_composition::<SwFrameRedo>(&subject_data, window, &window_align);
+            if run.query_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0 {
+                continue;
+            }
+            pssm_composition_based_stats::<SwFrameRedo>(
+                &mut run.matrix.rows,
+                self.info,
+                &subject_composition.prob,
+            );
+            // RPS-BLAST's bound of the adjusted matrix (`RedoRun::with_bound_check`), as in
+            // `redo_one_match_smith_waterman`: above `INT4_MAX` the caller refuses the search.
+            if run.bound_check && run.bound_exceeded.is_none() {
+                let bound: i64 = run
+                    .matrix
+                    .rows
+                    .iter()
+                    .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
+                    .sum();
+                if bound > i64::from(i32::MAX) {
+                    run.bound_exceeded = Some(bound);
+                }
+            }
+            if run.bound_exceeded.is_some() {
+                return Ok(None);
+            }
+            // `frame_range`'s buffer holds the frame's letters from byte 1 and a zero byte before
+            // the window (`buffer[begin]`): NCBI's `seqData->data` after the fit, whose byte before
+            // `ALIGN_EX` reads.
+            let rows = &run.matrix.rows;
+            let window_letters = SwWindow {
+                subject_from_sentinel: &subject_data[window.begin as usize..],
+                subject_length: (window.end - window.begin).max(0) as usize,
+                query_length,
+                rows: |pos| &rows[pos],
+                gap_open: run.gap_open,
+                gap_extend: run.gap_extend,
+                hspcnt,
+            };
+            let significance = SwSignificance::Evalue {
+                lambda: run.karlin.lambda,
+                log_k: run.log_k,
+                searchsp: self.stats.search_space as f64,
+                cutoff_e: self.expect_value,
+            };
+            // NCBI asks the heap only for the match's first alignment (`alignments[query_index]
+            // == NULL`): the round loop asks at its window's first round, so a window after one
+            // that made alignments passes.
+            let match_has_alignments = !made.is_empty();
+            let (matrix, gap, x_dropoff) = (&run.matrix, &mut run.scratch, run.x_dropoff);
+            let (gap_open, gap_extend) = (run.gap_open, run.gap_extend);
+            let redone = smith_waterman_redo_window(
+                &window_letters,
+                significance,
+                |evalue, score| match_has_alignments || heap.would_insert(evalue, score, oid),
+                |query, subject_span, score| {
+                    pssm_sw_xdrop_traceback(
+                        matrix,
+                        window_letters.subject_from_sentinel,
+                        query,
+                        subject_span,
+                        gap_open,
+                        gap_extend,
+                        x_dropoff,
+                        score,
+                        gap,
+                    )
+                },
+                &mut sw.rounds,
+            );
+            match redone {
+                SwWindowRedo::Alignments(alignments) => {
+                    made.extend(alignments.into_iter().map(|align| Align {
+                        score: align.score,
+                        rule: matrix_adjust_rule,
+                        query_start: align.query_start,
+                        query_end: align.query_end,
+                        match_start: align.match_start + window.begin,
+                        match_end: align.match_end + window.begin,
+                        frame: window.frame,
+                        edit_script: align.edit_script,
+                    }))
+                }
+                SwWindowRedo::Failed => return Ok(None),
+                SwWindowRedo::Endless => return Err(SwEndless),
+            }
+        }
+        // NCBI's list starts with the last alignment made.
+        made.reverse();
+        Ok(self.evaluate_windows::<SwFrameRedo, FrameSubject<'_>>(
+            run, oid, hsps, subject, frames, made,
+        ))
     }
 
     /// The steps of the redo after the window's alignments: `s_HSPListFromDistinctAlignments`,

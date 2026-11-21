@@ -2728,40 +2728,39 @@ mod tests {
             "d",
             "-query",
             "q",
-            "-parse_deflines",
         ];
         let on = [&off[..1], &off[3..]].concat();
         assert_eq!(data_loaders(&off), Ok(false));
         assert_eq!(data_loaders(&on), Ok(true));
         let seq_id = b"2HHB\nMKTAYIAKQR\n";
-        let (query, subject, response) = crate::store::register_inputs(&off, seq_id, b"").unwrap();
-        assert_eq!(subject, 0);
+        // The host registers the query with the data loaders of each argv's `validate`.
+        let (query, response) = crate::store::register("blastp", 0, false, seq_id).unwrap();
         assert!(response.contains(r#""length":13"#), "{response}");
-        crate::store::release(query).unwrap();
-        let error = crate::store::register_inputs(&on, seq_id, b"").unwrap_err();
+        let error = crate::store::register("blastp", 0, true, seq_id).unwrap_err();
         assert!(
             error.contains("the first line of the query (\"2HHB\")"),
             "{error}"
         );
-        let (query, _) = crate::store::register("blastp", 0, false, seq_id).unwrap();
         let refused =
-            crate::store::with_inputs(Program::Blastp, query, 0, &words, Some(true), |_, _| ());
+            crate::store::with_inputs(Program::Blastp, query, 0, &on, Some(true), |_, _| ());
         assert!(
             refused
                 .unwrap_err()
                 .contains("read with the data loaders off"),
             "a -db run with the data loaders on"
         );
-        assert!(crate::store::with_inputs(
-            Program::Blastp,
-            query,
-            0,
-            &words,
-            Some(false),
-            |_, _| ()
-        )
-        .is_ok());
+        assert!(
+            crate::store::with_inputs(Program::Blastp, query, 0, &off, Some(false), |_, _| ())
+                .is_ok()
+        );
         crate::store::release(query).unwrap();
+        // With -parse_deflines the reader of the ids wants a defline, with the data loaders off
+        // too: `register_inputs` gives the CLI's error for the argv (its run of 2026-11-21).
+        let parsed = [&off[..], &["-parse_deflines"]].concat();
+        assert_eq!(
+            crate::store::register_inputs(&parsed, seq_id, b"").unwrap_err(),
+            "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1"
+        );
         crate::files::release(file).unwrap();
         // BLASTN's database of repeats is refused too (line RG item D4).
         let repeats = [

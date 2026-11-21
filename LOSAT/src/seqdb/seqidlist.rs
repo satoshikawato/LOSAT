@@ -14,20 +14,6 @@ use crate::seqid::parse::{seq_id_from_text, SeqIdError};
 use crate::seqid::ParsedSeqId;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:134-145
-// ```c++
-// struct NCBI_XOBJREAD_EXPORT SBlastSeqIdListInfo {
-// 		SBlastSeqIdListInfo() : is_v4(true), file_size(0), num_ids(0), create_date(kEmptyStr),
-// 				      db_vol_length(0), db_create_date(kEmptyStr), db_vol_names(kEmptyStr) {}
-// 		bool is_v4;
-// 		Uint8 file_size;
-// 		Uint8 num_ids;
-// 		string title;
-// 		string create_date;
-// 		Uint8 db_vol_length;
-// 		string db_create_date;
-// 		string db_vol_names;
-// };
-// ```
 /// What the list file says of itself (`SBlastSeqIdListInfo`): a text list is `is_v4`, a binary
 /// list carries its header.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,74 +54,8 @@ pub struct SeqidListFile {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:58-85
-// ```c++
-// CSeqidlistRead::CSeqidlistRead (CMemoryFile & file) : m_Ptr((char*) file.GetPtr()), m_EndPtr((char*) file.GetPtr()) {
-// 	if(m_Ptr == NULL) {
-// 		NCBI_THROW(CSeqDBException, eArgErr, "Failed to map seqidlist file ");
-// 	}
-//
-// 	char null_byte = x_GetChar();
-// 	if (null_byte == 0) {
-// 		m_info.is_v4 = false;
-// 		Uint8 file_size = file.GetFileSize();
-// 		m_info.file_size = x_GetUint8();
-// 		if (m_info.file_size != file_size) {
-// 			NCBI_THROW(CSeqDBException, eArgErr, "Invalid seqidlist file");
-// 		}
-// 		m_EndPtr += file_size;
-// 		m_info.num_ids = x_GetUint8();
-// 		Uint4 title_length = x_GetUint4();
-// 		x_GetString(m_info.title, title_length);
-// 		char file_create_date_length = x_GetChar();
-// 		x_GetString(m_info.create_date, file_create_date_length);
-// 		m_info.db_vol_length = x_GetUint8();
-// 		if(m_info.db_vol_length != 0) {
-// 			char file_db_create_date_length = x_GetChar();
-// 			x_GetString(m_info.db_create_date, file_db_create_date_length);
-// 			Uint4 file_vol_names_length = x_GetUint4();
-// 			x_GetString(m_info.db_vol_names, file_vol_names_length);
-// 		}
-// 	}
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:87-108
-// ```c++
-// int CSeqidlistRead::GetIds(vector<CSeqDBGiList::SSiOid>  & idlist)
-// {
-// 	const unsigned char byte_max = 0xFF;
-// 	unsigned int i = 0;
-// 	idlist.clear();
-// 	idlist.resize(m_info.num_ids);
-// 	for(; (m_Ptr < m_EndPtr) && (i < m_info.num_ids); i++) {
-// 		unsigned char id_len = (unsigned char) x_GetChar();
-// 		if(id_len == byte_max) {
-// 			Uint4 long_id_len = x_GetUint4();
-// 			x_GetString(idlist[i].si, long_id_len);
-// 		}
-// 		else {
-// 			x_GetString(idlist[i].si, id_len);
-// 		}
-// 	}
-// 	if(i != m_info.num_ids) {
-// 		NCBI_THROW(CSeqDBException, eArgErr, "Invalid total num of ids in seqidlist file");
-// 	}
-//
-// 	return i;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:111-120
-// ```c++
-// int CBlastSeqidlistFile::GetSeqidlist(CMemoryFile & file, vector<CSeqDBGiList::SSiOid>  & idlist,
-// 		                              SBlastSeqIdListInfo & list_info)
-// {
-//
-// 	CSeqidlistRead list(file);
-// 	list.GetListInfo(list_info);
-// 	list.GetIds(idlist);
-//
-// 	return list_info.num_ids;
-// }
-// ```
 // A 0-byte file has no memory map (`CMemoryFile` leaves the pointer null), hence the first
 // error. NCBI reads the header and the ids from the map without bounds; a header or an id
 // cut off by the end of the file reads memory past it. LOSAT gives the second error for such
@@ -217,47 +137,6 @@ impl<'a> Cursor<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1284-1322
-// ```c++
-// void SeqDB_ReadMemorySiList(const char * fbeginp,
-//                             const char * fendp,
-//                             vector<CSeqDBGiList::SSiOid> & sis,
-//                             bool * in_order)
-// {
-//     Int8 file_size = fendp - fbeginp;
-//
-//     // We would prefer to do only one allocation, so assume
-//     // average seqid is 6 digits plus newline.  A few extra will be
-//     // allocated, but this is preferable to letting the vector
-//     // double itself (which it still will do if needed).
-//
-//     sis.reserve(sis.size() + int(file_size / 7));
-//
-//     const char * p = fbeginp;
-//     const char * head;
-//     while ( p < fendp) {
-//         // find the head of the seqid
-//         while (p< fendp && (*p=='>' || *p==' ' || *p=='\t' || *p=='\n' || *p=='\r')) ++p;
-//         if (p< fendp && *p == '#') {
-//             // anything beyond this point in the line is a comment
-//             while (p< fendp && *p!='\n') ++p;
-//             continue;
-//         }
-//         head = p;
-//         while (p< fendp && *p!=' ' && *p!='\t' && *p!='\n' && *p!='\r') ++p;
-//         if (p > head) {
-//             string acc(head, p);
-//             string str_id = NStr::TruncateSpaces(acc, NStr::eTrunc_Both);
-//             if (str_id != "") {
-//                 sis.push_back(str_id);
-//             } else {
-//                 cerr << "WARNING:  " << acc
-//                      << " is not a valid seqid string." << endl;
-//             }
-//         }
-//     }
-//     if (in_order) *in_order = false;
-// }
-// ```
 // A token holds no space, tab, line feed or carriage return, so `TruncateSpaces` (which
 // trims `isspace`: also form feed and vertical tab) can empty it only when it is made of
 // those two characters; such a token is reported and dropped.
@@ -296,22 +175,6 @@ fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>>
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
-// ```c++
-// void SeqDB_ReadSiList(const string & fname, vector<CSeqDBGiList::SSiOid> & sis, bool * in_order, SBlastSeqIdListInfo & db_info)
-// {
-// 	CMemoryFile mfile(SeqDB_MakeOSPath(fname));
-//     if (CBlastSeqidlistFile::GetSeqidlist(mfile, sis, db_info)) {
-//     	*in_order = true;
-//     	return;
-//     }
-//     else {
-//     	Int8 file_size = mfile.GetSize();
-//     	const char *fbeginp = (char*) mfile.GetPtr();
-//     	const char *fendp   = fbeginp + file_size;
-//     	SeqDB_ReadMemorySiList(fbeginp, fendp, sis, in_order);
-//     }
-// }
-// ```
 // A binary list of no ids (`GetSeqidlist` returns 0) is read again as text: its header
 // bytes become tokens. The header of a text file is the default (`is_v4`).
 /// Reads a seqid list file's bytes: a binary list, else a text list. `Err`: NCBI's
@@ -333,42 +196,6 @@ pub fn read_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Result<SeqidLis
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:148-181
-// ```c++
-// void s_ProcessSeqIDsForV5 (vector<string> & idlist)
-// {
-// 	 vector<string> tmplist;
-// 	 tmplist.reserve(idlist.size());
-//     for(unsigned int i=0; i < idlist.size(); i++) {
-//             try {
-//             CSeq_id seqid(idlist[i], CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal | CSeq_id::fParse_PartialOK);
-//             if(seqid.IsGi()) {
-//                     continue;
-//             }
-//
-//             if(seqid.IsPir() || seqid.IsPrf()) {
-//                     string id = seqid.AsFastaString();
-//                     tmplist.push_back(id);
-//                     continue;
-//             }
-//             tmplist.push_back(seqid.GetSeqIdString(true));
-//             } catch (CException & e) {
-//                     ERR_POST(e.GetMsg());
-//                     NCBI_THROW(CSeqDBException, eArgErr, "Invalid seq id: " + idlist[i]);
-//
-//             }
-//     }
-//
-//     if (tmplist.size() == 0) {
-//         ERR_POST(Warning << "Empty seqid list");
-//     }
-//     else {
-//     	sort(tmplist.begin(), tmplist.end());
-//     	vector<string>::iterator it = unique (tmplist.begin(), tmplist.end());
-//     	tmplist.resize(distance(tmplist.begin(),it));
-//     }
-//    	idlist.swap(tmplist);
-// }
-// ```
 /// The parse of a token failed: NCBI posts the exception's message, then throws
 /// `Invalid seq id: <token>`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -379,11 +206,6 @@ pub struct InvalidSeqId {
 
 impl InvalidSeqId {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:165-167
-    // ```c++
-    //             } catch (CException & e) {
-    //                     ERR_POST(e.GetMsg());
-    //                     NCBI_THROW(CSeqDBException, eArgErr, "Invalid seq id: " + idlist[i]);
-    // ```
     /// The `CSeqDBException` text (`BLAST Database error: Invalid seq id: <token>`), with the
     /// token's bytes (probe R3 of line LIB-B: a word that is not UTF-8).
     pub fn message(&self) -> Vec<u8> {
@@ -392,17 +214,6 @@ impl InvalidSeqId {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2532-2541
-// ```c++
-//         x_Init(fasta_pieces, type, tv);
-//         if ( !fasta_pieces.empty() ) {
-//             // tolerate trailing parts if they're all empty.
-//             ITERATE(list<CTempString>, it, fasta_pieces) {
-//                 if ( !it->empty() ) {
-//                     if ((flags & fParse_PartialOK) != 0) {
-//                         ERR_POST_X(10, Warning << "Ignoring extra parts"
-//                                    " (synonyms?) in FASTA-style ID "
-//                                    << the_id);
-// ```
 /// The ids of a text list as a version 5 database looks them up (`s_ProcessSeqIDsForV5`):
 /// sorted and unique. An empty result is NCBI's `Empty seqid list` warning (the caller
 /// writes it). `warn` gets the warnings the parse of each token posts, in order (a FASTA-style

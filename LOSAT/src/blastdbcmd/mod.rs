@@ -36,20 +36,12 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 const PROGRAM: &str = "BLASTDBCMD";
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:907-909
-// ```c++
-//     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
-//                   "BLAST database client, version " + CBlastVersion().Print());
-// ```
 /// The text of `blastdbcmd -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
 /// descriptions in `args`). Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-// ```c++
-//     SetDiagPostLevel(eDiag_Warning);
-//     SetDiagPostPrefix("blastdbcmd");
-// ```
 /// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
 /// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
 static TOOL: Tool = Tool {
@@ -100,20 +92,10 @@ fn run_body(
         Err(reason) => return diag.refuse(&refusal(reason)),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
-    // ```c++
-    //     try {
-    //         CNcbiOstream& out = args["out"].AsOutputFile();
-    // ```
     let mut out = match args.output_file("out", out) {
         Ok(out) => out,
         Err(error) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-            // ```c++
-            //     catch (const CArgException& e) {                                        \
-            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-            //         exit_code = BLAST_INPUT_ERROR;                                      \
-            //     }                                                                       \
-            // ```
             diag.post(&format!("Command line argument error: {}", error.message()));
             return 1;
         }
@@ -126,11 +108,6 @@ fn run_body(
         Err(error) => return database_error(diag, error),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
-    // ```c++
-    //         if (args["show_blastdb_search_path"]) {
-    //             out << CSeqDB::GenerateSearchPath() << NcbiEndl;
-    //             return status;
-    // ```
     if args.given("show_blastdb_search_path") {
         let _ = writeln!(out, "{}", path.as_str());
         let _ = out.flush();
@@ -146,19 +123,6 @@ fn run_body(
         .any(|selector| args.given(selector));
     if !selected && (args.given("taxids") || args.given("taxidlist")) {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:358-369
-        // ```c++
-        //     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
-        //     m_DbIsProtein = static_cast<bool>(seqtype == CSeqDB::eProtein);
-        //     m_TargetOnly = args["target_only"];
-        //    	if(m_TargetOnly) {
-        //     	CRef<CSeqDBGiList> taxid_list(new CSeqDBGiList());
-        //     	taxid_list->AddTaxIds(m_TaxIdList);
-        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype, taxid_list.GetPointer()));
-        //     }
-        //    	else {
-        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
-        //    	}
-        // ```
         // With `-target_only` the list's errors are those of the open, inside NCBI's guess
         // of the type: a protein database the list fails on is then looked for as a
         // nucleotide one (probe J111 of line BDC: `No alias or index file found for
@@ -246,35 +210,7 @@ fn refusal(reason: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
-// ```c++
-// static CSeqDBImpl *
-// s_SeqDBInit(const string       & dbname,
-//             char                 prot_nucl,
-//             ...
-// {
-//     CSeqDBImpl * impl = 0;
-//
-//     if (prot_nucl == '-') {
-//         try {
-//             prot_nucl = 'p';
-//             impl = new CSeqDBImpl(dbname,
-//                                   prot_nucl,
-//                                   ...
-//         }
-//         catch(CSeqDBException &) {
-//             prot_nucl = 'n';
-//         }
-//     }
-//
-//     if (! impl) {
-//         impl = new CSeqDBImpl(dbname,
-//                               prot_nucl,
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:524-531
-// ```c++
-//     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
-//     m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
-// ```
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
@@ -313,22 +249,7 @@ fn open_database(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// ```c++
-//     catch (const CSeqDBException& e) {                                      \
-//         ...
-//         else {                                                              \
-//         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-//         	exit_code = BLAST_DATABASE_ERROR;                               \
-//         }                                                                   \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-// ```
 /// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
 /// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
 /// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
@@ -348,34 +269,6 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573
-// ```c++
-//     static const NStr::TNumToStringFlags kFlags = NStr::fWithCommas;
-//     const string kLetters = m_DbIsProtein ? "residues" : "bases";
-//     const string kVersion = (m_BlastDb->GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5) ? "5":"4";
-//     ...
-//     // Print basic database information
-//     out << "Database: " << m_BlastDb->GetTitle() << endl
-//         << "\t" << NStr::IntToString(m_BlastDb->GetNumSeqs(), kFlags)
-//         << " sequences; ";
-//         if(args["exact_length"])
-//         	out << NStr::UInt8ToString(m_BlastDb->GetExactTotalLength(), kFlags);
-//         else
-//         	out << NStr::UInt8ToString(m_BlastDb->GetTotalLength(), kFlags);
-//     out << " total " << kLetters << endl << endl
-//         << "Date: " << m_BlastDb->GetDate()
-//         << "\tLongest sequence: "
-//         << NStr::IntToString(m_BlastDb->GetMaxLength(), kFlags) << " "
-//         << kLetters << endl << endl;
-//
-//     out << "BLASTDB Version: " << kVersion << endl;
-//     ...
-//     out << m_BlastDb->GetAvailableMaskAlgorithmDescriptions();
-//     ...
-//     out << endl << "Volumes:" << endl;
-//     ITERATE(vector<string>, file_name, volumes) {
-//         out << "\t" << *file_name << endl;
-//     }
-// ```
 /// The text of `-info` for `db` up to its filtering algorithms.
 ///
 /// The counts are `GetNumSeqs` and `GetTotalLength` of the database opened without a list:

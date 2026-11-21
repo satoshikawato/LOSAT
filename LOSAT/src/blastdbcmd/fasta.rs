@@ -39,50 +39,6 @@ impl FastaFormatter {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:436-531
-    // ```c++
-    // int CBlastDB_FastaFormatter::Write(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string target_id)
-    // {
-    // 	int status = -1;
-    // 	CRef<CBioseq> bioseq = m_BlastDb.GetBioseq(oid);
-    // 	if(target_id != kEmptyStr) {
-    // 		Int8 num_id = NStr::StringToNumeric<Int8>(target_id, NStr::fConvErr_NoThrow);
-    // 		if(errno) {
-    // 			CSeq_id seq_id(target_id, CSeq_id::fParse_PartialOK | CSeq_id::fParse_Default);
-    // 			bioseq = m_BlastDb.GetBioseq(oid, ZERO_GI, &seq_id);
-    // 		}
-    // 		else {
-    // 			bioseq = m_BlastDb.GetBioseq(oid, GI_FROM(Int8, num_id));
-    // 		}
-    // 	}
-    // 	...
-    // 	if (bioseq.Empty()) {
-    // 		return status;
-    // 	}
-    // 	...
-    //     CRef<CSeq_loc> range;
-    //     if(config.m_SeqRange.NotEmpty()) {
-    //     	TSeqPos length = m_BlastDb.GetSeqLength(oid);
-    //     	TSeqRange r = config.m_SeqRange;
-    //         if((TSeqPos)length <= config.m_SeqRange.GetTo()) {
-    //         	r.SetTo(length-1);
-    //     	}
-    //         if(!r.Empty()) {
-    //         	range.Reset(new CSeq_loc(*(FindBestChoice(bioseq->GetId(), CSeq_id::BestRank)), r.GetFrom(), r.GetTo()));
-    //         }
-    //     }
-    //     if(m_UseLongSeqIds) {
-    //     	...
-    //     }
-    //     else {
-    //     	string fasta_deflines = kEmptyStr;
-    //     	...
-    //     	m_Out << fasta_deflines;
-    //     	...
-    //     	m_fasta.WriteSequence(scope.AddBioseq(*bioseq), range.GetPointer());
-    //    }
-    //    return 0;
-    // }
-    // ```
     /// Writes the FASTA of sequence `oid` to `out` (nothing for a sequence NCBI's `GetBioseq`
     /// gives no Bioseq for: no definition line, or no letters), after the texts of the taxonomy
     /// lookups of NCBI's two `GetBioseq` calls.
@@ -111,23 +67,6 @@ impl FastaFormatter {
         }
         let mut letters = source.fasta_letters(oid, range)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:463-477
-        // ```c++
-        //     if(config.m_FiltAlgoId != -1) {
-        //     	CSeqDB::TSequenceRanges masks;
-        //     	s_GetSeqMask(m_BlastDb, oid, config.m_FiltAlgoId, masks);
-        //     	if(!masks.empty()) {
-        //     		CRef<CSeq_loc> mask_loc(new CSeq_loc);
-        //     		s_GetMaskSeqLoc(masks, *mask_loc);
-        //     		mask_loc->SetId( *(FindBestChoice(bioseq->GetId(), CSeq_id::BestRank)));
-        //     		m_BlastDb.GetMaskData(oid, config.m_FiltAlgoId, masks);
-        //     		m_fasta.SetMask(CFastaOstream::eSoftMask, mask_loc);
-        //     	}
-        //     }
-        //     else {
-        //     	CRef<CSeq_loc> empty;
-        //     	m_fasta.SetMask(CFastaOstream::eSoftMask, empty);
-        //     }
-        // ```
         // The approved differences 3, 5 and 6 of `PD-LOSAT-BLASTDBCMD-DEVIATIONS`, where the
         // letters are those of NCBI's own `%s` path: the mask goes on before the reverse
         // complement (NCBI lower-cases the output positions of the reversed letters), over
@@ -147,77 +86,8 @@ impl FastaFormatter {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2927-2975
-    // ```c++
-    // void CFastaOstream::x_WriteSeqIds(const CBioseq& bioseq,
-    //                                   const CSeq_loc* location)
-    // {
-    //     bool have_range = (location != NULL  &&  !location->IsWhole()
-    //                        &&  !(m_Flags & fSuppressRange) );
-    //
-    //     if ( !have_range  &&  (m_Flags & fNoDupCheck) == 0) {
-    //         ITERATE (CBioseq::TId, id, bioseq.GetId()) {
-    //             CSeq_id_Handle idh = CSeq_id_Handle::GetHandle(**id);
-    //             pair<TSeq_id_HandleSet::iterator, bool> p
-    //                 = m_PreviousWholeIds.insert(idh);
-    //             if ( !p.second ) {
-    //                 NCBI_THROW(CObjmgrUtilException, eBadLocation,
-    //                            "Duplicate Seq-id " + (*id)->AsFastaString()
-    //                            + " in FASTA output");
-    //             }
-    //         }
-    //     }
-    //
-    //     m_Out << '>';
-    //     ...
-    //         x_WriteAsFasta(bioseq);
-    //     ...
-    //     if (have_range) {
-    //         char delim = ':';
-    //         for (CSeq_loc_CI it(*location);  it;  ++it) {
-    //             CSeq_loc::TRange range = it.GetRange();
-    //             TSeqPos from = range.GetFrom() + 1, to = range.GetTo() + 1;
-    //             _ASSERT(from <= to);
-    //             m_Out << delim;
-    //             if (it.IsSetStrand()  &&  IsReverse(it.GetStrand())) {
-    //                 m_Out << 'c' << to << '-' << from;
-    //             } else {
-    //                 m_Out << from << '-' << to;
-    //             }
-    //             delim = ',';
-    //         }
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2875-2925
-    // ```c++
-    //     x_GetBestId(gi_id, best_id, hide_prefix, bioseq);
-    //
-    //     if (best_id.NotEmpty())
-    //     {
-    //         // RW-139, no GI in FASTA output
-    //         if (gi_id.NotEmpty() && (m_Flags & fEnableGI) && !best_id->IsGi())
-    //         {
-    //             gi_id->WriteAsFasta(m_Out);
-    //             m_Out << '|';
-    //         }
-    //         ...
-    //             best_id->WriteAsFasta(m_Out);
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3000-3020
-    // ```c++
-    //     string safe_title = (!custom_title.empty()) ? custom_title
-    //         : m_Gen->GenerateDefline(bioseq_handle, x_GetTitleFlags());
-    //
-    //     if ( !safe_title.empty() ) {
-    //         ...
-    //         if (safe_title[0] != ' ') {
-    //             m_Out << ' ';
-    //         }
-    //         ...
-    //         m_Out << safe_title;
-    //     }
-    //     m_Out << '\n';
-    // ```
     /// The header of `-long_seqids`: the Bioseq's best id for FASTA (`FastaNARank`,
     /// `FastaAARank`) after its GI, the range as `:a-b` (`:cb-a` for the minus strand), and
     /// the title `CDeflineGenerator` makes of the joined title and the Bioseq's first source,
@@ -307,42 +177,6 @@ fn parse_ids_partial(text: &[u8]) -> Result<Vec<ParsedSeqId>, Stop> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:630-665
-// ```c++
-// static string
-// s_ConfigureDeflineTitle(const string& title, bool use_ctrl_a)
-// {
-//     static const string kStandardSeparator(" >");
-//     const string kSeparator(use_ctrl_a ? CTRL_A : kStandardSeparator);
-//     string retval;
-//     list<string> tokens;
-//     NStr::Split(title, kStandardSeparator, tokens, NStr::fSplit_ByPattern);
-//     int idx = 0;
-//     for (auto token : tokens) {
-//         if (idx++ == 0) {
-//             retval += token;
-//             continue;
-//         }
-//         SIZE_TYPE pos = token.find(' ');
-//         const string kPossibleId(token, 0, pos != NPOS ? pos : token.length());
-//         CBioseq::TId seqids;
-//
-//         try {
-//             CSeq_id::ParseIDs(seqids, kPossibleId, CSeq_id::fParse_PartialOK);
-//         } catch (const CException&) {}
-//
-//         if (!seqids.empty()) {
-//             retval += kSeparator;
-//             CRef<CSeq_id> id = FindBestChoice(seqids, CSeq_id::Score);
-//             retval += GetBareId(*id);
-//             if (pos != NPOS)
-//                 retval += token.substr(pos, token.length() - pos);
-//         } else {
-//             retval += kStandardSeparator + token;
-//         }
-//     }
-//     return retval;
-// }
-// ```
 /// The title of the short header: each ` >` part whose first word parses as Seq-ids gets
 /// the bare form of their best, after `\x01` with `-ctrl_a`.
 fn configure_defline_title(title: &[u8], use_ctrl_a: bool) -> Result<Vec<u8>, Stop> {
@@ -373,41 +207,7 @@ fn configure_defline_title(title: &[u8], use_ctrl_a: bool) -> Result<Vec<u8>, St
     Ok(retval)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:362-398
-// ```c++
-// static string
-// s_RejoinDeflineTitle(const string& title, bool use_ctrl_a )
-// {
-//     static const string kStandardSeparator(" >");
-//     const string kSeparator(use_ctrl_a ? "\001" : kStandardSeparator); // actual, will b eused for output
-//     string retval;
-//     list<string> tokens;
-//     NStr::Split(title, kStandardSeparator, tokens, NStr::fSplit_ByPattern);
-//     int idx = 0;
-//     for (auto token : tokens) {
-//         if (idx++ == 0) {
-//             retval += token;
-//             continue;
-//         }
-//
-//         SIZE_TYPE pos = token.find(' ');
-//         const string kPossibleId(token, 0, pos != NPOS ? pos : token.length());
-//         CBioseq::TId seqids;
-// 	// verify found token via CSeq_id::ParseIDs
-//         try {
-//             CSeq_id::ParseIDs(seqids, kPossibleId, CSeq_id::fParse_PartialOK);
-//         } catch (const CException&) {}
-//
-//         if (!seqids.empty()) {
-//             retval += kSeparator + token;
-//         } else {
-//             retval += kStandardSeparator + token;
-//         }
-//
-//     }
-//     return retval;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:361-398
 /// The title of `-long_seqids -ctrl_a`: `\x01` before each ` >` part whose first word
 /// parses as Seq-ids, the part itself unchanged.
 fn rejoin_defline_title(title: &[u8], use_ctrl_a: bool) -> Result<Vec<u8>, Stop> {
@@ -450,39 +250,6 @@ fn split_by_pattern<'a>(text: &'a [u8], pattern: &[u8]) -> Vec<&'a [u8]> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:999-1032
-// ```c++
-//     string range;
-//     if (location != NULL) {
-//         TSeqPos start = location->GetStart(eExtreme_Biological) + 1;
-//         TSeqPos stop = location->GetStop(eExtreme_Biological) + 1;
-//         if (strand == eNa_strand_minus) {
-//             range = ":c"
-//                     + NStr::IntToString(stop) + "-" + NStr::IntToString(start)
-//                     + " ";
-//         } else {
-//             range = ":"
-//                     + NStr::IntToString(start) + "-" + NStr::IntToString(stop)
-//                     + " ";
-//         }
-//     }
-//     if (id->IsGeneral() && id->GetGeneral().GetDb() == "BL_ORD_ID") {
-//         out = ">" + range + s_GetTitle(bioseq) + '\n';
-//     }
-//     else if (id->IsLocal()) {
-//         string lcl_tmp = id->AsFastaString();
-//         lcl_tmp = lcl_tmp.erase(0,4);
-//         out = ">" + lcl_tmp + (range.empty() ? " " : range)
-//                 + s_GetTitle(bioseq) + '\n';
-//     } else {
-//         out = '>';
-//         id = FindBestChoice(bioseq.GetId(), CSeq_id::Score);
-//         out += GetBareId(*id) + (range.empty() ? " " : range);
-//
-//         string title = s_GetTitle(bioseq);
-//         out += s_ConfigureDeflineTitle(title, use_ctrla);
-//         out += '\n';
-//     }
-// ```
 /// The header of the short ids (`ProcessFastaDeflines`): the title alone after
 /// `gnl|BL_ORD_ID|n`, the local id's string, or the bare form of the Bioseq's best id
 /// (`Score`) and the configured title; the range as `:a-b ` or `:cb-a ` in the place of the
@@ -530,25 +297,9 @@ fn short_header(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:540
-// ```c++
-//     	m_fasta.SetAllFlags(CFastaOstream::fKeepGTSigns|CFastaOstream::fNoExpensiveOps|CFastaOstream::fEnableGI);
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2983-2985
-// ```c++
-//     if ((m_Flags & fNoExpensiveOps) != 0) {
-//         title_flags |= sequence::CDeflineGenerator::fNoExpensiveOps;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/objmgr/util/create_defline.hpp:86-88
-// ```c++
-//         fLocalAnnotsOnly   = 1 <<  2, ///< Never use related sequences' annotations.
-//         ...
-//         fNoExpensiveOps    = fLocalAnnotsOnly,
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:621
-// ```c++
-//     m_LocalAnnotsOnly = (flags & fLocalAnnotsOnly) != 0;
-// ```
 // The Bioseq's first source (`CSeqDBVol::x_GetTaxonomy`: one for each definition line with a
 // taxid above 0, in the order of `x_GetTaxDefline`, which puts the target's line first and keeps
 // the others, also with `-target_only`) names its organism where the taxonomy database gives the
@@ -599,27 +350,6 @@ fn generated_title(
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
-// ```c++
-//             while ( count >= rem_line ) {
-//                 x_WriteBuffer(ptr, rem_line);
-//                 if ( !(current_state & eHardMask) ) {
-//                     ptr += rem_line;
-//                 }
-//                 count -= rem_line;
-//                 m_Out << '\n';
-//                 rem_line = m_Width;
-//             }
-//             if ( count > 0 ) {
-//                 x_WriteBuffer(ptr, count);
-//                 rem_line -= count;
-//             }
-//             it.SetPos(new_pos);
-//         }
-//     }
-//     if ( rem_line < m_Width ) {
-//         m_Out << '\n';
-//     }
-// ```
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
 /// last one shorter, each ended by a line feed.
 fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {

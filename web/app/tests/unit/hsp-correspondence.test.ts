@@ -304,7 +304,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   let sections = 0;
   let unshown = 0;
   // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty heading, and
-  // NCBI's line stands in place of each of its alignments (showalign.cpp:1976-1981; LOSAT's
+  // NCBI's line stands in place of each of its alignments (c++/src/objtools/align_format/showalign.cpp:1976-1981; LOSAT's
   // report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
   const skippedLine = /^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/;
   const skippedHeadings = new Set<number>();

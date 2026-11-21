@@ -5,39 +5,6 @@
 /// line, a `\r` stays in its line, and a file that ends with `\n` has no empty line after it.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_peek_ahead.hpp:64-94
-/// ```c++
-///     bool
-///     PeekLine(
-///         string& str)
-///     {
-///         if (getline(mIstr, str)) {
-///             mPeeked.push_back({str,mLineNum++});
-///             return true;
-///         }
-///         return false;
-///     };
-///
-///     bool
-///     ReadLine(
-///         string& str,
-///         int& lineNum)
-///     {
-///         if (!mPeeked.empty()) {
-///             str = mPeeked.front().mData;
-///             lineNum = mPeeked.front().mNumLine;
-///             mPeeked.pop_front();
-///             return true;
-///         }
-///
-///         str.clear();
-///         if (getline(mIstr, str)) {
-///             lineNum = mLineNum++;
-///             return true;
-///         }
-///
-///         return false;
-///     };
-/// ```
 /// The peeked lines and the lines read after them are one sequence of lines, so the stream is
 /// kept as that sequence; `peeked` counts the lines taken by `peek_line` and `read` those of
 /// `read_line`. The line numbers (from 1) only name lines in NCBI's messages, which the

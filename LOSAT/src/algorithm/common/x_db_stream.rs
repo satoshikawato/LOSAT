@@ -59,11 +59,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
-//! ```c++
-//!     else {
-//!         len = seqdb.GetSequence(oid, &buf);
-//!     }
-//! ```
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

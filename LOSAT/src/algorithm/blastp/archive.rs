@@ -2,12 +2,6 @@
 //! each query batch from the batch's report data, and the error archive.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-283
-//! ```c++
-//!             if (fmt_args->ArchiveFormatRequested(args)) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
-//!                 m_Bah.ResetMessages();
-//!             } else {
-//! ```
 //! One archive per query batch, written after the batch's search; `report::archive` writes
 //! the document, this module gathers what BLASTP holds for its other formats: the hit lists
 //! (the Seq-aligns of outfmt 8), the SEG masks, and the Karlin-Altschul blocks and search
@@ -66,24 +60,10 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-    // ```c++
-    //     if (args[kArgLookupTableMaskingOnly]) {
-    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-    //     }
-    // ```
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     inputs.seg = args

@@ -3,19 +3,7 @@
 //! object streams (outfmt 5, 8, 9, 11, 12, 13-16).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:78-81
-//! ```c++
-//! NCBI_PARAM_DECL(bool, SERIAL, FastWriteDouble);
-//! NCBI_PARAM_DEF(bool, SERIAL, FastWriteDouble, true);
-//! typedef NCBI_PARAM_TYPE(SERIAL, FastWriteDouble) TFastWriteDouble;
-//! static CSafeStatic<TFastWriteDouble> s_FastWriteDouble;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:305-308
-//! ```c++
-//! void CObjectOStreamAsn::WriteDouble(double data)
-//! {
-//!     WriteDouble2(data, DBL_DIG);
-//! }
-//! ```
 //!
 //! Only the default `FastWriteDouble` branches exist here (a registry or environment value that
 //! turns it off is rejected by the callers, outfmt-20261019 DECISIONS 13). The digits come from
@@ -144,14 +132,6 @@ const LD_1EM16: X87 = ld(-16);
 const LD_1EM256: X87 = ld(-256);
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2486-2502
-/// ```c++
-///         if (value >= __NLG(1.e16)) {
-///             if      (value>=__NLG(1.e240)) {value*=__NLG(1.e-240); exp+=240;}
-///             else if (value>=__NLG(1.e224)) {value*=__NLG(1.e-224); exp+=224;}
-///             ...
-///             else if (value>=__NLG(1.e16))  {value*=__NLG(1.e-16);  exp+=16;}
-///         }
-/// ```
 /// The `else if` lines in source order: `(threshold, factor, exp step)`.
 const POSITIVE_SCALE: [(X87, X87, u32); 15] = [
     (ld(240), ld(-240), 240),
@@ -172,14 +152,6 @@ const POSITIVE_SCALE: [(X87, X87, u32); 15] = [
 ];
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2503-2520
-/// ```c++
-///         if      (value<   __NLG(1.)) {mult=__NLG(1.e+9); exp-= 1;}
-///         else if (value<  __NLG(10.)) {mult=__NLG(1.e+8);         }
-///         else if (value< __NLG(1.e2)) {mult=__NLG(1.e+7); exp+= 1;}
-///         ...
-///         else if (value<__NLG(1.e16)) {mult=__NLG(1.e-7); exp+=15;}
-///         else                         {mult=__NLG(1.e-8); exp+=16;}
-/// ```
 /// The `if` / `else if` lines in source order: `(bound, mult, exp step)`; the first line
 /// (`exp -= 1`) and the final `else` are written out in the port.
 const POSITIVE_MULT: [(X87, X87, u32); 16] = [
@@ -202,13 +174,6 @@ const POSITIVE_MULT: [(X87, X87, u32); 16] = [
 ];
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2524-2540
-/// ```c++
-///         if (value <= __NLG(1.e-16)) {
-///             if      (value<=__NLG(1.e-240)) {value*=__NLG(1.e240); exp+=240;}
-///             ...
-///             else if (value<=__NLG(1.e-16))  {value*=__NLG(1.e16);  exp+=16;}
-///         }
-/// ```
 const NEGATIVE_SCALE: [(X87, X87, u32); 15] = [
     (ld(-240), ld(240), 240),
     (ld(-224), ld(224), 224),
@@ -228,13 +193,6 @@ const NEGATIVE_SCALE: [(X87, X87, u32); 15] = [
 ];
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2541-2557
-/// ```c++
-///         if      (value<__NLG(1.e-15)) {mult=__NLG(1.e24); exp+=16;}
-///         else if (value<__NLG(1.e-14)) {mult=__NLG(1.e23); exp+=15;}
-///         ...
-///         else if (value<__NLG(1.))     {mult=__NLG(1.e9);  exp+=1;}
-///         else                          {mult=__NLG(1.e8);         }
-/// ```
 const NEGATIVE_MULT: [(X87, X87, u32); 16] = [
     (ld(-15), ld(24), 16),
     (ld(-14), ld(23), 15),
@@ -284,29 +242,6 @@ impl EcvtDigits {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2422-2442
-/// ```c++
-/// static char* s_ncbi_append_int2str(char* buffer, unsigned int value, size_t digits, bool zeros)
-/// {
-///     char* buffer_start = buffer;
-///     char* buffer_end = (buffer += digits-1);
-///     if (zeros) {
-///         do {
-///             *buffer-- = (char)('0' + (value % 10));
-///             value /= 10;
-///         } while (--digits);
-///     } else {
-///         do {
-///             *buffer-- = (char)('0' + (value % 10));
-///         } while (value /= 10);
-///
-///         if (++buffer != buffer_start) {
-///             memmove(buffer_start, buffer, buffer_end-buffer+1);
-///             buffer_end -= buffer - buffer_start;
-///         }
-///     }
-///     return ++buffer_end;
-/// }
-/// ```
 /// Writes at `buffer[start..]` and returns the index after the last character. Without
 /// `zeros`, the callers' values never have more than `digits` digits (NCBI would write before
 /// `buffer_start`).
@@ -361,31 +296,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
         sign: 0,
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2452-2474
-    // ```c++
-    //     *dec = *sign = 0;
-    //     if (precision==0) {
-    //         return 0;
-    //     }
-    //     if (precision > DBL_DIG) {
-    //         precision = DBL_DIG;
-    //     }
-    //     if (val == 0.) {
-    //         double zero = 0.;
-    //         if (memcmp(&val, &zero, sizeof(double)) == 0) {
-    //             *buffer='0';
-    //             return 1;
-    //         }
-    //         *buffer++='-';
-    //         *buffer='0';
-    //         *sign = -1;
-    //         return 2;
-    //     }
-    //     *sign = val < 0. ? -1 : 1;
-    //     if (*sign < 0) {
-    //         val = -val;
-    //     }
-    //     bool high_precision = precision > 9;
-    // ```
     if precision == 0 {
         return out;
     }
@@ -407,18 +317,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     let high_precision = precision > 9;
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2476-2485
-    // ```c++
-    // // calculate exponent
-    //     unsigned int exp=0;
-    //     bool exp_positive = val >= 1.;
-    //     unsigned int first, second=0;
-    //     long double mult = __NLG(1.);
-    //     long double value = val;
-    //
-    //     if (exp_positive) {
-    //         while (value>=__NLG(1.e256))
-    //             {value*=__NLG(1.e-256); exp+=256;}
-    // ```
     let mut exp: u32 = 0;
     let mut exp_positive = val >= 1.0;
     let first: u32;
@@ -463,11 +361,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
         }
     } else {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2521-2523
-        // ```c++
-        //     } else {
-        //         while (value<=__NLG(1.e-256))
-        //             {value*=__NLG(1.e256); exp+=256;}
-        // ```
         while value.le(LD_1EM256) {
             value = value.mul(LD_1E256);
             exp += 256;
@@ -498,26 +391,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2560-2577
-    // ```c++
-    // // get all digits
-    //     long double t1 = value * mult;
-    //     if (t1 >= __NLG(1.e9)) {
-    //         first = 999999999;
-    //     } else if (t1 < __NLG(1.e8)) {
-    //         first = 100000000;
-    //         t1 = first;
-    //     } else {
-    //         first = (unsigned int)t1;
-    //     }
-    //     if (high_precision) {
-    //         long double t2 = (t1-first) * __NLG(1.e8);
-    //         if (t2 >= __NLG(1.e8)) {
-    //             second = 99999999;
-    //         } else {
-    //             second = (unsigned int)t2;
-    //         }
-    //     }
-    // ```
     let mut t1 = value.mul(mult);
     if t1.ge(LD_1E9) {
         first = 999_999_999;
@@ -537,19 +410,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2579-2589
-    // ```c++
-    // // convert them into string
-    //     bool use_ext_buffer = bufsize > 20;
-    //     char tmp[32];
-    //     char *digits = use_ext_buffer ? buffer : tmp;
-    //     char *digits_end = s_ncbi_append_int2str(digits,first,9,false);
-    //     if (high_precision) {
-    //         digits_end = s_ncbi_append_int2str(digits_end,second,8,true);
-    //     }
-    //     size_t digits_len = digits_end - digits;
-    //     size_t digits_got = digits_len;
-    //     size_t digits_expected = high_precision ? 17 : 9;
-    // ```
     let digits = &mut out.buffer;
     let mut digits_end = s_ncbi_append_int2str(digits, 0, first, 9, false);
     if high_precision {
@@ -560,32 +420,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     let digits_expected = if high_precision { 17 } else { 9 };
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2591-2614
-    // ```c++
-    // // get significant digits according to requested precision
-    //     size_t pos = precision;
-    //     if (digits_len > precision) {
-    //         digits_len = precision;
-    //
-    //         // this is questionable, but in fact,
-    //         // improves the result (on average)
-    // #if 1
-    //         if (high_precision) {
-    //             if (digits[pos] == '4') {
-    //                 size_t pt = pos-1;
-    //                 while (pt != 0 && digits[--pt] == '9')
-    //                     ;
-    //                 if (pt != 0 && (pos-pt) > precision/2)
-    //                     digits[pos]='5';
-    //             } else if (digits[pos] == '5') {
-    //                 size_t pt = pos;
-    //                 while (pt != 0 && digits[--pt] == '0')
-    //                     ;
-    //                 if (pt != 0 && (pos-pt) > precision/2)
-    //                     digits[pos]='4';
-    //             }
-    //         }
-    // #endif
-    // ```
     let mut pos = precision;
     if digits_len > precision {
         digits_len = precision;
@@ -617,30 +451,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
         }
 
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2616-2637
-        // ```c++
-        //         if (digits[pos] >= '5') {
-        //             do {
-        //                 if (digits[--pos] < '9') {
-        //                     ++digits[pos++];
-        //                     break;
-        //                 }
-        //                 digits[pos]='0';
-        //             } while (pos > 0);
-        //             if (pos == 0) {
-        //                 if (digits_expected <= digits_got) {
-        //                     if (exp_positive) {
-        //                        ++exp;
-        //                     } else {
-        // // exp cannot be 0, by design
-        //                         exp_positive = --exp == 0;
-        //                     }
-        //                 }
-        //                 *digits = '1';
-        //                 digits_len = 1;
-        //             }
-        //         }
-        //     }
-        // ```
         if digits[pos] >= b'5' {
             loop {
                 pos -= 1;
@@ -670,13 +480,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2639-2643
-    // ```c++
-    // // truncate trailing zeros
-    //     for (pos = digits_len; pos-- > 0 && digits[pos] == '0';)
-    //         --digits_len;
-    //
-    //     *dec = exp_positive ? int(exp) : -int(exp);
-    // ```
     pos = digits_len;
     while pos > 0 {
         pos -= 1;
@@ -699,29 +502,6 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
 /// serial callers pass 64- and 512-byte buffers with precision 15.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2658-2681
-/// ```c++
-/// SIZE_TYPE NStr::DoubleToStringPosix(double val, unsigned int precision,
-///                                     char* buffer, SIZE_TYPE bufsize)
-/// {
-///     ...
-///     int dec=0, sign=0;
-///     char digits[32];
-///     size_t digits_len = DoubleToString_Ecvt(
-///         val, precision, digits, sizeof(digits), &dec, &sign);
-///     if (digits_len == 0) {
-///         errno = 0;
-///         return 0;
-///     }
-///     if (val == 0.) {
-///         strncpy(buffer,digits, digits_len);
-///         return digits_len;
-///     }
-///     if (digits_len == 1 && dec == 0 && sign >=0) {
-///         *buffer = digits[0];
-///         errno = 0;
-///         return 1;
-///     }
-/// ```
 pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
     let ecvt = double_to_string_ecvt(val, precision);
     let digits = ecvt.digits();
@@ -738,49 +518,12 @@ pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
         return;
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2682-2692
-    // ```c++
-    //     bool exp_positive = dec >= 0;
-    //     unsigned int exp= (unsigned int)(exp_positive ? dec : (-dec));
-    //
-    //     // assemble the result
-    //     char *buffer_pos = buffer;
-    // //    char *buffer_end = buffer + bufsize;
-    //     char *digits_pos = digits;
-    //
-    //     if (sign < 0) {
-    //         *buffer_pos++ = '-';
-    //     }
-    // ```
     let exp_positive = ecvt.dec >= 0;
     let mut exp: u32 = ecvt.dec.unsigned_abs();
     if ecvt.sign < 0 {
         out.push(b'-');
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2693-2715
-    // ```c++
-    //     // The 'e' format is used when the exponent of the value is less than -4
-    //     //  or greater than or equal to the precision argument
-    //     if ((exp_positive && exp >= precision) || (!exp_positive && exp > 4)) {
-    //         *buffer_pos++ = *digits_pos++;
-    //         --digits_len;
-    //         if (digits_len != 0) {
-    //             *buffer_pos++ = '.';
-    //             strncpy(buffer_pos,digits_pos,digits_len);
-    //             buffer_pos += digits_len;
-    //         }
-    //         *buffer_pos++ = 'e';
-    //         *buffer_pos++ = exp_positive ? '+' : '-';
-    //
-    // //#if defined(NCBI_OS_MSWIN)
-    // #if NCBI_COMPILER_MSVC && _MSC_VER < 1900
-    //         ...
-    // #else
-    //         bool need_zeros = exp < 10 ? true : false;
-    //         size_t need_digits = exp < 100 ? 2 : 3;
-    // #endif
-    //         // assuming exp < 1000
-    //         buffer_pos = s_ncbi_append_int2str(buffer_pos, exp, need_digits,need_zeros);
-    // ```
     // `precision` here is the caller's value, not the one DoubleToString_Ecvt clamps to
     // DBL_DIG. The oracle is gcc's build, so the non-MSVC exponent width applies.
     if (exp_positive && exp >= precision) || (!exp_positive && exp > 4) {
@@ -799,25 +542,6 @@ pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
         out.extend_from_slice(&tmp[..end]);
     } else if exp_positive {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2716-2732
-        // ```c++
-        //     } else if (exp_positive) {
-        //         *buffer_pos++ = *digits_pos++;
-        //         --digits_len;
-        //         if (digits_len > exp) {
-        //             strncpy(buffer_pos,digits_pos,exp);
-        //             buffer_pos += exp;
-        //             *buffer_pos++ = '.';
-        //             strncpy(buffer_pos,digits_pos+exp,digits_len-exp);
-        //             buffer_pos += digits_len-exp;
-        //         } else {
-        //             strncpy(buffer_pos,digits_pos,digits_len);
-        //             buffer_pos += digits_len;
-        //             exp -= (unsigned int)digits_len;
-        //             while (exp--) {
-        //                 *buffer_pos++ = '0';
-        //             }
-        //         }
-        // ```
         out.push(digits[0]);
         digits_len -= 1;
         let rest = &digits[1..1 + digits_len];
@@ -835,17 +559,6 @@ pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
         }
     } else {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2733-2741
-        // ```c++
-        //     } else {
-        //         *buffer_pos++ = '0';
-        //         *buffer_pos++ = '.';
-        //         for (--exp; exp--;) {
-        //             *buffer_pos++ = '0';
-        //         }
-        //         strncpy(buffer_pos,digits_pos, digits_len);
-        //         buffer_pos += digits_len;
-        //     }
-        // ```
         out.push(b'0');
         out.push(b'.');
         for _ in 1..exp {
@@ -858,20 +571,6 @@ pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
 /// `PutInt4`: plain decimal with a leading `-`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:951-971
-/// ```c++
-///     Int4 n = v;
-///     if ( n < 0 ) {
-///         n = -n;
-///     }
-///     char* pos = b + BSIZE;
-///     do {
-///         Int4 a = '0'+n;
-///         *--pos = char(a-10*(n/=Uint4(10)));
-///     } while ( n );
-///     if ( v < 0 ) {
-///         *--pos = '-';
-///     }
-/// ```
 fn put_int4(out: &mut Vec<u8>, v: i32) {
     let mut b = [0u8; 12];
     let mut pos = b.len();
@@ -895,48 +594,6 @@ fn put_int4(out: &mut Vec<u8>, v: i32) {
 /// `DBL_DIG` digits, appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:175-221
-/// ```c++
-/// void CObjectOStreamAsn::WriteDouble2(double data, unsigned digits)
-/// {
-///     ...
-///     if (isnan(data)) {
-///         m_Output.PutString("NOT-A-NUMBER");
-///         return;
-///     }
-///     if (!finite(data)) {
-///         if (data > 0) {
-///             m_Output.PutString("PLUS-INFINITY");
-///         } else {
-///             m_Output.PutString("MINUS-INFINITY");
-///         }
-///         return;
-///     }
-/// #endif
-///     if ( data == 0.0 ) {
-///         double zero = 0.;
-///         if (memcmp(&data, &zero, sizeof(double)) == 0) {
-///             m_Output.PutString("{ 0, 10, 0 }");
-///         } else {
-///             m_Output.PutString("{ -0, 10, 0 }");
-///         }
-///         return;
-///     }
-///
-///     char buffer[128];
-///     if (m_FastWriteDouble) {
-///         int dec, sign;
-///         size_t len = NStr::DoubleToString_Ecvt(
-///             data, digits, buffer, sizeof(buffer), &dec, &sign);
-///         _ASSERT(len > 0);
-///         m_Output.PutString("{ ");
-///         if (sign < 0) {
-///             m_Output.PutString("-");
-///         }
-///         m_Output.PutString(buffer,len);
-///         m_Output.PutString(", 10, ");
-///         m_Output.PutInt4(dec - (int)(len-1));
-///         m_Output.PutString(" }");
-/// ```
 pub fn write_asn_text_double(data: f64, out: &mut Vec<u8>) {
     if data.is_nan() {
         out.extend_from_slice(b"NOT-A-NUMBER");
@@ -994,26 +651,6 @@ impl JsonDoubleError {
 /// DBL_DIG)` appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:205-225
-/// ```c++
-/// void CObjectOStreamJson::WriteDouble(double data)
-/// {
-///     WriteDouble2(data,DBL_DIG);
-/// }
-///
-/// void CObjectOStreamJson::WriteDouble2(double data, unsigned digits)
-/// {
-///     if (isnan(data)) {
-///         ThrowError(fInvalidData, "invalid double: not a number");
-///     }
-///     if (!finite(data)) {
-///         ThrowError(fInvalidData, "invalid double: infinite");
-///     }
-///     if (m_FastWriteDouble) {
-///         char buffer[64];
-///         WriteKeywordValue( string(buffer,
-///             NStr::DoubleToStringPosix(data, digits, buffer, sizeof(buffer))));
-///     } else {
-/// ```
 pub fn write_json_double(data: f64, out: &mut Vec<u8>) -> Result<(), JsonDoubleError> {
     if data.is_nan() {
         return Err(JsonDoubleError::NotANumber);
@@ -1029,42 +666,6 @@ pub fn write_json_double(data: f64, out: &mut Vec<u8>) -> Result<(), JsonDoubleE
 /// 14, 16): `DoubleToStringPosix(data, DBL_DIG)` appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:661-713
-/// ```c++
-/// void CObjectOStreamXml::WriteDouble2(double data, unsigned digits)
-/// {
-///     if (m_SpecialCaseWrite && x_SpecialCaseWrite()) {
-///         return;
-///     }
-///     if (isnan(data)) {
-///         m_Output.PutString("NaN", 3);
-///         return;
-///     }
-///     if (!finite(data)) {
-///         if (data < 0) {
-///             m_Output.PutChar('-');
-///         }
-///         m_Output.PutString("INF", 3);
-///         return;
-///     }
-///     char buffer[512];
-///     SIZE_TYPE width;
-///     if (m_RealFmt == eRealFixedFormat) {
-///         ...
-///     } else {
-///         if (m_FastWriteDouble) {
-///             width = NStr::DoubleToStringPosix(data, digits, buffer, sizeof(buffer));
-///         } else {
-///             ...
-///         }
-///     }
-///     m_Output.PutString(buffer, width);
-/// }
-///
-/// void CObjectOStreamXml::WriteDouble(double data)
-/// {
-///     WriteDouble2(data, DBL_DIG);
-/// }
-/// ```
 /// (`m_RealFmt` starts as `eRealScientificFormat`, objostrxml.cpp:80; the special-case write
 /// belongs to the element writer that calls this.)
 pub fn write_xml_double(data: f64, out: &mut Vec<u8>) {

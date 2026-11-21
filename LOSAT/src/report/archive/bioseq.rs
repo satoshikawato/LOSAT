@@ -1,15 +1,6 @@
 //! The Bioseq of a query or subject record in a BLAST archive.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-603
-//! ```c++
-//!     if ( !TestFlag(fNoUserObjs) ) {
-//!         // store the raw defline in a User-object for reference
-//!         CRef<CSeqdesc> desc(new CSeqdesc);
-//!         desc->SetUser().SetType().SetStr("CFastaReader");
-//!         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
-//!         m_CurrentSeq->SetDescr().Set().push_back(desc);
-//!     }
-//! ```
 //! A record is `id { local str "Query_N" }` (`Subject_N` for `-subject`), `descr` with the
 //! `CFastaReader` user object (the raw defline line) and the `title` (absent when it is
 //! empty), and `inst` (`repr raw`, `mol na|aa`, the length and the data: `ncbi2na` when every

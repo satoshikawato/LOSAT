@@ -5,23 +5,7 @@ use crate::utils::x87::X87;
 use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::tables::KarlinParams;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:94-112
-// ```c
-// typedef struct Blast_GumbelBlk {
-//       double  Lambda;    /**< the unscaled Lambda value */
-//       double  C;
-//       double  G;         /**< G is the total penalty for extension */
-//       double  a;         /**< avg(L) = a     y + b    */
-//       double  Alpha;     /**< var(L) = alpha y + beta */
-//       double  Sigma;     /**< cov(L) = sigma y + tau  */
-//       double  a_un;      /**< Ungapped a */
-//       double  Alpha_un;  /**< Ungapped alpha */
-//       double  b;         /**< 2*G*(a_un - a) */
-//       double  Beta;      /**< 2*G*(alpha_un - alpha) */
-//       double  Tau;       /**< 2*G*(alpha_un - Sigma) */
-//       Int8 db_length;    /**< total length of database */
-// } Blast_GumbelBlk;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:94-112
 #[derive(Debug, Clone, Copy)]
 pub struct BlastGumbelBlk {
     pub lambda: f64,
@@ -45,35 +29,7 @@ pub struct BlastGumbelBlk {
 /// The Gumbel block of a protein scoring scheme from the matrix's table; `None` when its gap
 /// costs are not in the table (NCBI status 2).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3724-3749
-/// ```c
-///    if (found_matrix) {
-///       Boolean found_values=FALSE;
-///       Int4 index;
-///       for (index=0; index<max_number_values; index++) {
-///          if (BLAST_Nint(values[index][0]) == gap_open &&
-///             BLAST_Nint(values[index][1]) == gap_extend) {
-///             if (gbp) {
-///                gbp->Lambda = values[index][3];
-///                gbp->C = values[index][8];
-///                gbp->G = gap_open + gap_extend;
-///                gbp->a = values[index][6];
-///                gbp->Alpha = values[index][9];
-///                gbp->Sigma = values[index][10];
-///                gbp->a_un  = values[0][6];
-///                gbp->Alpha_un = values[0][9];
-///                gbp->b = 2.0 * gbp->G * (gbp->a_un - gbp->a);
-///                gbp->Beta = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Alpha);
-///                gbp->Tau  = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Sigma);
-///                gbp->filled = TRUE;
-///             }
-///             found_values = TRUE;
-///             break;
-///          }
-///       }
-///
-///       status = found_values ? 0 : 2;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3724-3749
 pub fn lookup_protein_gumbel_params(
     spec: &ProteinScoringSpec,
     db_length: i64,
@@ -143,7 +99,7 @@ pub fn lookup_protein_gumbel_params(
 //
 // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:54-64,252-255 (`ErfC` is
 // `ErfImpl` with `invert` set).
-// NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
     // LOSAT_X_ERFABSORB (graduated 2026-10-26, always on): for z < -6 the reference's value is
@@ -165,18 +121,6 @@ fn erfc_ncbi(z: f64) -> f64 {
     // for every subject of the same length; keep the last results per thread.
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5216,5223-5223,5248-5254
-    // ```c
-    //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
-    // ...
-    //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
-    // ...
-    //     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-    //     if (e > e0) {
-    //         while (e> e0) {
-    //             a = b;
-    //             b *= 2;
-    //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-    // ```
     // NCBI calls ErfC again with the same arguments for every candidate score `b` of every
     // subject length. The memo returns the value the first call computed for the same bits of
     // `z`; ErfC reads nothing else, so this is reuse only.
@@ -218,14 +162,6 @@ fn erfc_ncbi(z: f64) -> f64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
-// ```c
-//     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-//     if (e > e0) {
-//         while (e> e0) {
-//             a = b;
-//             b *= 2;
-//             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-// ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
 // It holds earlier ErfC results of the loop above and changes no value. It uses `X_ERFC_FIRST`
 // slots and doubles them while more than half hold a result, up to `X_ERFC_MOST`, in one
@@ -550,20 +486,7 @@ fn horner_ncbi(coefficients: &[f64], x: f64) -> f64 {
     result
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5176-5231
-// ```c
-// double BLAST_SpougeStoE(Int4 y_, Blast_KarlinBlk* kbp, Blast_GumbelBlk* gbp,
-//                         Int4 m_, Int4 n_)
-// {
-//     double scale_factor = kbp->Lambda / gbp->Lambda;
-//     double db_scale_factor = (gbp->db_length) ?
-//             (double)gbp->db_length/(double)n_ : 1.0;
-//     ...
-//     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
-//     ...
-//     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5176-5231
 pub fn blast_spouge_stoe(
     score: i32,
     kbp: &KarlinParams,
@@ -611,23 +534,7 @@ pub fn blast_spouge_stoe(
     area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
-// ```c
-// BLAST_SpougeEtoS(double e0,
-//                  Blast_KarlinBlk* kbp,
-//                  Blast_GumbelBlk* gbp,
-//                  Int4 m, Int4 n)
-// {
-//     Int4 a=0, b, c;
-//     double e;
-//     double db_scale_factor = (gbp->db_length) ?
-//             (double)gbp->db_length : 1.0;
-//
-//     b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
-//     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-//     ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
 pub fn blast_spouge_etos(
     evalue: f64,
     kbp: &KarlinParams,
@@ -790,9 +697,7 @@ mod tests {
     }
 
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
-    // NCBI c++/src/algo/blast/core/blast_stat.c:5180-5231:
-    // double scale_factor = kbp->Lambda / gbp->Lambda;
-    // e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5180-5231:
     // Compare every captured preliminary and scaled post-redo StoE call.
     #[test]
     fn pinned_tblastn_spouge_calls_match_ncbi_double_bits() {
@@ -923,11 +828,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5223-5229
-    // ```c
-    //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
-    //     ...
-    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
-    // ```
     // swissprot blastp Query_17 (120 letters) x P01717.2 (112 letters), score 6558 of the
     // matrix scaled by 32: NCBI's e-value 7.11685934590109512e-21 (outfmt 8
     // `{ 71168593459011, 10, -34 }`) follows from the doubly rounded ErfC above.
@@ -942,11 +842,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5229
-    // ```c
-    //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
-    //     ...
-    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
-    // ```
     // The rows of docs/evidence/spouge_x87_20261027 (its manifest.txt): ErfC arguments and
     // Spouge calls of a random sample where one rounding of the long-double product differs
     // from NCBI's two.
@@ -1072,7 +967,7 @@ mod tests {
 
     #[test]
     fn every_gap_cost_row_has_a_gumbel_block() {
-        // NCBI blast_stat.c:3724-3749 fills the block for any row of the table, e.g. PAM30
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3724-3749 fills the block for any row of the table, e.g. PAM30
         // 9/1 {9, 1, INT2_MAX, 0.294, 0.11, 0.61, 0.48, -6, 0.492716, 2.463920, 3.186150}
         // and the ungapped row's a 0.1938 and Alpha 0.161818.
         let pam30 = lookup_protein_gumbel_params(
@@ -1148,12 +1043,7 @@ mod tests {
         assert!((evalue - 1.5863473416482987).abs() < 1e-12);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5176-5231
-    // ```c
-    // P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
-    // ...
-    // e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5176-5231
     #[test]
     fn test_blast_spouge_stoe_matches_ncbi_formula_for_representative_tail_inputs() {
         let gbp = BlastGumbelBlk {
@@ -1192,13 +1082,7 @@ mod tests {
         assert!((long_tail - 4.058690669998566).abs() < 1e-12);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
-    // ```c
-    // b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
-    // e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-    // ...
-    // return a;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5268
     #[test]
     fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
         let gbp = BlastGumbelBlk {

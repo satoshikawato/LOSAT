@@ -69,15 +69,6 @@ impl TblastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
-    // ```c++
-    //         /*** Initialize the database/subject ***/
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    //         _ASSERT(db_adapter && scope);
-    // ```
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
     /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
     /// such (`DatabaseNumbers::total_length`) on every target.
@@ -118,14 +109,6 @@ impl TblastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     /// The numbers of the statistics (`SeqDb::statistics`): the setup's total length and number
     /// of sequences, the Gumbel block's length and `CSeqDB::GetMinLength`; the real numbers, also
     /// with `-dbsize`.
@@ -473,11 +456,6 @@ impl TblastnDatabase {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904
-// ```c++
-//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-//     ...
-//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-// ```
 /// Whether the rows of the hit list `list` read its subject (`rows`, by each HSP's engine
 /// identities, the Seq-align's `num_ident`): for `SubjectFetch::Every` a list with HSPs.
 pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool {
@@ -524,15 +502,6 @@ pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaRe
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-// ```c++
-//     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-//                                                   m_InternalData,
-//                                                   m_Opts,
-//                                                   seqinfo_src,
-//                                                   search_msgs));
-//     ...
-//     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-// ```
 /// Reads the definition lines of the sequences that the final hit lists `hitlists` of a
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
@@ -788,7 +757,7 @@ fn parsed_shown(
                     ))
                 },
             ),
-        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in
+        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (cited in
         // `tblastn_app::search`).
         prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
             |&number| match number {
@@ -1087,16 +1056,7 @@ mod tests {
             .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
-    // ```c
-    //    Int8 total_length = -1;
-    //    Int4 num_seqs = -1;
-    //
-    //    if (seq_src) {
-    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-    //       if (total_length <= 0)
-    //           total_length = BlastSeqSrcGetTotLen(seq_src);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
     // An alias file's `LENGTH` of 2^32 letters or more over the 16 sequences of
     // `tests/db_search/taxfilter/tfn` (`tests/db_search/dbcounts`) is NCBI's `Int8` on every
     // target, wasm32's 32-bit `usize` included: the database opens with its whole total.

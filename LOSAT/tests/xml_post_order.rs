@@ -16,22 +16,7 @@
 //! inputs `tests/db_search/make_xpost_inputs.py`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
-//! ```c++
-//! inline bool BAD_CHAR(char x) {
-//!     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
-//! }
-//! inline char CObjectOStreamXml::x_VerifyChar(char x) {
-//!     return BAD_CHAR(x) ?
-//!         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375
-//! ```c++
-//!     const CSeq_id& kSeqId = kAlignSet.Get().front()->GetSeq_id(1);
-//!
-//!     try {
-//!         const CBioseq_Handle& kSubjBioseqHandle = scope->GetBioseqHandle(kSeqId);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

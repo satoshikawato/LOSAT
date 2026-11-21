@@ -12,6 +12,7 @@ import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } fr
 import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
+import { focused } from './support/live';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import {
@@ -1113,6 +1114,9 @@ test.describe('leaving and returning', () => {
     await expect(page.getByTestId('keep-awake').locator('xpath=..')).not.toHaveAttribute('data-wake-lock', 'held');
     await page.getByTestId('resume-dismiss').click();
     await expect(page.getByTestId('resume-notice')).toHaveCount(0);
+    // A click on Dismiss, as Enter (announce.spec.ts), leaves the focus on the tab shown (WA2-AX-04): what the click
+    // does is not held as the press is (ui/press-hold.ts).
+    expect(await focused(page)).toMatch(/^tab-/);
     const log = await page.evaluate(() => (window as unknown as { __wakeLog: string[] }).__wakeLog);
     expect(log[0]).toBe('request');
     expect(log.at(-1)).toBe('release');

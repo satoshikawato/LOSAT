@@ -271,9 +271,12 @@ subject length is too short" (it fails for a count of 2^31 or a length of 2^32 t
 order of NCBI's one-thread traceback: by OID, then the hit list's heap), and the reports'
 signed counts with NCBI's commas, which lose digits from 4,294,967,296,000,000,000. Refused,
 where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases summed past
-`Int8` (outfmt 0 to 5 and 13 to 16), their numbers of sequences summed past `int` (outfmt 5),
-and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
-the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
+`Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
+A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
+BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits,
+the Owner's answer Q1 = A of
+2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
 (the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
 NCBI's option spaces of the statistics before their fallback to OID 0
@@ -288,14 +291,75 @@ effective lengths, the hit-saving cutoffs without the composition-based stretch 
 word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
 reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
 results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
-where NCBI formats them (after the search: its own errors of the search come first). Refused until
-item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
-(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
-loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
+where NCBI formats them (after the search: its own errors of the search come first). Line RG item
+D1a-4 part A (2026-11-17): RPSBLAST and RPSTBLASTN read these keys as NCBI's RPS search does
+(`CLocalRPSBlast`, rpsblast_local.cpp:331-400; one owner, `rps_search::volumes::RpsUnits`): a
+database of one volume is one search unit, the `-db` name with all its alias keys; one of several
+volumes searches each volume bare (its own length and count, no `STATS_*` key, the shortest length
+10, no OID range) under the database-wide `DbLength` (`STATS_TOTLEN`, else `GetTotalLength`) and
+`DbSeqNum` (`STATS_NSEQ`, else `GetNumSeqs`) that `x_AdjustDbSize` sets without `-searchsp` and
+`-dbsize`, each read only where above 0, while the Gumbel block reads `DbLength` where it is not 0.
+The footers print the first unit's search space, the search strategy's requests after the first hold
+that `DbLength` (0 and negatives too) and the last unit's search space, and the traceback sorts the
+results before its filters whatever the total length and after them (`-max_hsps`, `-qcov_hsp_perc`)
+only where the unit's `GetTotalLength` is above 0 (blast_traceback.c:1306, 1768-1771; part B, review A
+MF2). The preliminary stage's hit cutoff without the Gumbel block reads the space that
+`SplitQuery_SetEffectiveSearchSpace` sets (prelim_stage.cpp:219-221: the unit's total before the
+fallback to OID 0, its count without it), the traceback the setup's: they differ over one volume
+whose total is negative, and with `-dbsize` over one volume whose total is 0 or negative
+(SplitQuery's count is the unit's, the setup's 1; part B, review A MF1, review B N2). The setup of
+every unit fails as NCBI's where its average subject length is below one letter without the Gumbel
+block (an alias file's `NSEQ` above its `LENGTH` over one volume: `BLAST engine error: The average
+subject length is too short`, exit status 3, both programs; fix round 1, review A MF5). The search
+ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table holds every profile of a volume); a hit of a
+profile that they leave out among the profiles the reports show (those of the first
+`-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
+subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
+its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
+NCBI's report does not find it (`Unknown`, or a null pointer exception: the D1a-4 entry of
+PD-LOSAT-NCBI-DEFECTS)
+or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
+the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
+HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
+plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the
+diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
+tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
+the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (the D1a-4 entry of PD-LOSAT-NCBI-DEFECTS,
+rule 3): a
+sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
+diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
+where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
+query file or a first batch without letters ends as NCBI's; fix round 1, review B MF1), a query
+batch where two gapped alignments of one tree start past `Lc + 1` (NCBI's interval tree splits
+without end) and one where `Lc` is above the rows and an ungapped extension reads the row after the
+profiles past the `.rps` file's last page or goes on past that row (NCBI reads past its score
+matrix), RPSBLAST before any output and RPSTBLASTN after the reports of the query batches before, a
+setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`
+where a query is searched: SIGFPE; a run without a valid query is reported as NCBI reports it, fix
+round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
+first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
+`STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
+`-9223372036854775808` (approved exception 17, Int8 -2^63 written as digits; with one query batch
+NCBI's only request holds no
+`DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
-also with `-ungapped`), where NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
+queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
+BLASTX and, since fix round 3 of D1a-4, by BLASTP and
+PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
+`db.ak.ps.nseq0.oldfsc.allx.7`) and, since D1a-5 of line RG, by BLASTN, TBLASTN and TBLASTX (rows
+`db.ak.bn.nseq0.alln.*`, `db.ak.tbx.nseq0.alln.*`, `db.ak.tbn.nseq0.oldfsc.allx.*` and
+`db.ak.tbn.nseq0.ssp.allx.7`; they refused it at the database's open, probe e8 of fix round 3 of
+D1a-4). Every program makes the refusal with one test (`common::database::check_setup_count`) in
+the setup of the first query batch (BLASTN: or query chunk) with a valid context, where NCBI
+divides, before it reads a sequence (also over a volume without its `.nsq`): BLASTN, TBLASTX and
+TBLASTN after the reports of the batches before (NCBI's output before its crash in the next batch
+in the tabular formats: 150 and 152 bytes of outfmt 7 with `BATCH_SIZE=1`, two queries without
+letters to search then a valid one; the crash cuts NCBI's buffered output of the other formats
+short), BLASTP and PSI-BLAST before any output. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 

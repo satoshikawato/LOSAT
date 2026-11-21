@@ -66,67 +66,8 @@ impl Utf8Error {
 /// it takes. The end of `src` reads as the string's terminating NUL.
 ///
 /// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:5665-5674
-/// ```c++
-/// template <typename TIterator> inline TUnicodeSymbol
-/// CUtf8::x_Decode(TIterator& src)
-/// {
-///     SIZE_TYPE more=0;
-///     TUnicodeSymbol sym = DecodeFirst(*src,more);
-///     while (more--) {
-///         sym = DecodeNext(sym, *(++src));
-///     }
-///     return sym;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7174-7206
-/// ```c++
-/// TUnicodeSymbol CUtf8::DecodeFirst(char ch, SIZE_TYPE& more)
-/// {
-///     TUnicodeSymbol chRes = 0;
-///     more = 0;
-///     if ((ch & 0x80) == 0) {
-///         chRes = ch;
-///     } else if ((ch & 0xE0) == 0xC0) {
-///         chRes = (ch & 0x1F);
-///         more = 1;
-///     } else if ((ch & 0xF0) == 0xE0) {
-///         chRes = (ch & 0x0F);
-///         more = 2;
-///     } else if ((ch & 0xF8) == 0xF0) {
-///         chRes = (ch & 0x07);
-///         more = 3;
-///     } else {
-///         NCBI_THROW2(CStringException, eBadArgs,
-///             "Source string is not in UTF8 format", 0);
-///     }
-///     return chRes;
-/// }
-///
-/// TUnicodeSymbol CUtf8::DecodeNext(TUnicodeSymbol chU, char ch)
-/// {
-///     if ((ch & 0xC0) == 0x80) {
-///         return (chU << 6) | (ch & 0x3F);
-///     } else {
-///         NCBI_THROW2(CStringException, eBadArgs,
-///             "Source string is not in UTF8 format", 0);
-///     }
-///     return 0;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6884-6904
-/// ```c++
-/// char CUtf8::SymbolToChar(TUnicodeSymbol cp, EEncoding encoding)
-/// {
-///     ...
-///     if ( cp <= 0x7F) {
-///         return (char)cp;
-///     }
-///     ...
-///     if (cp > 0xFF || (encoding == eEncoding_Ascii && cp > 0x7F)) {
-///         NCBI_THROW2(CStringException, eConvert,
-///                     "Failed to convert symbol to requested encoding", 0);
-///     }
-/// ```
 pub(crate) fn decode_to_ascii(src: &[u8]) -> Result<(u8, usize), Utf8Error> {
     let first = src[0];
     let (mut symbol, more) = if first & 0x80 == 0 {
@@ -210,12 +151,12 @@ mod tests {
         let ncbi = |text: &str| crate::wording::losat_text(text).into_owned();
         let error = Utf8Error::SymbolToChar.exception();
         assert_eq!(error.site().line, 6901);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"));
         let error = Utf8Error::DecodeFirst.exception();
         assert_eq!(error.site().line, 7190);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"));
         let error = Utf8Error::DecodeNext.exception();
         assert_eq!(error.site().line, 7202);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n"));
     }
 }

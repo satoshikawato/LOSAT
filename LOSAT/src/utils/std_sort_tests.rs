@@ -161,7 +161,7 @@ fn std_sort_gives_libstdcxx_permutations_with_nan_keys() {
 }
 
 // The two loops of libstdc++'s sort that a comparison without sentinels drives out of the vector
-// (stl_algo.h:1790-1806, 1867-1887, quoted at the functions): `OutOfRange` before the read.
+// (stl_algo.h:1790-1806, 1867-1887, cited at the functions): `OutOfRange` before the read.
 #[test]
 fn unguarded_loops_that_would_leave_the_vector() {
     let mut always = |_: &u32, _: &u32| true;

@@ -5,14 +5,6 @@
 //! their letters.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eSAM) {
-//!         if (results.HasAlignments()) {
-//!             m_SamFormatter->Print(*results.GetSeqAlign());
-//!         }
-//!         return;
-//!     }
-//! ```
 //! (a query without alignments writes nothing: no unmapped record). The Seq-aligns are those of
 //! `BlastHitList2SeqAlign_OMF`, without `PruneSeqalign` (`algorithm::blastn::seqalign`).
 

@@ -7,36 +7,7 @@
 //! of the subjects as the report shows them (`TaxDefline`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1461-1467
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eTaxFormat) {
-//!         string reportCaption = "Tax BLAST report";
-//!         reportCaption = m_IsHTML ? "<h1>" + reportCaption + "</h1>" : CAlignFormatUtil::AddSpaces(reportCaption,max(kMinTaxFormatLineLength,kFormatLineLength),CAlignFormatUtil::eSpacePosToCenter | CAlignFormatUtil::eAddEOLAtLineStart | CAlignFormatUtil::eAddEOLAtLineEnd);
-//!         m_Outfile << reportCaption;
-//!         x_PrintTaxReport(results);
-//!         return;
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:873-902
-//! ```c++
-//! CBlastFormat::x_PrintTaxReport(const blast::CSearchResults& results)
-//! {
-//!     ...
-//!         m_Outfile <<  "\n";
-//!     ...
-//!     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
-//!                                             m_Outfile, m_BelieveQuery,
-//!                                             m_IsHTML, false,
-//!                                             results.GetRID());
-//!     ...
-//!     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
-//!     if (m_IsUngappedSearch && results.HasAlignments()) {
-//!         aln_set.Reset(CDisplaySeqalign::PrepareBlastUngappedSeqalign(*aln_set));
-//!     }
-//!     ...
-//!     CTaxFormat *taxFormatRes = new CTaxFormat (*new_aln_set,*m_Scope,m_IsHTML ? CTaxFormat::eHtml:CTaxFormat::eText, false,max(kMinTaxFormatLineLength,kFormatLineLength));
-//!     taxFormatRes->DisplayOrgReport(m_Outfile);
-//! }
-//! ```
 //! LOSAT's HSPs are NCBI's Seq-aligns one by one (`PrepareBlastUngappedSeqalign` splits an ungapped
 //! Seq-align of several HSPs into one per HSP, as a gapped search has them).
 //!
@@ -58,9 +29,6 @@ use crate::seqdb::taxdb::TaxNames;
 /// `max(kMinTaxFormatLineLength, kFormatLineLength)`: the report's line length (`m_LineLength`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/taxFormat.hpp:58
-/// ```c++
-/// const unsigned int kMinTaxFormatLineLength = 100;
-/// ```
 const LINE_LENGTH: u32 = 100;
 
 /// The longest run of spaces kept as bytes; a longer one is a `Seg::Spaces` (only the widths
@@ -134,15 +102,6 @@ impl Text {
     /// left to right; the text put in is not searched again by this call.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
-    /// ```c++
-    /// string CAlignFormatUtil::MapTemplate(string inpString,string tmplParamName,string templParamVal)
-    /// {
-    ///     string outString;
-    ///     string tmplParam = "<@" + tmplParamName + "@>";
-    ///     NStr::Replace(inpString,tmplParam,templParamVal,outString);
-    ///     return outString;
-    /// }
-    /// ```
     fn map(&self, name: &str, value: &Text) -> Text {
         let token = [b"<@", name.as_bytes(), b"@>"].concat();
         let mut out = Text::default();
@@ -227,38 +186,6 @@ enum Place {
 /// nothing (`width - 3` wraps) and still adds `...`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3610-3640
-/// ```c++
-/// string CAlignFormatUtil::AddSpaces(string paramVal, size_t maxParamValLength, int spacesFormatFlag)
-/// {
-///     //if(!spacePos.empty()) {
-///         string spaceString;
-///         if(maxParamValLength >= paramVal.size()) {
-///             size_t numSpaces = maxParamValLength - paramVal.size() + 1;
-///             if(spacesFormatFlag & eSpacePosToCenter) {
-///                 numSpaces = numSpaces/2;
-///             }
-/// 	    spaceString.assign(numSpaces,' ');
-///         }
-///         else {
-///             paramVal = paramVal.substr(0, maxParamValLength - 3) + "...";
-///             spaceString += " ";
-///         }
-///         if(spacesFormatFlag & eSpacePosAtLineEnd) {
-///             paramVal = paramVal + spaceString;
-///         }
-///         else if(spacesFormatFlag & eSpacePosToCenter) {
-///             paramVal = spaceString + paramVal + spaceString;
-///         }
-///         else {
-///             paramVal = spaceString + paramVal;
-///         }
-///         if(spacesFormatFlag & eAddEOLAtLineStart) paramVal = "\n" + paramVal;
-///         if(spacesFormatFlag & eAddEOLAtLineEnd) paramVal = paramVal + "\n";
-///     //}
-///
-///     return paramVal;
-/// }
-/// ```
 fn add_spaces(value: &[u8], width: u64, place: Place, eol_start: bool, eol_end: bool) -> Text {
     let (value, spaces): (std::borrow::Cow<'_, [u8]>, u64) = if width >= value.len() as u64 {
         let spaces = width - value.len() as u64 + 1;
@@ -323,20 +250,6 @@ impl TaxDefline {
     /// generated one of the record's title `title`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:911-929
-    /// ```c++
-    /// CTaxFormat::SSeqInfo *CTaxFormat::x_FillTaxDispParams(const CBioseq_Handle& bsp_handle,
-    ///                                     double bits,
-    ///                                     double evalue)
-    /// {
-    ///     SSeqInfo *seqInfo = new SSeqInfo;
-    /// 	seqInfo->gi = FindGi(bsp_handle.GetBioseqCore()->GetId());
-    /// 	seqInfo->seqID = FindBestChoice(bsp_handle.GetBioseqCore()->GetId(),CSeq_id::WorstRank);
-    /// 	seqInfo->label =  CAlignFormatUtil::GetLabel(seqInfo->seqID);//Just accession without db part like ref| or pdbd|
-    ///     ...
-    ///     seqInfo->taxid = ZERO_TAX_ID;
-    /// 	seqInfo->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-    ///     if(m_DisplayOption == eText) x_InitTextFormatInfo(seqInfo);
-    /// ```
     pub fn of_record(local_id: &[u8], title: &[u8], protein: bool) -> Self {
         TaxDefline {
             label: local_id.to_vec(),
@@ -356,20 +269,7 @@ impl TaxDefline {
     /// `report::defline::BioseqFacts::of_source`; refused where the report shows it for a source
     /// that LOSAT refuses).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:962-971
-    /// ```c++
-    /// 		if(bdl->IsSetTaxid() &&  bdl->CanGetTaxid()){
-    /// 		    taxid = bdl->GetTaxid();
-    /// 		}
-    ///         seqInfo->taxid = taxid;
-    ///
-    /// 		if(bdl->IsSetTitle()){
-    /// 			seqInfo->title = bdl->GetTitle();
-    /// 		}
-    ///         if(seqInfo->title.empty()) {
-    ///             seqInfo->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:961-971
     pub fn of_stored(
         oid: crate::seqdb::Oid,
         title: &[u8],
@@ -587,12 +487,7 @@ impl TaxSubjects for SubjectTable<'_> {
             .map_or(&[], |(lines, _)| lines.as_slice())
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:991-993
-    // ```c++
-    //         subid = &((*iter)->GetSeq_id(1));
-    //
-    //         if(!previousId.Empty() && subid->Match(*previousId)) continue;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:989-993
     fn same(&self, previous: usize, subject: usize) -> bool {
         previous == subject
             || matches!(
@@ -789,10 +684,6 @@ fn read_ncbirc(program: &str) -> Result<Option<crate::blastinput::ncbi_registry:
 /// (`formatter_registry::protocol`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:176-178
-/// ```c++
-///     m_TaxBrowserURL = (m_TaxBrowserURL.empty()) ? s_TagToConstString("TAX_BROWSER_URL") : m_TaxBrowserURL;
-///     m_TaxBrowserURL = CAlignFormatUtil::MapTemplate(m_TaxBrowserURL,"protocol",m_Protocol);
-/// ```
 fn tax_browser_url(registry: Option<&crate::blastinput::ncbi_registry::RegistryRead>) -> Vec<u8> {
     use super::formatter_registry::{protocol, tax_browser_template};
     Text::of(tax_browser_template(registry))
@@ -804,19 +695,6 @@ fn tax_browser_url(registry: Option<&crate::blastinput::ncbi_registry::RegistryR
 /// (`x_MapTaxInfoTemplate` up to `AddSpaces`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1160-1170
-/// ```c++
-/// string CTaxFormat::x_MapTaxInfoTemplate(string tableRowTemplate,STaxInfo &taxInfo,unsigned int depth)
-/// {
-///     string reportTableRow = CAlignFormatUtil::MapTemplate(tableRowTemplate,"blast_name_link",m_TaxFormatTemplates->blastNameLink);
-///     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"scientific_name",taxInfo.scientificName);
-///     string commonName = (taxInfo.commonName != taxInfo.scientificName) ? "(" + taxInfo.commonName + ")" : "";
-///     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"common_name",commonName);
-///     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"blast_name",taxInfo.blastName);
-///     if(m_DisplayOption == eText) {
-///         string txtOrgValue = reportTableRow;//Contains <@scientific_name@>[<@blast_name@>] mapped
-///         reportTableRow = CAlignFormatUtil::AddSpaces(txtOrgValue,m_LineLength,CAlignFormatUtil::eSpacePosToCenter | CAlignFormatUtil::eAddEOLAtLineStart | CAlignFormatUtil::eAddEOLAtLineEnd);
-///     }
-/// ```
 /// The template (`ORG_REPORT_TXT_ORG_HEADER_NO_TAX_CON`, taxFormat.cpp:98) has no
 /// `<@blast_name_link@>`: its replacement changes nothing.
 fn organism_line(names: &TaxNames) -> Text {
@@ -861,15 +739,6 @@ struct Widths {
 
 impl Widths {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:898-909
-    // ```c++
-    // void CTaxFormat::x_InitTextFormatInfo(CTaxFormat::SSeqInfo *seqInfo)
-    // {
-    //     string orgAccTxtTableHeader = s_TagToConstString("ORG_ACC_TXT_TABLE_HEADER");
-    //     m_MaxAccLength = max(max(m_MaxAccLength,(unsigned int)seqInfo->label.size()),(unsigned int)orgAccTxtTableHeader.size());
-    //     ...
-    //     m_MaxDescrLength =  m_LineLength - m_MaxAccLength - m_MaxScoreLength - m_MaxEvalLength - 4;//4 for spaces in between
-    //  }
-    // ```
     /// The widths after a definition line of the label `label`, with the scores `bit_score` and
     /// `evalue` (the width of the description, set between, is overwritten).
     fn take(&mut self, label: &[u8], bit_score: &[u8], evalue: &[u8]) {
@@ -886,18 +755,7 @@ impl Widths {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-181
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-//          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:204-205
-// ```c++
-//               CRef<objects::CSeq_align_set> tmp_align;
-//               sa_vec.push_back(tmp_align);
-// ```
 /// One query of a report: its title (outfmt 0's `Query=` text), the length of its record, and
 /// its HSPs in report order; `None` where NCBI did not search the query's batch (no query of it
 /// has a valid context), whose result NCBI gives a null Seq-align-set (a searched query without
@@ -986,24 +844,9 @@ impl TaxReport {
         .insert_into(out)?;
         crate::cli::insert(out, b"\n")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:885-888
-        // ```c++
-        //     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
-        //                                             m_Outfile, m_BelieveQuery,
-        //                                             m_IsHTML, false,
-        //                                             results.GetRID());
-        // ```
         // outfmt 0's `Query=` block (`kFormatLineLength`, 68).
         crate::report::pairwise::write_blastp_query_header(out, title, length)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:893-899
-        // ```c++
-        //     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
-        //     if (m_IsUngappedSearch && results.HasAlignments()) {
-        //         aln_set.Reset(CDisplaySeqalign::PrepareBlastUngappedSeqalign(*aln_set));
-        //     }
-        //
-        //     CRef<CSeq_align_set> new_aln_set(const_cast<CSeq_align_set*>(aln_set.GetPointer()));
-        //     CTaxFormat *taxFormatRes = new CTaxFormat (*new_aln_set,*m_Scope,m_IsHTML ? CTaxFormat::eHtml:CTaxFormat::eText, false,max(kMinTaxFormatLineLength,kFormatLineLength));
-        // ```
         // The Seq-align-set of a query whose batch NCBI did not search is null: `*new_aln_set`
         // throws (`CCoreException::eNullPtr`, "Attempt to access NULL pointer", exit status 255,
         // with a stack trace of NCBI's build; line RG T2 review 5, fix 5 `T/t2/fix5/probe_d2.sh`),
@@ -1017,13 +860,7 @@ impl TaxReport {
             ))
             .into());
         };
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-172
-        // ```c++
-        //     m_Protocol = CAlignFormatUtil::GetProtocol();
-        //     ...
-        //     m_ConfigFile = new CNcbiIfstream(".ncbirc");
-        //     m_Reg = new CNcbiRegistry(*m_ConfigFile);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-173
         // The report's two reads of `./.ncbirc` (`x_InitTaxFormat`) post before its reads and
         // lookups (`x_InitTaxInfoMap`, taxFormat.cpp:140-141).
         let lookups = &self.lookups;
@@ -1052,9 +889,6 @@ impl TaxReport {
             }
         }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:515
-        // ```c++
-        //     out << orgReportData;
-        // ```
         Ok(text.insert_into(out)?)
     }
 }
@@ -1119,51 +953,8 @@ pub fn report_batch<'a>(
     TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1023
-// ```c++
-//     ITERATE(CSeq_align_set::Tdata, iter, m_SeqalignSetRef->Get()){
-//
-//         subid = &((*iter)->GetSeq_id(1));
-//
-//         if(!previousId.Empty() && subid->Match(*previousId)) continue;
-//         ...
-//         try {
-//             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
-//             if( !handle ) continue;
-//             ...
-//             if(!bdl.empty()){ //no blast defline struct, should be no such case now
-//                 ...
-//                 for(list< CRef< CBlast_def_line > >::const_iterator iter = bdl.begin(); iter != bdl.end(); iter++){
-//                     SSeqInfo *seqInfo = x_FillTaxDispParams(*iter,handle,bits,evalue,use_this_seqid);
-//                     if(seqInfo) {
-//                         ...
-//                         x_InitBlastDBTaxInfo(seqInfo);
-//                     }
-//                 }
-//             }
-//             else
-//             {
-//                 SSeqInfo *seqInfo = x_FillTaxDispParams(handle,bits,evalue);
-//                 if(seqInfo) {
-//                     x_InitBlastDBTaxInfo(seqInfo);
-//                 }
-//             }
-//             previousId = subid;
-//         }
-//         catch (const CException&){
-//             continue;
-//         }
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1040-1055
-// ```c++
-// void CTaxFormat::x_InitBlastDBTaxInfo(CTaxFormat::SSeqInfo *seqInfo)
-// {
-//     TTaxId taxid = seqInfo->taxid;
-//     if(m_BlastResTaxInfo->seqTaxInfoMap.count(taxid) == 0){
-//         SSeqDBTaxInfo taxInfo;
-//         CSeqDB::GetTaxInfo(taxid, taxInfo);
-// ```
 /// The organism report of `hsps` (`CTaxFormat::x_InitTaxInfoMap`, then `DisplayOrgReport`) and
 /// its reads and lookups, in order (`Step`): the read of the subject of each HSP that it does not
 /// skip, then the lookups of its definition lines (`lookups`: a taxid not yet in the query's map,
@@ -1195,10 +986,6 @@ fn organism_report(
         }
         steps.push(Step::Read(hsp.subject));
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:950-951
-        // ```c++
-        //         string total_bit_score_buf, raw_score_buf;
-        //         CAlignFormatUtil::GetScoreString(evalue, bits, 0, 0, seqInfo->evalue, seqInfo->bit_score, total_bit_score_buf,raw_score_buf);
-        // ```
         let evalue: std::rc::Rc<[u8]> = format_evalue_ncbi(hsp.evalue).into_bytes().into();
         let bit_score: std::rc::Rc<[u8]> = format_bitscore_ncbi(hsp.bit_score).into_bytes().into();
         let mut threw = false;
@@ -1261,42 +1048,6 @@ fn organism_report(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:450-517 (`DisplayOrgReport`)
-// ```c++
-//     for(size_t i = 0; i < m_BlastResTaxInfo->orderedTaxids.size(); i++) {
-//         ...
-//         orgHeader = x_MapTaxInfoTemplate(orgHeader,seqsForTaxID);
-//         ...
-//         orgHeader = CAlignFormatUtil::MapTemplate(orgHeader,"next_taxid",nextTaxid);
-//         orgHeader = CAlignFormatUtil::MapTemplate(orgHeader,"disable_nexttaxid",hideNextTaxid);
-//         orgHeader = CAlignFormatUtil::MapTemplate(orgHeader,"prev_taxid",prevTaxid);
-//         orgHeader = CAlignFormatUtil::MapTemplate(orgHeader,"disable_prevtaxid",hidePrevTaxid);
-//         orgHeader = CAlignFormatUtil::MapTemplate(orgHeader,"disable_top",hideTop);
-//
-//         string orgReportSeqInfo;
-//         for(size_t j = 0; j < seqsForTaxID.seqInfoList.size(); j++) {
-//             SSeqInfo *seqInfo = seqsForTaxID.seqInfoList[j];
-//             string orgReportTableRow = x_MapSeqTemplate(m_TaxFormatTemplates->orgReportTableRow,seqInfo);
-//             orgReportSeqInfo += orgReportTableRow;
-//         }
-//
-//         string oneOrgInfo = orgHeader + orgReportSeqInfo;
-//         orgReportData += oneOrgInfo;
-//     }
-//     orgReportData = CAlignFormatUtil::MapTemplate(m_TaxFormatTemplates->orgReportTable,"table_rows",orgReportData);
-//     if(m_DisplayOption == eText) {
-//         string orgReportTxtTableCaption = s_TagToConstString("ORG_REPORT_TXT_TABLE_CAPTION");
-//         string reportCaption = CAlignFormatUtil::AddSpaces(orgReportTxtTableCaption,m_LineLength,CAlignFormatUtil::eSpacePosToCenter | CAlignFormatUtil::eAddEOLAtLineStart);
-//         orgReportData = CAlignFormatUtil::MapTemplate(orgReportData,"org_report_caption",reportCaption);
-//         string orgAccTxtTableHeader = s_TagToConstString("ORG_ACC_TXT_TABLE_HEADER");
-//         orgReportData = CAlignFormatUtil::MapSpaceTemplate(orgReportData,"acc_hd",orgAccTxtTableHeader,m_MaxAccLength);
-//         string orgDescrTxtTableHeader = s_TagToConstString("ORG_DESCR_TXT_TABLE_HEADER");
-//         orgReportData = CAlignFormatUtil::MapSpaceTemplate(orgReportData,"descr_hd",orgDescrTxtTableHeader,m_MaxDescrLength,CAlignFormatUtil::eSpacePosToCenter);
-//         string orgScoreTxtTableHeader = s_TagToConstString("ORG_SCORE_TXT_TABLE_HEADER");
-//         orgReportData = CAlignFormatUtil::MapSpaceTemplate(orgReportData,"score_hd",orgScoreTxtTableHeader,m_MaxScoreLength);
-//         string orgEValueTxtTableHeader = s_TagToConstString("ORG_EVALUE_TXT_TABLE_HEADER");
-//         orgReportData = CAlignFormatUtil::MapSpaceTemplate(orgReportData,"evalue_hd",orgEValueTxtTableHeader,m_MaxEvalLength);
-//     }
-// ```
 // `x_InitTaxIdToSeqsMap` fills a map that only the HTML report shows.
 /// The text of the organism report of `groups` with the widths `widths`; `browser_url` replaces
 /// `<@taxBrowserURL@>`.
@@ -1307,21 +1058,6 @@ fn org_report_text(groups: &[Group<'_>], widths: Widths, browser_url: &[u8]) -> 
         let last = i + 1 == groups.len();
         let number = |index: usize| groups[index].taxid.to_string().into_bytes();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1172-1187
-        // ```c++
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"bl_taxid",taxInfo.blNameTaxid);
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxid",TAX_ID_TO(int, taxInfo.taxid));
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxBrowserURL",m_TaxBrowserURL);
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"rid",m_Rid);
-        //     int numHits = taxInfo.seqInfoList.size();
-        //     numHits = (numHits > 0) ? numHits : taxInfo.numHits;
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"numhits",numHits);
-        //
-        //     string shift;
-        //     for(size_t i = 0; i < depth; i++) {
-        //         shift += ".";
-        //     }
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"depth",shift);
-        // ```
         // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
         let header = group
             .line
@@ -1394,21 +1130,6 @@ fn org_report_text(groups: &[Group<'_>], widths: Widths, browser_url: &[u8]) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1130-1150
-// ```c++
-// string CTaxFormat::x_MapSeqTemplate(string seqTemplate, SSeqInfo *seqInfo)
-// {
-//     string reportTableRow = CAlignFormatUtil::MapTemplate(seqTemplate,"gi",NStr::NumericToString(seqInfo->gi));
-//     ...
-//     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"descr_abbr",seqInfo->title.substr(0,60));//for standalone output
-//     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"rid",m_Rid);
-//
-//     if(m_DisplayOption == eText) {
-//         reportTableRow = CAlignFormatUtil::MapSpaceTemplate(reportTableRow,"acc",seqInfo->label,m_MaxAccLength);
-//         reportTableRow = CAlignFormatUtil::MapSpaceTemplate(reportTableRow,"descr_text",seqInfo->title,m_MaxDescrLength);
-//         reportTableRow = CAlignFormatUtil::MapSpaceTemplate(reportTableRow,"score",seqInfo->bit_score,m_MaxScoreLength);
-//         reportTableRow = CAlignFormatUtil::MapSpaceTemplate(reportTableRow,"evalue",seqInfo->evalue,m_MaxEvalLength);
-//     }
-// ```
 /// One row (`ORG_REPORT_TXT_TABLE_ROW`, ` <@acc@><@descr_text@><@score@><@evalue@>\n`). The
 /// replacements of `gi`, `disp_gi`, `descr_abbr` and `rid` come before any value is put in and
 /// the template holds none of them: they change nothing.

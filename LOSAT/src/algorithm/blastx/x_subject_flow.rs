@@ -22,11 +22,6 @@
 //! INT4_MAX / 4, stays below 2^29 + 2^28 < 2^30.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ```
 //! NCBI scans the subjects one after another in this loop (with `-num_threads 1`). The flow keeps
 //! the loop's order for everything after `compute_subject` (the sink: linking, reaping, the HSP
 //! stream) and changes only which thread computes a subject and when.
@@ -343,11 +338,6 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-/// ```c
-///     /* iterate over all subject sequences */
-///     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-///            != BLAST_SEQSRC_EOF) {
-/// ```
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
 /// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
@@ -661,18 +651,7 @@ impl XCrossScratch {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
-/// ```c
-///         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-/// ...
-///                     retval =
-///                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-/// ```c
-///     /* iterate over all subject sequences */
-///     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-///            != BLAST_SEQSRC_EOF) {
-/// ```
 /// EXPERIMENT (LOSAT_X_BXCHUNKCROSS, in the strict set): the chunk loop of a split query whose chunks
 /// `search::search_core` searches one after another, each with the subject flow
 /// (`LOSAT_X_BXCHUNKFLOW`), as one flow of tasks across the chunks. Task `c * tasks + t` is task `t`
@@ -910,14 +889,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
-    // ```c++
-    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //             ewp->diag_table->offset = ewp->diag_table->window;
-    //             s_BlastDiagClear(ewp->diag_table);
-    //         } else {
-    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    //         }
-    // ```
     // The offset a subject is scanned at is below INT4_MAX / 4 plus the previous subject and a
     // window; its entries add at most the subject's own length.
     #[test]

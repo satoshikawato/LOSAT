@@ -39,10 +39,6 @@ use std::{cell::RefCell, io::Write, sync::Arc};
 /// (`BlastxArgs::resolve`; a semantic error is raised later, where NCBI's handlers raise it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3630
-/// ```c++
-///     CRef<CBlastOptionsHandle> retval(x_CreateOptionsHandle(locality, args));
-///     CBlastOptions& opts = retval->SetOptions();
-/// ```
 pub(super) struct RunSetup {
     pub(super) choice: FormatChoice,
     pub(super) archive: Option<ArchiveHandle>,
@@ -57,10 +53,6 @@ impl RunSetup {
     /// `resolve` that is not a semantic one is returned here.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3584-3585
-    /// ```c++
-    /// CRef<CBlastOptionsHandle>
-    /// CBlastAppArgs::SetOptions(const CArgs& args)
-    /// ```
     pub(super) fn open(
         args: &BlastxArgs,
         settings: &ApplicationSettings,
@@ -69,24 +61,7 @@ impl RunSetup {
         strategy_slot: &mut Option<StrategyExport>,
     ) -> Result<Self> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
-        // ```c++
-        //     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
-        //         (*arg)->ExtractAlgorithmOptions(args, opts);
-        //     }
-        //
-        //     m_IsUngapped = !opts.GetGappedMode();
-        //     try { retval->Validate(); }
-        //     catch (const CBlastException& e) {
-        //         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
-        //     }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-        // ```c++
-        //     if (GetExportSearchStrategyStream(args) ||
-        //            m_FormattingArgs->ArchiveFormatRequested(args)) {
-        //         locality = CBlastOptions::eBoth;
-        //     }
-        // ```
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run, with NCBI's errors; a format that NCBI runs and LOSAT does not
         // write is rejected there too. The custom tabular fields are read as NCBI reads them
@@ -142,17 +117,6 @@ impl RunSetup {
             options.find_matrix_file(&settings.matrix_search)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3157-3165
-        // ```c++
-        //
-        //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
-        //                            "Number of threads (CPUs) to use in the BLAST search",
-        //                            CArgDescriptions::eInteger,
-        //                            NStr::IntToString(kDfltValue));
-        //     arg_desc.SetConstraint(kArgNumThreads,
-        //                            new CArgAllowValuesGreaterThanOrEqual(kMinValue));
-        //     arg_desc.SetDependency(kArgNumThreads,
-        //                            CArgDescriptions::eExcludes,
-        // ```
         // Existing LOSAT search-scoped pool validates the explicit thread contract
         // before input/output side effects; serial WASI remains explicitly serial.
         crate::utils::threading::validate_threads(args.num_threads as usize)?;
@@ -172,11 +136,6 @@ impl RunSetup {
 /// archive (`early_archive_error`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2525-2527
-/// ```c++
-///     } else if (args.Exist(kArgSubject) && args[kArgSubject]) {
-///
-///         CNcbiIstream* subj_input_stream = NULL;
-/// ```
 pub(super) struct SubjectRead<'a> {
     pub(super) args: &'a BlastxArgs,
     pub(super) settings: &'a ApplicationSettings,
@@ -192,11 +151,6 @@ pub(super) struct SubjectRead<'a> {
 /// interval and the records, not yet cut to it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2463-2465
-/// ```c++
-/// void
-/// CBlastDatabaseArgs::ExtractAlgorithmOptions(const CArgs& args,
-///                                             CBlastOptions& opts)
-/// ```
 pub(super) fn read_subjects(
     input: SubjectRead<'_>,
 ) -> Result<(Option<SequenceRange>, Vec<FastaRecord>)> {
@@ -211,18 +165,6 @@ pub(super) fn read_subjects(
         early_archive_error,
     } = input;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2540-2556
-    // ```c++
-    //         TSeqRange subj_range;
-    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-    //             subj_range =
-    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-    //                             "Invalid specification of subject location");
-    //         }
-    // ...
-    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-    //                                        subj_range, parse_deflines,
-    //                                        use_lcase_masks, subjects, m_IsMapper);
-    // ```
     // The handler of the database arguments reads `-subject_loc` after it opened the subject
     // file, and then the subjects, one record at a time: a record whose interval starts more
     // than one letter past its end stops the reading there (`seq_range::record_cut`), so the
@@ -273,11 +215,6 @@ pub(super) fn read_subjects(
 /// the options, the `-subject` records and the scopes of the queries (`-parse_deflines`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1067-1069
-/// ```c++
-/// CBlastFormat::WriteArchive(blast::IQueryFactory& queries,
-///                            blast::CBlastOptionsHandle& options_handle,
-///                            const CSearchResultSet& results,
-/// ```
 pub(super) struct ArchiveBatch<'a> {
     pub(super) handle: &'a ArchiveHandle,
     pub(super) archive_requests: &'a RunRequests<'a>,
@@ -295,11 +232,6 @@ impl ArchiveBatch<'_> {
     /// the titles of the reported sequences read first.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-285
-    /// ```c++
-    ///             if (fmt_args->ArchiveFormatRequested(args)) {
-    ///                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-    ///                 m_Bah.ResetMessages();
-    /// ```
     pub(super) fn write(
         self,
         writer: &mut crate::cli::NcbiOstream<'static>,
@@ -356,6 +288,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
+                            usize::MAX,
                             None,
                         )
                         .map_err(reported_error)?,

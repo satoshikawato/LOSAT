@@ -3,28 +3,6 @@
 //! `-in_pssm` searches a PSSM file.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1252-1271
-//! ```c++
-//! CRef<CPssmWithParameters>
-//! CPsiBlastArgs::x_CreatePssmFromMsa(CNcbiIstream& input_stream,
-//!                                    CBlastOptions& opt, bool save_ascii_pssm,
-//!                                    unsigned int msa_master_idx,
-//!                                    bool ignore_pssm_tmplt_seq)
-//! {
-//!     // FIXME get these from CBlastOptions
-//!     CPSIBlastOptions psiblast_opts;
-//!     PSIBlastOptionsNew(&psiblast_opts);
-//!     psiblast_opts->nsg_compatibility_mode = ignore_pssm_tmplt_seq;
-//!
-//!     CPSIDiagnosticsRequest diags(PSIDiagnosticsRequestNewEx(save_ascii_pssm));
-//!     CPsiBlastInputClustalW pssm_input(input_stream, *psiblast_opts,
-//!                                       opt.GetMatrixName(), diags, NULL, 0,
-//!                                       opt.GetGapOpeningCost(),
-//!                                       opt.GetGapExtensionCost(),
-//!                                       msa_master_idx);
-//!     CPssmEngine pssm_engine(&pssm_input);
-//!     return pssm_engine.Run();
-//! }
-//! ```
 //! The reader is `blastinput::aln_reader`; this module is `CPsiBlastInputClustalW`
 //! (`x_ExtractQueryFromMsa`, `x_ValidateQueryInMsa`, `Process`) and the use of `CPssmEngine` on
 //! it (the score block of its constructor, then `Run`), with the PSSM engine of `core::psi`. The
@@ -78,57 +56,10 @@ pub(crate) struct MsaScoring<'a> {
 // item PS6; `-matrix ''`: `PS/logs/fix6/probe_mx`).
 //
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/msa_pssm_input.hpp:104-122
-// ```c++
-//     const char* GetMatrixName() {
-//         return m_MatrixName.empty()
-//             ? IPssmInputData::GetMatrixName()
-//             : m_MatrixName.c_str();
-//     }
-//
-//    /// Obtain the gap existence value to use when building the PSSM
-//     int GetGapExistence() {
-//          return m_GapExistence
-//          ? m_GapExistence
-//          : IPssmInputData::GetGapExistence();
-//     }
-//
-//     /// Obtain the gap extension value to use when building the PSSM
-//     int GetGapExtension() {
-//          return m_GapExtension
-//          ? m_GapExtension
-//          : IPssmInputData::GetGapExtension();
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/pssm_input.hpp:68-80
-// ```c++
-//     virtual const char* GetMatrixName() {
-//         return BLAST_DEFAULT_MATRIX;
-//     }
-//
-//     /// Obtain the gap existence value for the underlying matrix used to build the PSSM.
-//     virtual int GetGapExistence() {
-//         return BLAST_GAP_OPEN_PROT;
-//     }
-//
-//     /// Obtain the gap extension value for the underlying matrix used to build the PSSM.
-//     virtual int GetGapExtension() {
-//         return BLAST_GAP_EXTN_PROT;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:77
-// ```c
-// #define BLAST_DEFAULT_MATRIX "BLOSUM62"
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:84-85
-// ```c
-// #define BLAST_GAP_OPEN_PROT 11 /**< default gap open penalty (all
-//                                     protein searches) */
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:92-93
-// ```c
-// #define BLAST_GAP_EXTN_PROT 1 /**< default gap open penalty (all
-//                                    protein searches) */
-// ```
 const BLAST_DEFAULT_MATRIX: &str = "BLOSUM62";
 const BLAST_GAP_OPEN_PROT: i32 = 11;
 const BLAST_GAP_EXTN_PROT: i32 = 1;
@@ -186,14 +117,6 @@ fn post_warnings(diagnostics: &mut dyn std::io::Write, warnings: &[Vec<u8>]) -> 
 /// (`CIupacaaToStdaa`): the letters A to Z; any other byte (`*` among them) is 0xff.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1674-1686
-/// ```c++
-/// const Uint1 CIupacaaToStdaa::scm_Table[256] = {
-/// ...
-///     0xff, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
-///     0x8, 0x9, 0x1b, 0xa, 0xb, 0xc, 0xd, 0x1a,
-///     0xe, 0xf, 0x10, 0x11, 0x12, 0x18, 0x13, 0x14,
-///     0x15, 0x16, 0x17, 0xff, 0xff, 0xff, 0xff, 0xff,
-/// ```
 /// (The table's upper-case half: A=1, B=2, ... I=9, J=0x1b, K=0xa, ... O=0x1a, ... U=0x18, ...
 /// Z=0x17; all other entries 0xff.)
 fn iupacaa_to_ncbistdaa(letter: u8) -> u8 {
@@ -210,25 +133,7 @@ fn iupacaa_to_ncbistdaa(letter: u8) -> u8 {
 /// the run (`CSeqportUtil::Convert` cannot convert it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:189-201
-/// ```c++
-///     for (CTypeIterator<CBioseq> itr(Begin(*m_SeqEntry)); itr; ++itr) {
-///         _ASSERT(itr->IsAa());
-///         if (itr->GetLength() != GetQueryLength()) {
-///             continue;
-///         }
-///         // let's check the sequence data
-///         CNCBIstdaa sequence;
-///         s_GetQuerySequenceData(*itr, GetQueryLength(), sequence);
-///         if (s_AreSequencesEqual(sequence, m_Query.get())) {
-///             m_QueryBioseq.Reset(&*itr);
-///             break;
-///         }
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:225
-/// ```c++
-///     NCBI_THROW(CSeqUtilException, eInvalidCoding, "Unknown conversion.");
-/// ```
 /// (The throw of a conversion that no function covers; NCBI BLAST+ 2.17.0, PS6 corpus `e.len1`, `n.q`.)
 fn query_bioseq<'a>(
     bioseqs: &'a [AlnBioseq],
@@ -264,18 +169,6 @@ fn query_bioseq<'a>(
 /// `x_ExtractQueryFromMsa`: the master row's letters without gaps, as NCBIstdaa.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:276-300
-/// ```c++
-///     if (msa_master_idx >= m_AsciiMsa.size()) {
-///         CNcbiOstrstream oss;
-///         oss << "Invalid master sequence index, please use a value between 1 "
-///             << "and " << m_AsciiMsa.size();
-///         NCBI_THROW(CBlastException, eInvalidOptions,
-///                    CNcbiOstrstreamToString(oss));
-///     }
-///     const string& kQuery = m_AsciiMsa.at(msa_master_idx);
-///     ...
-///         m_Query.get()[query_idx] = AMINOACID_TO_NCBISTDAA[toupper(*residue)];
-/// ```
 fn extract_query(rows: &[Vec<u8>], master_index: Option<i32>) -> Result<Vec<u8>> {
     // `AsInteger() - 1` of a value of 1 or more.
     let index = master_index.map_or(0, |index| (index - 1) as usize);
@@ -297,51 +190,6 @@ fn extract_query(rows: &[Vec<u8>], master_index: Option<i32>) -> Result<Vec<u8>>
 /// Returns the place that row had in the file (0-based).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:228-270
-/// ```c++
-///     const size_t kAligmentLength = m_AsciiMsa.front().size();
-///     const char kMaskingRes = NCBISTDAA_TO_AMINOACID[kProtMask];
-///     _ASSERT( !m_AsciiMsa.empty() );
-///
-///     size_t seq_idx = 0;
-///     for (; seq_idx < m_AsciiMsa.size(); seq_idx++) {
-///         size_t query_idx = 0;
-///         for (size_t align_idx = 0;
-///              align_idx < kAligmentLength && query_idx < GetQueryLength();
-///              align_idx++) {
-///             if (m_AsciiMsa[seq_idx][align_idx] == kGapChar) {
-///                 continue;
-///             }
-///             char query_res = NCBISTDAA_TO_AMINOACID[m_Query.get()[query_idx]];
-///             const char kCurrentRes = toupper(m_AsciiMsa[seq_idx][align_idx]);
-///             /* Selenocysteines are replaced by X's in query; test for this
-///              * possibility */
-///             if (query_res == kMaskingRes && kCurrentRes == 'U') {
-///                 query_res = kCurrentRes;
-///             }
-///             if (query_res != kCurrentRes) {
-///                 break;  // character mismatch
-///             } else {
-///                 query_idx++;
-///             }
-///         }
-///
-///         if (query_idx == GetQueryLength()) {
-///             break;
-///         }
-///     }
-///
-///     if (seq_idx < m_AsciiMsa.size()) {
-///         // If the query was found at position seq_idx, swap it with the first
-///         // element in the m_AsciiMsa vector
-///         for (size_t align_idx = 0; align_idx < kAligmentLength; align_idx++) {
-///             swap(m_AsciiMsa[seq_idx][align_idx], m_AsciiMsa.front()[align_idx]);
-///         }
-///     } else {
-///         string msg("No sequence in the multiple sequence alignment provided ");
-///         msg += "matches the query sequence";
-///         NCBI_THROW(CBlastException, eInvalidOptions, msg);
-///     }
-/// ```
 fn validate_query(rows: &mut [Vec<u8>], query: &[u8]) -> Result<usize> {
     let masking = crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID[21];
     // The columns that NCBI looks at and swaps are those of the first row of the file
@@ -415,7 +263,7 @@ fn short_row_read(front: &[u8], others: &[Vec<u8>]) -> bool {
 /// The first row is the first one whose letters start with the query's, so it can have more:
 /// with `-msa_master_idx`, a master that is the start of a sequence above it in the file. NCBI
 /// then fills its alignment (`query_length` cells a row) by that longer row's letters and reads
-/// past the query and writes past every row (the two functions quoted at [`engine_msa`]; NCBI
+/// past the query and writes past every row (the two functions cited at [`engine_msa`]; NCBI
 /// BLAST+ 2.17.0, review probes `p.pfx.*`, `u.pfx.*` of line PS item PS6: exit 0 with a PSSM of
 /// the longer row's columns when it is longer by one or two letters, `malloc(): invalid size`
 /// and SIGABRT when by many). That result depends on the allocator, so LOSAT refuses the run
@@ -447,85 +295,7 @@ impl<'a> QueryRows<'a> {
 /// gaps and the internal gaps of 10 or more of each other row unaligned.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:314-325
-/// ```c++
-///     const string& ascii_query = m_AsciiMsa.front();
-///
-///     unsigned int query_idx = 0;
-///     ITERATE(string, residue, ascii_query) {
-///         if (*residue == kGapChar) {
-///             continue;
-///         }
-///         m_Msa->data[kQueryIndex][query_idx].letter = m_Query.get()[query_idx];
-///         m_Msa->data[kQueryIndex][query_idx].is_aligned =
-///             (isupper(*residue) ? true : false);
-///         query_idx++;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:335-396
-/// ```c++
-///     size_t seq_index = kQueryIndex + 1;
-///     for (; seq_index < m_AsciiMsa.size(); seq_index++) {
-///         size_t query_idx = 0;
-///         for (size_t align_idx = 0; align_idx < kAlignmentLength; align_idx++) {
-///             if (m_AsciiMsa.front()[align_idx] == kGapChar) {
-///                 continue;
-///             }
-///             _ASSERT(toupper(m_AsciiMsa.front()[align_idx]) ==
-///                     NCBISTDAA_TO_AMINOACID[m_Query.get()[query_idx]]);
-///             const char kCurrentRes = m_AsciiMsa[seq_index][align_idx];
-///             _ASSERT(isalpha(kCurrentRes) || kCurrentRes == kGapChar);
-///             m_Msa->data[seq_index][query_idx].letter =
-///                 AMINOACID_TO_NCBISTDAA[(int) toupper(kCurrentRes)];
-///             m_Msa->data[seq_index][query_idx].is_aligned = true;
-///             query_idx++;
-///         }
-///     }
-///
-///     // set flanking gaps and long internal gaps as unaligned
-///     seq_index = kQueryIndex + 1;
-///     const int kGapResidue = 0;
-///     const int kLongGapLen = 10;
-///     for (; seq_index < m_Msa->dimensions->num_seqs + 1; seq_index++) {
-///         size_t i = 0;
-///
-///         // find left flanking gaps
-///         while (i < m_Msa->dimensions->query_length &&
-///                m_Msa->data[seq_index][i].letter == kGapResidue) {
-///
-///             m_Msa->data[seq_index][i].is_aligned = false;
-///             i++;
-///         }
-///
-///         // find long internal gaps
-///         while (i < m_Msa->dimensions->query_length) {
-///             while (i < m_Msa->dimensions->query_length &&
-///                    m_Msa->data[seq_index][i].letter != kGapResidue) {
-///                 i++;
-///             }
-///
-///             int k = static_cast<int>(i) + 1;
-///             while (k < m_Msa->dimensions->query_length &&
-///                    m_Msa->data[seq_index][k].letter == kGapResidue) {
-///                 k++;
-///             }
-///
-///             if (k - i >= kLongGapLen) {
-///                 for (int j=static_cast<int>(i);j < k;j++) {
-///                     m_Msa->data[seq_index][j].is_aligned = false;
-///                 }
-///             }
-///
-///             i = k;
-///         }
-///
-///         // find right flanking gaps
-///         int k = m_Msa->dimensions->query_length - 1;
-///         while (k >= 0 && m_Msa->data[seq_index][k].letter == kGapResidue) {
-///             m_Msa->data[seq_index][k].is_aligned = false;
-///             k--;
-///         }
-///     }
-/// ```
 /// The cells of a row are taken by the letters of the first row in step (`zip`), never by an
 /// index: [`QueryRows`] holds a first row of exactly `query.len()` letters, the number of cells
 /// of each row, so every cell is written once and none is written past the row.
@@ -591,54 +361,11 @@ fn engine_msa(aligned: &QueryRows<'_>) -> PsiMsa {
 /// stops there).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-520
-/// ```c
-///     status = Blast_ScoreBlkMatrixInit(program_number, scoring_options, sbp, get_path);
-///     if (status) {
-///         Blast_PerrorWithLocation(blast_message, status, kBlastMessageNoContext);
-///         return status;
-///     }
-///
-///     /* Fills in block for gapped blast. */
-///     if (Blast_ProgramIsPhiBlast(program_number)) {
-///        status = s_PHIScoreBlkFill(sbp, scoring_options, blast_message, get_path);
-///     } else if (Blast_ProgramIsMapping(program_number)) {
-///         /* Create fake score blocks for each query without computing base
-///            frequencies. We do not compute e-values for mapping, so the
-///            KA statistics are not needed, but the data structures are checked
-///            and used in BLAST engine. */
-///         status = s_JumperScoreBlkFill(sbp, query_info, blast_message);
-///     } else {
-///        status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
-///                query_info, blast_message);
-///
-///        if (scoring_options->gapped_calculation) {
-///           status =
-///               Blast_ScoreBlkKbpGappedCalc(sbp, scoring_options, program_number,
-///                                           query_info, blast_message);
-/// ```
 /// The ungapped calculation writes its message for a query whose parameters it cannot compute
 /// and its status is then replaced by the gapped calculation's:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
-/// ```c
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-///           sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-///           sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-///           if (!Blast_QueryIsTranslated(program) ) {
-///              Blast_MessageWrite(blast_message, eBlastSevWarning, context,
-///              kBlastErrMsg_CantCalculateUngappedKAParams);
-///           }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3557-3562
-/// ```c
-///       else if (status == 2)
-///       {
-///          snprintf(buffer, sizeof(buffer), "Gap existence and extension values of %ld and %ld not supported for %s", (long) gap_open, (long) gap_extend, matrix_name);
-///          Blast_MessageWrite(error_return, eBlastSevError, kBlastMessageNoContext, buffer);
-///          BlastKarlinReportAllowedValues(matrix_name, error_return);
-///       }
-/// ```
 /// The engine throws the first message that was written, so with gap costs that the matrix does
 /// not have the error is the ungapped calculation's for such a query and the gap costs' for any
 /// other (whose allowed values follow as further messages); with gap costs that the matrix has,
@@ -647,13 +374,6 @@ fn engine_msa(aligned: &QueryRows<'_>) -> PsiMsa {
 /// `z.x20.go0.ge5`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:566-570
-/// ```c++
-///     if (status != 0) {
-///         retval = BlastScoreBlkFree(retval);
-///         if (errors) {
-///             string msg(errors->message);
-///             errors = Blast_MessageFree(errors);
-/// ```
 fn score_block(
     scoring: &MsaScoring<'_>,
     query: &[u8],
@@ -702,30 +422,10 @@ fn score_block(
 /// engine then reads a null block.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2786
-/// ```c
-///       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-///       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-///       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-///           sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-///           sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:514-520 (the ungapped
 /// calculation's status is replaced by the gapped one's, so the failure goes unreported and the
 /// run goes on with `kbp_psi[0]` null; `s_PSISavePssm` and the scaling read it: NCBI BLAST+ 2.17.0
 /// ends with SIGSEGV, PS6 corpus `r.ch.q.allX`, `x.in.allx.60`, `x.in.allO`)
-/// ```c
-///        status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
-///                query_info, blast_message);
-///
-///        if (scoring_options->gapped_calculation) {
-///           status =
-///               Blast_ScoreBlkKbpGappedCalc(sbp, scoring_options, program_number,
-///                                           query_info, blast_message);
-/// ```
 fn ungapped_karlin_valid(matrix: ScoringMatrix, query: &[u8]) -> bool {
     let (_, loscore, hiscore) = crate::algorithm::pssm_search::in_pssm::score_table(matrix);
     let mut sentinelled = Vec::with_capacity(query.len() + 2);
@@ -817,22 +517,7 @@ pub(crate) fn pssm_from_msa(
     let query = extract_query(&rows, input.master_index)?;
     let front = validate_query(&mut rows, &query)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:86-89
-    // ```c++
-    //     if (pssm_input_msa->GetQueryLength() == 0) {
-    //         NCBI_THROW(CPssmEngineException, eNullInputData,
-    //            "Query length provided by IPssmInputData is 0");
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:188-194
-    // ```c++
-    // CPssmEngine::CPssmEngine(IPssmInputData* input)
-    //     : m_PssmInput(input), m_PssmInputFreqRatios(NULL)
-    // {
-    //     s_CheckAgainstNullData(input);
-    //     x_InitializeScoreBlock(x_GetQuery(), x_GetQueryLength(), x_GetMatrixName(),
-    //            x_GetGapExistence(), x_GetGapExtension());
-    // }
-    // ```
     if query.is_empty() {
         return Err(engine_error("Query length provided by IPssmInputData is 0"));
     }
@@ -851,25 +536,6 @@ pub(crate) fn pssm_from_msa(
     let bioseq = query_bioseq(&alignment.bioseqs, &query)
         .map_err(|exception| anyhow::Error::from(crate::cli::NativeError::exception(&exception)))?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-396
-    // ```c++
-    //     m_PssmInput->Process();
-    //     s_Validate(m_PssmInput);
-    //
-    //     CPSIMatrix pssm;
-    //     CPSIDiagnosticsResponse diagnostics;
-    //     int status =
-    //         PSICreatePssmWithDiagnostics(m_PssmInput->GetData(),
-    //                                      m_PssmInput->GetOptions(),
-    //                                      m_ScoreBlk,
-    //                                      m_PssmInput->GetDiagnosticsRequest(),
-    //                                      &pssm,
-    //                                      &diagnostics);
-    //     if (status != PSI_SUCCESS) {
-    //         // FIXME: need to use core level perror-like facility
-    //         string msg = x_ErrorCodeToString(status);
-    //         NCBI_THROW(CBlastException, eCoreBlastError, msg);
-    //     }
-    // ```
     // The options are `PSIBlastOptionsNew`'s (pseudocount 0 whatever `-pseudocount` says, which
     // acts on the later rounds) with the unaligned positions ignored and the structure-group mode
     // of `-ignore_msa_master`.
@@ -895,14 +561,6 @@ pub(crate) fn pssm_from_msa(
         other => engine_error(error_code_to_string(other)),
     })?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:400-405
-    // ```c++
-    //     retval = x_PSIMatrix2Asn1(pssm, m_PssmInput->GetMatrixName(),
-    //                               m_PssmInput->GetOptions(), diagnostics);
-    //     CRef<CBioseq> query = m_PssmInput->GetQueryForPssm();
-    //     if (query.NotEmpty()) {
-    //         retval->SetQuery().SetSeq(*query);
-    //     }
-    // ```
     // The Bioseq is the alignment's own: its ids, its letters as IUPACaa, its title (the text of the
     // defline outside its modifiers).
     let entry = bioseq.map(|bioseq| {

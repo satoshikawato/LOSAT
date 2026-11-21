@@ -201,6 +201,15 @@ As of dev be6456f32 with line PS's PS6 and PS6b (2026-11-21): 224 IDs cited in t
 | `SW SW7` | Stage SW7: the split of the large functions (BLASTN's and TBLASTX's `search_query_batch`, then BLASTP's `run_call`) into functions in new files, one phase per PR, with the output unchanged and instruction counts within 0.1 % of dev (or the cause found and written). | in progress | #960, #968, #981, #992, #996, #1005, #1006, #1020, #1023, #1042, #1043, #1113, #1115, #1130 | [docs/architecture/engine.md](../../docs/architecture/engine.md) |
 | `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40), searches of databases with column files and LOSAT Web inflating compressed sources with the engine's decoders (D2, DECISIONS 44). | in progress | #885, #886, #888, #897, #925, #931, #934, #935, #945, #947, #953, #954, #965, #972, #975, #977, #980, #997, #1008 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
 
+### RG: the remaining gaps to NCBI BLAST+
+
+| ID | Meaning | State | Main pull requests | Record in this repository |
+| --- | --- | --- | --- | --- |
+| `RG` | Line RG (from 2026-11-12): the gaps that remain between LOSAT and NCBI BLAST+ 2.17.0 (options LOSAT refused, outputs, refusals), closed item by item (items X1-X13, T, D, F and others). | in progress | #1366, #1367, #1374 | external |
+| `X4` | Item X4 of line RG: `blastp -use_sw_tback` with composition-based statistics, NCBI's Smith-Waterman redo at every `-num_threads`, as NCBI's `-num_threads 1` gives it. | done | #1367 | [LOSAT/src/algorithm/blastp/blast_engine/redo_run.rs](../../LOSAT/src/algorithm/blastp/blast_engine/redo_run.rs) |
+| `X4-mt` | Item X4-mt of line RG: the speed of `-use_sw_tback`, in two parts: the redo on the search's threads, and faster Smith-Waterman score-only and start scans (the gap along the row carried alone, `pmaxsd` cells on CPUs with AVX2, forbidden cells read through one letter), every value unchanged. | in progress | #1407 (scans; the threads part on `feature/rg-x4mt`) | [LOSAT/src/core/composition_adjustment/smith_waterman.rs](../../LOSAT/src/core/composition_adjustment/smith_waterman.rs) |
+| `X4-mt K1` | Stage K1 of X4-mt: the scans' cell carries the gap along the row alone; the tests' module `before_k1` keeps the cell before it as the reference that every value is compared with. | in progress | #1407 | [LOSAT/src/core/composition_adjustment/smith_waterman_tests.rs](../../LOSAT/src/core/composition_adjustment/smith_waterman_tests.rs) |
+
 ### Plan v4 (speed and memory lines)
 
 | ID | Meaning | State | Main pull requests | Record in this repository |

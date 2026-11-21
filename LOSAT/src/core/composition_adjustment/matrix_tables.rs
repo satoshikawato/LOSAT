@@ -19,12 +19,7 @@ pub struct CompoMatrixData {
     pub background: &'static [f64; 20],
 }
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:438-634
-/// ```c
-/// static const double BLOSUM62_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:438-634
 #[rustfmt::skip]
 pub(crate) const BLOSUM62_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -225,12 +220,7 @@ pub(crate) const BLOSUM62_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 2.50000000e-01, 7.50000000e-01, 2.81516607e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:384-526
-/// ```c
-/// static const double
-/// BLOSUM62_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:384-526
 #[rustfmt::skip]
 pub(crate) const BLOSUM62_JOINT_PROBS: [[f64; 20]; 20] = [
     [2.1497573378347484e-02, 2.3470224274721213e-03, 1.9493235258876179e-03,
@@ -375,12 +365,7 @@ pub(crate) const BLOSUM62_JOINT_PROBS: [[f64; 20]; 20] = [
      1.5489827890922993e-03, 1.9631915140537640e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:529-537
-/// ```c
-/// static const double
-/// BLOSUM62_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:529-537
 #[rustfmt::skip]
 pub(crate) const BLOSUM62_BG: [f64; 20] = [
     7.4216205067993410e-02, 5.1614486141284638e-02, 4.4645808512757915e-02,
@@ -392,12 +377,7 @@ pub(crate) const BLOSUM62_BG: [f64; 20] = [
     3.2281512313758580e-02, 7.2919098205619245e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:638-834
-/// ```c
-/// static const double BLOSUM80_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:638-834
 #[rustfmt::skip]
 pub(crate) const BLOSUM80_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -598,12 +578,7 @@ pub(crate) const BLOSUM80_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 1.40000000e-01, 7.50000000e-01, 3.18242650e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:541-683
-/// ```c
-/// static const double
-/// BLOSUM80_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:541-683
 #[rustfmt::skip]
 pub(crate) const BLOSUM80_JOINT_PROBS: [[f64; 20]; 20] = [
     [2.5190801261944146e-02, 2.0340063576029794e-03, 1.5934450456787860e-03,
@@ -748,12 +723,7 @@ pub(crate) const BLOSUM80_JOINT_PROBS: [[f64; 20]; 20] = [
      1.2479627747244684e-03, 2.4557979462295820e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:686-694
-/// ```c
-/// static const double
-/// BLOSUM80_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:686-694
 #[rustfmt::skip]
 pub(crate) const BLOSUM80_BG: [f64; 20] = [
     7.2647227078731003e-02, 5.0418078079712533e-02, 4.2998652475215837e-02,
@@ -765,12 +735,7 @@ pub(crate) const BLOSUM80_BG: [f64; 20] = [
     3.4849727270340386e-02, 7.3197242333946158e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:238-434
-/// ```c
-/// static const double BLOSUM50_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:238-434
 #[rustfmt::skip]
 pub(crate) const BLOSUM50_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -971,12 +936,7 @@ pub(crate) const BLOSUM50_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 2.90000000e-01, 7.50000000e-01, 2.55759716e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:227-369
-/// ```c
-/// static const double
-/// BLOSUM50_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:227-369
 #[rustfmt::skip]
 pub(crate) const BLOSUM50_JOINT_PROBS: [[f64; 20]; 20] = [
     [1.9177376165900414e-02, 2.7240376714546557e-03, 2.4031492992281512e-03,
@@ -1121,12 +1081,7 @@ pub(crate) const BLOSUM50_JOINT_PROBS: [[f64; 20]; 20] = [
      1.7646048865917325e-03, 1.6356187478795130e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:372-380
-/// ```c
-/// static const double
-/// BLOSUM50_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:372-380
 #[rustfmt::skip]
 pub(crate) const BLOSUM50_BG: [f64; 20] = [
     7.6539470498057649e-02, 5.3250385307217402e-02, 4.3637061980733187e-02,
@@ -1138,12 +1093,7 @@ pub(crate) const BLOSUM50_BG: [f64; 20] = [
     3.3493684732315711e-02, 7.2433722397458003e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:838-1034
-/// ```c
-/// static const double BLOSUM90_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:838-1034
 #[rustfmt::skip]
 pub(crate) const BLOSUM90_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -1344,12 +1294,7 @@ pub(crate) const BLOSUM90_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 1.20000000e-01, 7.50000000e-01, 3.47015056e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:698-840
-/// ```c
-/// static const double
-/// BLOSUM90_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:698-840
 #[rustfmt::skip]
 pub(crate) const BLOSUM90_JOINT_PROBS: [[f64; 20]; 20] = [
     [2.8941466476520718e-02, 1.8963172918503119e-03, 1.4296539454877236e-03,
@@ -1494,12 +1439,7 @@ pub(crate) const BLOSUM90_JOINT_PROBS: [[f64; 20]; 20] = [
      1.0599282277832859e-03, 2.8697002670368957e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:843-851
-/// ```c
-/// static const double
-/// BLOSUM90_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:843-851
 #[rustfmt::skip]
 pub(crate) const BLOSUM90_BG: [f64; 20] = [
     7.2552570322773416e-02, 4.9204908670176822e-02, 4.1453803904895913e-02,
@@ -1511,12 +1451,7 @@ pub(crate) const BLOSUM90_BG: [f64; 20] = [
     3.5653734247116535e-02, 7.3472127649230390e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:38-234
-/// ```c
-/// static const double BLOSUM45_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:38-234
 #[rustfmt::skip]
 pub(crate) const BLOSUM45_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -1717,12 +1652,7 @@ pub(crate) const BLOSUM45_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 2.90000000e-01, 7.50000000e-01, 2.36320536e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:70-212
-/// ```c
-/// static const double
-/// BLOSUM45_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:70-212
 #[rustfmt::skip]
 pub(crate) const BLOSUM45_JOINT_PROBS: [[f64; 20]; 20] = [
     [1.8067859192199651e-02, 2.8632970280029189e-03, 2.5852716092104864e-03,
@@ -1867,12 +1797,7 @@ pub(crate) const BLOSUM45_JOINT_PROBS: [[f64; 20]; 20] = [
      1.9130855013886519e-03, 1.4058608660834061e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:215-223
-/// ```c
-/// static const double
-/// BLOSUM45_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:215-223
 #[rustfmt::skip]
 pub(crate) const BLOSUM45_BG: [f64; 20] = [
     7.8254696826829992e-02, 5.2293400508515497e-02, 4.1869234505207159e-02,
@@ -1884,12 +1809,7 @@ pub(crate) const BLOSUM45_BG: [f64; 20] = [
     3.3781387194819178e-02, 6.9979818411519248e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:1038-1234
-/// ```c
-/// static const double PAM30_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:1038-1234
 #[rustfmt::skip]
 pub(crate) const PAM30_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -2090,12 +2010,7 @@ pub(crate) const PAM30_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 3.00000000e-03, 7.50000000e-01, 6.85288369e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:855-996
-/// ```c
-/// static const double
-/// PAM30_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:855-996
 #[rustfmt::skip]
 pub(crate) const PAM30_JOINT_PROBS: [[f64; 20]; 20] = [
     [5.9127839295455724e-02, 3.2440614389978224e-04, 1.0035946285397422e-03,
@@ -2240,12 +2155,7 @@ pub(crate) const PAM30_JOINT_PROBS: [[f64; 20]; 20] = [
      1.5581070490829142e-04, 4.8623010168479329e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1000-1008
-/// ```c
-/// static const double
-/// PAM30_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1000-1008
 #[rustfmt::skip]
 pub(crate) const PAM30_BG: [f64; 20] = [
     8.7126757718998679e-02, 4.0903890307999048e-02, 4.0432285538126674e-02,
@@ -2257,12 +2167,7 @@ pub(crate) const PAM30_BG: [f64; 20] = [
     2.9916218247065893e-02, 6.4717601577993583e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:1238-1434
-/// ```c
-/// static const double PAM70_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:1238-1434
 #[rustfmt::skip]
 pub(crate) const PAM70_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -2463,12 +2368,7 @@ pub(crate) const PAM70_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 2.00000000e-02, 7.50000000e-01, 5.58422761e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1012-1153
-/// ```c
-/// static const double
-/// PAM70_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1012-1153
 #[rustfmt::skip]
 pub(crate) const PAM70_JOINT_PROBS: [[f64; 20]; 20] = [
     [3.7194198649883180e-02, 8.0875430987034625e-04, 2.0736464600905839e-03,
@@ -2613,12 +2513,7 @@ pub(crate) const PAM70_JOINT_PROBS: [[f64; 20]; 20] = [
      3.5013220379328771e-04, 3.4391130954492435e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1157-1165
-/// ```c
-/// static const double
-/// PAM70_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1157-1165
 #[rustfmt::skip]
 pub(crate) const PAM70_BG: [f64; 20] = [
     8.7126757718998679e-02, 4.0903890307999048e-02, 4.0432285538126674e-02,
@@ -2630,12 +2525,7 @@ pub(crate) const PAM70_BG: [f64; 20] = [
     2.9916218247065893e-02, 6.4717601577993583e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/matrix_freq_ratios.c:1438-1634
-/// ```c
-/// static const double PAM250_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-/// {{0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:1438-1634
 #[rustfmt::skip]
 pub(crate) const PAM250_FREQ_RATIOS: [[f64; 28]; 28] = [
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
@@ -2836,12 +2726,7 @@ pub(crate) const PAM250_FREQ_RATIOS: [[f64; 28]; 28] = [
      7.50000000e-01, 1.70000000e-01, 7.50000000e-01, 2.91088108e+00],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1169-1310
-/// ```c
-/// static const double
-/// PAM250_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1169-1310
 #[rustfmt::skip]
 pub(crate) const PAM250_JOINT_PROBS: [[f64; 20]; 20] = [
     [1.1506395421657883e-02, 2.4975231508904631e-03, 3.6632346972757428e-03,
@@ -2986,12 +2871,7 @@ pub(crate) const PAM250_JOINT_PROBS: [[f64; 20]; 20] = [
      1.0955188103504248e-03, 1.1301289775766317e-02],
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1314-1322
-/// ```c
-/// static const double
-/// PAM250_bg[COMPO_NUM_TRUE_AA] =
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1314-1322
 #[rustfmt::skip]
 pub(crate) const PAM250_BG: [f64; 20] = [
     8.7126757718998679e-02, 4.0903890307999048e-02, 4.0432285538126674e-02,
@@ -3003,15 +2883,7 @@ pub(crate) const PAM250_BG: [f64; 20] = [
     2.9916218247065893e-02, 6.4717601577993583e-02,
 ];
 
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1343-1354
-/// ```c
-/// static Compo_FrequencyData
-/// s_FrequencyData[NUM_SUPPORTED_MATRICES] =
-///     {
-///         MATRIX_DATA(BLOSUM62),
-///         MATRIX_DATA(BLOSUM80),
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1343-1354
 pub static COMPO_MATRIX_DATA: [CompoMatrixData; 8] = [
     CompoMatrixData {
         #[cfg(test)]

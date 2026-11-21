@@ -24,7 +24,7 @@
 //! the window), and otherwise waits, so the results held for the merge stay within W blocks, without
 //! the end of a round of `search_blocks_of` where every worker waits for the round's last block and
 //! the merge. NCBI's threads allocate their search structures
-//! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, quoted at `BlastpSubjectScratch`)
+//! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, cited at `BlastpSubjectScratch`)
 //! and read the sequences in the mapped files.
 //!
 //! Why the reports do not change: each block is searched as a task of `search_blocks_of` searches
@@ -158,7 +158,7 @@ fn x_read_search_block_into(
 }
 
 // No NCBI counterpart: where LOSAT keeps its scratch and its block bytes (NCBI's
-// `BlastCoreAuxStruct` per thread, quoted at `BlastpSubjectScratch`).
+// `BlastCoreAuxStruct` per thread, cited at `BlastpSubjectScratch`).
 /// A worker's search scratch and block buffer.
 struct XKit {
     scratch: BlastpSubjectScratch,
@@ -365,7 +365,7 @@ fn x_window_worker<S, K, P>(
     }
 }
 
-// No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is quoted above
+// No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is cited above
 // `search_blocks`); it changes no value NCBI computes.
 /// The parallel stage of `x_search_blocks_kept`: the blocks of at most `block_bytes` searched by
 /// one task per worker, in the window `size` (module header).
@@ -440,7 +440,7 @@ where
 }
 
 // No NCBI counterpart: scheduling of the preliminary loop and where its buffers are kept (NCBI's
-// loop is quoted above `search_blocks`); it changes no value NCBI computes.
+// loop is cited above `search_blocks`); it changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): `search_blocks_of` (the same blocks of at most `block_bytes`)
 /// with one scratch and one block buffer per worker for the whole stage, the blocks taken in a
 /// window of `blocks_per_thread` blocks per worker (module header).

@@ -16,22 +16,6 @@ struct BlockInfo {
 /// `sTerminateBlock`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:80-98
-/// ```c++
-///     if (blockInfo.first) {
-///         numSeqs = blockInfo.seqCount;
-///         blockInfo.first = false;
-///     }
-///     else
-///     if (numSeqs != blockInfo.seqCount) {
-///         ...
-///         throw SShowStopper(
-///             lineCount,
-///             EAlnSubcode::eAlnSubcode_BadSequenceCount,
-///             description);
-///     }
-///     blockInfo.seqCount = 0;
-///     blockInfo.lineLength = 0;
-/// ```
 fn terminate_block(num_seqs: &mut usize, block: &mut BlockInfo) -> Result<(), ScanFailure> {
     if block.first {
         *num_seqs = block.seq_count;
@@ -49,14 +33,6 @@ fn terminate_block(num_seqs: &mut usize, block: &mut BlockInfo) -> Result<(), Sc
 /// line also when other text follows, and a line of nothing else is one too (`npos` is not 0).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:200-206
-/// ```c++
-/// bool
-/// CAlnScannerClustal::sIsConservationLine(
-///     const string& line)
-/// {
-///     return line.find_first_not_of(":.* \t\r\n");
-/// };
-/// ```
 fn is_conservation_line(line: &[u8]) -> bool {
     line.iter().position(|c| !b":.* \t\r\n".contains(c)) != Some(0)
 }
@@ -65,129 +41,11 @@ fn is_conservation_line(line: &[u8]) -> bool {
 /// scanner's `xVerifyAlignmentData`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:117-196
-/// ```c++
-///     while (iStr.ReadLine(line, lineCount)) {
-///         if (lineCount == 1) {
-///             if (NStr::StartsWith(line, "clustal", NStr::eNocase)) {
-///                 continue;
-///             }
-///         }
-///
-///         NStr::TruncateSpacesInPlace(line);
-///         if (line.empty()) {
-///             if (inBlock) {
-///                 sTerminateBlock(lineCount, numSeqs, blockInfo);
-///                 inBlock = false;
-///             }
-///             continue;
-///         }
-///
-///         if (sIsConservationLine(line)) {
-///             if (!inBlock) {
-///                 ...
-///                 ...
-///             }
-///             sTerminateBlock(lineCount, numSeqs, blockInfo);
-///             inBlock = false;
-///             continue;
-///         }
-///         // Search for end of block
-///         vector<string> tokens;
-///         NStr::Split(line, " \t", tokens, NStr::fSplit_Tokenize);
-///         const auto num_tokens = tokens.size();
-///         if (num_tokens < 2 || num_tokens > 3) {
-///             ...
-///             ...
-///         }
-///
-///         int seqLength = 0;
-///         if (num_tokens == 3) {
-///             seqLength = NStr::StringToInt(tokens[2], NStr::fConvErr_NoThrow);
-///             if (!seqLength) {
-///                 ...
-///             }
-///         }
-///
-///         if (!inBlock) {
-///             inBlock = true;
-///         }
-///
-///         sProcessClustalDataLine(
-///              tokens, lineCount,
-///              blockInfo.seqCount,
-///              numSeqs,
-///              blockInfo.first,
-///              blockInfo.lineLength);
-///
-///         mSequences[blockInfo.seqCount].push_back({tokens[1], lineCount});
-///         ++(blockInfo.seqCount);
-///     }
-///
-///     if (inBlock) {
-///         ...
-///         ...
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:219-303
-/// ```c++
-///     auto seqId = tokens[0];
-///     if (firstBlock) {
-///         TLineInfo existingInfo;
-///         auto idComparison = xGetExistingSeqIdInfo(seqId, existingInfo);
-///         if (idComparison != ESeqIdComparison::eDifferentChars) {
-///             ...
-///             ...
-///         }
-///         mSeqIds.push_back({seqId, lineNum});
-///         mSequences.push_back(vector<TLineInfo>());
-///     }
-///     else {
-///         if (seqCount >= numSeqs) {
-///             ...
-///             ...
-///         }
-///
-///         if (seqId != mSeqIds[seqCount].mData) {
-///             ...
-///         }
-///     }
-///
-///     if (seqCount==0) {
-///         blockLineLength = tokens[1].size();
-///         return;
-///     }
-///
-///     auto currentLineLength = tokens[1].size();
-///     if (currentLineLength != blockLineLength) {
-///         ...
-///         ...
-///     }
-/// ```
 /// The base scanner (`xGetExistingSeqIdInfo`: the same id, or one that differs by case only, is
 /// a duplicate):
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner.cpp:205-223
-/// ```c++
-///     for (const auto& idInfo : mSeqIds) {
-///         if (seqId == idInfo.mData) {
-///             existingInfo = idInfo;
-///             return ESeqIdComparison::eIdentical;
-///         }
-///     }
-///
-///     string seqIdLower(seqId);
-///     NStr::ToLower(seqIdLower);
-///     for (const auto& idInfo : mSeqIds) {
-///         string idLower(idInfo.mData);
-///         NStr::ToLower(idLower);
-///         if (seqIdLower == idLower) {
-///             existingInfo = idInfo;
-///             return ESeqIdComparison::eDifferByCase;
-///         }
-///     }
-///
-///     return ESeqIdComparison::eDifferentChars;
-/// ```
 pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailure> {
     let mut ids: Vec<Vec<u8>> = Vec::new();
     let mut sequences: Vec<Vec<&[u8]>> = Vec::new();

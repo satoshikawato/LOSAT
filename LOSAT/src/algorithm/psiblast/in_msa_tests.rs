@@ -138,8 +138,11 @@ fn the_query_bioseq_is_the_first_equal_one() {
         "NCBI C++ Exception:\n    T0 \"{}/src/util/sequtil/sequtil_convert_imp.cpp\", line 225: Error: (CSeqUtilException::Invalid coding) ncbi::CSeqConvert_imp::Convert() - Unknown conversion.\n",
         crate::ncbi_exception::NCBI_BUILD_ROOT
     );
-    assert_eq!(error.what(), crate::wording::losat_text(&ncbi));
-    assert_eq!(error.what(), "Unknown conversion.\n");
+    assert_eq!(
+        error.what(),
+        crate::wording::losat_bytes(ncbi.as_bytes()).as_ref()
+    );
+    assert_eq!(error.what(), b"Unknown conversion.\n");
 }
 
 fn scoring(matrix_name: &str, gap_open: i32, gap_extend: i32) -> MsaScoring<'_> {

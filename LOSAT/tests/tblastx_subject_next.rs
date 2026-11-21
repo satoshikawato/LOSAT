@@ -6,11 +6,6 @@
 //! is on by default (`src/utils/xswitch.rs`); `LOSAT_X_TBXNEXT=0` turns it off.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ```
 //! The switch may not change a report: the tests compare the reports by default (on) and with it
 //! off, at one and several threads, against the one-thread search with it off, on a set laid out
 //! as a genome database is (two long records first, then many short ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a

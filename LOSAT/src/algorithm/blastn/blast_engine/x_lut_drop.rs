@@ -2,17 +2,7 @@
 //! query batch's lookup tables dropped when its preliminary stage ends, before its traceback,
 //! instead of at the end of the batch.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:201-211
-//! ```c++
-//!     if (is_phi) {
-//!         _ASSERT(m_InternalData->m_LookupTable);
-//!     ...
-//!     }
-//!     else
-//!     {
-//!         m_InternalData->m_LookupTable.Reset(NULL);
-//!     }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:200-211
 //!
 //! What it changes. `search_query_batch` builds the batch's tables (`build_lookup_tables`: the
 //! megablast table, the direct or the small table of the blastn tasks, the discontiguous tables),

@@ -1,247 +1,9 @@
-//! Tests of `hit_sort`: the port of libstdc++'s `std::list::sort` against a linked-list model of
-//! the same algorithm (nodes moved by `_M_transfer`, as libstdc++ moves them), and NCBI's
-//! comparators with their edges.
+//! Tests of `hit_sort`: the replay of the calls that the C++ library's list sort was seen to make
+//! (`LOSAT/tests/unit/list_sort_observed/README.md`), NCBI's comparators, the orders of
+//! `sort_query_hits` (ties, the comparisons' side effects on the hits' HSP orders, HSPs without
+//! identities) and the values that the description table's columns read.
 
 use super::*;
-
-/// A small deterministic generator (xorshift64*), so the tests need no crate.
-struct Random(u64);
-
-impl Random {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
-    }
-
-    fn below(&mut self, bound: u64) -> u64 {
-        self.next() % bound
-    }
-}
-
-/// libstdc++'s `std::list` as a circular doubly linked list of nodes: node 0 of each list is its
-/// head (`_M_impl._M_node`), the others hold the elements (`value`).
-struct Lists {
-    next: Vec<usize>,
-    prev: Vec<usize>,
-    value: Vec<usize>,
-}
-
-impl Lists {
-    fn new() -> Self {
-        Lists {
-            next: Vec::new(),
-            prev: Vec::new(),
-            value: Vec::new(),
-        }
-    }
-
-    /// A new empty list: its head node.
-    fn head(&mut self) -> usize {
-        let node = self.next.len();
-        self.next.push(node);
-        self.prev.push(node);
-        self.value.push(usize::MAX);
-        node
-    }
-
-    fn push_back(&mut self, head: usize, value: usize) {
-        let node = self.next.len();
-        self.next.push(head);
-        self.prev.push(self.prev[head]);
-        self.value.push(value);
-        let last = self.prev[head];
-        self.next[last] = node;
-        self.prev[head] = node;
-    }
-
-    fn empty(&self, head: usize) -> bool {
-        self.next[head] == head
-    }
-
-    /// `position->_M_transfer(first, last)`: moves the nodes `[first, last)` before `position`.
-    fn transfer(&mut self, position: usize, first: usize, last: usize) {
-        if position == last || first == last {
-            return;
-        }
-        let before_first = self.prev[first];
-        let before_last = self.prev[last];
-        // Unlink [first, last).
-        self.next[before_first] = last;
-        self.prev[last] = before_first;
-        // Link before `position`.
-        let before_position = self.prev[position];
-        self.next[before_position] = first;
-        self.prev[first] = before_position;
-        self.next[before_last] = position;
-        self.prev[position] = before_last;
-    }
-
-    /// `_List_node_base::swap(x, y)` of two heads: the lists trade their nodes.
-    fn swap(&mut self, x: usize, y: usize) {
-        let nodes = |lists: &Self, head: usize| {
-            (!lists.empty(head)).then(|| (lists.next[head], lists.prev[head]))
-        };
-        let (x_nodes, y_nodes) = (nodes(self, x), nodes(self, y));
-        for (head, held) in [(x, y_nodes), (y, x_nodes)] {
-            match held {
-                Some((first, last)) => {
-                    self.next[head] = first;
-                    self.prev[head] = last;
-                    self.prev[first] = head;
-                    self.next[last] = head;
-                }
-                None => {
-                    self.next[head] = head;
-                    self.prev[head] = head;
-                }
-            }
-        }
-    }
-
-    /// `_Scratch_list::merge(x, comp)` into `this`.
-    fn merge(&mut self, this: usize, x: usize, comp: &mut impl FnMut(usize, usize) -> bool) {
-        let mut first1 = self.next[this];
-        let last1 = this;
-        let mut first2 = self.next[x];
-        let last2 = x;
-        while first1 != last1 && first2 != last2 {
-            if comp(self.value[first2], self.value[first1]) {
-                let next = self.next[first2];
-                self.transfer(first1, first2, next);
-                first2 = next;
-            } else {
-                first1 = self.next[first1];
-            }
-        }
-        if first2 != last2 {
-            self.transfer(last1, first2, last2);
-        }
-    }
-
-    fn values(&self, head: usize) -> Vec<usize> {
-        let mut values = Vec::new();
-        let mut node = self.next[head];
-        while node != head {
-            values.push(self.value[node]);
-            node = self.next[node];
-        }
-        values
-    }
-}
-
-/// `std::list::sort(comp)` on the linked-list model (bits/list.tcc:614-662).
-fn model_sort(values: &[usize], mut comp: impl FnMut(usize, usize) -> bool) -> Vec<usize> {
-    let mut lists = Lists::new();
-    let list = lists.head();
-    for &value in values {
-        lists.push_back(list, value);
-    }
-    if lists.empty(list) || lists.next[lists.next[list]] == list {
-        return lists.values(list);
-    }
-    let carry = lists.head();
-    let tmp: Vec<usize> = (0..64).map(|_| lists.head()).collect();
-    let mut fill = 0;
-    loop {
-        // __carry._M_take_one(begin()._M_node);
-        let first = lists.next[list];
-        let after = lists.next[first];
-        lists.transfer(carry, first, after);
-        let mut counter = 0;
-        while counter != fill && !lists.empty(tmp[counter]) {
-            lists.merge(tmp[counter], carry, &mut comp);
-            lists.swap(carry, tmp[counter]);
-            counter += 1;
-        }
-        lists.swap(carry, tmp[counter]);
-        if counter == fill {
-            fill += 1;
-        }
-        if lists.empty(list) {
-            break;
-        }
-    }
-    for counter in 1..fill {
-        lists.merge(tmp[counter], tmp[counter - 1], &mut comp);
-    }
-    lists.values(tmp[fill - 1])
-}
-
-/// `list_sort` of the elements `0..keys.len()` by `less(keys[a], keys[b])`, with its calls.
-fn port_sort(keys: &[i64], less: fn(i64, i64) -> bool) -> (Vec<usize>, Vec<(usize, usize)>) {
-    let mut calls = Vec::new();
-    let mut list: Vec<usize> = (0..keys.len()).collect();
-    list_sort(&mut list, |&a, &b| {
-        calls.push((a, b));
-        less(keys[a], keys[b])
-    });
-    (list, calls)
-}
-
-fn model(keys: &[i64], less: fn(i64, i64) -> bool) -> (Vec<usize>, Vec<(usize, usize)>) {
-    let mut calls = Vec::new();
-    let values: Vec<usize> = (0..keys.len()).collect();
-    let sorted = model_sort(&values, |a, b| {
-        calls.push((a, b));
-        less(keys[a], keys[b])
-    });
-    (sorted, calls)
-}
-
-#[test]
-fn the_port_calls_the_comparator_as_the_linked_list_sort_does() {
-    let comparators: [(&str, fn(i64, i64) -> bool); 6] = [
-        ("<", |a, b| a < b),
-        (">", |a, b| a > b),
-        ("<=", |a, b| a <= b),
-        (">=", |a, b| a >= b),
-        ("always", |_, _| true),
-        ("never", |_, _| false),
-    ];
-    let mut random = Random(0x9e37_79b9_7f4a_7c15);
-    for case in 0..600 {
-        let n = match case % 6 {
-            0 => random.below(4) as usize,
-            1 => random.below(20) as usize,
-            _ => random.below(130) as usize,
-        };
-        // Few distinct keys: many ties.
-        let distinct = 1 + random.below(if case % 2 == 0 { 3 } else { 1000 });
-        let keys: Vec<i64> = (0..n).map(|_| random.below(distinct) as i64).collect();
-        for (name, less) in comparators {
-            let (port, port_calls) = port_sort(&keys, less);
-            let (expected, expected_calls) = model(&keys, less);
-            assert_eq!(port, expected, "{name} {keys:?}");
-            assert_eq!(port_calls, expected_calls, "{name} {keys:?}");
-        }
-    }
-}
-
-#[test]
-fn small_lists_sort_with_libstdcxx_s_calls() {
-    let always = |_: i64, _: i64| true;
-    // 0 or 1 element: no call.
-    assert_eq!(port_sort(&[], always), (vec![], vec![]));
-    assert_eq!(port_sort(&[7], always), (vec![0], vec![]));
-    // The newer element goes first only when comp(newer, older).
-    assert_eq!(port_sort(&[1, 1], always), (vec![1, 0], vec![(1, 0)]));
-    assert_eq!(port_sort(&[1, 1], |a, b| a < b), (vec![0, 1], vec![(1, 0)]));
-    // `>=` reverses equal elements (NCBI's total score with ties: dup9, dup1, msA give msA,
-    // dup1, dup9).
-    assert_eq!(
-        port_sort(&[5, 5, 5], |a, b| a >= b),
-        (vec![2, 1, 0], vec![(1, 0), (2, 1)])
-    );
-    assert_eq!(
-        port_sort(&[5, 5, 5, 5], always),
-        (vec![3, 2, 1, 0], vec![(1, 0), (3, 2), (3, 1), (2, 1)])
-    );
-    // A strict order keeps equal elements in their order (stable).
-    assert_eq!(port_sort(&[2, 1, 2, 1], |a, b| a > b).0, vec![0, 2, 1, 3]);
-    assert_eq!(port_sort(&[3, 1, 2], |a, b| a < b).0, vec![1, 2, 0]);
-}
 
 fn hsp(
     bits: f64,
@@ -518,9 +280,6 @@ fn pairwise_hit(e_value: f64) -> PairwiseHit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
-// ```c++
-//     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-// ```
 // The sorts compare the Seq-align's E-values: below 1e-180 both are 0.0, so `0.0 < 0.0` is false
 // and the order stays (NCBI 2.17.0 `blastp -comp_based_stats 0 -sorthits 4` on a query and two
 // subjects, the query itself and the query between 800 letters on each side, keeps the second
@@ -577,4 +336,145 @@ fn hsp_sorts_apply_to_every_hit() {
     );
     // The hits keep their order.
     assert_eq!(sorted(by(None, Some(4)), false, &hits).hits, vec![0, 1]);
+}
+
+/// The fields of a line of `list_sort_calls.txt`: the list's length, the answers, the calls (the
+/// input positions of the comparator's first and second elements) and the order after the sort.
+type ObservedSort = (usize, Vec<bool>, Vec<(usize, usize)>, Vec<usize>);
+
+fn observed_sort(line: &str) -> ObservedSort {
+    let fields: Vec<&str> = line.split(' ').collect();
+    let (n, answers, calls, order) = match fields[0] {
+        "T" => (fields[1], fields[2], fields[3], fields[4]),
+        "R" => (fields[2], fields[4], fields[5], fields[6]),
+        kind => panic!("a line of kind {kind}: {line}"),
+    };
+    let split = |field: &str| -> Vec<String> {
+        if field == "-" {
+            Vec::new()
+        } else {
+            field.split(',').map(str::to_string).collect()
+        }
+    };
+    let answers = if answers == "-" {
+        Vec::new()
+    } else {
+        answers.bytes().map(|answer| answer == b'1').collect()
+    };
+    let calls = split(calls)
+        .iter()
+        .map(|call| {
+            let (first, second) = call.split_once(':').unwrap();
+            (first.parse().unwrap(), second.parse().unwrap())
+        })
+        .collect();
+    let order = split(order).iter().map(|k| k.parse().unwrap()).collect();
+    (n.parse().unwrap(), answers, calls, order)
+}
+
+// For each recorded sequence of answers (every one for lists of 0 to 5 elements, and random ones
+// for lists of 6 to 257 elements), `list_sort` hands the comparator the elements that g++ 13's
+// `std::list::sort` handed it, in the same argument order and sequence, and leaves the same order.
+#[test]
+fn list_sort_calls_as_observed() {
+    let records = include_str!("../../tests/unit/list_sort_observed/list_sort_calls.txt");
+    let (mut lists, mut all_calls) = (0, 0);
+    for line in records.lines() {
+        let (n, answers, calls, order) = observed_sort(line);
+        assert_eq!(answers.len(), calls.len(), "{line}");
+        let mut list: Vec<usize> = (0..n).collect();
+        let mut asked = Vec::new();
+        list_sort(&mut list, |&first, &second| {
+            asked.push((first, second));
+            answers[asked.len() - 1]
+        });
+        assert_eq!(asked, calls, "{line}");
+        assert_eq!(list, order, "{line}");
+        lists += 1;
+        all_calls += calls.len();
+    }
+    assert_eq!((lists, all_calls), (182, 7563));
+}
+
+// NCBI BLAST+ 2.17.0 (blastp -threshold 9 -comp_based_stats 0 -seg no, outfmt 0 -sorthsps 3)
+// printed one subject's HSPs of 100 % (E-value 2e-14), 51 % (2e-13), 0 % (2e-06) and 80 % (3e-04)
+// in that order, the order without -sorthsps. SortHspByPercentIdentityDescending compares the
+// HSP without identities with every HSP by E-value, so it orders these four in a cycle (80 %
+// before 51 % by ratio, 51 % before 0 % and 0 % before 80 % by E-value), and the order is the one
+// that the calls of the list sort give.
+#[test]
+fn hsps_in_a_cycle_take_the_order_of_ncbi_s_calls() {
+    let hsps = vec![
+        hsp(55.5, 2e-14, 26, 26, (0, 25), 0),
+        hsp(53.1, 2e-13, 20, 39, (30, 68), 30),
+        hsp(32.3, 2e-6, 0, 24, (70, 93), 70),
+        hsp(25.8, 3e-4, 8, 10, (100, 109), 100),
+    ];
+    let hits = vec![hsps];
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &hits).hsps,
+        vec![vec![0, 1, 2, 3]]
+    );
+    assert_eq!(
+        sorted(by(Some(3), Some(3)), false, &hits).hsps,
+        vec![vec![0, 1, 2, 3]]
+    );
+}
+
+// NCBI BLAST+ 2.17.0 (the same options, -sorthits 3) printed the subjects of 100 % (E-value
+// 3e-16), 0 % (6e-08) and 80 % (1e-05) in that order: a hit of 0 % ties with every hit
+// (SortHitByPercentIdentityDescendingEx compares its E-values of -1), while 80 % goes after 100 %,
+// so the order is the one that the calls of the list sort give.
+#[test]
+fn a_hit_of_zero_percent_takes_the_order_of_ncbi_s_calls() {
+    let hits = vec![
+        vec![hsp(55.5, 3e-16, 26, 26, (0, 25), 0)],
+        vec![hsp(32.3, 6e-8, 0, 24, (70, 93), 0)],
+        vec![hsp(25.8, 1e-5, 8, 10, (100, 109), 0)],
+    ];
+    assert_eq!(sorted(by(Some(3), None), false, &hits).hits, vec![0, 1, 2]);
+}
+
+// NCBI BLAST+ 2.17.0 (the same options) printed one subject's HSPs of 51 % (E-value 5e-14), 0 %
+// (1e-06) and 80 % (2e-04), in that E-value order, as 80 %, 51 %, 0 % with -sorthsps 3, and three
+// subjects of one such HSP each (E-values 3e-15, 8e-08, 2e-05) as 80 %, 51 %, 0 % with -sorthits
+// 3. Both lists are cycles of the comparator that the list sort's calls move: a stable sort by the
+// comparator, or a merge in another order, leaves another order.
+#[test]
+fn cycles_move_as_ncbi_s_calls_move_them() {
+    let hsps = vec![
+        hsp(53.1, 5e-14, 20, 39, (30, 68), 0),
+        hsp(32.3, 1e-6, 0, 24, (70, 93), 77),
+        hsp(25.8, 2e-4, 8, 10, (100, 109), 132),
+    ];
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &[hsps]).hsps,
+        vec![vec![2, 0, 1]]
+    );
+    let hits = vec![
+        vec![hsp(53.1, 3e-15, 20, 39, (30, 68), 0)],
+        vec![hsp(32.3, 8e-8, 0, 24, (70, 93), 0)],
+        vec![hsp(25.8, 2e-5, 8, 10, (100, 109), 0)],
+    ];
+    assert_eq!(sorted(by(Some(3), None), false, &hits).hits, vec![2, 0, 1]);
+}
+
+// Two more cycles of SortHspByPercentIdentityDescending (HSPs in E-value order, one without
+// identities), in the orders that g++ 13's std::list::sort leaves them.
+#[test]
+fn hsp_cycles_take_the_order_of_the_list_sort_s_calls() {
+    let first = vec![
+        hsp(100.0, 1e-20, 7, 30, (0, 29), 0),
+        hsp(90.0, 1e-14, 0, 30, (40, 69), 40),
+        hsp(80.0, 1e-10, 4, 10, (80, 89), 80),
+    ];
+    let second = vec![
+        hsp(80.0, 1e-5, 0, 20, (0, 19), 0),
+        hsp(90.0, 1e-20, 7, 10, (30, 39), 30),
+        hsp(70.0, 1e-3, 29, 30, (50, 79), 50),
+    ];
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &[first, second]).hsps,
+        vec![vec![2, 0, 1], vec![2, 1, 0]]
+    );
 }

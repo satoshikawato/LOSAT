@@ -8,33 +8,6 @@
 //! LOSAT's refusals of what NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
-//! ```c++
-//! CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
-//!                              const CPsiBlastIterationState* itr)
-//! {
-//!     if (pssm.Empty()) {
-//!         return;
-//!     }
-//!
-//!     if (m_CmdLineArgs->SaveCheckpoint() &&
-//!         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//!          itr->GetIterationNumber() >= 1)) {
-//!         *m_CmdLineArgs->GetCheckpointStream() << MSerial_AsnText << *pssm;
-//!     }
-//!
-//!     if (m_CmdLineArgs->SaveAsciiPssm() &&
-//!         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//!          itr->GetIterationNumber() >= 1)) {
-//!         if (m_AncillaryData.Empty() && pssm.NotEmpty()) {
-//!             _ASSERT(itr->GetIterationNumber() == 1);
-//!             m_AncillaryData = ExtractPssmAncillaryData(*pssm);
-//!         }
-//!         CBlastFormatUtil::PrintAsciiPssm(*pssm,
-//!                                          m_AncillaryData,
-//!                                          *m_CmdLineArgs->GetAsciiPssmStream());
-//!     }
-//! }
-//! ```
 //! With `-in_pssm` the loop's first `SavePssmToFile(pssm, &itr)` writes the input PSSM, the object
 //! that `CPsiBlast` searches (`CPsiBlast(pssm, db_adapter, psi_opts)` holds the same `CRef`); its
 //! ASCII PSSM takes the ancillary data of the PSSM itself, which stays for the files written after
@@ -121,43 +94,13 @@ fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> 
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:252-259
-// ```c++
-//     CNCBIstdaa query;
-//     pssm_with_params.GetPssm().GetQuerySequenceData(query);
-//     const vector<char>& query_seq = query.Get();
-//     ...
-//         out << "\n" << setw(5) << (i+1) << " " <<
-//             NCBISTDAA_TO_AMINOACID[(int)query_seq[i]] << "  ";
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:252-261
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:88-93 (`GetQuerySequenceData`)
-// ```c++
-//     if ( !seq_data.IsNcbistdaa() ) {
-//         CSeq_data ncbistdaa;
-//         CSeqportUtil::Convert(seq_data, &ncbistdaa, CSeq_data::e_Ncbistdaa);
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2045-2052
-// ```c++
-//     if ( in_str != 0 ) {
-//         string result;
-//         retval = CSeqConvert::Convert(*in_str, s_SeqDataToSeqUtil[from_code],
-//                                       uBeginIdx, uLength,
-//                                       result, s_SeqDataToSeqUtil[to_code]);
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2045-2054
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:898-905 and the tables
 // of c++/src/util/sequtil/sequtil_tables.cpp:1674-1707 (`CIupacaaToStdaa`: the code of each
 // capital for it and for its lower case, 0xff for every other byte) and 1748-1781 (`CEaaToStdaa`:
 // the capitals, `*` and `-`, 0xff for every other byte)
-// ```c++
-// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToStdaa
-// (const char* src,
-//  TSeqPos pos,
-//  TSeqPos length,
-//  char *dst)
-// {
-//     return convert_1_to_1(src, pos, length, dst, CIupacaaToStdaa::GetTable());
-// }
-// ```
 /// Whether NCBI's ASCII PSSM prints a letter of NCBIstdaa for every query residue of `object`:
 /// the query's data converts through `CSeqConvert`, whose tables give a code to the letters of
 /// iupacaa in either case (a lower-case letter prints its capital: M4a-1c LG probe
@@ -216,15 +159,6 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:274-282
-    // ```c++
-    //             for (SIZE_TYPE c = 0; c < DIM(RESIDUE_ORDER); c++) {
-    //                 if ((*pssm)(RESIDUE_ORDER[c], i) != BLAST_SCORE_MIN) {
-    //                     double value = 100;
-    //                     value *= (*weighted_res_freqs)(RESIDUE_ORDER[c], i);
-    //                     // round to the nearest integer
-    //                     value = (int)(value + (value > 0. ? 0.5 : -0.5));
-    //                     out << setw(4) << (int)value;
-    // ```
     // A weighted frequency whose rounded percentage is not an `int` (or is NaN) is undefined
     // behaviour in that conversion (x86-64 prints -2147483648): LOSAT's refusal, for the cells
     // NCBI prints (the engine's frequencies lie in [0, 1]; only a file reaches this).
@@ -326,25 +260,6 @@ impl InPssmRounds {
     /// writes after a round 1 without alignments.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:150-168
-    /// ```c++
-    ///     // Save the K&A values be as they might have been modified in the
-    ///     // composition adjustment library
-    ///     if (m_Pssm.NotEmpty()) {
-    ///         CPssm& pssm = m_Pssm->SetPssm();
-    ///         pssm.SetLambda
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->Lambda);
-    ///         pssm.SetKappa
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->K);
-    ///         pssm.SetH
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->H);
-    ///         pssm.SetLambdaUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->Lambda);
-    ///         pssm.SetKappaUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->K);
-    ///         pssm.SetHUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->H);
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:157-191 (`CPssm::SetLambda`
     /// and the others set the members of `finalData`)
     /// The redo of the composition-based statistics works on copies of the score block
@@ -379,56 +294,8 @@ impl InPssmRounds {
 /// diagnostics when it has `informationContent`, and the PSI blocks of its `finalData` (a member
 /// it lacks is `CPssm::kInvalidStat`, 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
-// ```c++
-// ExtractPssmAncillaryData(const CPssmWithParameters& pssm)
-// {
-//     _ASSERT(pssm.CanGetPssm());
-//     pair<double, double> lambda, k, h;
-//     lambda.first = pssm.GetPssm().GetLambdaUngapped();
-//     lambda.second = pssm.GetPssm().GetLambda();
-//     k.first = pssm.GetPssm().GetKappaUngapped();
-//     k.second = pssm.GetPssm().GetKappa();
-//     h.first = pssm.GetPssm().GetHUngapped();
-//     h.second = pssm.GetPssm().GetH();
-//     return CRef<CBlastAncillaryData>(new CBlastAncillaryData(lambda, k, h, 0,
-//                                                              true));
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
-// ```c++
-// CBlastAncillaryData::CBlastAncillaryData(pair<double, double> lambda,
-//                                          pair<double, double> k,
-//                                          pair<double, double> h,
-//                                          Int8 effective_search_space,
-//                                          bool is_psiblast /* = false */)
-// : m_GumbelBlk(0), m_UngappedKarlinBlk(0), m_GappedKarlinBlk(0), m_PsiUngappedKarlinBlk(0),
-//   m_PsiGappedKarlinBlk(0), m_SearchSpace(0), m_LengthAdjustment(0)
-// {
-//     if (is_psiblast) {
-//         m_PsiGappedKarlinBlk = Blast_KarlinBlkNew();
-//         m_PsiGappedKarlinBlk->Lambda = lambda.second;
-//         m_PsiGappedKarlinBlk->K = k.second;
-//         m_PsiGappedKarlinBlk->H = h.second;
-//
-//         m_PsiUngappedKarlinBlk = Blast_KarlinBlkNew();
-//         m_PsiUngappedKarlinBlk->Lambda = lambda.first;
-//         m_PsiUngappedKarlinBlk->K = k.first;
-//         m_PsiUngappedKarlinBlk->H = h.first;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196
-// ```c++
-//     // We use whether the information content is available to assume whether
-//     // the PSSM computation was done or not
-//     bool pssm_calculation_done = info_content.empty() ? false : true;
-//
-//     if (pssm_calculation_done) {
-//         out << "\nLast position-specific scoring matrix computed, weighted ";
-//         out << "observed percentages rounded down, information per position, ";
-//         out << "and relative weight of gapless real matches to pseudocounts\n";
-//     } else {
-//         out << "\nLast position-specific scoring matrix computed\n";
-//     }
-// ```
 fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
     let pssm = &object.pssm;
     let rows_n = usize::try_from(pssm.num_rows).unwrap_or(0);
@@ -545,7 +412,7 @@ mod tests {
         }
     }
 
-    // blastfmtutil.cpp:252-259, Pssm.cpp:88-93, sequtil_tables.cpp:1674-1707 (quoted at
+    // blastfmtutil.cpp:252-259, Pssm.cpp:88-93, sequtil_tables.cpp:1674-1707 (cited at
     // `ascii_letters_defined`): NCBI's ASCII PSSM prints a letter of NCBIstdaa only for the letters
     // of iupacaa (a lower-case one as its capital), the capitals, `*` and `-` of ncbieaa and the
     // codes below 28.
@@ -600,7 +467,7 @@ mod tests {
         h: 0.14,
     };
 
-    // psiblast_aux_priv.cpp:440-502 (quoted at `with_computed_scores`): the ratios of a PSSM of
+    // psiblast_aux_priv.cpp:440-502 (cited at `with_computed_scores`): the ratios of a PSSM of
     // fewer rows get zeros up to 28 rows in each column, the scores are the engine's by column, the
     // gapped values the engine's, and the parameters get the gap costs.
     #[test]
@@ -758,7 +625,7 @@ mod tests {
         long(edge).unwrap();
     }
 
-    // psiblast_impl.cpp:150-168 (quoted at `written_back`): the six values of `finalData`.
+    // psiblast_impl.cpp:150-168 (cited at `written_back`): the six values of `finalData`.
     #[test]
     fn the_write_back_sets_the_searched_blocks() {
         let mut object = pssm(ObjectId::Str(b"myq".to_vec()), 1, 28);
@@ -793,7 +660,7 @@ mod tests {
         );
     }
 
-    // blastfmtutil.cpp:186-196 (quoted at `ascii_pssm`): the short form of a PSSM without its
+    // blastfmtutil.cpp:186-196 (cited at `ascii_pssm`): the short form of a PSSM without its
     // information content, with the PSI blocks of its file (0 for those it lacks).
     #[test]
     fn a_file_pssm_without_information_content_prints_the_short_form() {

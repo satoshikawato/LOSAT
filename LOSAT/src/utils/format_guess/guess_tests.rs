@@ -279,7 +279,7 @@ fn tests_that_read_past_their_data_or_throw() {
     };
     // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(exception.site().line, 640);
-    assert!(exception.what().contains(&*crate::wording::losat_text(
+    assert!(String::from_utf8(exception.what()).unwrap().contains(&*crate::wording::losat_text(
         "NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 640: Error: (CStringException::eConvert) ncbi::NStr::StringToInt() - Cannot convert string '99999999999' to int, overflow (m_Pos = 0)\n"
     )));
     // TestFormatFasta's search for `|` past four bytes: undecided, and the guess without eFasta goes on.

@@ -545,8 +545,9 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
 // `replace(pos, n1, basic_string_view(str).substr(pos2, n2))`. The texts are observed: NCBI's
 // rpsbproc printed `basic_string::replace: __pos (which is N) > this->size() (which is M)` and
 // exited with status 3, the fixtures `tests/fixtures/rpsbproc/oracle/x.h_ntqlen1500.both.err`,
-// `x.h_ntframe4.doms.err` and `x.h_qfmin1.doms.err`. `qf`, an `int` (its value past `int`'s range where exception 12 took
-// it there), is the `size_t` `pos`: a negative one is beyond any length.
+// `x.h_ntframe4.doms.err` and `x.h_qfmin1.doms.err`. `qf`, an `int` (its value past `int`'s
+// range where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any
+// length.
 fn string_replace(
     text: &mut Vec<u8>,
     pos: i64,

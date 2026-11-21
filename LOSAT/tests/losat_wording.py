@@ -64,6 +64,7 @@ _SERIAL = {name.encode() for name in _C["SERIAL_EXCEPTION_CLASSES"].split(",")}
 LOSAT_CRATE_VERSION, NCBI_RELEASE = _versions()
 # `losat_version!()`, `report_version!()` and `NCBI_VERSION` (`crate::NCBI_BLAST_VERSION`) of wording.rs.
 LOSAT_VERSION = f"LOSAT {LOSAT_CRATE_VERSION}".encode()
+VERSION_NUMBER = LOSAT_CRATE_VERSION.encode()  # `wording::VERSION_NUMBER`
 REPORT_VERSION = b"(" + LOSAT_VERSION + b")"
 NCBI_VERSION = f"{NCBI_RELEASE}+".encode()
 ERROR_PREFIXES = [(_C[f"NCBI_{name}_ERROR"].encode(), _C[f"{name}_ERROR"].encode()) for name in _PREFIX_NAMES]
@@ -162,9 +163,26 @@ def _after_program_name(out: bytearray) -> bool:
     return any(65 <= b <= 90 for b in word) and not any(97 <= b <= 122 for b in word)
 
 
+_XMLHELP_PROGRAM = b'<program type="'  # `wording::XMLHELP_PROGRAM`
+_XMLHELP_VERSION = re.compile(rb"<version>([0-9.]+)</version>")
+
+
+_XMLHELP_HEAD = re.compile(rb'(?:\A|[\n ])<program type="[^\n<>]*">[\n ]<name>[^<\n]*</name>[\n ]\Z')
+
+
+def _xmlhelp_version(out: bytearray, text: bytes, i: int) -> int | None:
+    """`wording::xmlhelp_version`: the end of `<version>V</version>` at `i` when `out` ends with the
+    lines `<program type="...">` and `<name>...</name>` (each line feed a space in a collapsed message)."""
+    if not (out.endswith(b"</name>\n") or out.endswith(b"</name> ")) or not _XMLHELP_HEAD.search(bytes(out)):
+        return None
+    m = _XMLHELP_VERSION.match(text, i)
+    return m.end() if m else None
+
+
 def losat_bytes(text: bytes) -> bytes:
     """LOSAT's text of NCBI's `text` (`wording::losat_bytes`)."""
-    needles = (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::", NCBI_VERSION, b" error:", _RPSBPROC_TITLE)
+    needles = (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::", NCBI_VERSION, b" error:", _RPSBPROC_TITLE,
+               _XMLHELP_PROGRAM)
     if not any(needle in text for needle in needles):
         return text
     out = bytearray()
@@ -188,6 +206,12 @@ def losat_bytes(text: bytes) -> bytes:
             out += _RPSBPROC_TITLE + b" " + REPORT_VERSION
             i += len(_NCBI_RPSBPROC_BANNER)
             continue
+        if text.startswith(b"<", i):
+            end = _xmlhelp_version(out, text, i)
+            if end is not None:
+                out += b"<version>" + VERSION_NUMBER + b"</version>"
+                i = end
+                continue
         if text.startswith(NCBI_USER_MANUAL_FOOTER, i):
             out += USER_MANUAL_FOOTER
             i += len(NCBI_USER_MANUAL_FOOTER)
@@ -342,14 +366,29 @@ def losat_text(text: str) -> str:
     return losat_bytes(text.encode()).decode()
 
 
+_XMLHELP_DIR = ROOT / "LOSAT" / "src" / "ncbi_xmlhelp"
+_XMLHELP_LOSAT = re.compile(rb'((?:\A|(?<=[\n ]))<program type="[^\n<>]*">[\n ]<name>([^<\n]*)</name>[\n ]<version>)'
+                            + re.escape(VERSION_NUMBER)
+                            + rb"(</version>)")
+
+
+def _ncbi_xmlhelp_version(name: bytes) -> bytes:
+    """NCBI's version of `-xmlhelp`'s program `name`, from its frozen XML (LOSAT's when there is none)."""
+    path = _XMLHELP_DIR / f"{name.decode(errors='replace')}.xml"
+    m = _XMLHELP_VERSION.search(path.read_bytes()) if path.is_file() else None
+    return m.group(1) if m else VERSION_NUMBER
+
+
 def ncbi_hash_form(losat: bytes) -> bytes:
     """LOSAT's output read back in NCBI's words, for a harness that holds only the hash of NCBI's bytes
     (no freeze to map with `losat_output_bytes`): the version statement, the error prefixes, rpsbproc's
-    banner and the user-manual footer become NCBI's again. Exact for those rules (each LOSAT text stands
+    banner, the user-manual footer and `-xmlhelp`'s program version (NCBI's, from the program's frozen
+    `LOSAT/src/ncbi_xmlhelp/<name>.xml`) become NCBI's again. Exact for those rules (each LOSAT text stands
     for one NCBI text); an exception report cannot be read back, so a harness with its freeze compares
     `losat_output_bytes(freeze)` instead. Pair it with `names_ncbi` so that an output that still writes
     NCBI's words is not taken for LOSAT's."""
     out = losat.replace(_RPSBPROC_TITLE + b" " + REPORT_VERSION, _NCBI_RPSBPROC_BANNER)
+    out = _XMLHELP_LOSAT.sub(lambda m: m.group(1) + _ncbi_xmlhelp_version(m.group(2)) + m.group(3), out)
     out = _ARCHIVE_BYTE_POST.sub(lambda m: m.group(1) + _BYTE_POSITION + str(int(m.group(2)) - IDENT_GROWTH).encode(), out)
     out = out.replace(bytes([_BER_VISIBLE_STRING, len(LOSAT_VERSION)]) + LOSAT_VERSION,
                       bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)]) + NCBI_VERSION)

@@ -90,7 +90,8 @@ authoritative, current guidance for agent behavior in LOSAT.
      program's version it states LOSAT's: `BLASTP (LOSAT 0.2.0)` in a search output's
      header (outfmt 0 line 1, outfmt 7 `# BLASTP (LOSAT 0.2.0)`, `BlastOutput_version`,
      the XML2 and JSON `version`), `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone (an
-     archive's or strategy's `ident`, SAM `@PG VN:`, `-version`), and in the descriptions of
+     archive's or strategy's `ident`, SAM `@PG VN:`, `-version`), `0.2.0` in `-xmlhelp`'s
+     `<version>`, and in the descriptions of
      NCBI's frozen `-help` and `-xmlhelp` texts and rpsbproc's banner; the XML and JSON
      structure, DOCTYPE, namespaces and schema locations stay NCBI's (exception 14; one
      producer and one mapping, `LOSAT/src/wording.rs`). Errors raised after argument parsing, the outfmt 0 write

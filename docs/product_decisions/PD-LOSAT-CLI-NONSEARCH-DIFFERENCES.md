@@ -326,7 +326,9 @@ BLAST+.
      (`blastn: LOSAT 0.2.0`; dustmasker, segmasker and rpsbproc too, where NCBI's state their own
      `1.0.0` and `0.5.1`) and the program's version in `-version-full-xml` and `-version-full-json`,
      blastdbcmd's `version LOSAT 0.2.0`. rpsbproc's banner reads
-     `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` (NCBI's `v0.5.1`).
+     `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` (NCBI's `v0.5.1`). The program's `<version>`
+     in `-xmlhelp` holds LOSAT's version number, `0.2.0`, as `-version-full-xml`'s numbers do
+     (NCBI's `2.17.0`; dustmasker's and segmasker's `1.0.0`, rpsbproc's `0.5.1`).
    - The structure of the XML and JSON outputs stays NCBI's: element and member names, their order
      and nesting, the DOCTYPE (`-//NCBI//NCBI BlastOutput/EN`, `NCBI_BlastOutput.dtd`),
      `xmlns="http://www.ncbi.nlm.nih.gov"` and `xs:schemaLocation` (`NCBI_BlastOutput2.xsd`), which

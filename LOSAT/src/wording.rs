@@ -35,6 +35,9 @@
 //!   `BLAST`) and a space come before it, and [`LOSAT_VERSION`] otherwise (`blastn: 2.17.0+`,
 //!   `VN:2.17.0+`, `ident "2.17.0+"`, `version 2.17.0+`); rpsbproc's banner
 //!   [`RPSBPROC_TITLE`]` v`[`NCBI_RPSBPROC_VERSION`] ends with ` `[`REPORT_VERSION`] instead.
+//! - The version of `-xmlhelp`'s program (`<version>2.17.0</version>` after `<program type="...">`
+//!   and its `<name>`; dustmasker's and segmasker's `1.0.0`, rpsbproc's `0.5.1`) becomes
+//!   [`VERSION_NUMBER`], the number that `-version-full-xml` gives too.
 //! - Each NCBI prefix of [`ERROR_PREFIXES`] becomes LOSAT's.
 //! - [`NCBI_USER_MANUAL_FOOTER`] becomes [`USER_MANUAL_FOOTER`].
 //! - `NCBI C++ Exception:`, the white space after it and the place of the first exception
@@ -84,6 +87,11 @@ pub const LOSAT_VERSION: &str = losat_version!();
 /// LOSAT's version after a program's name: a report's header `BLASTP (LOSAT 0.2.0)` (NCBI's
 /// `BLASTP 2.17.0+`), which the writers join as `<PROGRAM> <version>`.
 pub const REPORT_VERSION: &str = report_version!();
+
+/// LOSAT's version number (`0.2.0`) where NCBI's `-xmlhelp` writes its program's
+/// (`<version>2.17.0</version>`): the element holds a number, as `-version-full-xml`'s
+/// `version_info` does.
+pub const VERSION_NUMBER: &str = env!("CARGO_PKG_VERSION");
 
 /// What NCBI's `CBlastVersion::Print()` writes (`2.17.0+`), which LOSAT's text replaces with
 /// [`LOSAT_VERSION`] or [`REPORT_VERSION`].
@@ -161,7 +169,8 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
         || contains(text, b"::")
         || contains(text, version)
         || contains(text, b" error:")
-        || contains(text, title))
+        || contains(text, title)
+        || contains(text, XMLHELP_PROGRAM))
     {
         return Cow::Borrowed(text);
     }
@@ -212,6 +221,16 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
             i += banner;
             changed = true;
             continue;
+        }
+        if rest[0] == b'<' {
+            if let Some(number) = xmlhelp_version(&out, rest) {
+                out.extend_from_slice(b"<version>");
+                out.extend_from_slice(VERSION_NUMBER.as_bytes());
+                out.extend_from_slice(b"</version>");
+                changed |= &rest[9..number - 10] != VERSION_NUMBER.as_bytes();
+                i += number;
+                continue;
+            }
         }
         if rest.starts_with(footer) {
             out.extend_from_slice(USER_MANUAL_FOOTER.as_bytes());
@@ -425,6 +444,46 @@ fn after_program_name(out: &[u8]) -> bool {
     word.iter().any(u8::is_ascii_uppercase) && !word.iter().any(u8::is_ascii_lowercase)
 }
 
+/// The start of the program's element in `-xmlhelp` (`ncbi_xmlhelp`).
+const XMLHELP_PROGRAM: &[u8] = b"<program type=\"";
+
+/// The length of `<version>V</version>` (V digits and dots) at the start of `text` when it is
+/// the version of `-xmlhelp`'s program: `out` ends with the lines `<program type="...">` and
+/// `<name>...</name>` (each line feed a space in a collapsed message).
+fn xmlhelp_version(out: &[u8], text: &[u8]) -> Option<usize> {
+    let line_end = |text: &[u8]| matches!(text.last(), Some(b'\n' | b' '));
+    if !line_end(out) {
+        return None;
+    }
+    let before = out[..out.len() - 1].strip_suffix(b"</name>")?;
+    let name = rfind(before, b"<name>")?;
+    if before[name..].iter().any(|b| *b == b'\n')
+        || before[name + 1..].contains(&b'<')
+        || !line_end(&before[..name])
+    {
+        return None;
+    }
+    let before = before[..name - 1].strip_suffix(b">")?;
+    let program = rfind(before, XMLHELP_PROGRAM)?;
+    if (program > 0 && !line_end(&before[..program]))
+        || before[program + XMLHELP_PROGRAM.len()..]
+            .iter()
+            .any(|b| matches!(b, b'\n' | b'<' | b'>'))
+    {
+        return None;
+    }
+    let mut i = literal(text, b"<version>")?;
+    let number = text[i..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit() || **b == b'.')
+        .count();
+    if number == 0 {
+        return None;
+    }
+    i += number;
+    Some(i + literal(&text[i..], b"</version>")?)
+}
+
 /// The length of NCBI's rpsbproc banner `<title> v0.5.1` at the start of `text`.
 fn rpsbproc_banner(text: &[u8]) -> Option<usize> {
     let mut i = literal(text, RPSBPROC_TITLE.as_bytes())?;
@@ -435,6 +494,11 @@ fn rpsbproc_banner(text: &[u8]) -> Option<usize> {
 fn find(text: &[u8], needle: &[u8]) -> Option<usize> {
     text.windows(needle.len())
         .position(|window| window == needle)
+}
+
+fn rfind(text: &[u8], needle: &[u8]) -> Option<usize> {
+    text.windows(needle.len())
+        .rposition(|window| window == needle)
 }
 
 fn contains(text: &[u8], needle: &[u8]) -> bool {

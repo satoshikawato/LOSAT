@@ -1257,6 +1257,15 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
+the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
+has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
+`tests/fasta/rps/tks_w.faa` and `tests/fasta/x4/sw_subjects.faa`, and the lists `neg.txt` (an id no database holds) and
+`neg_exact.txt` (also sexact's accession, which the OID mask removes). The negative list keeps the ti-only subjects
+without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after the early termination test of their
+match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
+the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -1534,6 +1543,13 @@ most 9 in BLOSUM62).
   `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`). `empty.aux` is an empty
   file (0 bytes), put in place of `rps_mini.aux` for NCBI's engine error of a `.aux` without a matrix name (row
   `db.rpstbn.emptyaux.6`).
+- `rpscol` (PS15a-1): one profile (`makeprofiledb` of a PSSM whose query id is the local id `Query_1`, an entry that
+  NCBI's scope takes for the first query of a run read without `-parse_deflines`; the PSSM is the one of
+  `PR/followups/rps_lcl_query_title.md`'s fixture, `tests/fasta/rps/col_qp.faa` the protein of it, `col_qn.fna` its
+  back-translation). Rows `db.rps.of11.col` and `db.rpstbn.of11.col` are NCBI's archive; `db.rps.rej.of5col` and
+  `db.rpstbn.rej.of5col` are LOSAT's refusals of BLAST XML (NCBI's rpsblast shows the query's title for the entry,
+  NCBI's rpstblastn stops with an exception after half a document). The files keep their original names
+  (`rpscol`): the `.pin` and the `.aux` name them.
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
@@ -1557,7 +1573,13 @@ most 9 in BLOSUM62).
   ends in `.gz`), `BLASTDB` set to that directory and `-db "NAME NAME2"` (a name `DIR/NAME` has its files inflated into
   the subdirectory `DIR`: a copy of a volume under its own base name, line RG D1a-4 fix 2); with `@ALIAS` the alias file
   `rps/ALIAS.pal` is copied beside them and the run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
-  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
+  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path); the directory's path then has
+  the `db_dir_len.txt` characters (the name's prefix is lengthened, `db_search_fixtures.py` `temp_dir_of_length`), because
+  the wraps of an archive's message that holds it (`message "..."`) depend on its length, and `{db_dir}` stands for
+  that length in `wording::tests::archive_messages_are_wrapped_again_as_ncbi_wraps_them`.
+- `rps/uneq2.pal` (item PS15a-1, review S1 and S2; rows `db.rps.of11.udbs`, `db.rpstbn.of5.u2m`, `db.rpstbn.u2m.7`):
+  `DBLIST "rps_mini3v.00" "rps_mini"`, two volumes of different size (one profile of 190 letters, three of 560) of which
+  CDD:101 and CDD:102 are in both.
 - Alias files (line RG, D1a-3 review 7 S1 and D1a-4), written by hand, each `TITLE t` and a `DBLIST` of `rps_mini`
   (one volume: `*rps.pal`), `rps_mini3v` (three volumes: `*rps3v.pal`) or `rps_mini3v.01 rps_mini3v.02` (two volumes:
   `l0rps2v.pal`) with one or two keys, as named: `l0` `LENGTH 0`, `l0n0` `LENGTH 0` and `NSEQ 0`, `n0` `NSEQ 0`, `nm5`
@@ -1715,6 +1737,18 @@ the rejection rows give it a valid query, where NCBI crashes (SIGFPE) and LOSAT 
 before its crash (`ncbi-near`), `nseq0ns` over `aliaskeys/n_nseq0ns` (`NSEQ 0` over `arch_tbn_snucl_nonsq`, which has no
 sequence file) before the error of the missing file, which NCBI meets only after the division (TBLASTN with the Gumbel
 block, which does not divide: that error). Frozen with NCBI BLAST+ 2.17.0 on the workstation (`env_blast`).
+
+Rows `db.cnt.avg2p32.mb.*`, `db.cnt.avg2p32.mo00.split.6`, `db.cnt.avg2p32.mo52.split.6` and `db.ak.bn.rej.nseq0.mbsplit` (D1a-6 of line RG): a query batch split into chunks
+(`CHUNK_SIZE=200`) over `dbcounts/avg2p32`, whose average length is too short, with options that LOSAT refuses for the
+greedy extension (`-task megablast` with gap costs 40000 and 40000, or reward 0 and penalty 0): NCBI checks the subjects in
+the setup of the first chunk with a valid context, before the greedy set-up, so it stops with `The average subject length is
+too short` (exit 3), as an unsplit batch does (`.mbwhole.6`). `.b1.7` reports two queries without letters first (`BATCH_SIZE=1`,
+`../fasta/rps/alln_q.fna`); `.nq` puts a query of 300 N (`../fasta/rps/n300_q.fna`: that query, then `taxfilter/q.fna`) before
+it, so the first chunks have no valid context. The rejection row has `NSEQ 0`, where NCBI crashes in that setup (SIGFPE).
+Rows `db.gr.bn.*` (the same item): `db.gr.bn.rej.mo00.b1` refuses matrix-only scoring with the greedy extension in the third
+batch of `alln_q.fna` (`BATCH_SIZE=1`) after the reports of the two batches before, the 142 bytes NCBI writes before it
+divides by zero there (SIGFPE); `db.gr.bn.alln_q.b1.7` is the near run NCBI finishes (`ncbi-near`).
+Frozen with NCBI BLAST+ 2.17.0 on the developer machine and again on the workstation (`env_blast`), the same bytes.
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
 files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are

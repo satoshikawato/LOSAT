@@ -89,23 +89,27 @@ pub(super) fn check_freq_ratio_file(
     }
     args.comp_based_stats.mode =
         crate::algorithm::blastp::args::BlastpCompositionMode::NoCompositionBasedStats;
-    writeln!(
-        diagnostics,
-        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.",
+    let warning = format!(
+        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.\n",
         failed.join(", ")
-    )?;
+    );
+    match &args.archive {
+        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
+        None => diagnostics.write_all(warning.as_bytes())?,
+    }
     Ok(())
 }
 
-/// What rpsblast sets in the options handle that the search strategy's requests hold
+/// What rpsblast sets in the options handle that the requests of the archive and of the search
+/// strategy hold
 /// (`report::archive::OptionsHandle::set_search_sets`): before the batches, the composition-based
 /// statistics that `check_freq_ratio_file` turned off (NCBI's `SetCompositionBasedStats` in place:
 /// `CompositionBasedStats 0` in every request, NCBI BLAST+ 2.17.0 `p9.rps.err.nofreq`); at each
 /// batch's set-up, the database's length and `.aux` costs (`rps_search::volumes::search_sets`).
 #[cold]
 #[inline(never)]
-pub(super) fn note_strategy_sets(
-    strategy: &crate::report::archive::strategy::StrategyExport,
+pub(super) fn note_handle_sets(
+    handle: &crate::report::archive::OptionsHandle,
     rps: &RpsSearch,
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
@@ -123,7 +127,7 @@ pub(super) fn note_strategy_sets(
     let db_length = database.rps_units().and_then(RpsUnits::strategy_db_length);
     let volumes = RpsVolumeSet::of(database.seqdb());
     let costs = RpsVolumeSetup::new("RPSBLAST").costs(volumes.first());
-    strategy.options().set_search_sets(
+    handle.set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
     )
@@ -324,7 +328,9 @@ pub(super) fn rps_search(
     // default tabular writers print the HSP's count, so the engine counts again for them; the
     // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
     // traceback's count for the block's gate (`tabular::needs_rows`).
-    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none();
+    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none()
+        && crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number
+            != crate::blastinput::app::output_format::ARCHIVE_FORMAT;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // A query that NCBI's engine would cut into chunks (`s_GetNextSubjectChunk`) is refused.
     if let Some(long) = run.contexts.iter().find(|ctx| ctx.aa_len > MAX_DBSEQ_LEN) {

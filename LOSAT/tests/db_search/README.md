@@ -1543,6 +1543,13 @@ most 9 in BLOSUM62).
   `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`). `empty.aux` is an empty
   file (0 bytes), put in place of `rps_mini.aux` for NCBI's engine error of a `.aux` without a matrix name (row
   `db.rpstbn.emptyaux.6`).
+- `rpscol` (PS15a-1): one profile (`makeprofiledb` of a PSSM whose query id is the local id `Query_1`, an entry that
+  NCBI's scope takes for the first query of a run read without `-parse_deflines`; the PSSM is the one of
+  `PR/followups/rps_lcl_query_title.md`'s fixture, `tests/fasta/rps/col_qp.faa` the protein of it, `col_qn.fna` its
+  back-translation). Rows `db.rps.of11.col` and `db.rpstbn.of11.col` are NCBI's archive; `db.rps.rej.of5col` and
+  `db.rpstbn.rej.of5col` are LOSAT's refusals of BLAST XML (NCBI's rpsblast shows the query's title for the entry,
+  NCBI's rpstblastn stops with an exception after half a document). The files keep their original names
+  (`rpscol`): the `.pin` and the `.aux` name them.
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
@@ -1566,7 +1573,13 @@ most 9 in BLOSUM62).
   ends in `.gz`), `BLASTDB` set to that directory and `-db "NAME NAME2"` (a name `DIR/NAME` has its files inflated into
   the subdirectory `DIR`: a copy of a volume under its own base name, line RG D1a-4 fix 2); with `@ALIAS` the alias file
   `rps/ALIAS.pal` is copied beside them and the run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
-  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
+  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path); the directory's path then has
+  the `db_dir_len.txt` characters (the name's prefix is lengthened, `db_search_fixtures.py` `temp_dir_of_length`), because
+  the wraps of an archive's message that holds it (`message "..."`) depend on its length, and `{db_dir}` stands for
+  that length in `wording::tests::archive_messages_are_wrapped_again_as_ncbi_wraps_them`.
+- `rps/uneq2.pal` (item PS15a-1, review S1 and S2; rows `db.rps.of11.udbs`, `db.rpstbn.of5.u2m`, `db.rpstbn.u2m.7`):
+  `DBLIST "rps_mini3v.00" "rps_mini"`, two volumes of different size (one profile of 190 letters, three of 560) of which
+  CDD:101 and CDD:102 are in both.
 - Alias files (line RG, D1a-3 review 7 S1 and D1a-4), written by hand, each `TITLE t` and a `DBLIST` of `rps_mini`
   (one volume: `*rps.pal`), `rps_mini3v` (three volumes: `*rps3v.pal`) or `rps_mini3v.01 rps_mini3v.02` (two volumes:
   `l0rps2v.pal`) with one or two keys, as named: `l0` `LENGTH 0`, `l0n0` `LENGTH 0` and `NSEQ 0`, `n0` `NSEQ 0`, `nm5`

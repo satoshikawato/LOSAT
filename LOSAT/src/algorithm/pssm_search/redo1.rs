@@ -23,7 +23,7 @@ use super::rows::QueryPssm;
 use super::traceback0::final_hsp;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{
-    fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHspList,
+    fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
     COMPO_HEAP_EVALUE_STRETCH,
 };
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
@@ -508,6 +508,52 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
     }
 }
 
+/// The identities and positives that NCBI's RPS-TBLASTN redo counts for an HSP
+/// (`s_ComputeNumIdentities`, which the Seq-align's `num_ident` and `num_positives` show): on the
+/// redo's whole subject, the translation buffer (`one_query->sequence`), at the HSP's offsets in
+/// its own frame, not on the frame's letters, so that the counts of an HSP of any frame but +1
+/// are those of the letters of frame +1 (then the sentinel and the frames after it) at the
+/// same offsets. The query side is the profile's consensus.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:482-531
+/// (`Blast_RedoAlignmentCore` is called with the profile as `query_blk` and `one_query`, the
+/// user's translated query of all frames, as `subject_blk`, blast_traceback.c:1274-1281; the
+/// HSP's subject offsets are in its frame.) The offsets stay inside the buffer, which holds
+/// every frame, the HSP's own among them.
+fn translation_buffer_counts(
+    hsp: &BlastpHsp,
+    query_nomask: &[u8],
+    buffer: &[u8],
+    matrix: crate::config::ScoringMatrix,
+) -> (usize, usize) {
+    let (mut q, mut s) = (hsp.q_start - 1, hsp.s_start.min(hsp.s_end) - 1);
+    let implicit = [GapEditOp::Sub(hsp.q_end.saturating_sub(q) as u32)];
+    let ops = hsp.gap_info.as_deref().unwrap_or(&implicit);
+    let (mut num_ident, mut num_positives) = (0usize, 0usize);
+    for op in ops {
+        match *op {
+            GapEditOp::Sub(n) => {
+                for (&ql, &sl) in query_nomask[q..q + n as usize]
+                    .iter()
+                    .zip(&buffer[s..s + n as usize])
+                {
+                    if ql == sl {
+                        num_ident += 1;
+                        num_positives += 1;
+                    } else if crate::utils::matrix::standard_score(matrix, ql, sl) > 0 {
+                        num_positives += 1;
+                    }
+                }
+                q += n as usize;
+                s += n as usize;
+            }
+            GapEditOp::Del(n) => s += n as usize,
+            GapEditOp::Ins(n) => q += n as usize,
+        }
+    }
+    (num_ident, num_positives)
+}
+
 /// A window of the subject (`s_WindowInfo`'s `subject_range`): `[begin, end)` of the frame
 /// `frame`'s letters. `end` may lie before `begin` (`end - begin` is NCBI's length, then below 0:
 /// `rpstblastn -strand`, whose translation buffer is shorter than `GET_NUCL_LENGTH` assumes). A
@@ -856,6 +902,11 @@ impl RedoMatch<'_> {
                 kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
+            if S::Instance::SUBJECT_IS_TRANSLATED {
+                // The Seq-align's counts (see `translation_buffer_counts`).
+                (hsp.num_ident, hsp.num_positives) =
+                    translation_buffer_counts(&hsp, run.query_nomask, subject, self.matrix);
+            }
             hsp.e_value = e_value;
             hsp.num = num;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)

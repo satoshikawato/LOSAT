@@ -2446,12 +2446,15 @@ pub(crate) fn refuse_display_id_of_a_query(
 /// batch's queries to its scope before their reports and empties it after them and finds such a
 /// subject there: its reports show the query's title and letters in the subject's place, and the
 /// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
-/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's.
+/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's. `effect` says what NCBI
+/// does with it: `QUERY_ANCHORED_EFFECT`, or `XML_EFFECT` for the RPS programs' BLAST XML (`-outfmt 5`: RPSBLAST gets the query's title for the entry, RPSTBLASTN
+/// an exception from its Seq-align conversion and half a document; PS15a-1).
 pub(crate) fn refuse_generated_query_id(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: crate::seqdb::Oid,
     scope: &crate::blastinput::query_batch::QueryScope,
     program: &str,
+    effect: &str,
 ) -> Result<()> {
     if !scope.has_key(&subject.query_scope_keys().own) {
         return Ok(());
@@ -2460,12 +2463,19 @@ pub(crate) fn refuse_generated_query_id(
         oid,
         &format!(
             "has the Seq-id {}, {GENERATED_QUERY_ID} in the query batch that reports it: NCBI \
-             BLAST+ shows that query in its place in the query-anchored formats (outfmt 1 to 4)",
+             BLAST+ {effect}",
             String::from_utf8_lossy(&subject.alignment_fasta())
         ),
         program,
     ))
 }
+
+/// What NCBI does with such a sequence in the query-anchored formats (`refuse_generated_query_id`).
+pub(crate) const QUERY_ANCHORED_EFFECT: &str =
+    "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
+
+/// What NCBI does with it in the BLAST XML of the RPS programs (`refuse_generated_query_id`).
+pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML (outfmt 5)";
 
 /// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
 /// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same
@@ -2499,7 +2509,13 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
         if generated {
             for &rank in &ranks {
                 if let Some(subject) = parsed_of(rank) {
-                    refuse_generated_query_id(subject, oid_of(rank), scope, program)?;
+                    refuse_generated_query_id(
+                        subject,
+                        oid_of(rank),
+                        scope,
+                        program,
+                        QUERY_ANCHORED_EFFECT,
+                    )?;
                 }
             }
         }

@@ -139,3 +139,15 @@ fn a_rebuild_drops_the_overhangs() {
         )]
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:141-161: 2 plus the
+// plus strand's three frames, or the minus strand's when the first plus frame is empty.
+#[test]
+fn a_translated_query_length_is_its_frames_plus_two() {
+    // 100 letters: frames of 33, 33 and 32 residues on each strand.
+    assert_eq!(translated_query_length(&[33, 33, 32, 33, 33, 32]), 100);
+    assert_eq!(translated_query_length(&[0, 0, 0, 33, 33, 32]), 100);
+    assert_eq!(translated_query_length(&[33, 33, 32, 0, 0, 0]), 100);
+    // 2 letters: no frame has a residue.
+    assert_eq!(translated_query_length(&[0; 6]), 2);
+}

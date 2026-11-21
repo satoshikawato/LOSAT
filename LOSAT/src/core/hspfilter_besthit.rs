@@ -63,6 +63,24 @@ impl BestHitParams {
     }
 }
 
+/// `BlastQueryInfoGetQueryLength` of a translated query (blastx, tblastx), the `qlen` over which
+/// the best hit key folds a minus-frame HSP: 2 plus the lengths of the query's three plus-strand
+/// contexts, or of its three minus-strand contexts when the first plus context is empty (only the
+/// minus strand searched). `context_lengths` are the query's six contexts in NCBI's order (the
+/// frames 1, 2, 3, -1, -2, -3), each the length of its translation as the query information holds
+/// it (0 for a strand that is not searched). The result is the length of the searched DNA for one
+/// of 2 or more letters, in the units of neither offset of the key, as NCBI's.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:141-161
+pub(crate) fn translated_query_length(context_lengths: &[i32]) -> i32 {
+    let start = if context_lengths[0] == 0 { 3 } else { 0 };
+    let length: i64 = 2 + context_lengths[start..start + 3]
+        .iter()
+        .map(|&length| i64::from(length))
+        .sum::<i64>();
+    i32::try_from(length).unwrap_or(i32::MAX)
+}
+
 /// What `s_BlastHSPBestHitRun` reads of an HSP: its range on the plus strand of the query
 /// (`begin`, already folded for a minus context by the caller, and `len`, the query extent of
 /// the HSP), its raw score and its e-value.

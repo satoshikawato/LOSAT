@@ -10,9 +10,9 @@ import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
-import { failedOutput } from '../application/results';
+import { failedOutput, keptOutputs } from '../application/results';
 import { commandWords } from '../domain/argv';
-import { isBinaryOutput, outfmtOf, runOutputs } from '../domain/output-format';
+import { isBinaryOutput, outfmtOf } from '../domain/output-format';
 import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
 import PlaceWords from './PlaceWords.vue';
@@ -21,16 +21,21 @@ import RunFiles from './RunFiles.vue';
 import TabList from './TabList.vue';
 import { useStore } from './useStore';
 
-const props = defineProps<{ coordinator: Coordinator; run: RunView }>();
+/**
+ * The Outputs of a run: those of a completed run, and for a failed run the output that the CLI leaves before its error
+ * (line WQA's sweep, D15, 2026-11-20), where the results page shows its `-logfile` file and warnings apart (`files` false).
+ */
+const props = withDefaults(defineProps<{ coordinator: Coordinator; run: RunView; files?: boolean }>(), { files: true });
 /** The tab of the run's files, after the formats. */
 const FILES = 'run-files';
 const chosen = ref<RunOutput>(6);
 /** The tab of the run's files is chosen (the output chosen before stays read). */
 const filesChosen = ref(false);
-const outputs = computed(() => runOutputs(props.run.snapshot.argv));
-const runFiles = computed(() => props.run.record.runFiles ?? []);
-/** The output shown: the one chosen, or outfmt 6 for a run that does not write it. */
-const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : 6));
+/** The outputs that the run kept: all of a completed run's, the argv's own for a failed run (`keptOutputs`). */
+const outputs = computed(() => keptOutputs(props.run));
+const runFiles = computed(() => (props.files ? (props.run.record.runFiles ?? []) : []));
+/** The output shown: the one chosen, or outfmt 6 for a run that does not keep it, else the first that it kept. */
+const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : outputs.value.includes(6) ? 6 : (outputs.value[0] ?? 6)));
 const binary = computed(() => isBinaryOutput(props.run.snapshot.argv, format.value));
 /** Where the error of the output shown is, in words, when the run could not write it, as the engine said (it is empty); undefined where it was written. */
 const notWritten = computed(() => {

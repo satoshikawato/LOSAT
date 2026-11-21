@@ -56,6 +56,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-max_intron_length` | 0 | Only 0 runs: linking with uneven gaps is for blastx and tblastn, and any other value stops with an options error, as in NCBI BLAST+ |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
 
 For every option: `losat tblastx -help`.
@@ -91,7 +92,6 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-subject_besthit`.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.

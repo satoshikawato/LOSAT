@@ -2,7 +2,7 @@
 //! process, for each program: what a format after a structured first one gives where it is
 //! written, where it failed alone before its reports, and where its report stops.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (quoted at
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (cited at
 //! `FormatOutput::writes_query_warnings`): a structured report returns before the query's result
 //! warnings, and the others post them when the query's report starts.
 

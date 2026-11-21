@@ -200,7 +200,6 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`, and `-matrix IDENTITY`, which NCBI searches without them) | Refused. With `-comp_based_stats` 1 to 3 it works. |
-| `-subject_besthit` | Refused. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`), when a query with a residue that can be scored is followed in the same batch of queries by one with none (all `X`, empty, or masked whole by `-seg yes`) and `-searchsp` is not given or is 0 | Refused. NCBI reports every e-value of the first of the two as 0. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastp-fast`) | Refused. NCBI crashes. |
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
@@ -260,7 +259,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` | Refused. |
-| `-subject_besthit` | Refused. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
@@ -287,7 +285,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-subject_besthit` | Refused. |
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See Rare inputs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
@@ -324,7 +321,7 @@ These refusals apply to every search program that reads databases.
 
 - `blastn` and `tblastx` refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences. NCBI crashes on them where a query is searched.
 - `blastp`, `blastx`, `tblastn` and `psiblast` refuse the same cases with `-searchsp` or `OLD_FSC`. `blastx` also refuses them with `-ungapped`.
-- A run of such a database whose queries have no letters to search is reported as in NCBI by `blastp`, `blastx` and `psiblast`. `blastn`, `tblastn` and `tblastx` refuse it.
+- A run of such a database whose queries have no letters to search is reported as in NCBI by every program.
 - `rpsblast` and `rpstblastn`: an alias file's `LENGTH` and `NSEQ` over one volume also set the length that NCBI's search covers, their sum, which can be shorter or longer than the profiles. Refused: a sum above 2,147,483,647 (NCBI frees the profiles twice and aborts), or one so long that NCBI's diagonal table passes 2^30 entries (its loop never ends).
 - A sum shorter than the profiles is refused where two gapped alignments of a query (of a frame for `rpstblastn`) start past it plus one. NCBI's interval tree then splits without end. With one such alignment the search runs as in NCBI.
 - A sum longer than the profiles is refused where an ungapped extension runs past the row after the last profile. This needs an X-drop above the profiles' delimiter scores and a sum of the profiles plus 2 or more (NCBI reads past its score matrix). At plus 1 the search runs as in NCBI where that row lies within the `.rps` file's last memory page, and is refused where it lies past it (NCBI reads past the file's mapping).
@@ -341,7 +338,7 @@ These refusals apply to every search program that reads databases.
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
-| `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
+| `-best_hit_overhang`, `-best_hit_score_edge` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |
 | `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
@@ -374,7 +371,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM whose columns' largest scores add up to 2^30 or more. Every PSSM of fewer than 19,800 columns passes.
 - A query whose letters give no Karlin-Altschul parameters. NCBI crashes.
 - A PSSM without a query, and query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
-- A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, BitMagic data, reads past a Packed-seg's vectors, and integer overflows.
+- A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, malformed BitMagic data of a Seq-table, reads past a Packed-seg's vectors, and integer overflows. BitMagic data is decoded as NCBI decodes it; refused are the data that NCBI reads past (such as empty or cut data), decodes with undefined behaviour (such as an XOR block or a write past BitMagic's blocks) or from memory it did not write, and a GAP block that is not one where NCBI's scalar, SSE2 and SSE4.2 builds decode it or answer a row of it differently.
 - Also two Seq-ids of one location (a feature's, a Seq-table's or a Seq-table row's) with different messages that NCBI orders by address; a Seq-table of more than 10,000,000 rows; a Std-seg of more than 1,000,000 rows; and XML and JSON reports of an untitled query whose annotations hold features.
 - An error about the query's annotations, or a Seq-id twice in the entry. Two Seq-ids count as one when NCBI's object manager takes them as one: equal ones, and ones that differ only where NCBI does not look, such as the case of letters, GenBank, EMBL or DDBJ for an accession alone, or PDB's `chain` and `chain-id`.
 - A query Seq-entry set whose annotations NCBI's object manager takes, and which NCBI then stops at with its exception (`CSeq_entry::GetSeq()`).

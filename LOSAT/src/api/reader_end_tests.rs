@@ -413,7 +413,7 @@ fn ends_as_the_command_line(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652 (a batch whose
-// queries all have no data stops the run, quoted at `query_batch::no_data_batch_error`)
+// queries all have no data stops the run, cited at `query_batch::no_data_batch_error`)
 // A batch that NCBI fails is never searched and adds nothing to the scope of the run's queries,
 // so a query with the id of an earlier one in that batch is not LOSAT's refusal: the batches
 // before are reported and the run ends with NCBI's error, in the library's run and in
@@ -510,7 +510,7 @@ fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2799 (a query whose letters
-// give no Karlin-Altschul parameters, quoted at `report::query_warnings::INVALID_QUERY_MESSAGE`)
+// give no Karlin-Altschul parameters, cited at `report::query_warnings::INVALID_QUERY_MESSAGE`)
 // An error of NCBI's in the search of a batch comes before LOSAT's refusal of two queries with one
 // id in a later batch, on the command line, in the library's run and in `run_batches` (line WQA D10
 // round 4, 2026-11-20; NCBI BLAST+ 2.17.0, probes `fix-reader-error/r3-psiblast-probe` and
@@ -586,7 +586,7 @@ fn an_error_of_ncbi_before_the_refusal_comes_first() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (`BLAST_GapAlignSetUp`,
-// quoted at `query_batch::refused_batch_error`)
+// cited at `query_batch::refused_batch_error`)
 // The batch of a repeated id stops at one point in every program, on the command line, in the
 // library's run and in `run_batches` (line WQA D10 round 5, 2026-11-20; review 3 of D10, M1): where
 // the batch's records with new ids have a valid context, NCBI's error of the batch's set-up for

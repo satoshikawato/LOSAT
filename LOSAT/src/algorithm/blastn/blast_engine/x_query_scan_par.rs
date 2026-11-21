@@ -9,11 +9,6 @@
 //! is not known.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//! 	    BLAST_PROF_START( APP.LOOP.PRE );
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//! ```
 //! NCBI reads its query batches one at a time, inside the loop. LOSAT needs every record's length
 //! before its first batch (the batch planner, LOSAT_X_RPTSTREAM's checks),
 //! so where LOSAT_X_QSTREAM acts it reads the whole query file once for the lengths alone, on one

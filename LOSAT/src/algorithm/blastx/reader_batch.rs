@@ -58,12 +58,6 @@ pub(crate) struct UnitPrep {
 
 impl PreparedQueryBatch {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
-    // ```c
-    //          Int4 concat_qlen =
-    //              query_info->contexts[query_info->last_context].query_offset +
-    //              query_info->contexts[query_info->last_context].query_length;
-    //          Int4 avg_qlen = concat_qlen / (query_info->last_context + 1);
-    // ```
     // The query info is the query batch's, not a part of it: `concat_qlen` and the number of
     // contexts are those of the reader batch when this unit is a part of one.
     /// `last.query_offset + last.query_length` of the batch NCBI searches.
@@ -87,48 +81,9 @@ impl PreparedQueryBatch {
 }
 
 impl ReaderBatchShape {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:92-117
-    // ```c
-    // static double
-    // s_BlastFindSmallestLambda(Blast_KarlinBlk** kbp_in,
-    //                           const BlastQueryInfo* query_info,
-    //                           Blast_KarlinBlk** kbp_out)
-    // {
-    //     Int4 i;
-    //     double min_lambda = (double) INT4_MAX;
-    //
-    //     ASSERT(kbp_in && query_info);
-    //
-    //     for (i=query_info->first_context; i<=query_info->last_context; i++) {
-    //         ASSERT(s_BlastKarlinBlkIsValid(kbp_in[i]) ==
-    //                query_info->contexts[i].is_valid);
-    //         if (s_BlastKarlinBlkIsValid(kbp_in[i])) {
-    //             if (min_lambda > kbp_in[i]->Lambda)
-    //             {
-    //                 min_lambda = kbp_in[i]->Lambda;
-    //                 if (kbp_out)
-    //                   *kbp_out = kbp_in[i];
-    //             }
-    //         }
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:91-117
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
-    // ```c
-    //          Int4 concat_qlen =
-    //              query_info->contexts[query_info->last_context].query_offset +
-    //              query_info->contexts[query_info->last_context].query_length;
-    //          Int4 avg_qlen = concat_qlen / (query_info->last_context + 1);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88
-    // ```c++
-    //     if (index) {
-    //         Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
-    //         Uint4 prev_len = qinfo->contexts[index-1].query_length;
-    //
-    //         Uint4 shift = prev_len ? prev_len + 1 : 0;
-    //
-    //         qinfo->contexts[index].query_offset = prev_loc + shift;
-    // ```
     // The reader batch is one query info: its contexts follow one another through the units, a
     // context of positive length taking its length and a separator. The layout of the contexts
     // follows from the records alone (`context_frame`, as `prepare_queries` lays them out), so
@@ -221,7 +176,7 @@ impl ReaderBatchShape {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (`BLAST_GapAlignSetUp`,
-// quoted at `parameters::subject_parameters`)
+// cited at `parameters::subject_parameters`)
 /// The set-up of the records `queries` of a reader batch alone (`native::add_batch_scope`): the
 /// error of the set-up of the subjects where a context of theirs is valid (a database whose
 /// sequences could not be read, `UnreadableSubjects`, as the search fails its first batch with a
@@ -251,25 +206,8 @@ pub(crate) fn set_up_error(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:416-416,990-990
-// ```c
-//    parameters->cutoff_score_min = cutoff_min;
-// ...
-//       params->cutoff_score_min = cutoff_min;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2453
-// ```c
-//     if (do_link_hsps) {
-//         ASSERT(hitParams->link_hsp_params != NULL);
-//         cutoff_s =
-//             (int) (hitParams->cutoff_score_min * context->localScalingFactor);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
-// ```c
-//          Int4 concat_qlen =
-//              query_info->contexts[query_info->last_context].query_offset +
-//              query_info->contexts[query_info->last_context].query_length;
-//          Int4 avg_qlen = concat_qlen / (query_info->last_context + 1);
-// ```
 // NCBI sets up and searches a reader batch (one `BATCH_SIZE` query batch) as a whole, so these
 // values are taken over all its contexts. LOSAT searches the batch in units of at most 10002
 // letters. Phase 1 prepares every unit (translation, filtering, the statistical blocks of the

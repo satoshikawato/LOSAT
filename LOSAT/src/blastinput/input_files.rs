@@ -6,14 +6,7 @@ use anyhow::Result;
 /// Whether a FASTA file has no character but white space: NCBI reads it as a file without
 /// records (an empty query, or no subject).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:862-866
-/// ```c
-/// 	IOS_BASE::iostate orig_state = in.rdstate();
-/// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-///
-/// 	if(! (in >> c))
-/// 		return true;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:862-866
 /// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
 /// (`ncbi_str::is_blank`); the library API's `read_query_records` reads it too.
 pub fn is_blank(bytes: &[u8]) -> bool {
@@ -24,29 +17,7 @@ pub fn is_blank(bytes: &[u8]) -> bool {
 /// standard input, and a file that does not open gets NCBI's error
 /// (`crate::cli::inaccessible`). A file named `.gz` is read through gzip (`open_file_input`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
-/// ```c
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-///     } else if ( !AsString().empty() ) {
-///         if (!fstrm) {
-///             fstrm = new CNcbiIfstream;
-///         }
-///         if (fstrm) {
-///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-///             if ( !fstrm->is_open() ) {
-///                 delete fstrm;
-///                 fstrm = NULL;
-///             } else {
-///                 m_DeleteFlag = true;
-///             }
-///         }
-///         m_Ios = fstrm;
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-735
 /// `-` is the standard input itself, which this opening and every other `-` read in place and
 /// leave open (`InputFile`, as `m_DeleteFlag` stays false for `cin`).
 pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<InputFile> {
@@ -65,23 +36,7 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<I
 /// It reads, seeks and is a `std::fs::File` (`Deref`) as either.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:609-613
-/// ```c++
-/// CArg_Ios::~CArg_Ios(void)
-/// {
-///     if (m_Ios  &&  m_DeleteFlag)
-///         delete m_Ios;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
-/// ```c++
-///     m_DeleteFlag = false;
-///
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-/// ```
 /// Every `-` argument is the one `cin`, never closed: its position is the process's standard
 /// input's (`-query -` with `-subject -` reads what the subjects left, nothing). The standard
 /// input is not copied (`dup` on Unix, `DuplicateHandle` on Windows), which the WASI targets
@@ -125,7 +80,7 @@ impl InputFile {
     }
 
     /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
-    /// (`m_Ios = &cin`, quoted at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// (`m_Ios = &cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
     /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
     /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
     pub(crate) fn is_standard_input(&self) -> bool {
@@ -416,14 +371,7 @@ fn standard_input() -> std::io::Result<InputFile> {
 /// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a terminal has none,
 /// while a character device such as `/dev/null` has one).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
-/// ```c
-/// 	char c;
-/// 	CNcbiStreampos orig_p = in.tellg();
-/// 	// Piped input
-/// 	if(orig_p < 0)
-/// 		return false;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
 /// On Unix and WASI the answer is whether the position can be read, as before
 /// (`lseek` fails on a pipe and on a terminal, not on `/dev/null`; the position is not moved).
 /// On Windows `SetFilePointerEx` succeeds on a pipe or a console handle (its result is
@@ -465,18 +413,7 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
 /// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
 /// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
-/// ```c
-/// GetSubjectFile(const CArgs& args)
-/// {
-/// 	string filename="";
-///
-/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
-/// 		filename = args[kArgSubject].AsString();
-///
-/// 	return filename;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:903-911
 /// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
 /// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
 /// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
@@ -496,25 +433,7 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
 /// `Subject_<n>` and its title is the record's title (`FastaRecord::title`), written
 /// as bytes; a subject without a title gives `Subject_<n> : ...`.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-/// ```c
-///         catch(CBlastException & e ) {
-///         	// Skip bad subject sequence
-///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-///         		seqblk_vec->push_back(subj);
-///         		string warning = kEmptyStr;
-///         		const CSeq_id *  id = subjects.GetSeqId(i);
-///         		string title = subjects.GetTitle(i);
-///         		if(id != NULL) {
-///         			warning = id->GetSeqIdString() + " ";
-///         		}
-///         		warning += subjects.GetTitle(i);
-///         		if(warning != kEmptyStr){
-///         			warning += ": ";
-///         		}
-///         		warning += "Subject sequence contains no data";
-///         		ERR_POST(Warning << warning);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 pub fn write_empty_subject_warnings(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     program: &str,
@@ -550,7 +469,7 @@ pub fn write_empty_subject_warnings_by_length(
 /// numbers of letters `records` gives, in their order: the shared reader's records and BLASTX's
 /// (`algorithm::blastx::input::FastaRecord::names`).
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (cited at
 /// `write_empty_subject_warnings`)
 pub fn write_empty_subject_warnings_of<'a>(
     records: impl IntoIterator<Item = (crate::blastinput::fasta_reader::RecordNames<'a>, usize)>,
@@ -801,15 +720,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
-    // ```c++
-    //     m_DeleteFlag = false;
-    //
-    //     if (AsString() == "-") {
-    // #if defined(NCBI_OS_MSWIN)
-    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    // #endif
-    //         m_Ios  = &cin;
-    // ```
     // Every `-` is the process's descriptor 0 itself (not a copy, which the WASI targets cannot
     // make), and dropping the input leaves it open (`m_DeleteFlag` false: `cin` is never deleted).
     #[cfg(unix)]
@@ -825,13 +735,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:609-613
-    // ```c++
-    // CArg_Ios::~CArg_Ios(void)
-    // {
-    //     if (m_Ios  &&  m_DeleteFlag)
-    //         delete m_Ios;
-    // }
-    // ```
     // Two inputs read in place (`InputFile::in_place`, as two `-` arguments read `cin`) share one
     // position, and dropping one leaves the descriptor open for the other: here a pipe, whose
     // bytes the first takes in part and the second reads on from there.
@@ -860,7 +763,7 @@ mod tests {
         drop(unsafe { OwnedFd::from_raw_fd(raw) });
     }
 
-    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
     // input). A regular file has a position; a pipe has none, on Linux because `lseek`
     // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
     #[test]

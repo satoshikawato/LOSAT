@@ -9,33 +9,7 @@
 //! PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-//! ```c
-//!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-//!
-//!         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-//!
-//!         if (hitsfound == 0)
-//!             continue;
-//!
-//!         total_hits += hitsfound;
-//!         hits_extended += extend(offset_pairs, hitsfound, word_params,
-//!                                 lookup_wrap, query, subject, matrix,
-//!                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-//! ```c
-//!     for (; s <= s_end; s += scan_step) {
-//!         num_hits = s_BlastLookupGetNumHits(lookup, index);
-//!         if (num_hits == 0)
-//!             continue;
-//!         s_BlastLookupRetrieve(lookup,
-//!                               index,
-//!                               offset_pairs + total_hits,
-//!                               s_off);
-//!         total_hits += num_hits;
-//!     }
-//! ```
 //!
 //! The reference for these tables is `scan_na_lookup` (`na_scan.rs`), which `run.rs` calls after
 //! `if two_stage_lookup_ref.is_none()` ("Original lookup method") when this module declines the
@@ -139,15 +113,6 @@ pub(in super::super) struct NaInputs<'a> {
 
 impl NaInputs<'_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:41-79
-    /// ```c
-    /// num_hits = s_BlastLookupGetNumHits(lookup, index);
-    /// if (num_hits == 0)
-    ///     continue;
-    /// s_BlastLookupRetrieve(lookup,
-    ///                       index,
-    ///                       offset_pairs + total_hits,
-    ///                       s_off);
-    /// ```
     /// The reference's lookup of a word: the presence-vector direct table for word sizes up to
     /// 13, the Na table otherwise.
     #[inline(always)]
@@ -218,22 +183,7 @@ pub(in super::super) fn wants(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-/// ```c
-///     for (; s <= s_end; s += scan_step) {
-///         num_hits = s_BlastLookupGetNumHits(lookup, index);
-///         if (num_hits == 0)
-///             continue;
-///         s_BlastLookupRetrieve(lookup,
-///                               index,
-///                               offset_pairs + total_hits,
-///                               s_off);
-///         total_hits += num_hits;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:900-903
-/// ```c
-///         Int4 context = BSearchContextInfo(q_off, query_info);
-/// ```
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
 /// word length and step (masked subject or not), from `job.start` to `job.end`; every lookup hit of
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
@@ -243,12 +193,6 @@ fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:76-79
-/// ```c
-///     for(i=0;i<num_hits;i++) {
-///         offset_pairs[i].qs_offsets.q_off = lookup_pos[i];
-///         offset_pairs[i].qs_offsets.s_off = s_off;
-///     }
-/// ```
 /// One lookup hit of the word at subject offset `kmer_start` as a `Seed` with the context of its
 /// query offset (`q_off_1`: the table's 1-based query offset, 0 for no hit, which is skipped). A
 /// function, not a closure of `scan_strip_na_from`: called from the run loop and from the
@@ -321,47 +265,7 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
-/// ```c
-///     diag = s_off + diag_table->diag_array_length - q_off;
-///     real_diag = diag & diag_table->diag_mask;
-///     last_hit = hit_level_array[real_diag].last_hit;
-///     s_off_pos = s_off + diag_table->offset;
-///     if (s_off_pos < last_hit) return 0;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839,887-895,923-933,939-941
-/// ```c
-///     diag = s_off - q_off;
-///     s_end = s_off + word_length;
-///     s_off_pos = s_off + hash_table->offset;
-///     s_end_pos = s_end + hash_table->offset;
-///
-///     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-/// ...
-///     if (s_off_pos < last_hit) return 0;
-/// ...
-///     } else if (check_masks) {
-///         /* check the masks for the word */
-///         if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-///                         query_mask, query_info, s_range,
-///                         word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-///         /* update the right end*/
-///         s_end += extended;
-///         s_end_pos += extended;
-///     }
-/// ...
-///             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-/// ...
-///                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-///                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-///                           + hash_table->offset;
-///             } else {
-///                 hit_ready = 0;
-///             }
-/// ...
-///     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-///                           hit_ready, s_off_pos, window_size + Delta + 1);
-/// ```
 /// Phase 2 for the seeds of one strip, in order: the reference's statements after the context
 /// for one-hit mode with the diagonal hash (`two_hits` false, so `off_found` stays false and
 /// `hit_ready` true until the cutoff test), with the reference's coordinates (the query offset
@@ -441,18 +345,10 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         // Use pre-computed cutoff score (computed once per query-subject pair)
         let cutoff_score = x.cutoff_scores[context_idx];
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
-        // ```c
-        // diag = s_off - q_off;
-        // s_end = s_off + word_length;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-829
         let diag = kmer_start as isize - q_off0 as isize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
-        // ```c
-        // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-        // if(!rc)  last_hit = 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:833-836
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
         // of a bucket below the bound (`s_off_pos` below). (A one-hit table keeps no memo,
         // LOSAT_X_DIAGLV2.)
@@ -470,11 +366,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             (level, hit_saved)
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
-        // ```c
-        // s_off_pos = s_off + diag_table->offset;
-        // if (s_off_pos < last_hit) return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
         let s_off_pos = kmer_start + diag_offset as usize;
         let s_off_pos_i32 = s_off_pos as i32;
 
@@ -491,15 +383,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let off_found = false;
         let query_mask = ctx.masks.as_slice();
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
-        // ```c
-        // static NCBI_INLINE Boolean s_IsSeedMasked(...)
-        // {
-        //     ...
-        //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
-        //                                      (lookup_wrap, index, q_pos));
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:459-489
         #[expect(
             clippy::manual_contains,
             reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
@@ -513,22 +397,12 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
                 safe_k,
             );
             let hits = x.hits(kmer);
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-            // ```c
-            // /* Also add 1 to all indices, because lookup table indices count
-            //    from 1. */
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
             let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
             !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
         };
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:887-895
-        // ```c
-        //     } else if (check_masks) {
-        //         if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-        //                         query_mask, query_info, s_range,
-        //                         word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-722,887-895
         let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
             q_off,
             s_off,
@@ -549,15 +423,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         s_end_pos += ext;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-919
-        // ```c
-        //         if (word_params->ungapped_extension) {
-        //             /* perform ungapped extension */
-        //             s_NuclUngappedExtend(query, subject, matrix, q_off, s_off, ...
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-        // ```c
-        // Uint1 *q_start = query->sequence;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:268-269
         // NCBI's `query` is the concatenated query and `q_off` an offset in it
         // (na_ungapped.c:164-206 too): a walk that does not stop at the context's sentinel (a
         // raw X-drop of 2^30 or more) reads the contexts before it.
@@ -608,28 +474,12 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let ungapped_score = ungapped.score;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:928-929
-        // ```c
-        //                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-        //                           + hash_table->offset;
-        // ```
         let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932
-        // ```c
-        //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-        // ...
-        //             } else {
-        //                 hit_ready = 0;
-        //             }
-        // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             let hit_ready = false;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-            // ```c
-            // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-            //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-            //                       hit_ready, s_off_pos, window_size + Delta + 1);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
             part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
@@ -660,12 +510,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             out.hit_keys.push(x_key);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-        // ```c
-        // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                       hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         part::insert_t::<PT, false, false, TRACK>(
             diag_hash,
             out,
@@ -681,13 +526,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-/// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): the scan ranges of `scan_subject_kmers_with_ranges` (`word_length ==
 /// lut_word_length`) cut into strips scanned by any thread, folded here in
@@ -868,16 +706,6 @@ fn seed_stage_of(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-///                                 lookup_wrap, query, subject, matrix,
-///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-///     }
-/// ```
 /// Dispatch of `prelim_subject::prelim_chunk_hits` for a table that is not two-stage: the seed
 /// stage of this chunk (the loop above with its one-hit extension) when LOSAT_X_PAIRPARNA is
 /// on and the chunk is in scope; `true` means it has run and the reference scan is skipped.
@@ -1012,11 +840,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-    // ```c
-    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-    //
-    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-    // ```
     // The whole stage on random sequences (the subject made of mutated copies of query pieces
     // on both strands, query masks on one context, so `s_TypeOfWord` checks words there) for
     // the direct table at word sizes 6, 7 and 8: the pairs of the reference wrapper

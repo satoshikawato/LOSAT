@@ -16,24 +16,6 @@
 //! `Dbtag`, `Object-id`), `c++/src/objects/biblio/biblio.asn:119-124` (`Id-pat`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
-//! ```text
-//! Blast-def-line-set ::= SEQUENCE OF Blast-def-line  -- all deflines for an entry
-//!
-//! Blast-def-line ::= SEQUENCE {
-//!     title VisibleString OPTIONAL,             -- simple title
-//!     seqid SEQUENCE OF Seq-id,                 -- Regular NCBI Seq-Id
-//!     -- taxonomy id, should not be set if multiple taxids are available
-//!     -- (see links below)
-//!     taxid  INTEGER OPTIONAL,
-//!     memberships SEQUENCE OF INTEGER OPTIONAL, -- bit arrays
-//!     -- Repurposed to store the (multiple) taxIDs associated with WP proteins.
-//!     links SEQUENCE OF INTEGER OPTIONAL,
-//!     -- In proteins this stores the PIG, in nucleotides this stores the "origin
-//!     -- GIs" (if one sequence is described in the ASN.1 as an identical copy of
-//!     -- another)
-//!     other-info SEQUENCE OF INTEGER OPTIONAL
-//! }
-//! ```
 
 use super::defline_set::{BlastDefline, DeflineSet};
 use super::model::{
@@ -42,24 +24,6 @@ use super::model::{
 };
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:70-130
-// ```c++
-//         eApplication        = 1 << 6,
-//         eContextSpecific    = 2 << 6,
-//         ...
-//         eConstructed        = 1 << 5,
-//         ...
-//         eInteger            = 2,
-//         ...
-//         eSequence           = 16,
-//         ...
-//         eVisibleString      = 26,
-//         ...
-//         eLongTag            = 31,
-//         ...
-//         eContainterTagByte      = TByte(eConstructed) | TByte(eSequence),
-//         eIndefiniteLengthByte   = 0x80,
-//         eEndOfContentsByte      = 0,
-// ```
 const TAG_INTEGER: u8 = 2;
 /// `MakeTagByte(eApplication, ePrimitive, eInteger)`, which `ExpectIntegerTag` also takes.
 const TAG_APPLICATION_INTEGER: u8 = (1 << 6) | TAG_INTEGER;
@@ -179,26 +143,6 @@ impl<'a> Reader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:394-411
-    // ```c++
-    // size_t CObjectIStreamAsnBinary::ReadLengthLong(TByte byte)
-    // {
-    //     size_t lengthLength = byte - 0x80;
-    //     if ( lengthLength == 0 ) {
-    //         ThrowError(fFormatError, "unexpected indefinite length");
-    //     }
-    //     if ( lengthLength > sizeof(size_t) ) {
-    //         ThrowError(fOverflow, "length overflow");
-    //     }
-    //     size_t length = m_Input.GetChar() & 0xff;
-    //     if ( length == 0 ) {
-    //         ThrowError(fFormatError, "illegal length start");
-    //     }
-    //     while ( --lengthLength > 0 ) {
-    //         length = (length << 8) | (m_Input.GetChar() & 0xff);
-    //     }
-    //     return StartTagData(length);
-    // }
-    // ```
     /// Reads a definite length (short or long form).
     fn definite_length(&mut self, first: u8) -> Result<usize, BerError> {
         if first < INDEFINITE_LENGTH_BYTE {
@@ -306,41 +250,8 @@ impl<'a> Reader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:145-160
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectIntegerTag(void)
-    // {
-    //     ...
-    //     Uint1 tag = StartTag(PeekTagByte());
-    //     Uint1 exp = MakeTagByte(  eUniversal, ePrimitive, eInteger);
-    //     if (tag != exp) {
-    //         if (tag != MakeTagByte(eApplication, ePrimitive, eInteger)) {
-    //             UnexpectedSysTagByte(exp);
-    //         }
-    //         SetSpecialCaseUsed(CObjectIStream::eReadAsBigInt);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:337-345
-    // ```c++
-    // size_t CObjectIStreamAsnBinary::ReadShortLength(void)
-    // {
-    //     TByte byte = FlushTag();
-    //     if ( byte >= 0x80 ) {
-    //         UnexpectedLongLength();
-    //     }
-    //     return StartTagData(byte);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:569-575
-    // ```c++
-    // Int4 CObjectIStreamAsnBinary::ReadInt4(void)
-    // {
-    //     ExpectIntegerTag();
-    //     Int4 data;
-    //     ReadStdSigned(*this, data);
-    //     return data;
-    // }
-    // ```
     /// An INTEGER as NCBI's `ReadInt4` (`width` 4) or `ReadInt8` (`width` 8) reads it: the tag
     /// of an INTEGER or of an application INTEGER (`eReadAsBigInt` changes nothing in the value),
     /// a short length, the value by `read_std_signed`. Errors carry NCBI's texts
@@ -374,15 +285,6 @@ impl<'a> Reader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:585-591
-    // ```c++
-    // Int8 CObjectIStreamAsnBinary::ReadInt8(void)
-    // {
-    //     ExpectIntegerTag();
-    //     Uint8 data;
-    //     ReadStdSigned(*this, data);
-    //     return data;
-    // }
-    // ```
     /// An INTEGER member that NCBI reads into an `Int8` (`ReadInt8`): the GI (`TGi`, an `Int8`
     /// with `NCBI_INT8_GI`, corelib/ncbimisc.hpp:975-1003).
     fn int8(&mut self) -> Result<i64, BerError> {
@@ -466,46 +368,6 @@ pub(crate) enum StdSignedError<E> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
-// ```c++
-// template<typename T>
-// void ReadStdSigned(CObjectIStreamAsnBinary& in, T& data)
-// {
-//     size_t length = in.ReadShortLength();
-//     if ( length == 0 ) {
-//         in.ThrowError(in.fFormatError, "zero length of number");
-//     }
-//     T n;
-//     if ( length > sizeof(data) ) {
-//         // skip
-//         --length;
-//         Int1 c = in.ReadSByte();
-//         if ( c != 0 && c != -1 ) {
-//             in.ThrowError(in.fOverflow, "overflow error");
-//         }
-//         while ( length > sizeof(data) ) {
-//             --length;
-//             if ( in.ReadSByte() != c ) {
-//                 in.ThrowError(in.fOverflow, "overflow error");
-//             }
-//         }
-//         --length;
-//         n = in.ReadSByte();
-//         if ( ((n ^ c) & 0x80) != 0 ) {
-//             in.ThrowError(in.fOverflow, "overflow error");
-//         }
-//     }
-//     else {
-//         --length;
-//         n = in.ReadSByte();
-//     }
-//     while ( length > 0 ) {
-//         --length;
-//         n = (n << 8) | in.ReadByte();
-//     }
-//     data = n;
-//     in.EndOfTag();
-// }
-// ```
 /// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
 /// taken one at a time from `byte`, read into a signed type of `width` bytes (`sizeof(T)`: 4 for
 /// `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
@@ -551,15 +413,6 @@ pub(crate) fn read_std_signed<E>(
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:724-738
-// ```c++
-//         for(string::iterator i = str.begin(); i < to; ++i) {
-//             if ( BadVisibleChar(*i) ) {
-//                 ...
-//                 {
-//                     char c = ReplaceVisibleChar(*i, fix_method, this, str, subst);
-//                     if (c != '\0') {
-//                         *i = subst;
-// ```
 // A VisibleString is read with the method `eFNP_ReplaceAndWarn` unless the
 // parameter SERIAL / WRONG_CHARS_READ says otherwise (objistr.cpp:302-303):
 // every byte outside ' ' ..= '~' (`GoodVisibleChar`, objistr.inl:456-459)
@@ -580,19 +433,6 @@ pub(crate) fn replaced_bytes(value: &[u8]) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
-// ```c++
-//     CTempString raw_data = x_GetHdrAsn1Binary(oid);
-//
-//     if (! raw_data.size()) {
-//         return bdls;
-//     }
-//
-//     // Now create an ASN.1 object from the memory chunk provided here.
-//
-//     CObjectIStreamAsnBinary inpstr(raw_data.data(), raw_data.size());
-//
-//     bdls.Reset(new objects::CBlast_def_line_set);
-// ```
 /// Decodes the `Blast-def-line-set` of one sequence with every member: the titles, the
 /// Seq-ids of every alternative, the taxids, memberships, links and other-info. An empty
 /// record gives no definition line, as in NCBI. The `general` ids `BL_ORD_ID` keep the

@@ -1,7 +1,7 @@
 use super::*;
 
 // The standard code (gc.inc:43) and `x_InitFsaTransl`'s merges (Genetic_code_table.cpp:139-232,
-// quoted at `amino_acid_table`): every unambiguous codon, the Asx/Glx/Leu-Ile merges, a codon
+// cited at `amino_acid_table`): every unambiguous codon, the Asx/Glx/Leu-Ile merges, a codon
 // that spans two amino acids, gaps and bytes that are not bases.
 #[test]
 fn codons_of_the_standard_code() {
@@ -39,7 +39,7 @@ fn codons_of_the_standard_code() {
     assert_eq!(codon_residue(4, 2, 15), b'A');
 }
 
-// `x_Translate` (sequence.cpp:3636-3725, quoted at `translate`): the last partial codon is kept
+// `x_Translate` (sequence.cpp:3636-3725, cited at `translate`): the last partial codon is kept
 // only when it is not X; rpsbproc's `*` to `X` (biodata_core.cpp:130-133).
 #[test]
 fn translation_of_a_frame() {

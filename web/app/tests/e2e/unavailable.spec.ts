@@ -547,7 +547,7 @@ test('a search whose threaded module cannot be downloaded fails with the file an
   await submit(page);
   await waitStatus(page, 1, 'failed', 30_000);
   expect(await runMessage(page, 1)).toMatch(
-    /^Run 1 failed: LOSAT could not download its engine file \/engine\/losat-web-threads-[0-9a-f]+\.wasm \(network error\)\. Reload the page\. A failed run keeps no results\.$/,
+    /^Run 1 failed: LOSAT could not download its engine file \/engine\/losat-web-threads-[0-9a-f]+\.wasm \(network error\)\. Reload the page\. It keeps no outputs\.$/,
   );
 });
 
@@ -559,7 +559,7 @@ test('a search whose Engine worker cannot be loaded fails with what could not st
   await submit(page);
   await waitStatus(page, 1, 'failed', 30_000);
   expect(await runMessage(page, 1)).toBe(
-    `Run 1 failed: LOSAT could not start the part that runs searches. ${RELOAD} A failed run keeps no results.`,
+    `Run 1 failed: LOSAT could not start the part that runs searches. ${RELOAD} It keeps no outputs.`,
   );
 });
 
@@ -602,7 +602,7 @@ test('a search whose Data worker ended fails at once with what stopped, and its 
   // commit of its results, while the page already said that the part that keeps the results stopped (the review of D2, L2).
   await expect.poll(() => endedByPage(page, 'losat-engine'), { timeout: 15_000 }).toBe(engines + 1);
   await waitStatus(page, 1, 'failed', 30_000);
-  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${DATA_ENDED} A failed run keeps no results.`);
+  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${DATA_ENDED} It keeps no outputs.`);
   await expect(page.getByTestId('losat-unavailable')).toHaveText(DATA_ENDED);
 });
 
@@ -615,7 +615,7 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   expect(await openKeeperLinks(page)).toBe(1);
   await endWorker(page, 'losat-engine');
   await waitStatus(page, 1, 'failed', 30_000);
-  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} A failed run keeps no results.`);
+  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} It keeps no outputs.`);
   // The worker's threads and its keeper ended with it: the page ends its runtime at once. Before, the page waited for the
   // keeper's answer for good, with the keeper's channel open (here in Chromium, Firefox and WebKit).
   await expect.poll(() => openKeeperLinks(page), { timeout: 15_000 }).toBe(0);
@@ -672,7 +672,7 @@ for (const [end, sentence] of [
     await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
     await endWorker(page, 'losat-engine', end === 'fails' ? 'out of memory' : undefined);
     await waitStatus(page, 2, 'failed', 30_000);
-    expect(await runMessage(page, 2)).toBe(`Run 2 failed: ${sentence} A failed run keeps no results.`);
+    expect(await runMessage(page, 2)).toBe(`Run 2 failed: ${sentence} It keeps no outputs.`);
   });
 }
 

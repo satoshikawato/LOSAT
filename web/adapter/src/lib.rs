@@ -70,14 +70,16 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 4 since `losat_web2_register_inputs`, which
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 7 since a run that fails keeps the output of the
+/// argv up to its error and drops the other outputs with the signal of stream 9 (line WQA's sweep,
+/// D15, 2026-11-20; versions 5 and 6 are taken by other open branches); 4 since `losat_web2_register_inputs`, which
 /// reads the inputs of a run with `-parse_deflines`, and the signal of stream 9 for every output
 /// stream that failed (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which
 /// makes the host discard a stream that failed alone after a chunk of it was sent (line RG item
 /// T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    4
+    7
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

@@ -11,8 +11,7 @@
 
 use super::{score_compare_prelim_hits, PrelimHit, PrelimHitLists, PrelimHspList};
 use crate::algorithm::blastn::hsp::{
-    compare_hsp_lists, score_compare_hsps, update_best_evalue, BlastnHitList, BlastnHspList,
-    HitList, HitListEntry,
+    score_compare_hsps, update_best_evalue, BlastnHitList, BlastnHspList, HitList,
 };
 use crate::core::hspfilter_besthit::{BestHitKey, BestHitLists, BestHitParams, BestHitQuery};
 
@@ -45,27 +44,6 @@ fn best_hit_key(
         score,
         evalue,
     }
-}
-
-/// The hit list that `s_BlastHSPBestHitFinal` makes of one query's kept lists: the lists (with
-/// their best e-values) sorted by e-value, then saved into a hit list of
-/// `prelim_hitlist_size` subjects, which keeps the lists of the best e-values when there are
-/// more (`Blast_HitListUpdate`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214
-fn final_hit_list<L: HitListEntry>(mut lists: Vec<L>, prelim_hitlist_size: usize) -> HitList<L> {
-    for list in &mut lists {
-        list.update_best_evalue();
-    }
-    // `Blast_HitListSortByEvalue`: no list is empty.
-    if lists.len() > 1 {
-        lists.sort_by(compare_hsp_lists);
-    }
-    let mut hit_list = HitList::new(prelim_hitlist_size);
-    for list in lists {
-        hit_list.update(list);
-    }
-    hit_list
 }
 
 /// NCBI's best hit writer in place of the HSP collector (`PrelimHitCollector`): each subject's
@@ -128,7 +106,7 @@ impl PrelimBestHit {
                     best_evalue: 0.0,
                 })
                 .collect();
-            hit_lists[query] = Some(final_hit_list(lists, self.prelim_hitlist_size));
+            hit_lists[query] = Some(HitList::best_hit_final(lists, self.prelim_hitlist_size));
         }
         hit_lists
     }
@@ -196,7 +174,7 @@ pub(super) fn best_hit_traceback(
             best_evalue: 0.0,
         })
         .collect();
-    *hit_list = final_hit_list(lists, prelim_hitlist_size);
+    *hit_list = HitList::best_hit_final(lists, prelim_hitlist_size);
 }
 
 #[cfg(test)]

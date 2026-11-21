@@ -47,7 +47,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-best_hit_overhang`, ...) are never recorded. `-strand` is not an option of the request:
+/// accept (`-entrez_query`, ...) are never recorded. `-strand` is not an option of the request:
 /// NCBI keeps it in the queries' Seq-locs (the query reader's strand, `with_strand`).
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
@@ -75,6 +75,8 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);

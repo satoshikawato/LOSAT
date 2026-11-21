@@ -1,0 +1,39 @@
+# TBLASTX 2.17.0+
+# Query: dq0
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+dq0	ds7	79.667	300	61	0	59	958	1310	411	1.47e-176	607
+dq0	ds7	56.886	167	72	0	552	52	817	1317	2.41e-81	183
+dq0	ds7	36.076	158	101	0	562	89	807	1280	2.96e-56	122
+dq0	ds7	60.870	23	9	0	122	190	1811	1743	1.46e-34	36.8
+dq0	ds7	68.750	16	5	0	177	130	1756	1803	2.17e-14	24.9
+dq0	ds7	61.111	18	7	0	378	325	1519	1572	2.27e-04	22.6
+dq0	ds7	50.000	10	5	0	851	880	224	253	2.8	21.7
+# TBLASTX 2.17.0+
+# Query: dq1
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+dq1	ds10	92.414	290	22	0	1352	483	1272	2141	0.0	719
+dq1	ds10	66.667	54	18	0	1823	1662	66	227	0.0	88.1
+dq1	ds10	75.433	289	71	0	484	1350	2140	1274	9.71e-139	462
+dq1	ds10	60.000	50	20	0	1663	1812	226	77	9.71e-139	46.4
+dq1	ds10	40.816	49	29	0	1677	1823	212	66	1.46e-85	44.6
+dq1	ds10	77.143	70	16	0	1565	1356	1389	1598	2.36e-64	132
+dq1	ds10	61.538	52	20	0	1820	1665	1023	1178	2.36e-64	73.0
+dq1	ds10	65.455	55	19	0	1399	1563	1555	1391	3.59e-48	72.1
+dq1	ds10	35.556	45	29	0	1679	1813	210	76	3.59e-48	35.4
+dq1	ds10	35.468	203	131	0	1432	824	1192	1800	5.61e-27	111
+dq1	ds10	39.683	63	38	0	1356	1544	1598	1410	1.34e-11	51.9
+# TBLASTX 2.17.0+
+# Query: dq2
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+dq2	ds7	81.818	220	40	0	1633	974	1211	552	3.09e-129	450
+dq2	ds7	81.132	53	10	0	487	645	1802	1644	6.61e-68	116
+dq2	ds7	58.140	215	90	0	981	1625	559	1203	5.85e-61	223
+dq2	ds7	58.025	81	34	0	902	660	508	750	2.39e-32	86.3
+dq2	ds7	68.750	48	15	0	629	486	1660	1803	2.39e-32	67.0
+# BLAST processed 3 queries

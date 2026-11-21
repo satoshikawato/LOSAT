@@ -50,7 +50,7 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 `Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's parser checks the rest, so an option means, and fails, as it does there (`ArgumentError`).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 
 ## Inputs
 
@@ -61,6 +61,8 @@ A `Sequences` is one FASTA input, and the search reads it with the command line'
 - `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
 
 A PSSM takes the place of the query of psiblast and tblastn: `Pssm.from_file(path)` is `-in_pssm path` (a PSSM file as `-out_pssm` writes it). Its one query is the PSSM's sequence: `q_idx` 0.
+
+An alignment takes the place of the query of psiblast: `Alignment.from_file(path)` is `-in_msa path` (a multiple sequence alignment; the search reads it as the command line does). Its one query is the alignment's master: `q_idx` 0. `msa_master_idx` and `ignore_msa_master` are options of `Search`, as on the command line, and choose the master.
 
 A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as the command line finds it (`BLASTDB`, `.ncbirc`). The options of a database search (`taxids`, `seqidlist`, ...) go to `Search` with the others. Then `hsp.s_idx` is the sequence's ordinal id, the same in every search of that database.
 

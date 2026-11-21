@@ -69,6 +69,13 @@ impl Error {
     pub(crate) fn written(text: Vec<u8>) -> Self {
         Error::Search(without_line_feeds(text))
     }
+
+    /// The parser's refusal of a tool's argv after the tool wrote `text`, the refusal's message
+    /// last, to its standard error: that text without its last line feeds, as `written`'s
+    /// (`Error::Argv`).
+    pub(crate) fn written_argv(text: Vec<u8>) -> Self {
+        Error::Argv(without_line_feeds(text))
+    }
 }
 
 /// The bytes of `error` in anyhow's alternate form (the error and its causes joined by `: `), with

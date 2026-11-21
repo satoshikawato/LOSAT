@@ -1412,6 +1412,31 @@ impl ReportStream {
             failed: false,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// The end of a run whose report went to this stream, `result` being the run's: what the
+    /// report wrote stays (a flush, also after an error, such as the outfmt 0 prolog). Where the
+    /// report's stream throws (`throws`: the stream of the outfmt 0 to 4 formatter,
+    /// blast_format.cpp:118-119, and the organism report's, `NcbiReportBuffer`), a write that
+    /// failed (`failed`) or an insertion that set the stream's `badbit` (`BadbitInsertion`) is
+    /// NCBI's "BLAST failed to write output", exit status 6. For the other formats NCBI aborts and
+    /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
+    /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
+    pub(crate) fn finish(&mut self, result: anyhow::Result<()>, throws: bool) -> anyhow::Result<()> {
+        use anyhow::Context;
+        let flushed = std::io::Write::flush(self);
+        let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
+        if (self.failed || badbit) && throws {
+            return Err(NativeError {
+                exit: 6,
+                message: "BLAST failed to write output\n".into(),
+            }
+            .into());
+        }
+        result?;
+        flushed.context("failed to write the output")
+    }
 }
 
 impl std::io::Write for ReportStream {

@@ -18,45 +18,29 @@ pub struct LocalTime {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:102-105
-// ```c++
-// static const char* kMonthAbbr[12] = {
-//     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-//     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-// };
-// ```
 const MONTH_ABBR: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 impl LocalTime {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
-    // ```c++
-    //     // Bind values to internal variables
-    //     struct tm *t;
-    //
-    // #ifdef HAVE_LOCALTIME_R
-    //     struct tm temp;
-    //     if (GetTimeZone() == eLocal) {
-    //         localtime_r(&timer, &temp);
-    //     } else {
-    //         gmtime_r(&timer, &temp);
-    //     }
-    //     t = &temp;
-    // #else
-    //     t = ( GetTimeZone() == eLocal ) ? localtime(&timer) : gmtime(&timer);
-    // ```
     // `CTime(CTime::eCurrent)` is the local time of the C library. LOSAT
     // calls no C library: the zone's offset from UTC comes from
-    // `local_offset`, which reads the zone as the C library does (glibc on
-    // Unix and on WASI, from the environment and the directories that the
-    // host gives; UCRT on Windows), and where the zone cannot be found (an
-    // unreadable zone file, a WASI host that gives neither `TZ` nor a zone
-    // file) or the C library gives no local time the time is UTC.
+    // `local_offset`, which finds the zone where the C library finds it
+    // (glibc on Unix and on WASI, from the environment and the directories
+    // that the host gives, read by the crate jiff; UCRT on Windows), and
+    // where no zone is found or read (no zone file, a WASI host that gives
+    // neither `TZ` nor a zone file, a `TZ` that jiff does not read) the time
+    // is UTC. A leap second of a zone file is second 60, as glibc writes it.
     /// The current local time, or `None` where the platform has no clock.
     pub fn now() -> Option<Self> {
         let seconds = unix_seconds()?;
-        let offset = local_utc_offset(seconds).unwrap_or(0);
-        Some(Self::from_unix_seconds(seconds + offset))
+        let offset = local_utc_offset(seconds).unwrap_or_default();
+        let mut time = Self::from_unix_seconds(seconds + offset.seconds);
+        if offset.leap_second {
+            time.second = 60;
+        }
+        Some(time)
     }
 
     /// The calendar time `seconds` after 1970-01-01 00:00:00 (Gregorian
@@ -91,34 +75,7 @@ impl LocalTime {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:88-97
-    // ```c++
-    //     CTime now(CTime::eCurrent);
-    //
-    //     m_Date = now.AsString("b d, Y  ");
-    //     string t = now.AsString("H:m P");
-    //
-    //     if (t[0] == '0') {
-    //         t.assign(t, 1, t.size() - 1);
-    //     }
-    //
-    //     m_Date += t;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1592-1617
-    // ```c++
-    //         case 'Y': s_AddZeroPadInt(str, t->Year(), 4);       break;
-    //         case 'M': s_AddZeroPadInt2(str, t->Month());        break;
-    //         case 'b': str += kMonthAbbr[t->Month()-1];          break;
-    //         case 'B': str += kMonthFull[t->Month()-1];          break;
-    //         case 'D': s_AddZeroPadInt2(str, t->Day());          break;
-    //         case 'd': s_AddZeroPadInt(str, t->Day(),1);         break;
-    //         case 'h': s_AddZeroPadInt2(str, t->Hour());         break;
-    //         case 'H': s_AddZeroPadInt2(str, (t->Hour()+11) % 12+1);
-    //         ...
-    //         case 'm': s_AddZeroPadInt2(str, t->Minute());       break;
-    //         case 's': s_AddZeroPadInt2(str, t->Second());       break;
-    //         ...
-    //         case 'P': str += ( t->Hour() < 12) ? "AM" : "PM" ;  break;
-    // ```
     /// The creation date of the index files and of the alias file, for
     /// example `Oct 12, 2026  3:22 PM`.
     pub fn index_date(&self) -> String {
@@ -132,9 +89,6 @@ impl LocalTime {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:121
-    // ```c++
-    // static const char* kDefaultFormatTime      = "M/D/Y h:m:s";
-    // ```
     /// `CTime::AsString()` with the default format, for example
     /// `10/12/2026 20:29:48`.
     pub fn log_time(&self) -> String {

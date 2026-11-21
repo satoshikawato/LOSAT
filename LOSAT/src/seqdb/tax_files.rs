@@ -23,8 +23,8 @@ pub const NO_ACCESSION_INFO: &str = "DB contains no accession info.";
 /// Text of NCBI's catch block of `GetOid` / `GetOids` for any LMDB error; `dbname` is the base
 /// name of the `.ndb` file. (`MDB_NOTFOUND` there gives "Seqid list specified but no accession
 /// table is found in `<dbname>`", which cannot happen once the table exists.)
-pub fn accessions_lookup_error(dbname: &str) -> String {
-    format!("Accessions to Oids lookup error in {dbname}")
+pub fn accessions_lookup_error(dbname: &[u8]) -> Vec<u8> {
+    [b"Accessions to Oids lookup error in ".as_slice(), dbname].concat()
 }
 
 fn le_u32(v: &[u8], what: &str) -> Result<u32, String> {
@@ -48,86 +48,7 @@ fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, String> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:124-146
-// ```c++
-// MDB_dbi CBlastLMDBManager::CBlastEnv::GetDbi(EDbiType dbi_type)
-// {
-//     if(m_dbis[dbi_type] == UINT_MAX) {
-//         string err = "DB contains no ";
-//         switch (dbi_type) {
-//         case eDbiVolinof:
-//         case eDbiVolname:
-//             err += "vol info.";
-//             break;
-//         case eDbiAcc2oid:
-//             err += "accession info.";
-//             break;
-//         case eDbiTaxid2offset:
-//             err += "tax id info";
-//             break;
-//         default:
-//             NCBI_THROW( CSeqDBException, eArgErr, "Invalid dbi type");
-//         }
-//         NCBI_THROW( CSeqDBException, eArgErr, err);
-//
-//     }
-//     return m_dbis[dbi_type];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:306-357
-// ```c++
-// void CSeqDBLMDB::GetVolumesInfo(vector<string> & vol_names, vector<blastdb::TOid> & vol_num_oids)
-// {
-//     MDB_dbi db_volname_handle;
-//     MDB_dbi db_volinfo_handle;
-//     lmdb::env & env = CBlastLMDBManager::GetInstance().GetReadEnvVol(m_LMDBFile, db_volname_handle, db_volinfo_handle);
-//     vol_names.clear();
-//     vol_num_oids.clear();
-//     {
-//     auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//     lmdb::dbi db_volname(db_volname_handle);
-//     lmdb::dbi db_volinfo(db_volinfo_handle);
-//     MDB_stat volinfo_stat, volname_stat;
-//     lmdb::dbi_stat(txn, db_volinfo, &volinfo_stat);
-//     lmdb::dbi_stat(txn, db_volname, &volname_stat);
-//     if(volinfo_stat.ms_entries != volname_stat.ms_entries) {
-//            NCBI_THROW( CSeqDBException, eArgErr, "Volinfo error ");
-//     }
-//
-//     vol_names.resize(volinfo_stat.ms_entries);
-//     vol_num_oids.resize(volinfo_stat.ms_entries);
-//
-//     auto cursor_volname = lmdb::cursor::open(txn, db_volname);
-//     auto cursor_volinfo = lmdb::cursor::open(txn, db_volinfo);
-//     for (unsigned int i=0; i < volinfo_stat.ms_entries; i++) {
-//         lmdb::val data2find(&i, sizeof(Int4));
-//         if (cursor_volname.get(data2find, MDB_SET)) {
-//             {
-//                 lmdb::val k, val;
-//                 cursor_volname.get(k, val, MDB_GET_CURRENT);
-//                 vol_names[i].assign(val.data(), val.size());
-//             }
-//             if (cursor_volinfo.get(data2find, MDB_SET)) {
-//                 lmdb::val k, val;
-//                 cursor_volinfo.get(k, val, MDB_GET_CURRENT);
-//                 const char* d = val.data();
-//                 vol_num_oids[i] = (((d[3] << 24)&0xFF000000) | ((d[2] << 16) & 0xFF0000) | ((d[1] << 8) & 0xFF00) | (d[0]&0xFF));
-//             }
-//             else {
-//                 NCBI_THROW( CSeqDBException, eArgErr, "No volinfo for " + vol_names[i]);
-//             }
-//          }
-//        }
-//     cursor_volname.close();
-//     cursor_volinfo.close();
-//     txn.reset();
-//     }
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_LMDBFile);
-//
-//     for(unsigned int j=0; j < vol_num_oids.size(); j++){
-//         m_NumOids += vol_num_oids[j];
-//     }
-// }
-// ```
 /// Volumes of the entry in index order: `(volume base name, number of OIDs in that volume)`.
 /// The OIDs of volume `i` start at the sum of the counts before it.
 ///
@@ -189,50 +110,6 @@ pub fn total_oids(vols: &[(Vec<u8>, u32)]) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:359-400
-// ```c++
-// void
-// CSeqDBLMDB::GetOids(const vector<string>& accessions, vector<blastdb::TOid>& oids) const
-// {
-//     try {
-//     oids.clear();
-//     oids.resize(accessions.size(), kSeqDBEntryNotFound);
-//
-//     MDB_dbi dbi_handle;
-//     lmdb::env & env = CBlastLMDBManager::GetInstance().GetReadEnvAcc(m_LMDBFile, dbi_handle, &m_LMDBFileOpened);
-//     {
-//     lmdb::dbi dbi(dbi_handle);
-//     auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//
-//     auto cursor = lmdb::cursor::open(txn, dbi);
-//
-//     unsigned int i=0;
-//     for (i=0; i < accessions.size(); i++) {
-//         string acc = accessions[i];
-//         lmdb::val data2find(acc);
-//         if (cursor.get(data2find, MDB_SET)) {
-//             lmdb::val k, val;
-//             cursor.get(k, val, MDB_GET_CURRENT);
-//             const char* d = val.data();
-//             oids[i] = (((d[3] << 24)&0xFF000000) | ((d[2] << 16) & 0xFF0000) | ((d[1] << 8) & 0xFF00) | (d[0]&0xFF));
-//         }
-//     }
-//
-//     cursor.close();
-//     txn.reset();
-//     }
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_LMDBFile);
-//     } catch (lmdb::error & e) {
-//            string dbname;
-//            CSeqDB_Path(m_LMDBFile).FindBaseName().GetString(dbname);
-//            if(e.code() == MDB_NOTFOUND) {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Seqid list specified but no accession table is found in " + dbname);
-//            }
-//            else {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Accessions to Oids lookup error in " + dbname);
-//            }
-//     }
-// }
-// ```
 /// First OID of an accession key (`GetOids`: `MDB_SET`, `MDB_GET_CURRENT`; the first duplicate
 /// in `memcmp` order of the 4 value bytes). The key is the id string exactly as stored
 /// (`AAA00001`, `AAA00001.1`, `myprot9`, `pdb|...`): no case folding.
@@ -249,51 +126,6 @@ pub fn acc_first_oid<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Opt
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:261-303
-// ```c++
-// void
-// CSeqDBLMDB::GetOid(const string & accession, vector<blastdb::TOid> & oids, const bool allow_dup) const
-// {
-//     try {
-//     oids.clear();
-//     {
-//     MDB_dbi dbi_handle;
-//     lmdb::env & env = CBlastLMDBManager::GetInstance().GetReadEnvAcc(m_LMDBFile, dbi_handle, &m_LMDBFileOpened);
-//     lmdb::dbi dbi(dbi_handle);
-//     auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//     auto cursor = lmdb::cursor::open(txn, dbi);
-//
-//     string acc = accession;
-//     lmdb::val data2find(acc);
-//
-//     if (cursor.get(data2find, MDB_SET)) {
-//         lmdb::val k, val;
-//         cursor.get(k, val, MDB_GET_CURRENT);
-//         const char* d = val.data();
-//         oids.push_back(((d[3] << 24)&0xFF000000) | ((d[2] << 16) & 0xFF0000) | ((d[1] << 8) & 0xFF00) | (d[0]&0xFF));
-//
-//         if(allow_dup) {
-//             while (cursor.get(k,val, MDB_NEXT_DUP)) {
-//                 d = val.data();
-//                 oids.push_back(((d[3] << 24)&0xFF000000) | ((d[2] << 16) & 0xFF0000) | ((d[1] << 8) & 0xFF00) | (d[0]&0xFF));
-//             }
-//         }
-//     }
-//     cursor.close();
-//     txn.reset();
-//     }
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_LMDBFile);
-//     } catch (lmdb::error & e) {
-//            string dbname;
-//            CSeqDB_Path(m_LMDBFile).FindBaseName().GetString(dbname);
-//            if(e.code() == MDB_NOTFOUND) {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Seqid list specified but no accession table is found in " + dbname);
-//            }
-//            else {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Accessions to Oids lookup error in " + dbname);
-//            }
-//     }
-// }
-// ```
 /// All OIDs of an accession key in LMDB duplicate order (`GetOid(.., allow_dup = true)`):
 /// `memcmp` order of the 4 LE bytes, so {1, 256, 512} come as 256, 512, 1. Empty when absent.
 /// Works for keys with a sub-database (more than about 500 OIDs), where NCBI fails.
@@ -436,11 +268,13 @@ pub enum TaxError {
 impl TaxError {
     /// The message NCBI throws (`CSeqDBException`, `eArgErr`) for this failure; `dbname` is the
     /// base name of the `.ntf` file, e.g. `nt.ntf`. `Data` has no NCBI text and gives its detail.
-    pub fn message(&self, dbname: &str) -> String {
+    pub fn message(&self, dbname: &[u8]) -> Vec<u8> {
         match self {
-            TaxError::NoTaxInfo => format!("No taxonomy info found in {dbname}"),
-            TaxError::Lookup(_) => format!("Taxonomy Id to Oids lookup error in {dbname}"),
-            TaxError::Data(m) => m.clone(),
+            TaxError::NoTaxInfo => [b"No taxonomy info found in ".as_slice(), dbname].concat(),
+            TaxError::Lookup(_) => {
+                [b"Taxonomy Id to Oids lookup error in ".as_slice(), dbname].concat()
+            }
+            TaxError::Data(m) => m.clone().into_bytes(),
         }
     }
 
@@ -477,40 +311,6 @@ pub struct TaxOids {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:558-589
-// ```c++
-// void CSeqDBLMDB::GetDBTaxIds(vector<TTaxId> & tax_ids) const
-// {
-//
-//     tax_ids.clear();
-//     try {
-//        MDB_dbi dbi_handle;
-//     lmdb::env & env = CBlastLMDBManager::GetInstance().GetReadEnvTax(m_TaxId2OffsetsFile, dbi_handle);
-//     {
-//         auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//         auto dbi(dbi_handle);
-//         auto cursor = lmdb::cursor::open(txn, dbi);
-//         lmdb::val key;
-//         while (cursor.get(key, MDB_NEXT)) {
-//             TTaxId taxid = TAX_ID_FROM(Int4, *((Int4 *)key.data()));
-//             tax_ids.push_back(taxid);
-//         }
-//         cursor.close();
-//         txn.reset();
-//     }
-//     }
-//     catch (lmdb::error & e) {
-//            string dbname;
-//            CSeqDB_Path(m_TaxId2OffsetsFile).FindBaseName().GetString(dbname);
-//            if(e.code() == MDB_NOTFOUND) {
-//             NCBI_THROW( CSeqDBException, eArgErr, "No taxonomy info found in " + dbname);
-//            }
-//            else {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Taxonomy Id to Oids lookup error in " + dbname);
-//            }
-//     }
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_TaxId2OffsetsFile);
-// }
-// ```
 /// All taxids with a key in the `.ntf` (`GetDBTaxIds`), in key order (`memcmp` of the LE bytes,
 /// i.e. unsorted as numbers).
 pub fn get_db_tax_ids<R: ReadAt + ?Sized>(ntf: &Env<R>) -> Result<Vec<i32>, TaxError> {
@@ -532,90 +332,6 @@ pub fn get_db_tax_ids<R: ReadAt + ?Sized>(ntf: &Env<R>) -> Result<Vec<i32>, TaxE
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:591-672
-// ```c++
-// void CSeqDBLMDB::GetOidsForTaxIds(const set<TTaxId> & tax_ids, vector<blastdb::TOid>& oids, vector<TTaxId> & tax_ids_found) const
-// {
-//     try {
-//     oids.clear();
-//     tax_ids_found.clear();
-//     vector<Uint8> offsets;
-//        MDB_dbi dbi_handle;
-//     lmdb::env & env = CBlastLMDBManager::GetInstance().GetReadEnvTax(m_TaxId2OffsetsFile, dbi_handle);
-//     {
-//     auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//        lmdb::dbi dbi(dbi_handle);
-//     auto cursor = lmdb::cursor::open(txn, dbi);
-//     ITERATE(set<TTaxId>, itr, tax_ids) {
-//         Int4 tax_id = TAX_ID_TO(Int4, *itr);
-//         lmdb::val data2find(tax_id);
-//
-//         if (cursor.get(data2find, MDB_SET)) {
-//             lmdb::val k, val;
-//             cursor.get(k, val, MDB_GET_CURRENT);
-//             const char* d = val.data();
-//             offsets.push_back((((Uint8) d[7] << 56) &0xFF00000000000000) | (((Uint8) d[6] << 48) & 0xFF000000000000) |
-//                               (((Uint8) d[5] << 40) &0xFF0000000000)     | (((Uint8) d[4] << 32) & 0xFF00000000)     |
-//                               (((Uint8) d[3] << 24) &0xFF000000)         | (((Uint8) d[2] << 16) & 0xFF0000)         |
-//                               (((Uint8) d[1] << 8)  &0xFF00)             | ((Uint8)  d[0]&0xFF));
-//             while (cursor.get(k,val, MDB_NEXT_DUP)) {
-//                 d = val.data();
-//                 offsets.push_back((((Uint8) d[7] << 56) &0xFF00000000000000) | (((Uint8) d[6] << 48) & 0xFF000000000000) |
-//                                   (((Uint8) d[5] << 40) &0xFF0000000000)     | (((Uint8) d[4] << 32) & 0xFF00000000)     |
-//                                   (((Uint8) d[3] << 24) &0xFF000000)         | (((Uint8) d[2] << 16) & 0xFF0000)         |
-//                                   (((Uint8) d[1] << 8)  &0xFF00)             | ((Uint8)  d[0]&0xFF));
-//             }
-//             tax_ids_found.push_back(*itr);
-//         }
-//     }
-//     cursor.close();
-//     txn.reset();
-//     }
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_TaxId2OffsetsFile);
-//     vector<bool> oids_set(m_NumOids, false);
-//
-//        CMemoryFile oid_file(m_TaxId2OidsFile);
-//        const char * start_ptr = (char *) oid_file.GetPtr();
-//        for (unsigned int i=0; i < offsets.size(); i++) {
-//            Uint4 * list_ptr = (Uint4 * ) (start_ptr + offsets[i]);
-//            Uint4 num_of_oids = *list_ptr;
-//            Uint4 count = 0 ;
-//            list_ptr ++;
-//            while(count < num_of_oids) {
-//                if(!oids_set[*list_ptr]) {
-//                    oids.push_back(*list_ptr);
-//                    oids_set[*list_ptr] = true;
-//                }
-//                count++;
-//                list_ptr++;
-//            }
-//        }
-//
-//        int oids_sz = oids.size();
-//        if((oids_sz*log(oids_sz)) < m_NumOids) {
-//            sort(oids.begin(), oids.end());
-//        }
-//        else {
-//            oids.resize(0);
-//            oids.reserve(oids_sz);
-//            for (int i=0; i < oids_set.size(); i++) {
-//                if(oids_set[i]) {
-//                 oids.push_back(i);
-//             }
-//         }
-//        }
-//
-//     } catch (lmdb::error & e) {
-//            string dbname;
-//            CSeqDB_Path(m_TaxId2OffsetsFile).FindBaseName().GetString(dbname);
-//            if(e.code() == MDB_NOTFOUND) {
-//             NCBI_THROW( CSeqDBException, eArgErr, "No taxonomy info found in " + dbname);
-//            }
-//            else {
-//             NCBI_THROW( CSeqDBException, eArgErr, "Taxonomy Id to Oids lookup error in " + dbname);
-//            }
-//     }
-// }
-// ```
 /// `CSeqDBLMDB::GetOidsForTaxIds`: the union of the OID lists of the requested taxids.
 ///
 /// * `ntf`: the `.ntf`/`.ptf` environment (table `taxid2offset`, key = Int4 taxid in 4 LE
@@ -776,40 +492,6 @@ impl OidIndex {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:675-706
-// ```c++
-// class CLookupTaxIds
-// {
-// public:
-//     CLookupTaxIds(CMemoryFile & file): m_IndexStart((Uint8*) file.GetPtr()), m_DataStart((Int4 *) file.GetPtr()) {
-//         if(m_IndexStart == NULL){
-//             NCBI_THROW( CSeqDBException, eArgErr, "Failed to open oid-to-taxids lookup file");
-//         }
-//
-//         Uint8 num_of_oids = *m_IndexStart;
-//         m_IndexStart ++;
-//         m_DataStart += (2* (num_of_oids + 1));
-//     }
-//
-//     inline void GetTaxIdListForOid(blastdb::TOid oid, vector<TTaxId> & taxid_list);
-// private:
-//
-//     Uint8 * m_IndexStart;
-//     Int4 * m_DataStart;
-// };
-//
-// void CLookupTaxIds::GetTaxIdListForOid(blastdb::TOid oid, vector<TTaxId> & taxid_list)
-// {
-//     taxid_list.clear();
-//     Uint8 * index_ptr = m_IndexStart + oid;
-//     Int4 * end = m_DataStart + (*index_ptr);
-//     index_ptr--;
-//     Int4 * begin = (oid == 0) ? m_DataStart:m_DataStart + (*index_ptr);
-//     while (begin < end) {
-//         taxid_list.push_back(TAX_ID_FROM(Int4, *begin));
-//         begin++;
-//     }
-// }
-// ```
 /// `CLookupTaxIds` over a `.not`/`.pot` file read by position. Keeps only the OID count.
 pub struct OidTaxIds<'r, R: ReadAt + ?Sized> {
     src: &'r R,
@@ -866,36 +548,6 @@ pub fn taxids_of_oid<R: ReadAt + ?Sized>(not: &R, oid: u32) -> Result<Vec<i32>, 
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:708-735
-// ```c++
-// void
-// CSeqDBLMDB::NegativeTaxIdsToOids(const set<TTaxId>& tax_ids, vector<blastdb::TOid>& rv, vector<TTaxId> & tax_ids_found) const
-// {
-//     rv.clear();
-//     vector<blastdb::TOid> oids;
-//     GetOidsForTaxIds(tax_ids, oids, tax_ids_found);
-//     CMemoryFile oid_file(m_Oid2TaxIdsFile);
-//     set<TTaxId> tax_id_list(tax_ids_found.begin(), tax_ids_found.end());
-//     CLookupTaxIds lookup(oid_file);
-//     for(unsigned int i=0; i < oids.size(); i++) {
-//         vector<TTaxId>  file_list;
-//         lookup.GetTaxIdListForOid(oids[i], file_list);
-//         if(file_list.size() > tax_ids.size()) {
-//             continue;
-//         }
-//         else {
-//             unsigned int j = 0;
-//             for(; j < file_list.size(); j++) {
-//                 if(tax_id_list.find(file_list[j]) == tax_id_list.end()) {
-//                     break;
-//                 }
-//             }
-//             if(j == file_list.size()) {
-//                 rv.push_back(oids[i]);
-//             }
-//         }
-//     }
-// }
-// ```
 /// `CSeqDBLMDB::NegativeTaxIdsToOids`: the OIDs that `-negative_taxids` removes.
 ///
 /// Candidates are the OIDs of [`get_oids_for_tax_ids`]. A candidate is selected (= excluded
@@ -930,53 +582,6 @@ pub fn negative_tax_ids_to_oids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized, R3: Re
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:415-459
-// ```c++
-// class CLookupSeqIds
-// {
-// public:
-//     CLookupSeqIds(CMemoryFile & file): m_IndexStart((Uint8*) file.GetPtr()), m_DataStart((char *) file.GetPtr()) {
-//         if(m_IndexStart == NULL){
-//             NCBI_THROW( CSeqDBException, eArgErr, "Failed to open oid-to-seqid lookup file");
-//         }
-//
-//         Uint8 num_of_oids = *m_IndexStart;
-//         m_IndexStart ++;
-//         m_DataStart += (8 * (num_of_oids + 1));
-//     }
-//
-//     inline void GetSeqIdListForOid(blastdb::TOid oid, vector<string> & idlist);
-// private:
-//
-//     Uint8 * m_IndexStart;
-//     char * m_DataStart;
-// };
-//
-// void CLookupSeqIds::GetSeqIdListForOid(blastdb::TOid oid, vector<string> & idlist)
-// {
-//     Uint8 * index_ptr = m_IndexStart + oid;
-//     Char * end = m_DataStart + (*index_ptr);
-//     index_ptr--;
-//     Char * begin = (oid == 0) ? m_DataStart:m_DataStart + (*index_ptr);
-//     while (begin < end) {
-//         unsigned char id_len = *begin;
-//         begin ++;
-//         if(id_len == 0xFF) {
-//             Uint4 long_id_len = *((Uint4 *) begin);
-//             begin +=4;
-//             string id;
-//             id.assign(begin, long_id_len);
-//             begin += long_id_len;
-//             idlist.push_back(id);
-//         }
-//         else {
-//             string id;
-//             id.assign(begin, id_len);
-//             begin += id_len;
-//             idlist.push_back(id);
-//         }
-//     }
-// }
-// ```
 /// `CLookupSeqIds` over a `.nos`/`.pos` file read by position.
 pub struct OidSeqIds<'r, R: ReadAt + ?Sized> {
     src: &'r R,
@@ -1240,16 +845,16 @@ mod tests {
         let nto: Vec<u8> = Vec::new();
         let e = get_oids_for_tax_ids(&env, &nto, 7, &set(&[1])).unwrap_err();
         assert_eq!(e, TaxError::NoTaxInfo);
-        assert_eq!(e.message("p5.ptf"), "No taxonomy info found in p5.ptf");
+        assert_eq!(e.message(b"p5.ptf"), b"No taxonomy info found in p5.ptf");
         assert_eq!(get_db_tax_ids(&env).unwrap_err(), TaxError::NoTaxInfo);
         assert_eq!(
-            accessions_lookup_error("p5.pdb"),
-            "Accessions to Oids lookup error in p5.pdb"
+            accessions_lookup_error(b"p5.pdb"),
+            b"Accessions to Oids lookup error in p5.pdb"
         );
         let e = TaxError::Lookup("detail".into());
         assert_eq!(
-            e.message("x.ntf"),
-            "Taxonomy Id to Oids lookup error in x.ntf"
+            e.message(b"x.ntf"),
+            b"Taxonomy Id to Oids lookup error in x.ntf"
         );
         assert_eq!(e.detail(), "detail");
         // volinfo/volname with different counts and a missing volinfo: synthetic LMDB is covered in lmdb_read

@@ -6,46 +6,9 @@
 //! J included.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:185-232
-//! ```c++
-//!     if (strcmp(matrix_name, "BLOSUM45") == 0)
-//!         packed_matrix = &NCBISM_Blosum45;
-//!     ...
-//!     else if (strcmp(matrix_name, "IDENTITY") == 0)
-//!         	packed_matrix = &NCBISM_Identity;
-//!     else {
-//!         string prog_name = Blast_ProgramNameFromType(
-//!                                            m_Options.GetProgramType());
-//!         if (prog_name != "blastn" && prog_name != "megablast") {
-//!             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-//!                         "unsupported score matrix");
-//!         }
-//!     }
-//!
-//!     if (packed_matrix) {
-//!         SNCBIFullScoreMatrix m;
-//!
-//!         NCBISM_Unpack(packed_matrix, &m);
-//!
-//!         for (unsigned int i = 0; i < kMatrixCols; i++) {
-//!             for (unsigned int j = 0; j < kMatrixCols; j++) {
-//!                 m_Matrix[i][j] = m.s[i][j];
-//! ```
 //! (`kMatrixCols` = 28, the NCBIstdaa codes; `NCBISM_Unpack` gives a letter outside the
 //! packed symbols the table's `defscore`, util/tables/raw_scoremat.c:81-118.)
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:392-425
-//! ```c++
-//! CBlastFormattingMatrix::CBlastFormattingMatrix(int** data, unsigned int nrows,
-//!                                                unsigned int ncols)
-//! {
-//!     const int kAsciiSize = 256;
-//!     Resize(kAsciiSize, kAsciiSize, INT_MIN);
-//!     ...
-//!     // Convert to IUPACaa using the CSeqportUtil::Convert method.
-//!     ...
-//!             if (iupacaa_values[row] >= 0 && iupacaa_values[col] >= 0) {
-//!                 (*this)((int)iupacaa_values[row], (int)iupacaa_values[col]) =
-//!                     data[row][col];
-//! ```
 //! So the matrix is indexed by IUPACaa letters; `-` and `*` have no IUPACaa letter (INT_MIN),
 //! U and O are letters outside the packed symbols (BLOSUM62's `defscore` -4), and J has the
 //! packed table's J row.
@@ -90,42 +53,8 @@ pub fn is_structured_xml(outfmt: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-// ```c++
-//     else {
-//         string prog_name = Blast_ProgramNameFromType(
-//                                            m_Options.GetProgramType());
-//         if (prog_name != "blastn" && prog_name != "megablast") {
-//             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-//                         "unsupported score matrix");
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
-// ```c++
-// 	if((m_IsIterative) || (m_IsBl2Seq)) {
-// 		if(m_AccumulatedResults.empty()) {
-// 			...
-// 			m_AccumulatedResults.push_back(res);
-// 			...
-// 		else {
-// 			CConstRef<CSeq_id> query_id = results.GetSeqId();
-// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
-// 				m_AccumulatedResults.push_back(res);
-// 			}
-// 			else {
-// 				CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
-// 				if(m_IsBl2Seq) {
-// 				    CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212
-// ```c++
-// CBlastFormat::PrintEpilog(const blast::CBlastOptions& options)
-// {
-//     if ((m_FormatType == CFormattingArgs::eXml2) || (m_FormatType == CFormattingArgs::eJson) ||
-//         (m_FormatType == CFormattingArgs::eXml2_S) || (m_FormatType == CFormattingArgs::eJson_S)) {
-//     	if(!m_AccumulatedResults.empty()) {
-//     		CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
-//     		if(m_IsBl2Seq) {
-//     			CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
-// ```
 /// Where NCBI's run stops when its BLAST XML family report data does not know the matrix name
 /// (`xml_formatting_failure`): the report data, and with it the error, is made where NCBI writes
 /// a query's report (NCBI BLAST+ 2.17.0, probe K/k4f of line RG, 221 runs).
@@ -216,7 +145,7 @@ fn is_blast_xml(outfmt: &str) -> bool {
 pub fn unsupported_score_matrix() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 3,
-        message: "BLAST engine error: unsupported score matrix\n".to_string(),
+        message: "BLAST engine error: unsupported score matrix\n".into(),
     }
     .into()
 }
@@ -314,8 +243,11 @@ mod tests {
         let error = unsupported_score_matrix();
         let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
         assert_eq!(
-            (native.exit, native.message.as_str()),
-            (3, "BLAST engine error: unsupported score matrix\n")
+            (native.exit, native.message.as_slice()),
+            (
+                3,
+                b"BLAST engine error: unsupported score matrix\n".as_slice()
+            )
         );
     }
 

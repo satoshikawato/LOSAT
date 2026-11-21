@@ -3,44 +3,7 @@
 //! texts for its errors.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
-//! ```c++
-//!         if (NULL != m_Options->GetWindowMaskerDatabase() ||
-//!             0    != m_Options->GetWindowMaskerTaxId()) {
-//!
-//!             if (m_QueryVector.NotEmpty()) {
-//!                 Blast_FindWindowMaskerLoc(*m_QueryVector, m_Options);
-//!             } else {
-//!                 Blast_FindWindowMaskerLoc(*m_TSeqLocVector, m_Options);
-//!             }
-//!         }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:280-313
-//! ```c++
-//! Blast_FindWindowMaskerLoc(CBlastQueryVector & queries, const string & lstat)
-//! {
-//!     AutoPtr<CSeqMasker> masker(s_BuildSeqMasker(lstat));
-//!
-//!     for(size_t j = 0; j < queries.Size(); j++) {
-//!         ...
-//!         CSeqVector psv(*seqloc,
-//!                        *queries.GetScope(j),
-//!                        CBioseq_Handle::eCoding_Iupac,
-//!                        eNa_strand_plus);
-//!         ...
-//!         AutoPtr<CSeqMasker::TMaskList> pos_masks((*masker)(psv));
-//!
-//!         TMaskedQueryRegions mqr;
-//!
-//!         s_BuildMaskedRanges(*pos_masks,
-//!                             *seqloc,
-//!                             *query_seq_id,
-//!                             & mqr,
-//!                             0);
-//!
-//!         query.SetMaskedRegions(mqr);
-//!     }
-//! }
-//! ```
 //! The masks run after DUST in `x_CalculateMasks` and `SetMaskedRegions` replaces every mask
 //! of the query, its DUST and lower-case masks too (NCBI 2.17.0 gives the same bytes with
 //! and without `-dust` and `-lcase_masking`). NCBI reads the counts file for each query batch
@@ -102,29 +65,7 @@ impl fmt::Debug for WindowMasker {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458
-/// ```c++
-///     if (args.Exist(kArgWindowMaskerDatabase) &&
-///         args[kArgWindowMaskerDatabase]) {
-///         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
-///         const CSeqMaskerIstatFactory::EStatType type =
-///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
-///         if (type != CSeqMaskerIstatFactory::eOBinary &&
-///             type != CSeqMaskerIstatFactory::eBinary) {
-///             string msg("Only optimized binary windowmasker stat files are supported");
-///             NCBI_THROW(CInputException, eInvalidInput, msg);
-///         }
-///
-///         opt.SetWindowMaskerDatabase(stat_file.c_str());
-///         filter_dbs++;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-/// ```c++
-///     catch (const CException& e) {                                           \
-///         LOG_POST(Error << "Error: " << e.what());                           \
-///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-///     }                                                                       \
-/// ```
 /// A file that cannot be opened is `CATCH_ALL`'s exception (exit 255, its report and an empty
 /// line); a format other than the two binary ones is the input error of the filtering options
 /// (exit 1). LOSAT's check reads the file on the stream functions NCBI's does; its other
@@ -144,7 +85,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
                 message: format!(
                     "BLAST query/options error: Only optimized binary windowmasker stat files are supported\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
-                ),
+                ).into(),
             });
         }
     }
@@ -162,15 +103,6 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
 /// `s_BuildSeqMasker( lstat )`: the masker made from the counts file `name`, or its error.
 fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:99-109
-    // ```c++
-    // CSeqMasker* s_BuildSeqMasker(const string & lstat)
-    // {
-    //     Uint1 arg_window_size            = 0; // [allow setting of this field?]
-    //     Uint4 arg_window_step            = 1;
-    //     Uint1 arg_unit_step              = 1;
-    //     Uint4 arg_textend                = 0; // [allow setting of this field?]
-    //     Uint4 arg_cutoff_score           = 0; // [allow setting of this field?]
-    // ```
     let params = MaskerParams::default();
     source
         .counts(name, &params)
@@ -188,13 +120,6 @@ fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskErro
 /// too.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:418-422
-/// ```c++
-/// Blast_FindWindowMaskerLocTaxId(CBlastQueryVector & queries, int taxid)
-/// {
-///     string db = WindowMaskerTaxidToDb(taxid);
-///     Blast_FindWindowMaskerLoc(queries, db);
-/// }
-/// ```
 /// The directory and the file do not change during a run, so LOSAT looks for the file once.
 pub(crate) fn open_taxid(
     taxid: i32,
@@ -261,26 +186,7 @@ impl WindowMasker {
     /// `first`: the run's first load (the set-up of its first query batch).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
-    /// ```c++
-    ///         if (NULL != m_Options->GetWindowMaskerDatabase() ||
-    ///             0    != m_Options->GetWindowMaskerTaxId()) {
-    ///
-    ///             if (m_QueryVector.NotEmpty()) {
-    ///                 Blast_FindWindowMaskerLoc(*m_QueryVector, m_Options);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:411-422
-    /// ```c++
-    /// string WindowMaskerTaxidToDb(int taxid)
-    /// {
-    ///     string path = s_FindPathToWM();
-    ///     return WindowMaskerTaxidToDb(path, taxid);
-    /// }
-    ///
-    /// void
-    /// Blast_FindWindowMaskerLocTaxId(CBlastQueryVector & queries, int taxid)
-    /// {
-    ///     string db = WindowMaskerTaxidToDb(taxid);
-    /// ```
     pub(crate) fn load_posts(&self, first: bool) -> &Posts {
         if first {
             &self.first_load
@@ -310,31 +216,6 @@ impl WindowMasker {
     /// complement, moved by nothing (the letters start at the query's location).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:162-189
-    /// ```c++
-    ///     TSeqPos query_start = seqloc.GetStart(eExtreme_Positional);
-    ///     ...
-    ///     ITERATE(CSeqMasker::TMaskList, pr, masks) {
-    ///         CRef<CSeq_interval> ival(new CSeq_interval);
-    ///
-    ///         TSeqPos
-    ///             start  = pr->first,
-    ///             end    = pr->second;
-    ///
-    ///         ival->SetFrom (query_start + start);
-    ///         ival->SetTo   (query_start + end);
-    ///         ival->SetId   (query_id);
-    ///         ival->SetStrand(eNa_strand_both);
-    ///
-    ///         if (mqr) {
-    ///             CRef<CSeqLocInfo> info_plus
-    ///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFramePlus1));
-    ///             mqr->push_back(info_plus);
-    ///
-    ///             CRef<CSeqLocInfo> info_minus
-    ///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFrameMinus1));
-    ///             mqr->push_back(info_minus);
-    ///         }
-    /// ```
     /// `psv` is the vector of the query's Seq-loc on `eNa_strand_plus` relative to the
     /// location: with `-strand minus` the location is on the minus strand and the vector is
     /// the reverse complement of the searched letters. The intervals of that vector are put
@@ -382,25 +263,7 @@ impl WindowMasker {
 /// `first_load` is the batch's first query's post, `later_loads` the others'.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:149-151
-/// ```c++
-///     catch(CException & e) {
-///         NCBI_THROW(CBlastException, eSetup, e.what());
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
-/// ```c++
-///         } catch (const CException& e) {
-///             ...
-///             CRef<CSearchMessage> m
-///                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-///             messages[index].push_back(m);
-///             s_InvalidateQueryContexts(qinfo, index);
-///         }
-///     ...
-///     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-///         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-///     }
-/// ```
 /// `x_CalculateMasks` is called again for each query (`GetMaskedRegions`) while it has not
 /// succeeded, so each query reads the file again and gets the same exception: the query's
 /// message is the severity, the exception's text and a space (`TSearchMessages::ToString`),
@@ -417,28 +280,22 @@ pub(crate) fn batch_error(
     later_loads: &Posts,
 ) -> Option<(Posts, NativeError)> {
     let text = match error {
-        WinMaskError::BadIndex { .. } => error.to_string(),
+        WinMaskError::BadIndex { .. } => error.to_string().into_bytes(),
         _ => error.create_report()?,
     };
     // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:171-174
-    // ```c
-    //             else if( !input_stream.read( (char *)cba, cba_size*sizeof( Uint4 ) ) )
-    //             {
-    //                 ERR_POST( Warning << "file read failed: "
-    //                                   << "bit array optimizations are not used." );
-    // ```
     let mut warnings = Posts::new();
-    let mut message = String::from("BLAST engine error: ");
+    let mut message = b"BLAST engine error: ".to_vec();
     for query in 0..queries {
         warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
             warnings.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
         }
-        message.push_str("Warning: ");
-        message.push_str(&text);
-        message.push(' ');
+        message.extend_from_slice(b"Warning: ");
+        message.extend_from_slice(&text);
+        message.push(b' ');
     }
-    message.push('\n');
+    message.push(b'\n');
     Some((warnings, NativeError { exit: 3, message }))
 }
 
@@ -514,7 +371,7 @@ mod tests {
         assert_eq!(
             missing.message,
             // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
-            crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n"))
+            crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n")).as_bytes()
         );
         // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
         // cannot open a directory as a file, so the open fails first there: the "could not open"
@@ -524,17 +381,16 @@ mod tests {
             assert_eq!(directory.exit, 1);
             assert_eq!(
                 directory.message,
-                "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
+                b"BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
             );
         } else {
             assert_eq!(directory.exit, 255);
             assert!(
-                directory.message.ends_with(&format!(
-                    "could not open {}\n\n",
-                    env!("CARGO_MANIFEST_DIR")
-                )),
+                directory.message.ends_with(
+                    format!("could not open {}\n\n", env!("CARGO_MANIFEST_DIR")).as_bytes()
+                ),
                 "{}",
-                directory.message
+                String::from_utf8_lossy(&directory.message)
             );
         }
         let binary = open(&counts_path("dm2L_u9.binary"), &FileCounts).unwrap();
@@ -607,11 +463,12 @@ mod tests {
         // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             error.message,
-            crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n"))
+            crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n")).as_bytes()
         );
         // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
         let ascii = open_taxid(10, root, &FileCounts).unwrap();
         let report = ascii.build_error().unwrap().create_report().unwrap();
+        let report = String::from_utf8(report).unwrap();
         assert!(
             report.contains("Cannot convert string 'AAAAAAAAA' to unsigned int, overflow"),
             "{report}"
@@ -655,7 +512,7 @@ mod tests {
         // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             error.message,
-            crate::wording::losat_text(&format!("BLAST engine error: {unit}{unit}\n"))
+            crate::wording::losat_text(&format!("BLAST engine error: {unit}{unit}\n")).as_bytes()
         );
         let short = WinMaskError::Format {
             site: FormatSite::HashTable,
@@ -678,7 +535,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             bad_index.message,
-            "BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
+            b"BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
         );
         assert!(
             batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none()

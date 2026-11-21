@@ -27,61 +27,7 @@ use std::io::Read;
 use crate::utils::format_guess::FormatGuess;
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:841-850
-// ```c++
-// CMakeBlastDBApp::TFormat
-// CMakeBlastDBApp::x_GuessFileType(CNcbiIstream & input)
-// {
-//     CFormatGuess fg(input);
-//     fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eBinaryASN);
-//     fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eTextASN);
-//     fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eFasta);
-//     fg.GetFormatHints().DisableAllNonpreferred();
-//     return fg.GuessFormat();
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:452-491
-// ```c++
-// CFormatGuess::EFormat
-// CFormatGuess::GuessFormat( EOnError onerror )
-// {
-//     //sqd-4036:
-//     // make sure we got something to work with
-//     //
-//     if (!x_TestInput(m_Stream, onerror)) {
-//         return eUnknown;
-//     }
-//     if (!EnsureTestBuffer()) {
-//         //one condition that won't allow us to get a good test buffer is an ascii
-//         // file without any line breaks. so before giving up, let's specifically
-//         // try any formats that would allow for that:
-//         if(TestFormatNewick(eQuick)) {
-//             return CFormatGuess::eNewick;
-//         }
-//         return CFormatGuess::eUnknown;
-//     }
-//
-//     EMode mode = eQuick;
-//
-//     // First, try to use hints
-//     if ( !m_Hints.IsEmpty() ) {
-//         for (size_t f = 0; f < sm_CheckOrder_Size; ++f) {
-//             EFormat fmt = EFormat( sm_CheckOrder[f] );
-//             if (m_Hints.IsPreferred(fmt)  &&  x_TestFormat(fmt, mode)) {
-//                 return fmt;
-//             }
-//         }
-//     }
-//
-//     // Check other formats, skip the ones that are disabled through hints
-//     for (size_t f = 0; f < sm_CheckOrder_Size; ++f) {
-//         EFormat fmt = EFormat( sm_CheckOrder[f] );
-//         if ( ! m_Hints.IsDisabled(fmt)  &&  x_TestFormat(fmt, mode) ) {
-//             return fmt;
-//         }
-//     }
-//     return eUnknown;
-// }
-// ```
 /// `true` when makeblastdb takes the input for FASTA (no warning): `x_GuessFileType` returns `CFormatGuess::eFasta`.
 ///
 /// The preferred formats are tried in the order of `sm_CheckOrder`, where `eFasta` precedes `eTextASN` and `eBinaryASN`,

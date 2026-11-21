@@ -11,15 +11,6 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:55-61
-// ```c
-// const double kPSINearIdentical = 0.94;
-// const double kPSIIdentical = 1.0;
-// const unsigned int kQueryIndex = 0;
-// const double kEpsilon = 0.0001;
-// const int kPSIScaleFactor = 200;
-// const double kPositScalingPercent = 0.05;
-// const Uint4 kPositScalingNumIterations = 10;
-// ```
 const K_PSI_NEAR_IDENTICAL: f64 = 0.94;
 const K_PSI_IDENTICAL: f64 = 1.0;
 const K_QUERY_INDEX: usize = 0;
@@ -29,29 +20,16 @@ const K_POSIT_SCALING_PERCENT: f64 = 0.05;
 const K_POSIT_SCALING_NUM_ITERATIONS: u32 = 10;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:550
-// ```c
-// #define EFFECTIVE_ALPHABET 20 /**< size of alphabet used for pseudocounts calculations */
-// ```
 const EFFECTIVE_ALPHABET: usize = 20;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2065-2066
-// ```c
-// #define MAX_IND_OBSERVATIONS  400 /**< max number of independent observation for pseudocount calculation */
-// #define PSEUDO_MAX 1000000 /**< effective infinity */
-// ```
 const MAX_IND_OBSERVATIONS: usize = 400;
 const PSEUDO_MAX: f64 = 1000000.0;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_math.h:161
-// ```c
-// #define NCBIMATH_LN2	0.69314718055994530941723212145818
-// ```
 const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:122
-// ```c
-// #define BLAST_SCORE_MAX INT2_MAX   /**< maximum allowed score (for one letter comparison). */
-// ```
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
 const GAP: u8 = ncbistdaa::GAP;
@@ -59,13 +37,6 @@ const X: u8 = ncbistdaa::X;
 const STAR: u8 = ncbistdaa::STOP;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
-// ```c
-// long BLAST_Nint(double x)
-// {
-//    x += (x >= 0. ? 0.5 : -0.5);
-//    return (long)x;
-// }
-// ```
 fn blast_nint(x: f64) -> i64 {
     let x = x + if x >= 0.0 { 0.5 } else { -0.5 };
     x as i64
@@ -82,20 +53,6 @@ pub(super) struct PackedMsa {
 
 impl PackedMsa {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:159-178
-    // ```c
-    //     /* Copy the multiple sequence alignment data */
-    //     for (s = 0; s < msa->dimensions->num_seqs + 1; s++) {
-    //         for (p = 0; p < msa->dimensions->query_length; p++) {
-    //             ASSERT(msa->data[s][p].letter <= BLASTAA_SIZE);
-    //             retval->data[s][p].letter = msa->data[s][p].letter;
-    //             retval->data[s][p].is_aligned = msa->data[s][p].is_aligned;
-    //         }
-    //     }
-    //     ...
-    //     for (s = 0; s < msa->dimensions->num_seqs + 1; s++) {
-    //         retval->use_sequence[s] = TRUE;
-    //     }
-    // ```
     pub(super) fn new(msa: &PsiMsa) -> Self {
         Self {
             query_length: msa.query_length,
@@ -106,16 +63,6 @@ impl PackedMsa {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:209-224
-    // ```c
-    // _PSIPackedMsaGetNumberOfAlignedSeqs(const _PSIPackedMsa* msa)
-    // {
-    //     ...
-    //     for (i = 0; i < msa->dimensions->num_seqs + 1; i++) {
-    //         if (msa->use_sequence[i]) {
-    //             retval++;
-    //         }
-    //     }
-    // ```
     // The count includes the query, so `_PSIMsaNew`'s `num_seqs` is one more than the
     // sequences it keeps: its last row stays empty (`Msa::new`).
     fn number_of_aligned_seqs(&self) -> usize {
@@ -145,37 +92,6 @@ pub(super) struct Msa {
 
 impl Msa {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:325-385
-    // ```c
-    //     retval->dimensions->num_seqs = _PSIPackedMsaGetNumberOfAlignedSeqs(msa);
-    //
-    //     retval->cell = (_PSIMsaCell**)
-    //         _PSIAllocateMatrix(retval->dimensions->num_seqs + 1,
-    //                            retval->dimensions->query_length,
-    //                            sizeof(_PSIMsaCell));
-    //     ...
-    //         for (s = 0; s < msa->dimensions->num_seqs + 1; s++) {
-    //
-    //             if ( !msa->use_sequence[s] ) {
-    //                 continue;
-    //             }
-    //
-    //             for (p = 0; p < retval->dimensions->query_length; p++) {
-    //                 retval->cell[ss][p].letter = msa->data[s][p].letter;
-    //                 retval->cell[ss][p].is_aligned = msa->data[s][p].is_aligned;
-    //                 retval->cell[ss][p].extents.left = -1;
-    //                 retval->cell[ss][p].extents.right =
-    //                     msa->dimensions->query_length;
-    //             }
-    //             ss++;
-    //         }
-    //     ...
-    //     for (p = 0; p < retval->dimensions->query_length; p++) {
-    //         ASSERT(IS_residue(msa->data[kQueryIndex][p].letter));
-    //         retval->query[p] = msa->data[kQueryIndex][p].letter;
-    //     }
-    //     ...
-    //     _PSIUpdatePositionCounts(retval);
-    // ```
     // `_PSIAllocateMatrix` allocates with `calloc`: the rows not copied hold zeros.
     pub(super) fn new(packed: &PackedMsa) -> Self {
         let query_length = packed.query_length;
@@ -213,23 +129,13 @@ impl Msa {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1011-1024
-    // ```c
-    //     for (s = 0; s < kNumberOfSeqs; s++) {
-    //         _PSIMsaCell* pos = msa->cell[s];   /* entry in MSA matrix */
-    //
-    //         for (p = 0; p < kQueryLength; p++, pos++) {
-    //             if (pos->is_aligned) {
-    //                 const Uint1 res = pos->letter;
-    //                 if (res >= msa->alphabet_size) {
-    //                     continue;
-    //                 }
-    //                 msa->residue_counts[p][res]++;
-    //                 msa->num_matching_seqs[p]++;
-    //             }
-    //         }
-    //     }
-    // ```
     fn update_position_counts(&mut self) {
+        // Reset the data in case this function is called again after the initial counts (the
+        // structure group's compatibility mode).
+        self.num_matching_seqs.fill(0);
+        for counts in &mut self.residue_counts {
+            *counts = [0; BLASTAA_SIZE];
+        }
         for row in &self.cell {
             for (p, pos) in row.iter().enumerate() {
                 if pos.is_aligned {
@@ -243,6 +149,18 @@ impl Msa {
             }
         }
     }
+
+    /// `_PSIStructureGroupCustomization(msa)`: the query row is made of gaps that are not aligned
+    /// (`ignore_msa_master`), and the counts are made again.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:799-808
+    pub(super) fn structure_group_customization(&mut self) {
+        for cell in &mut self.cell[K_QUERY_INDEX] {
+            cell.letter = 0;
+            cell.is_aligned = false;
+        }
+        self.update_position_counts();
+    }
 }
 
 /// `_PSIAlignedBlock`.
@@ -255,14 +173,6 @@ pub(super) struct AlignedBlock {
 
 impl AlignedBlock {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:511-528
-    // ```c
-    //     retval->size = (Uint4*) calloc(query_length, sizeof(Uint4));
-    //     ...
-    //     for (i = 0; i < query_length; i++) {
-    //         retval->pos_extnt[i].left = -1;
-    //         retval->pos_extnt[i].right = query_length;
-    //     }
-    // ```
     pub(super) fn new(query_length: usize) -> Self {
         Self {
             pos_extnt: vec![(-1, query_length as i32); query_length],
@@ -286,41 +196,7 @@ pub(super) struct SequenceWeights {
 
 impl SequenceWeights {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:564-616
-    // ```c
-    //     retval->row_sigma = (double*) calloc(dimensions->num_seqs + 1,
-    //                                          sizeof(double));
-    //     ...
-    //     retval->norm_seq_weights = (double*) calloc(dimensions->num_seqs + 1,
-    //                                                 sizeof(double));
-    //     ...
-    //     retval->sigma = (double*) calloc(dimensions->query_length, sizeof(double));
-    //     ...
-    //     retval->match_weights = (double**)
-    //         _PSIAllocateMatrix(dimensions->query_length,
-    //                            sbp->alphabet_size,
-    //                            sizeof(double));
-    //     ...
-    //     retval->std_prob = BLAST_GetStandardAaProbabilities();
-    //     ...
-    //     retval->gapless_column_weights = (double*)
-    //         calloc(dimensions->query_length, sizeof(double));
-    //     ...
-    //     retval->posDistinctDistrib = (int**)
-    //         _PSIAllocateMatrix(1+dimensions->query_length,
-    //                            1+EFFECTIVE_ALPHABET,
-    //                            sizeof(int));
-    //     ...
-    //     retval->posNumParticipating = (int*) calloc(1+dimensions->query_length, sizeof(int));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1341-1346
-    // ```c
-    //     standard_probabilities = Blast_ResFreqNew(&sbp);
-    //     Blast_ResFreqStdComp(&sbp, standard_probabilities);
-    //
-    //     for (i = 0; i < (Uint4) sbp.alphabet_size; i++) {
-    //         retval[i] = standard_probabilities->prob[i];
-    //     }
-    // ```
     pub(super) fn new(num_seqs: usize, query_length: usize) -> Self {
         Self {
             row_sigma: vec![0.0; num_seqs + 1],
@@ -344,17 +220,7 @@ pub(super) struct InternalPssm {
 }
 
 impl InternalPssm {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:435-460
-    // ```c
-    //     retval->ncols = query_length;
-    //     retval->nrows = alphabet_size;
-    //
-    //     retval->pssm = (int**) _PSIAllocateMatrix(retval->ncols,
-    //                                               retval->nrows,
-    //                                               sizeof(int));
-    //     ...
-    //     retval->pseudocounts = (double*) calloc(query_length, sizeof(double));
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:434-460
     pub(super) fn new(query_length: usize) -> Self {
         Self {
             pssm: vec![[0; BLASTAA_SIZE]; query_length],
@@ -370,30 +236,6 @@ impl InternalPssm {
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:947-988
-// ```c
-// _PSIPurgeBiasedSegments(_PSIPackedMsa* msa)
-// {
-//     ...
-//     s_PSIPurgeSelfHits(msa);
-//     s_PSIPurgeNearIdenticalAlignments(msa);
-//     ...
-// s_PSIPurgeSelfHits(_PSIPackedMsa* msa)
-// {
-//     ...
-//     for (s = kQueryIndex + 1; s < msa->dimensions->num_seqs + 1; s++) {
-//         s_PSIPurgeSimilarAlignments(msa, kQueryIndex, s, kPSIIdentical);
-//     }
-// }
-// ...
-//     for (i = 1; i < msa->dimensions->num_seqs + 1; i++) {
-//         for (j = 1; (i + j) < msa->dimensions->num_seqs + 1; j++) {
-//             /* N.B.: The order of comparison of sequence pairs is deliberate,
-//              * tests on real data indicated that this approach allowed more
-//              * sequences to be purged */
-//             s_PSIPurgeSimilarAlignments(msa, j, (i + j), kPSINearIdentical);
-//         }
-//     }
-// ```
 pub(super) fn purge_biased_segments(msa: &mut PackedMsa) {
     for s in K_QUERY_INDEX + 1..msa.num_seqs + 1 {
         purge_similar_alignments(msa, K_QUERY_INDEX, s, K_PSI_IDENTICAL);
@@ -424,14 +266,6 @@ struct AlignmentTraits {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1066-1072
-// ```c
-// _PSIResetAlignmentTraits(_PSIAlignmentTraits* traits, Uint4 position)
-// {
-//     ASSERT(traits);
-//     memset((void*) traits, 0, sizeof(_PSIAlignmentTraits));
-//     traits->start = position;
-// }
-// ```
 fn reset_alignment_traits(traits: &mut AlignmentTraits, position: u32) {
     *traits = AlignmentTraits {
         start: position,
@@ -440,28 +274,6 @@ fn reset_alignment_traits(traits: &mut AlignmentTraits, position: u32) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1076-1112
-// ```c
-//     switch (*state) {
-//     case eCounting:
-//         /* Purge aligned region if max_percent_identity is exceeded */
-//         {
-//             if (traits->effective_length > 0) {
-//                 const double percent_identity =
-//                     ((double)traits->n_identical) / traits->effective_length;
-//                 if (percent_identity >= max_percent_identity) {
-//                     const unsigned int align_stop =
-//                         traits->start + traits->effective_length +
-//                         traits->n_x_residues;
-//                     int rv = _PSIPurgeAlignedRegion(msa, seq_index,
-//                                                     traits->start, align_stop);
-//                     ...
-//         *state = eResting;
-//         break;
-//
-//     case eResting:
-//         /* No-op */
-//         break;
-// ```
 fn handle_neither_aligned(
     traits: &AlignmentTraits,
     state: &mut PurgeState,
@@ -482,65 +294,7 @@ fn handle_neither_aligned(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1185-1252
-// ```c
-//     if ( seq_index1 == seq_index2 ||
-//          !msa->use_sequence[seq_index1] ||
-//          !msa->use_sequence[seq_index2] ) {
-//         return;
-//     }
-//
-//     _PSIResetAlignmentTraits(&traits, p);
-//     ...
-//     for (p = 0; p < kQueryLength; p++, seq1++, seq2++) {
-//         Boolean kPos1Aligned = (seq_index1 == kQueryIndex ?
-//                                       FALSE : seq1->is_aligned);
-//         Boolean kPos2Aligned = seq2->is_aligned;
-//
-//         /* if neither position is aligned */
-//         if (!kPos1Aligned && !kPos2Aligned) {
-//             _handleNeitherAligned(&traits, &state, msa, seq_index2,
-//                                   max_percent_identity);
-//         } else {
-//             Boolean neither_is_X =
-//                seq1->letter != kXResidue && seq2->letter != kXResidue;
-//
-//             /* Either one of the is aligned*/
-//             if (neither_is_X) {
-//                 _handleEitherAlignedNeitherX(&traits, &state, p);
-//             } else {    /* either is X */
-//                 _handleEitherAlignedEitherX(&traits, &state);
-//             }
-//
-//             if (neither_is_X && (kPos2Aligned && seq1->is_aligned) &&
-//                 (seq1->letter == seq2->letter)) {
-//                 _handleBothAlignedSameResidueNoX(&traits, &state);
-//             }
-//         }
-//     }
-//     _handleNeitherAligned(&traits, &state, msa, seq_index2,
-//                           max_percent_identity);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1118-1183
-// ```c
-// _handleBothAlignedSameResidueNoX(...)
-//     case eCounting:
-//         traits->n_identical++;
-// ...
-// _handleEitherAlignedEitherX(...)
-//     case eCounting:
-//         traits->n_x_residues++;
-// ...
-// _handleEitherAlignedNeitherX(...)
-//     case eCounting:
-//         traits->effective_length++;
-//         break;
-//
-//     case eResting:
-//         _PSIResetAlignmentTraits(traits, position);
-//         traits->effective_length = 1;   /* count this residue */
-//         *state = eCounting;
-//         break;
-// ```
 // The cells are read as they are when each position is reached: a purge rewrites the cells of
 // `seq_index2` that the loop has passed.
 fn purge_similar_alignments(
@@ -593,44 +347,6 @@ fn purge_similar_alignments(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2762-2806
-// ```c
-// s_PSIDiscardIfUnused(_PSIPackedMsa* msa, unsigned int seq_index)
-// {
-//     ...
-//     for (i = 0; i < msa->dimensions->query_length; i++) {
-//         if (msa->data[seq_index][i].is_aligned) {
-//             contains_aligned_regions = TRUE;
-//             break;
-//         }
-//     }
-//
-//     if ( !contains_aligned_regions ) {
-//         msa->use_sequence[seq_index] = FALSE;
-//     }
-// }
-//
-// int
-// _PSIPurgeAlignedRegion(_PSIPackedMsa* msa,
-//                        unsigned int seq_index,
-//                        unsigned int start,
-//                        unsigned int stop)
-// {
-//     ...
-//     if ( !msa ||
-//         seq_index == 0 ||
-//         seq_index > msa->dimensions->num_seqs + 1 ||
-//         stop > msa->dimensions->query_length) {
-//         return PSIERR_BADPARAM;
-//     }
-//
-//     sequence_position = msa->data[seq_index];
-//     for (i = start; i < stop; i++) {
-//         sequence_position[i].letter = 0;
-//         sequence_position[i].is_aligned = FALSE;
-//     }
-//
-//     s_PSIDiscardIfUnused(msa, seq_index);
-// ```
 fn purge_aligned_region(msa: &mut PackedMsa, seq_index: usize, start: usize, stop: usize) {
     if seq_index == 0 || seq_index > msa.num_seqs + 1 || stop > msa.query_length {
         return;
@@ -652,64 +368,14 @@ fn purge_aligned_region(msa: &mut PackedMsa, seq_index: usize, start: usize, sto
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:827-859
-// ```c
-//     retval = s_PSIValidateNoFlankingGaps(msa);
-//     ...
-//     if ( !ignore_unaligned_positions ) {
-//         retval = s_PSIValidateAlignedColumns(msa);
-//     ...
-//     retval = s_PSIValidateNoGapsInQuery(msa);
-//     ...
-//     retval = s_PSIValidateParticipatingSequences(msa);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:703-797
-// ```c
-//     /* Look for starting gaps in alignments */
-//     for (s = 0; s < msa->dimensions->num_seqs + 1; s++) {
-//         /* find the first aligned residue */
-//         for (p = 0; p < (Int4) msa->dimensions->query_length; p++) {
-//             if (msa->cell[s][p].is_aligned) {
-//                 if (msa->cell[s][p].letter == kGapResidue) {
-//                     return PSIERR_STARTINGGAP;
-//                 } else {
-//                     break;
-//     ...
-//     /* Look for ending gaps in alignments */
-//     ...
-//         for (p = msa->dimensions->query_length - 1; p >= 0; p--) {
-//             if (msa->cell[s][p].is_aligned) {
-//                 if (msa->cell[s][p].letter == kGapResidue) {
-//                     return PSIERR_ENDINGGAP;
-//     ...
-//     for (p = 0; p < msa->dimensions->query_length; p++) {
-//         Boolean found_aligned_sequence = FALSE;
-//         Boolean found_non_gap_residue = FALSE;
-//         for (s = kQueryIndex; s < msa->dimensions->num_seqs + 1; s++) {
-//             if (msa->cell[s][p].is_aligned) {
-//                 found_aligned_sequence = TRUE;
-//                 if (msa->cell[s][p].letter != kGapResidue) {
-//                     found_non_gap_residue = TRUE;
-//                     break;
-//         ...
-//         if ( !found_aligned_sequence ) {
-//             return PSIERR_UNALIGNEDCOLUMN;
-//         }
-//         if ( !found_non_gap_residue ) {
-//             return PSIERR_COLUMNOFGAPS;
-//         }
-//     ...
-//     return msa->dimensions->num_seqs ? PSI_SUCCESS : PSIERR_NOALIGNEDSEQS;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:683-696
-// ```c
-//     for (p = 0; p < msa->dimensions->query_length; p++) {
-//         if (msa->cell[kQueryIndex][p].letter == kGapResidue ||
-//             msa->query[p] == kGapResidue) {
-//             return PSIERR_GAPINQUERY;
-//         }
-//     }
-// ```
-pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
+///
+/// `ignore_unaligned_positions` (`PSIBlastOptions`, set by `CPsiBlastInputClustalW`) skips the
+/// check of the aligned columns:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:836-848
+pub(super) fn validate_msa(msa: &Msa, ignore_unaligned_positions: bool) -> Result<(), PsiError> {
     for row in &msa.cell {
         if let Some(cell) = row.iter().find(|cell| cell.is_aligned) {
             if cell.letter == GAP {
@@ -724,7 +390,11 @@ pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
             }
         }
     }
-    for p in 0..msa.query_length {
+    for p in 0..(if ignore_unaligned_positions {
+        0
+    } else {
+        msa.query_length
+    }) {
         let mut found_aligned_sequence = false;
         let mut found_non_gap_residue = false;
         for row in &msa.cell {
@@ -754,21 +424,22 @@ pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
     Ok(())
 }
 
+/// `_PSIValidateMSA_StructureGroup(msa)`: only the check that sequences take part
+/// (`s_PSIValidateParticipatingSequences`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:810-819
+pub(super) fn validate_msa_structure_group(msa: &Msa) -> Result<(), PsiError> {
+    if msa.num_seqs == 0 {
+        return Err(PsiError::NoAlignedSeqs);
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------------
 // Alignment blocks
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1306-1313
-// ```c
-//     /* no need to compute extents for query sequence */
-//     for (s = kQueryIndex + 1; s < msa->dimensions->num_seqs + 1; s++) {
-//         _PSIGetLeftExtents(msa, s);
-//         _PSIGetRightExtents(msa, s);
-//         _PSIComputePositionExtents(msa, s, aligned_blocks);
-//     }
-//
-//     _PSIComputeAlignedRegionLengths(msa, aligned_blocks);
-// ```
 pub(super) fn compute_alignment_blocks(msa: &mut Msa, aligned_blocks: &mut AlignedBlock) {
     for s in K_QUERY_INDEX + 1..msa.num_seqs + 1 {
         get_left_extents(&mut msa.cell[s]);
@@ -779,27 +450,6 @@ pub(super) fn compute_alignment_blocks(msa: &mut Msa, aligned_blocks: &mut Align
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1330-1349
-// ```c
-//     if (sequence_position[prev].is_aligned &&
-//         sequence_position[prev].letter != kGapResidue) {
-//         sequence_position[prev].extents.left = prev;
-//     }
-//
-//     for (curr = prev + 1; curr < msa->dimensions->query_length;
-//          curr++, prev++) {
-//
-//         if ( !sequence_position[curr].is_aligned ) {
-//             continue;
-//         }
-//
-//         if (sequence_position[prev].is_aligned) {
-//             sequence_position[curr].extents.left =
-//                 sequence_position[prev].extents.left;
-//         } else {
-//             sequence_position[curr].extents.left = curr;
-//         }
-//     }
-// ```
 fn get_left_extents(row: &mut [MsaCell]) {
     if row.is_empty() {
         return;
@@ -820,28 +470,6 @@ fn get_left_extents(row: &mut [MsaCell]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1364-1383
-// ```c
-//     last = msa->dimensions->query_length - 1;
-//
-//     if (sequence_position[last].is_aligned &&
-//         sequence_position[last].letter != kGapResidue) {
-//         sequence_position[last].extents.right = last;
-//     }
-//
-//     for (curr = last - 1; curr >= 0; curr--, last--) {
-//
-//         if ( !sequence_position[curr].is_aligned ) {
-//             continue;
-//         }
-//
-//         if (sequence_position[last].is_aligned) {
-//             sequence_position[curr].extents.right =
-//                 sequence_position[last].extents.right;
-//         } else {
-//             sequence_position[curr].extents.right = curr;
-//         }
-//     }
-// ```
 fn get_right_extents(row: &mut [MsaCell]) {
     let Some(last) = row.len().checked_sub(1) else {
         return;
@@ -862,22 +490,6 @@ fn get_right_extents(row: &mut [MsaCell]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1401-1417
-// ```c
-//     for (i = 0; i < msa->dimensions->query_length; i++) {
-// #ifdef PSI_IGNORE_GAPS_IN_COLUMNS
-//         ...
-// #else
-//         if (sequence_position[i].is_aligned) {
-// #endif
-//             aligned_blocks->pos_extnt[i].left =
-//                 MAX(aligned_blocks->pos_extnt[i].left,
-//                     sequence_position[i].extents.left);
-//             aligned_blocks->pos_extnt[i].right =
-//                 MIN(aligned_blocks->pos_extnt[i].right,
-//                     sequence_position[i].extents.right);
-//         }
-//     }
-// ```
 // `PSI_IGNORE_GAPS_IN_COLUMNS` is not defined (blast_psi_priv.c:50).
 fn compute_position_extents(row: &[MsaCell], aligned_blocks: &mut AlignedBlock) {
     for (i, cell) in row.iter().enumerate() {
@@ -890,35 +502,6 @@ fn compute_position_extents(row: &[MsaCell], aligned_blocks: &mut AlignedBlock) 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1431-1459
-// ```c
-//     for (i = 0; i < kQueryLength; i++) {
-//         aligned_blocks->size[i] = aligned_blocks->pos_extnt[i].right -
-//                                    aligned_blocks->pos_extnt[i].left + 1;
-//         ...
-//     }
-//
-//     /* Do not include X's in aligned region lengths */
-//     for (i = 0; i < kQueryLength; i++) {
-//
-//         if (msa->query[i] == kXResidue) {
-//
-//             Uint4 idx = 0;
-//             for (idx = 0; idx < i; idx++) {
-//                 if ((Uint4)aligned_blocks->pos_extnt[idx].right >= i &&
-//                     msa->query[idx] != kXResidue) {
-//                     aligned_blocks->size[idx]--;
-//                 }
-//             }
-//             for (idx = msa->dimensions->query_length - 1; idx > i; idx--) {
-//                 if ((Uint4)aligned_blocks->pos_extnt[idx].left <= i &&
-//                     msa->query[idx] != kXResidue) {
-//                     aligned_blocks->size[idx]--;
-//                 }
-//             }
-//         }
-//
-//     }
-// ```
 fn compute_aligned_region_lengths(msa: &Msa, aligned_blocks: &mut AlignedBlock) {
     let query_length = msa.query_length;
     for i in 0..query_length {
@@ -947,69 +530,24 @@ fn compute_aligned_region_lengths(msa: &Msa, aligned_blocks: &mut AlignedBlock) 
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1580-1639
-// ```c
-//     for (pos = 0; pos < kQueryLength; pos++) {
-//
-//         /* ignore positions of no interest */
-//         if (aligned_blocks->size[pos] == 0 ||
-//             msa->num_matching_seqs[pos] <= kExpectedNumMatchingSeqs) {
-//             continue;
-//         }
-//
-//         DynamicUint4Array_Copy(prev_pos_aligned_seqs, aligned_seqs);
-//         _PSIGetAlignedSequencesForPosition(msa, pos, aligned_seqs);
-//         ASSERT(msa->num_matching_seqs[pos] == aligned_seqs->num_used);
-//         if (aligned_seqs->num_used <= kExpectedNumMatchingSeqs) {
-//             continue;
-//         }
-//         last_calc_pos = pos;
-//
-//         if (last_calc_pos != pos - 1 ||
-//             !DynamicUint4Array_AreEqual(aligned_seqs, prev_pos_aligned_seqs)) {
-//
-//             memset((void*)seq_weights->norm_seq_weights, 0,
-//                    sizeof(double)*(msa->dimensions->num_seqs+1));
-//             memset((void*)seq_weights->row_sigma, 0,
-//                    sizeof(double)*(msa->dimensions->num_seqs+1));
-//
-//             _PSICalculateNormalizedSequenceWeights(msa, aligned_blocks, pos,
-//                                                    aligned_seqs, seq_weights);
-//         } else {
-//             ...
-//         }
-//         seq_weights->posNumParticipating[pos] = aligned_seqs->num_used;
-//
-//         /* Uses seq_weights->norm_seq_weights to populate match_weights */
-//         _PSICalculateMatchWeights(msa, pos, aligned_seqs, seq_weights);
-//     }
-//     ...
-//     retval = _PSICheckSequenceWeights(msa, seq_weights,
-//                                       nsg_compatibility_mode);
-//     ...
-// #ifndef PSI_IGNORE_GAPS_IN_COLUMNS
-//     _PSISpreadGapWeights(msa, seq_weights, nsg_compatibility_mode);
-//     retval = _PSICheckSequenceWeights(msa, seq_weights,
-//                                       nsg_compatibility_mode);
-// #endif
-// ```
 // `last_calc_pos` is set to `pos` just before the test, so `last_calc_pos != pos - 1` always
 // holds and the weights are computed at every position: the `else` branch is never taken.
 // Without the structure group compatibility mode, `kExpectedNumMatchingSeqs` is 1.
 pub(super) fn compute_sequence_weights(
     msa: &Msa,
     aligned_blocks: &AlignedBlock,
+    nsg_compatibility_mode: bool,
     seq_weights: &mut SequenceWeights,
 ) -> Result<(), PsiError> {
-    const K_EXPECTED_NUM_MATCHING_SEQS: u32 = 1;
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     let mut aligned_seqs: Vec<usize> = Vec::with_capacity(msa.num_seqs + 1);
     for pos in 0..msa.query_length {
-        if aligned_blocks.size[pos] == 0
-            || msa.num_matching_seqs[pos] <= K_EXPECTED_NUM_MATCHING_SEQS
+        if aligned_blocks.size[pos] == 0 || msa.num_matching_seqs[pos] <= expected_num_matching_seqs
         {
             continue;
         }
         get_aligned_sequences_for_position(msa, pos, &mut aligned_seqs);
-        if aligned_seqs.len() as u32 <= K_EXPECTED_NUM_MATCHING_SEQS {
+        if aligned_seqs.len() as u32 <= expected_num_matching_seqs {
             continue;
         }
         seq_weights.norm_seq_weights.fill(0.0);
@@ -1018,25 +556,24 @@ pub(super) fn compute_sequence_weights(
         seq_weights.pos_num_participating[pos] = aligned_seqs.len() as i32;
         calculate_match_weights(msa, pos, &aligned_seqs, seq_weights);
     }
-    check_sequence_weights(msa, seq_weights)?;
-    spread_gap_weights(msa, seq_weights);
-    check_sequence_weights(msa, seq_weights)
+    check_sequence_weights(msa, seq_weights, nsg_compatibility_mode)?;
+    spread_gap_weights(msa, seq_weights, nsg_compatibility_mode);
+    check_sequence_weights(msa, seq_weights, nsg_compatibility_mode)
+}
+
+/// `kExpectedNumMatchingSeqs` of `_PSIComputeSequenceWeights`, `_PSISpreadGapWeights` and
+/// `_PSICheckSequenceWeights`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1566
+fn expected_matching_seqs(nsg_compatibility_mode: bool) -> u32 {
+    if nsg_compatibility_mode {
+        0
+    } else {
+        1
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1915-1928
-// ```c
-//     aligned_sequences->num_used = 0;    /* reset the array */
-//
-//     for (i = 0; i < msa->dimensions->num_seqs + 1; i++) {
-// #ifdef PSI_IGNORE_GAPS_IN_COLUMNS
-//         ...
-// #else
-//         if (msa->cell[i][position].is_aligned) {
-// #endif
-//             DynamicUint4Array_Append(aligned_sequences, i);
-//         }
-//     }
-// ```
 fn get_aligned_sequences_for_position(msa: &Msa, position: usize, aligned: &mut Vec<usize>) {
     aligned.clear();
     for (i, row) in msa.cell.iter().enumerate() {
@@ -1046,73 +583,7 @@ fn get_aligned_sequences_for_position(msa: &Msa, position: usize, aligned: &mut 
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1786-1871
-// ```c
-//     for (i = (Uint4)aligned_blocks->pos_extnt[position].left;
-//          i <= (Uint4)aligned_blocks->pos_extnt[position].right; i++) {
-//
-//         Uint4 residue_counts_for_column[BLASTAA_SIZE] = { 0 };
-//         Uint4 num_distinct_residues_for_column = 0;
-//         Uint4 num_local_std_letters = 0;
-//         ...
-//         for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//             const Uint4 kSeqIdx = aligned_seqs->data[asi];
-//             const Uint1 kResidue = msa->cell[kSeqIdx][i].letter;
-//
-//             if (residue_counts_for_column[kResidue] == 0) {
-//                 num_distinct_residues_for_column++;
-//                 if (kResidue != kGapResidue && kResidue != kXResidue)
-//                     num_local_std_letters++;
-//             }
-//             residue_counts_for_column[kResidue]++;
-//         }
-//
-//         sigma += num_distinct_residues_for_column;
-//         num_local_std_letters = MIN(num_local_std_letters,EFFECTIVE_ALPHABET);
-//         seq_weights->posDistinctDistrib[position][num_local_std_letters]++;
-//         if (num_distinct_residues_for_column > 1) {
-//             distinct_residues_found = TRUE;
-//         }
-//
-//         for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//             const Uint4 seq_idx = aligned_seqs->data[asi];
-//             const Uint1 residue = msa->cell[seq_idx][i].letter;
-//             seq_weights->row_sigma[seq_idx] +=
-//                 (1.0 / (double)
-//                  (residue_counts_for_column[residue] *
-//                   num_distinct_residues_for_column) );
-//         }
-//     }
-//
-//     /* Save sigma for this position */
-//     seq_weights->sigma[position] = sigma;
-//
-//     if (distinct_residues_found) {
-//         double weight_sum = 0.0;
-//
-//         for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//             const Uint4 seq_idx = aligned_seqs->data[asi];
-//             seq_weights->norm_seq_weights[seq_idx] =
-//                 seq_weights->row_sigma[seq_idx] /
-//                 (aligned_blocks->pos_extnt[position].right -
-//                  aligned_blocks->pos_extnt[position].left + 1);
-//             weight_sum += seq_weights->norm_seq_weights[seq_idx];
-//         }
-//
-//         /* Normalize */
-//         for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//             const Uint4 seq_idx = aligned_seqs->data[asi];
-//             seq_weights->norm_seq_weights[seq_idx] /= weight_sum;
-//         }
-//
-//     } else {
-//         for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//             const Uint4 seq_idx = aligned_seqs->data[asi];
-//             seq_weights->norm_seq_weights[seq_idx] =
-//                 (1.0/(double) aligned_seqs->num_used);
-//         }
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1785-1871
 fn calculate_normalized_sequence_weights(
     msa: &Msa,
     aligned_blocks: &AlignedBlock,
@@ -1172,21 +643,6 @@ fn calculate_normalized_sequence_weights(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1888-1900
-// ```c
-//     for (asi = 0; asi < aligned_seqs->num_used; asi++) {
-//         const Uint4 seq_idx = aligned_seqs->data[asi];
-//         const Uint1 residue = msa->cell[seq_idx][position].letter;
-//
-//         seq_weights->match_weights[position][residue] +=
-//             seq_weights->norm_seq_weights[seq_idx];
-//
-//         /* Collected for diagnostics information, not used elsewhere */
-//         if (residue != kGapResidue) {
-//             seq_weights->gapless_column_weights[position] +=
-//              seq_weights->norm_seq_weights[seq_idx];
-//         }
-//     }
-// ```
 fn calculate_match_weights(
     msa: &Msa,
     position: usize,
@@ -1204,29 +660,12 @@ fn calculate_match_weights(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1945-1963
-// ```c
-//     for (pos = 0; pos < msa->dimensions->query_length; pos++) {
-//
-//         if (msa->num_matching_seqs[pos] <= kExpectedNumMatchingSeqs ||
-//             msa->cell[kQueryIndex][pos].letter == kXResidue) {
-//             continue;
-//         }
-//
-//         /* Disperse method of spreading the gap weights */
-//         for (res = 0; res < msa->alphabet_size; res++) {
-//             if (seq_weights->std_prob[res] > kEpsilon) {
-//                 seq_weights->match_weights[pos][res] +=
-//                     (seq_weights->match_weights[pos][kGapResidue] *
-//                      seq_weights->std_prob[res]);
-//             }
-//         }
-//         seq_weights->match_weights[pos][kGapResidue] = 0.0;
-//
-//     }
-// ```
-fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights) {
+fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights, nsg_compatibility_mode: bool) {
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     for pos in 0..msa.query_length {
-        if msa.num_matching_seqs[pos] <= 1 || msa.cell[K_QUERY_INDEX][pos].letter == X {
+        if msa.num_matching_seqs[pos] <= expected_num_matching_seqs
+            || msa.cell[K_QUERY_INDEX][pos].letter == X
+        {
             continue;
         }
         for res in 0..BLASTAA_SIZE {
@@ -1240,33 +679,20 @@ fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1990-2016
-// ```c
-//     for (pos = 0; pos < msa->dimensions->query_length; pos++) {
-//
-//         double running_total = 0.0;
-//         Uint4 residue = 0;
-//
-//         if (msa->num_matching_seqs[pos] <= kExpectedNumMatchingSeqs ||
-//             msa->cell[kQueryIndex][pos].letter == kXResidue) {
-//             ...
-//             continue;
-//         }
-//
-//         for (residue = 0; residue < msa->alphabet_size; residue++) {
-//             running_total += seq_weights->match_weights[pos][residue];
-//         }
-//
-//         if (running_total < 0.99 || running_total > 1.01) {
-//             return PSIERR_BADSEQWEIGHTS;
-//         }
-// ```
 // `!(0.99..=1.01).contains(..)` is NCBI's two comparisons for every number but NaN, which
 // NCBI's lets through and this rejects. The weights are finite (sums of finite products,
 // normalised by a positive total in `_PSICalculateNormalizedSequenceWeights`), so no NaN
 // reaches this check.
-fn check_sequence_weights(msa: &Msa, seq_weights: &SequenceWeights) -> Result<(), PsiError> {
+fn check_sequence_weights(
+    msa: &Msa,
+    seq_weights: &SequenceWeights,
+    nsg_compatibility_mode: bool,
+) -> Result<(), PsiError> {
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     for pos in 0..msa.query_length {
-        if msa.num_matching_seqs[pos] <= 1 || msa.cell[K_QUERY_INDEX][pos].letter == X {
+        if msa.num_matching_seqs[pos] <= expected_num_matching_seqs
+            || msa.cell[K_QUERY_INDEX][pos].letter == X
+        {
             continue;
         }
         let mut running_total = 0.0;
@@ -1285,78 +711,16 @@ fn check_sequence_weights(msa: &Msa, seq_weights: &SequenceWeights) -> Result<()
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2093-2180
-// ```c
-//     s_initializeExpNumObservations(&(expno[0]),  backgroundProbabilities);
-//
-//     for (p = 0; p < msa->dimensions->query_length; p++) {
-//         double columnCounts = 0.0; /*column-specific pseudocounts*/
-//         double observations = 0.0;
-//         double pseudoWeight; /*multiplier for pseudocounts term*/
-//         if (msa->cell[kQueryIndex][p].letter != kXResidue)
-//         {
-//            observations = s_effectiveObservations(aligned_blocks, seq_weights, p, msa->dimensions->query_length, expno);
-//            ...
-//            if (0 == pseudo_count)
-//               columnCounts = s_columnSpecificPseudocounts(seq_weights, p, backgroundProbabilities, observations);
-//            else
-//               columnCounts = pseudo_count;
-//         }
-//         if (columnCounts >= PSEUDO_MAX) {
-//            pseudoWeight = kZeroObsPseudo;
-//            observations = 0;
-//         }
-//         else {
-//            pseudoWeight = columnCounts;
-//         }
-//
-//         for (r = 0; r < msa->alphabet_size; r++) {
-//
-//             if (msa->cell[kQueryIndex][p].letter == kXResidue ||
-//                 seq_weights->std_prob[r] <= kEpsilon) {
-//                 internal_pssm->freq_ratios[p][r] = 0.0;
-//             } else {
-//                 ...
-//                 const double kBeta = pseudoWeight;
-//                 ...
-//                 internal_pssm->pseudocounts[p] = kBeta;
-//
-//                 for (i = 0; i < msa->alphabet_size; i++) {
-//                     if (sbp->matrix->data[r][i] != BLAST_SCORE_MIN) {
-//                         pseudo += (seq_weights->match_weights[p][i] *
-//                                    freq_ratios->data[r][i]);
-//                     }
-//                 }
-//                 pseudo *= kBeta;
-//
-//                 numerator =
-//                     (observations * seq_weights->match_weights[p][r] /
-//                      seq_weights->std_prob[r])
-//                     + pseudo;
-//
-//                 denominator = observations + kBeta;
-//                 ...
-//                 qOverPEstimate = numerator/denominator;
-//
-//                 internal_pssm->freq_ratios[p][r] = qOverPEstimate *
-//                     seq_weights->std_prob[r];
-//
-//             }
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2084-2085
-// ```c
-//     const double kZeroObsPseudo = 30.0; /*arbitrary constant to use for columns with
-//                              zero observations in actual data (ZERO_OBS_PSEUDO in posit.c) */
-// ```
 pub(super) fn compute_freq_ratios(
     msa: &Msa,
     seq_weights: &mut SequenceWeights,
     sbp: &PsiScoreBlk,
     aligned_blocks: &AlignedBlock,
     pseudo_count: i32,
+    nsg_compatibility_mode: bool,
     internal: &mut InternalPssm,
-) {
+) -> Result<(), PsiError> {
     const K_ZERO_OBS_PSEUDO: f64 = 30.0;
     let expno = initialize_exp_num_observations(sbp.background);
     for p in 0..msa.query_length {
@@ -1400,22 +764,18 @@ pub(super) fn compute_freq_ratios(
             let numerator =
                 observations * seq_weights.match_weights[p][r] / seq_weights.std_prob[r] + pseudo;
             let denominator = observations + beta;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2162-2166
+            if nsg_compatibility_mode && denominator == 0.0 {
+                return Err(PsiError::Unknown);
+            }
             let q_over_p_estimate = numerator / denominator;
             internal.freq_ratios[p][r] = q_over_p_estimate * seq_weights.std_prob[r];
         }
     }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3068-3084
-// ```c
-//    expno[0] = 0;
-//    for (j=1;j<MAX_IND_OBSERVATIONS;++j) {
-//      weighted_sum = 0;
-//      for (k=0;k<EFFECTIVE_ALPHABET;++k)
-//        weighted_sum += exp(j*log(1.0-backgroundProbabilities[k]));
-//      expno[j] = EFFECTIVE_ALPHABET-weighted_sum;
-//    }
-// ```
 // `expno[MAX_IND_OBSERVATIONS]` is never written nor read (`s_effectiveObservations` stops at
 // `MAX_IND_OBSERVATIONS - 1`).
 fn initialize_exp_num_observations(background: &[f64; 20]) -> [f64; MAX_IND_OBSERVATIONS] {
@@ -1431,38 +791,6 @@ fn initialize_exp_num_observations(background: &[f64; 20]) -> [f64; MAX_IND_OBSE
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3135-3175
-// ```c
-//  if (align_blk->pos_extnt[columnNumber].left < 0)
-//    return(0);
-//  if (align_blk->pos_extnt[columnNumber].right >= queryLength)
-//    return(0);
-//
-//  halfNumColumns = MAX(1,(align_blk->pos_extnt[columnNumber].right -
-//                          align_blk->pos_extnt[columnNumber].left+2)/2);
-//  k = EFFECTIVE_ALPHABET;
-//  columnsAccountedFor = 0;
-//  totalDistinctCounts = 0;
-//  while (columnsAccountedFor < halfNumColumns) {
-//    ASSERT(k >= 0);
-//    totalDistinctCounts += (seq_weights->posDistinctDistrib[columnNumber][k] *k);
-//    columnsAccountedFor += seq_weights->posDistinctDistrib[columnNumber][k];
-//    if (columnsAccountedFor > halfNumColumns) {
-//      totalDistinctCounts -=
-//        ((columnsAccountedFor - halfNumColumns) * k);
-//      columnsAccountedFor = halfNumColumns;
-//    }
-//    k--;
-//  }
-//  aveDistinctAA = ((double) totalDistinctCounts)/
-//    ((double) columnsAccountedFor);
-//
-//  for (i=1;i<MAX_IND_OBSERVATIONS && expno[i]<=aveDistinctAA;++i);
-//  indep = (i==MAX_IND_OBSERVATIONS) ? i :
-//    i-(expno[i]-aveDistinctAA)/(expno[i]-expno[i-1]);
-//  indep = MIN(indep, seq_weights->posNumParticipating[columnNumber]);
-//  indep = MAX(0,indep - 1);
-//  return(indep);
-// ```
 // The distribution of a column whose extent was set holds one count per column of the extent
 // (`_PSICalculateNormalizedSequenceWeights`), at least `halfNumColumns`, so `k` stays at 0 or
 // above. The loop's `k >= 0` stands for NCBI's `ASSERT(k >= 0)`, which only debug builds check:
@@ -1520,80 +848,12 @@ fn effective_observations(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2972-3004
-// ```c
-//    charOrder[0] =  1;  /*A*/
-//    charOrder[1] =  16; /*R*/
-//    charOrder[2] =  13; /*N*/
-//    charOrder[3] =  4;  /*D*/
-//    charOrder[4] =  3;  /*C*/
-//    charOrder[5] =  15; /*Q*/
-//    charOrder[6] =  5;  /*E*/
-//    charOrder[7] =  7;  /*G*/
-//    charOrder[8] =  8;  /*H*/
-//    charOrder[9] =  9;  /*I*/
-//    charOrder[10] = 11; /*L*/
-//    charOrder[11] = 10; /*K*/
-//    charOrder[12] = 12; /*M*/
-//    charOrder[13] =  6; /*F*/
-//    charOrder[14] = 14; /*P*/
-//    charOrder[15] = 17; /*S*/
-//    charOrder[16] = 18; /*T*/
-//    charOrder[17] = 20; /*W*/
-//    charOrder[18] = 22; /*Y*/
-//    charOrder[19] = 19; /*V*/
-//
-//    for(c = 0; c < EFFECTIVE_ALPHABET; c++)
-//      probabilities[c] = posSearch->match_weights[columnNumber][charOrder[c]];
-// ```
 const CHAR_ORDER: [usize; EFFECTIVE_ALPHABET] = [
     1, 16, 13, 4, 3, 15, 5, 7, 8, 9, 11, 10, 12, 6, 14, 17, 18, 20, 22, 19,
 ];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3086-3118
-// ```c
-//   const double kPseudoMult = 500.0;  /* Was PSEUDO_MULTIPLIER */
-//   const double kPseudoNumerator = 0.0457;  /*numerator of entropy-based method, was PSEUDO_NUMERATOR */
-//   const double kPseudoExponent = 0.8;  /*exponent of denominator, was PSEUDO_EXPONENT */
-//   const double kPseudoSmallInitial = 5.5; /*small number of pseudocounts to
-//                               avoid 0 probabilities in entropy-based method, was PSEUDO_SMALL_INITIAL */
-//
-//   s_fillColumnProbabilities(&(columnProbabilitiesInitial[0]), posSearch, columnNumber);
-//   s_adjustColumnProbabilities(&(columnProbabilitiesInitial[0]),
-//                             &(columnProbabilitiesAdjusted[0]),
-//                               kPseudoSmallInitial,
-//                               backgroundProbabilities, observations);
-//   relativeEntropy = s_computeRelativeEntropy(&(columnProbabilitiesAdjusted[0]),
-//                                            backgroundProbabilities);
-//   pseudoDenominator = pow(relativeEntropy, kPseudoExponent);
-//   alpha = kPseudoNumerator/pseudoDenominator;
-//   if (alpha < (1.0 - kPosEpsilon))
-//     returnValue = kPseudoMult * alpha/ (1- alpha);
-//   else
-//     returnValue = PSEUDO_MAX;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3014-3060
-// ```c
-//   overallSum = 0.0;
-//   for(c = 0; c < EFFECTIVE_ALPHABET; c++) {
-//     intermediateSums[c] =
-//       (initialProbabilities[c] * observations) +
-//       (standardProbabilities[c] * standardWeight);
-//     overallSum += intermediateSums[c];
-//   }
-//   for(c = 0; c < EFFECTIVE_ALPHABET; c++)
-//     probabilitiesToReturn[c] = intermediateSums[c]/overallSum;
-// ...
-// const double kPosEpsilon = 0.0001; /**< minimum return value of s_computeRelativeEntropy */
-// ...
-//    returnValue = 0.0;
-//    for(c = 0; c < EFFECTIVE_ALPHABET; c++) {
-//      if (newDistribution[c] > kPosEpsilon)
-//        returnValue += (newDistribution[c] *
-//                        log (newDistribution[c]/backgroundProbabilities[c]));
-//    }
-//    if (returnValue < kPosEpsilon)
-//      returnValue = kPosEpsilon;
-// ```
 fn column_specific_pseudocounts(
     seq_weights: &SequenceWeights,
     column: usize,
@@ -1636,66 +896,6 @@ fn column_specific_pseudocounts(
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2409-2469
-// ```c
-//     ideal_lambda = sbp->kbp_ideal->Lambda;
-//     freq_ratios = _PSIMatrixFrequencyRatiosNew(sbp->name);
-//
-//     /* Each column is a position in the query */
-//     for (i = 0; i < internal_pssm->ncols; i++) {
-//
-//         /* True if all frequencies in column i are zero */
-//         Boolean is_unaligned_column = TRUE;
-//         const Uint4 kResidue = query[i];
-//
-//         for (j = 0; j < (Uint4) sbp->alphabet_size; j++) {
-//
-//             double qOverPEstimate = 0.0;
-//
-//             /* Division compensates for multiplication in
-//              * _PSIComputeFreqRatios */
-//             if (std_probs[j] > kEpsilon) {
-//                 qOverPEstimate =
-//                     internal_pssm->freq_ratios[i][j] / std_probs[j];
-//             }
-//
-//             if (is_unaligned_column && qOverPEstimate != 0.0) {
-//                 is_unaligned_column = FALSE;
-//             }
-//
-//             /* Populate scaled matrix */
-//             if (qOverPEstimate == 0.0 || std_probs[j] < kEpsilon) {
-//                 internal_pssm->scaled_pssm[i][j] = BLAST_SCORE_MIN;
-//             } else {
-//                 double tmp = log(qOverPEstimate)/ideal_lambda;
-//                 internal_pssm->scaled_pssm[i][j] = (int)
-//                     BLAST_Nint(kPSIScaleFactor * tmp);
-//             }
-//
-//             if ( (j == kXResidue || j == kStarResidue) &&
-//                  (sbp->matrix->data[kResidue][kXResidue] != BLAST_SCORE_MIN) ) {
-//                 internal_pssm->scaled_pssm[i][j] =
-//                     sbp->matrix->data[kResidue][j] * kPSIScaleFactor;
-//             }
-//         }
-//
-//         if (is_unaligned_column) {
-//             for (j = 0; j < (Uint4) sbp->alphabet_size; j++) {
-//
-//                 internal_pssm->pssm[i][j] = sbp->matrix->data[kResidue][j];
-//
-//                 if (freq_ratios->data[kResidue][j] != 0.0) {
-//                     double tmp =
-//                         kPSIScaleFactor * freq_ratios->bit_scale_factor *
-//                         log(freq_ratios->data[kResidue][j])/NCBIMATH_LN2;
-//
-//                     internal_pssm->scaled_pssm[i][j] = (int)BLAST_Nint(tmp);
-//                 } else {
-//                     internal_pssm->scaled_pssm[i][j] = BLAST_SCORE_MIN;
-//                 }
-//             }
-//         }
-//     }
-// ```
 pub(super) fn convert_freq_ratios_to_pssm(
     internal: &mut InternalPssm,
     query: &[u8],
@@ -1743,70 +943,6 @@ pub(super) fn convert_freq_ratios_to_pssm(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2509-2593
-// ```c
-//     factor = 1.0;
-//     for ( ; ; ) {
-//         ...
-//         for (i = 0; i < internal_pssm->ncols; i++) {
-//             for (j = 0; j < internal_pssm->nrows; j++) {
-//                 if (scaled_pssm[i][j] != BLAST_SCORE_MIN) {
-//                     pssm[i][j] =
-//                         (int)BLAST_Nint(factor*scaled_pssm[i][j]/kPSIScaleFactor);
-//                 } else {
-//                     pssm[i][j] = BLAST_SCORE_MIN;
-//                 }
-//             }
-//         }
-//         _PSIUpdateLambdaK((const int**)pssm, query, query_length,
-//                           std_probs, sbp);
-//
-//         new_lambda = sbp->kbp_psi[0]->Lambda;
-//
-//         if (new_lambda > ideal_lambda) {
-//             if (first_time) {
-//                 factor_high = 1.0 + kPositScalingPercent;
-//                 factor = factor_high;
-//                 factor_low = 1.0;
-//                 too_high = TRUE;
-//                 first_time = FALSE;
-//             } else {
-//                 if (too_high == FALSE) {
-//                     break;
-//                 }
-//                 factor_high += (factor_high - 1.0);
-//                 factor = factor_high;
-//             }
-//         } else if (new_lambda > 0) {
-//             if (first_time) {
-//                 factor_high = 1.0;
-//                 factor_low = 1.0 - kPositScalingPercent;
-//                 factor = factor_low;
-//                 too_high = FALSE;
-//                 first_time = FALSE;
-//             } else {
-//                 if (too_high == TRUE) {
-//                     break;
-//                 }
-//                 factor_low += (factor_low - 1.0);
-//                 factor = factor_low;
-//             }
-//         } else {
-//             return PSIERR_POSITIVEAVGSCORE;
-//         }
-//     }
-//
-//     /* Binary search for kPositScalingNumIterations times */
-//     for (index = 0; index < kPositScalingNumIterations; index++) {
-//         ...
-//         factor = (factor_high + factor_low)/2;
-//         ... (the same rescaling and _PSIUpdateLambdaK)
-//         if (new_lambda > ideal_lambda) {
-//             factor_low = factor;
-//         } else {
-//             factor_high = factor;
-//         }
-//     }
-// ```
 /// Returns `kbp_psi[0]` after the scaling: the block of its last `_PSIUpdateLambdaK`.
 pub(super) fn scale_matrix(
     query: &[u8],
@@ -1871,7 +1007,7 @@ pub(super) fn scale_matrix(
     Ok(kbp_psi)
 }
 
-/// The rescaling of `_PSIScaleMatrix`'s loops (quoted above `scale_matrix`).
+/// The rescaling of `_PSIScaleMatrix`'s loops (cited above `scale_matrix`).
 fn rescale(internal: &mut InternalPssm, factor: f64) {
     for (pssm, scaled) in internal.pssm.iter_mut().zip(&internal.scaled_pssm) {
         for (score, &scaled) in pssm.iter_mut().zip(scaled) {
@@ -1885,40 +1021,7 @@ fn rescale(internal: &mut InternalPssm, factor: f64) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2732-2753
-// ```c
-//     Blast_ScoreFreq* score_freqs =
-//         _PSIComputeScoreProbabilities(pssm, query, query_length,
-//                                       std_probs, sbp);
-//
-//     /* Calculate lambda and K */
-//     Blast_KarlinBlkUngappedCalc(sbp->kbp_psi[0], score_freqs);
-//
-//     ASSERT(sbp->kbp_ideal);
-//     ASSERT(sbp->kbp_psi[0]);
-//     ASSERT(sbp->kbp_gap_std[0]);
-//     ASSERT(sbp->kbp_gap_psi[0]);
-//
-//     sbp->kbp_gap_psi[0]->K =
-//         sbp->kbp_psi[0]->K * sbp->kbp_gap_std[0]->K / sbp->kbp_ideal->K;
-//     sbp->kbp_gap_psi[0]->logK = log(sbp->kbp_gap_psi[0]->K);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2699-2734
-// ```c
-//    kbp->Lambda = Blast_KarlinLambdaNR(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT);
-//    if (kbp->Lambda < 0.)
-//       goto ErrExit;
-//    ...
-//    kbp->H = BlastKarlinLtoH(sfp, kbp->Lambda);
-//    if (kbp->H < 0.)
-//       goto ErrExit;
-//    ...
-//    kbp->K = BlastKarlinLHtoK(sfp, kbp->Lambda, kbp->H);
-//    if (kbp->K < 0.)
-//       goto ErrExit;
-//    ...
-// ErrExit:
-//    kbp->Lambda = kbp->H = kbp->K = -1.;
-// ```
 /// `kbp_psi[0]` after `_PSIUpdateLambdaK`: Lambda, K and H, all -1 when any of them cannot be
 /// computed. The gapped PSI K that the call also sets depends on this block only
 /// (`gapped_psi_k`), so it is computed once, from the last block.
@@ -1942,37 +1045,13 @@ fn update_lambda_k(
     }
 }
 
-/// `sbp->kbp_gap_psi[0]->K` after `_PSIUpdateLambdaK` (quoted above `update_lambda_k`).
+/// `sbp->kbp_gap_psi[0]->K` after `_PSIUpdateLambdaK` (cited above `update_lambda_k`).
 pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
     kbp_psi.k * sbp.gap_std_k / sbp.ideal_k
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2100-2119
-// ```c
-// BlastScoreChk(Int4 lo, Int4 hi)
-// {
-//    if (lo >= 0 || hi <= 0 ||
-//          lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX)
-//       return 1;
-//
-//    if (hi - lo > BLAST_SCORE_RANGE_MAX)
-//       return 1;
-//
-//    return 0;
-// }
-// ...
-//    if (BlastScoreChk(score_min, score_max) != 0)
-//       return NULL;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2699-2704
-// ```c
-// Blast_KarlinBlkUngappedCalc(Blast_KarlinBlk* kbp, Blast_ScoreFreq* sfp)
-// {
-//
-//
-//    if (kbp == NULL || sfp == NULL)
-//       return 1;
-// ```
 /// Whether `Blast_ScoreFreqNew` makes the score frequencies of `pssm` in
 /// `_PSIComputeScoreProbabilities` (the range of the 20 standard letters' scores over the
 /// positions that are not X, without `BLAST_SCORE_MIN` and `BLAST_SCORE_MAX`, passes
@@ -1994,28 +1073,7 @@ fn factor_one_score_range_is_valid(pssm: &[[i32; BLASTAA_SIZE]], query: &[u8]) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:355-378
-// ```c
-//     std_prob = BLAST_GetStandardAaProbabilities();
-//     *pssm = PSIMatrixNew(query_length, (Uint4) sbp->alphabet_size);
-//     internal_pssm = _PSIInternalPssmDataNew(query_length, sbp->alphabet_size);
-//     ...
-//     _PSICopyMatrix_double(internal_pssm->freq_ratios, freq_ratios,
-//                           internal_pssm->ncols, internal_pssm->nrows);
-//
-//     status = _PSICreateAndScalePssmFromFrequencyRatios(internal_pssm,
-//                                                        query, query_length,
-//                                                        std_prob, sbp,
-//                                                        impala_scaling_factor);
-//     ...
-//     s_PSISavePssm(internal_pssm, sbp, *pssm);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:399-414
-// ```c
-//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp, std_prob);
-//     ...
-//     if (impala_scaling_factor == kPSSM_NoImpalaScaling) {
-//         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
-// ```
 /// `PSICreatePssmFromFrequencyRatios` without IMPALA's scaling (`CPsiBlastInputFreqRatios`'s
 /// default): the scores of the PSSM of `freq_ratios` (28 per position) and `kbp_psi[0]` of its
 /// scaling.
@@ -2032,50 +1090,8 @@ pub(super) fn pssm_from_freq_ratios(
     Ok((internal.into_scores(), ungapped))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:715-742
-// ```c
-//     _PSICopyMatrix_int(internal_pssm->pssm, posSearch->posMatrix,
-//                        internal_pssm->ncols, internal_pssm->nrows);
-//     _PSICopyMatrix_int(internal_pssm->scaled_pssm,
-//                        posSearch->posPrivateMatrix,
-//                        internal_pssm->ncols, internal_pssm->nrows);
-//     _PSICopyMatrix_double(internal_pssm->freq_ratios,
-//                           posSearch->posFreqs, internal_pssm->ncols,
-//                           internal_pssm->nrows);
-//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp,
-//                                          compactSearch->standardProb);
-//     ...
-//     status = Kappa_impalaScaling(posSearch, compactSearch, (double)
-//                                  scale_factor, FALSE, sbp);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:715-743
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.c:357-386
-// ```c
-//     for (c = 0; c < dim1; c++) {
-//         for (a = 0; a < dim2; a++) {
-//             if (BLAST_SCORE_MIN != private_matrix[c][a]) {
-//                 matrix[c][a] = (int)BLAST_Nint((double) private_matrix[c][a] *
-//                                         factor / kPSIScaleFactor);
-//             }
-//         }
-//     }
-//
-//     _PSIUpdateLambdaK((const int**) matrix,
-//                       compactSearch->query,
-//                       compactSearch->qlength,
-//                       compactSearch->standardProb,
-//                       sbp);
-//
-//     scalefactor = ((double) scalingFactor) / kPSIScaleFactor;
-//     for (c = 0; c < dim1; c++) {
-//         for (a = 0; a < dim2; a++) {
-//             if (BLAST_SCORE_MIN != private_matrix[c][a]) {
-//                 private_matrix[c][a] =
-//                     (int)BLAST_Nint((double) private_matrix[c][a] * factor *
-//                              scalefactor);
-//             }
-//         }
-//     }
-// ```
 /// `s_ScalePosMatrix` of the position-based composition-based statistics: the scaled PSSM
 /// (`posPrivateMatrix`, the redo's `startMatrix`) and `kbp_psi[0]` of the factor-1 PSSM
 /// (`posMatrix`), or `None` where `_PSIUpdateLambdaK` leaves `kbp_psi[0]` as it was
@@ -2115,16 +1131,6 @@ pub(super) fn scale_pos_matrix(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1795-1815
-// ```c
-// static BLAST_LetterProb Robinson_prob[] = {
-//       { 'A', 78.05 },
-//       { 'C', 19.25 },
-//       { 'D', 53.64 },
-//       ...
-//       { 'W', 13.30 },
-//       { 'Y', 32.16 }
-//    };
-// ```
 // `Blast_GetStdAlphabet` (blast_stat.c:1863-1883) gives these letters in NCBIstdaa, in this order.
 const STD_ALPHABET: [u8; 20] = [
     ncbistdaa::A,
@@ -2150,65 +1156,8 @@ const STD_ALPHABET: [u8; 20] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2675-2727
-// ```c
-//     effective_length = _PSISequenceLengthWithoutX(query, query_length);
-//
-//     /* Get the minimum and maximum scores */
-//     for (p = 0; p < query_length; p++) {
-//         if (query[p] == kXResidue) {
-//             continue;
-//         }
-//         for (r = 0; r < alphabet_size; r++) {
-//             const int kScore = pssm[p][aa_alphabet[r]];
-//
-//             if (kScore <= BLAST_SCORE_MIN || kScore >= BLAST_SCORE_MAX) {
-//                 continue;
-//             }
-//             max_score = MAX(kScore, max_score);
-//             min_score = MIN(kScore, min_score);
-//         }
-//     }
-//     ...
-//     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
-//     ...
-//     score_freqs->obs_min = min_score;
-//     score_freqs->obs_max = max_score;
-//     for (p = 0; p < query_length; p++) {
-//         if (query[p] == kXResidue) {
-//             continue;
-//         }
-//
-//         for (r = 0; r < alphabet_size; r++) {
-//             const int kScore = pssm[p][aa_alphabet[r]];
-//
-//             if (kScore <= BLAST_SCORE_MIN || kScore >= BLAST_SCORE_MAX) {
-//                 continue;
-//             }
-//
-//             /* Increment the weight for the score in position p, residue r */
-//             score_freqs->sprob[kScore] +=
-//                 (std_probs[aa_alphabet[r]]/effective_length);
-//         }
-//     }
-//
-//     ASSERT(score_freqs->score_avg == 0.0);
-//     for (s = min_score; s <= max_score; s++) {
-//         score_freqs->score_avg += (s * score_freqs->sprob[s]);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2102-2104, 2118-2119 and
 // 2703-2704
-// ```c
-//    if (lo >= 0 || hi <= 0 ||
-//          lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX)
-//       return 1;
-//    ...
-//    if (BlastScoreChk(score_min, score_max) != 0)
-//       return NULL;
-//    ...
-//    if (kbp == NULL || sfp == NULL)
-//       return 1;
-// ```
 // NCBI's `Blast_ScoreFreqNew` returns NULL when the PSSM's smallest score is 0 or more or its
 // largest 0 or less; `Blast_KarlinBlkUngappedCalc` then leaves `kbp_psi[0]` as it was (the
 // previous Lambda). The scaled scores of a BLOSUM62 round (the only matrix LOSAT's psiblast
@@ -2254,89 +1203,7 @@ fn compute_score_probabilities(
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2826-2898
-// ```c
-//     if (diagnostics->information_content) {
-//         double* info = _PSICalculateInformationContentFromFreqRatios(
-//                 internal_pssm->freq_ratios, seq_weights->std_prob,
-//                 diagnostics->query_length,
-//                 diagnostics->alphabet_size);
-//         ...
-//     if (diagnostics->weighted_residue_freqs) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             for (r = 0; r < diagnostics->alphabet_size; r++) {
-//                 diagnostics->weighted_residue_freqs[p][r] =
-//                     seq_weights->match_weights[p][r];
-//             }
-//         }
-//     }
-//
-//     if (diagnostics->frequency_ratios) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             for (r = 0; r < diagnostics->alphabet_size; r++) {
-//                 diagnostics->frequency_ratios[p][r] =
-//                     internal_pssm->freq_ratios[p][r];
-//             }
-//         }
-//     }
-//
-//     if (diagnostics->gapless_column_weights) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             if (msa->num_matching_seqs[p] > 1
-//                 && msa->cell[0][p].letter != kXResidue) {
-//
-//                 diagnostics->gapless_column_weights[p] =
-//                     seq_weights->gapless_column_weights[p]
-//                     / internal_pssm->pseudocounts[p];
-//
-//                 diagnostics->gapless_column_weights[p] *=
-//                     (seq_weights->sigma[p] / aligned_block->size[p] - 1);
-//             }
-//             else {
-//                 diagnostics->gapless_column_weights[p] = 0.0;
-//             }
-//         }
-//     }
-//
-//     if (diagnostics->sigma) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             diagnostics->sigma[p] = seq_weights->sigma[p];
-//         }
-//     }
-//
-//     if (diagnostics->interval_sizes) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             diagnostics->interval_sizes[p] = aligned_block->size[p];
-//         }
-//     }
-//
-//     if (diagnostics->num_matching_seqs) {
-//         for (p = 0; p < diagnostics->query_length; p++) {
-//             diagnostics->num_matching_seqs[p] = msa->num_matching_seqs[p];
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2360-2378
-// ```c
-//     for (p = 0; p < query_length; p++) {
-//
-//         double info_sum = 0.0;
-//
-//         for (r = 0; r < alphabet_sz; r++) {
-//
-//             if (std_prob[r] > kEpsilon) {
-//                 /* Division compensates for multiplication in
-//                  * _PSIComputeFreqRatios */
-//                 double qOverPEstimate = freq_ratios[p][r] / std_prob[r];
-//                 if (qOverPEstimate > kEpsilon) {
-//                     info_sum +=
-//                         freq_ratios[p][r] * log(qOverPEstimate) / NCBIMATH_LN2;
-//                 }
-//             }
-//
-//         }
-//         retval[p] = info_sum;
-//     }
-// ```
 // Each diagnostic is computed only when `request` asks for it (`PSIDiagnosticsResponseNew`
 // allocates only those, blast_psi.c:618-714).
 pub(super) fn save_diagnostics(

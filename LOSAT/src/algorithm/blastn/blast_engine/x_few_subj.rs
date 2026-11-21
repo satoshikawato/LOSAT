@@ -5,24 +5,7 @@
 //! LOSAT_X_PAIRPARDISCARR).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//!        Int4 stat_length;
-//!        if (seq_arg.oid == BLAST_SEQSRC_ERROR) {
-//!            status = BLASTERR_SEQSRC;
-//!            break;
-//!        }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-484
-//! ```c
-//!     while (TRUE) {
-//!         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//!                                        dbseq_chunk_overlap);
-//!         if (status == SUBJECT_SPLIT_DONE) break;
-//!         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-//! ```
 //!
 //! Without the switch, a search of two subjects or more at two threads or more searches each
 //! subject as one task of the pool (`use_parallel`, `search_subjects`), and a subject of two
@@ -86,7 +69,7 @@ pub(super) fn on() -> bool {
 pub(super) enum Kind {
     /// A discontiguous table (dc-megablast).
     Disc,
-    /// A contiguous table of `-task blastn`.
+    /// A contiguous table of `-task blastn` (or `-task rmblastn`, the same table and stages).
     Blastn,
     /// Any other contiguous table (megablast; the lowest row).
     Other,
@@ -97,7 +80,7 @@ impl Kind {
     pub(super) fn of(disc: bool, task: &str) -> Kind {
         if disc {
             Kind::Disc
-        } else if task == "blastn" {
+        } else if matches!(task, "blastn" | "rmblastn") {
             Kind::Blastn
         } else {
             Kind::Other
@@ -194,6 +177,7 @@ mod tests {
         assert_eq!(speedup_tenths(Kind::Other, 128), 27);
         assert_eq!(Kind::of(true, "dc-megablast"), Kind::Disc);
         assert_eq!(Kind::of(false, "blastn"), Kind::Blastn);
+        assert_eq!(Kind::of(false, "rmblastn"), Kind::Blastn);
         assert_eq!(Kind::of(false, "megablast"), Kind::Other);
         assert_eq!(Kind::of(false, "blastn-short"), Kind::Other);
     }

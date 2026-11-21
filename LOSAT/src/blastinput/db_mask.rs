@@ -25,42 +25,7 @@ use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
-// ```c++
-//     // Masking of database
-//     if (m_SupportsDatabaseMasking) {
-//         arg_desc.AddOptionalKey(kArgDbSoftMask,
-//                 "filtering_algorithm",
-//                 "Filtering algorithm ID to apply to the BLAST database as soft "
-//                 "masking",
-//                 CArgDescriptions::eString);
-//         arg_desc.SetDependency(kArgDbSoftMask, CArgDescriptions::eExcludes,
-//                            kArgDbHardMask);
-//
-//         arg_desc.AddOptionalKey(kArgDbHardMask,
-//                 "filtering_algorithm",
-//                 "Filtering algorithm ID to apply to the BLAST database as hard "
-//                 "masking",
-//                 CArgDescriptions::eString);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
-// ```c++
-//     if (m_SupportsDatabaseMasking) {
-//         database_args.push_back(kArgDbSoftMask);
-//         database_args.push_back(kArgDbHardMask);
-//     }
-//     ...
-//         ITERATE(vector<string>, dbarg, database_args) {
-//             arg_desc.SetDependency(kArgSubject, CArgDescriptions::eExcludes,
-//                                    *dbarg);
-//         }
-//     ...
-//         ITERATE(vector<string>, dbarg, database_args) {
-//             arg_desc.SetDependency(kArgSubjectLocation,
-//                                    CArgDescriptions::eExcludes,
-//                                    *dbarg);
-//         }
-// ```
 // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
 // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
 /// The two options of a program whose database arguments support masking (BLASTN).
@@ -85,14 +50,6 @@ pub struct DbMaskArgs {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:234-239
-// ```c
-// /** Define the possible subject masking types */
-// typedef enum ESubjectMaskingType {
-//     eNoSubjMasking,
-//     eSoftSubjMasking,
-//     eHardSubjMasking
-// } ESubjectMaskingType;
-// ```
 /// `ESubjectMaskingType` of a masked search (`eNoSubjMasking` is no `DbMaskOption`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaskKind {
@@ -123,13 +80,6 @@ pub struct DbMaskOption {
 
 impl DbMaskArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2517-2523
-    // ```c++
-    //         if (args.Exist(kArgDbSoftMask) && args[kArgDbSoftMask]) {
-    //             m_SearchDb->SetFilteringAlgorithm(args[kArgDbSoftMask].AsString(), eSoftSubjMasking);
-    //         } else if (args.Exist(kArgDbHardMask) && args[kArgDbHardMask]) {
-    //             m_SearchDb->SetFilteringAlgorithm(args[kArgDbHardMask].AsString(), eHardSubjMasking);
-    //         }
-    // ```
     /// The masking that the options ask for (the soft one first; the parser refuses both), for a
     /// search of `-db` (the parser refuses them with `-subject` and `-subject_loc`).
     pub fn option(&self) -> Option<DbMaskOption> {
@@ -147,32 +97,6 @@ impl DbMaskArgs {
 
 impl FilteringAlgorithm {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:149-171
-    // ```c++
-    // static bool s_IsNumericId(const string &id)
-    // {
-    //     Int4 nid(-1);
-    //     return NStr::StringToNumeric(id, &nid, NStr::fConvErr_NoThrow, 10);
-    // }
-    //
-    // void
-    // CSearchDatabase::SetFilteringAlgorithm(const string &filt_algorithm,
-    //                                        ESubjectMaskingType mask_type)
-    // {
-    //     m_MaskType = mask_type;
-    //     m_FilteringAlgorithmString = "";
-    //     if (mask_type == eNoSubjMasking) {
-    //         m_FilteringAlgorithmId = -1;
-    //         return;
-    //     }
-    //     if (s_IsNumericId(filt_algorithm)) {
-    //         m_FilteringAlgorithmId = NStr::StringToInt(filt_algorithm);
-    //         x_ValidateMaskingAlgorithm();
-    //     } else {
-    //         m_FilteringAlgorithmString = filt_algorithm;
-    //         m_NeedsFilteringTranslation = true;
-    //     }
-    // }
-    // ```
     // `x_ValidateMaskingAlgorithm` returns at once here: the database is not open yet.
     /// The algorithm that the option's text names: `+11` and `011` are the id 11; ` 11`, `11 `,
     /// `11x`, `2147483648` and the empty text are names.
@@ -200,43 +124,8 @@ pub struct ResolvedMask {
 }
 
 impl DbMaskOption {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:296-318
-    // ```c++
-    //     x_ValidateMaskingAlgorithm();
-    //     _ASSERT(m_SeqDb.NotEmpty());
-    //     m_DbInitialized = true;
-    // }
-    //
-    // void
-    // CSearchDatabase::x_ValidateMaskingAlgorithm() const
-    // {
-    //     if (m_FilteringAlgorithmId <= 0 || m_SeqDb.Empty()) {
-    //         return;
-    //     }
-    //
-    //     vector<int> supported_algorithms;
-    //     m_SeqDb->GetAvailableMaskAlgorithms(supported_algorithms);
-    //     if (find(supported_algorithms.begin(),
-    //              supported_algorithms.end(),
-    //              m_FilteringAlgorithmId) == supported_algorithms.end()) {
-    //         CNcbiOstrstream oss;
-    //         oss << "Masking algorithm ID " << m_FilteringAlgorithmId << " is "
-    //             << "not supported in " <<
-    //             (IsProtein() ? "protein" : "nucleotide") << " '"
-    //             << GetDatabaseName() << "' BLAST database";
-    //         string msg = CNcbiOstrstreamToString(oss);
-    //         NCBI_THROW(CBlastException, eInvalidOptions, msg);
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:295-318
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
-    // ```c++
-    //     catch (const blast::CBlastException& e) {                               \
-    //         const string& msg = e.GetMsg();                                     \
-    //         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-    //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-    //             exit_code = BLAST_INPUT_ERROR;                                  \
-    // ```
     /// NCBI's check of an id when it opens the database `db` of the `-db` value `db_name`
     /// (`x_InitializeDb`): an id above 0 must be one of the database's algorithms (all its
     /// volumes'), else NCBI's options error, exit 1. A name is not looked up here, nor an id of
@@ -263,7 +152,7 @@ impl DbMaskOption {
                 message: format!(
                     "BLAST options error: Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
                     if nucleotide { "nucleotide" } else { "protein" }
-                ),
+                ).into(),
             }
             .into());
         }
@@ -271,70 +160,9 @@ impl DbMaskOption {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:195-231
-    // ```c++
-    // int
-    // CSearchDatabase::GetFilteringAlgorithm() const
-    // {
-    //     if (m_MaskType == eNoSubjMasking) return -1;
-    //     try {
-    //         if (m_NeedsFilteringTranslation) {
-    //             x_TranslateFilteringAlgorithm();
-    //         }
-    //         return m_FilteringAlgorithmId;
-    //     } catch (const CSeqDBException&) {
-    //         return -1;
-    //     }
-    // }
-    //
-    // string
-    // CSearchDatabase::GetFilteringAlgorithmKey() const
-    // {
-    //     if (m_MaskType == eNoSubjMasking) return "";
-    //     return m_FilteringAlgorithmString;
-    // }
-    // ...
-    // void
-    // CSearchDatabase::x_TranslateFilteringAlgorithm() const
-    // {
-    //     if (m_MaskType == eNoSubjMasking) return;
-    //     if (!m_DbInitialized) {
-    //         x_InitializeDb();
-    //     }
-    //     m_FilteringAlgorithmId =
-    //         m_SeqDb->GetMaskAlgorithmId(m_FilteringAlgorithmString);
-    //     m_NeedsFilteringTranslation = false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153
-    // ```c++
-    //         int filteringAlgorithmId = db_adapter.GetFilteringAlgorithm();
-    //         if(filteringAlgorithmId == -1) {
-    //             CRef <CSearchDatabase> db_Info = db_adapter.GetSearchDatabase();
-    //             if (db_Info && db_Info.NotEmpty()) {
-    //                 ESubjectMaskingType maskType = db_Info->GetMaskType();
-    //                 if(maskType != eNoSubjMasking) {
-    //                     db_Info->SetFilteringAlgorithm(-1, eNoSubjMasking);
-    //                     ERR_POST(Warning << "Subject mask not found in " + m_DbName +", proceeding without subject masking.");
-    //                 }
-    //             }
-    //         }
-    //         CBlastFormatUtil::GetBlastDbInfo(m_DbInfo, m_DbName, m_DbIsAA,
-    //                                    dbfilt_algorithm, is_remote_search);
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:228-242
-    // ```c++
-    //         CBlastFormat formatter(opt, *db_adapter,
-    //     ...
-    //                                m_CmdLineArgs->ExecuteRemotely(),
-    //                                db_adapter->GetFilteringAlgorithm(),
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:196-200
-    // ```c++
-    //         else {                                                              \
-    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-    //         	exit_code = BLAST_DATABASE_ERROR;                               \
-    //         }                                                                   \
-    // ```
     /// The formatter's resolution, after `Query is Empty!`: the id of a name (by the table of all
     /// the database's volumes, `MaskAlgorithms::id_of`). A name that the database does not have
     /// (or that NCBI's reader of the table fails on) and the id -1 write NCBI's warning to
@@ -389,7 +217,7 @@ impl DbMaskOption {
             match error {
                 SeqDbError::Range(text) => NativeError {
                     exit: 2,
-                    message: format!("BLAST Database error: {text}\n"),
+                    message: format!("BLAST Database error: {text}\n").into(),
                 }
                 .into(),
                 error => crate::algorithm::common::database::database_error_of(error, program),
@@ -406,28 +234,11 @@ impl DbMaskOption {
 
 impl DbMaskOption {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:644-651
-    // ```c++
-    //     CNcbiOstream* out = cmdline_args->GetExportSearchStrategyStream(args);
-    //     if ( !out ) {
-    //         return;
-    //     }
-    //
-    //     s_ExportSearchStrategy(out, queries, opts_hndl,
-    //                            cmdline_args->GetBlastDatabaseArgs(),
-    //                            pssm, num_iters);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:54-58
-    // ```c++
-    // CLocalDbAdapter::CLocalDbAdapter(const CSearchDatabase& dbinfo)
-    //     : m_SeqSrc(0), m_SeqInfoSrc(0), m_DbName(dbinfo.GetDatabaseName()), m_DbScanMode(false)
-    // {
-    //     m_DbInfo.Reset(new CSearchDatabase(dbinfo));
-    // }
-    // ```
     // The search strategy reads the command line's `CSearchDatabase`; the formatter's warning
     // resets the database adapter's copy (blast_format.cpp:146), which the archive reads. So
     // after the warning the strategy still writes the name as its key (search_strategy.cpp:500-505,
-    // quoted at `ResolvedMask::archive_params`); an empty name and the id -1 write nothing.
+    // cited at `ResolvedMask::archive_params`); an empty name and the id -1 write nothing.
     /// The search strategy's program options of the masking (`-export_search_strategy`): the
     /// archive's (`ResolvedMask::archive_params`) when the formatter resolved it (`resolved`), else,
     /// after its warning, `DbFilteringAlgorithmKey` and `SubjectMaskingType` of a name that is not
@@ -478,26 +289,6 @@ impl ResolvedMask {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516
-    // ```c++
-    //     // Set the filtering algorithms
-    //     string algo_key = db->GetFilteringAlgorithmKey();
-    //     if (algo_key != kEmptyStr)
-    //     {
-    //     	int mask_type = (int) db->GetMaskType();
-    //        	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_DbFilteringAlgorithmKey), algo_key);
-    //        	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_SubjectMaskingType), mask_type);
-    //     }
-    //     else {
-    //     	// Set the filtering algorithms
-    //     	int algo_id = db->GetFilteringAlgorithm();
-    //     	if (algo_id != -1)
-    //     	{
-    //     		int mask_type = (int) db->GetMaskType();
-    //     		x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_DbFilteringAlgorithmId), algo_id);
-    //     		x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_SubjectMaskingType), mask_type);
-    //     	}
-    //     }
-    // ```
     /// The program options of the BLAST archive and of the search strategy (after the list's).
     /// An empty name is no key (`algo_key != kEmptyStr`): the id it was translated to is written.
     pub fn archive_params(&self) -> Vec<Param> {
@@ -554,16 +345,8 @@ pub enum HardMaskShape {
     ShortLastMask { start: u32, end: u32 },
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (cited at
 // `core::subject_split::HardSplitState::next_chunk`)
-// ```c
-//     /* if no chunking is performed */
-//     if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-//         subject->seq_ranges = backup->soft_ranges;
-//         subject->num_seq_ranges = backup->num_soft_ranges;
-//         return SUBJECT_SPLIT_OK;
-//     }
-// ```
 /// The shortest scanned word (the word size, or the discontiguous template's length) at which
 /// `-db_hard_mask` searches a sequence of the shape [`HardMaskShape::TailMask`] instead of refusing
 /// it: over the chunk before the mask alone, scanned from its start as NCBI scans its other hard
@@ -586,88 +369,18 @@ pub const TAIL_MASK_SEARCHED_WORD: usize = 11;
 
 impl HardMaskShape {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 and 579-584
-    // (quoted at `core::subject_split::HardSplitState::next_chunk`): the chunks, the "no
+    // (cited at `core::subject_split::HardSplitState::next_chunk`): the chunks, the "no
     // chunking" branch, and the overlap after each chunk, read one range past the list after the
     // last one.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668
-    // ```c
-    //     /* if sequence is masked, fall back to generic scanner and extender */
-    //     if (subject->mask_type != eNoSubjMasking) {
-    //     ...
-    //         /* generic scanner permits any (non-aligned) starting offset */
-    //         scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-    //         scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354, 1368-1370
-    // ```c
-    //     Int4 min_subj_seq_length = 1;
-    //     ...
-    //     if (Blast_SubjectIsTranslated(program_number)) {
-    //         min_subj_seq_length = s_GetMinimumSubjSeqLen(lookup_wrap);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58
-    // ```c
-    // s_DetermineScanningOffsets(const BLAST_SequenceBlk* subject,
-    //                            Int4  word_length,
-    //                            Int4  lut_word_length,
-    //                            Int4* range)
-    // {
-    //     ...
-    //     while (range[1] > range[2]) {
-    //         range[0]++;
-    //         if (range[0] >= (Int4)subject->num_seq_ranges) {
-    //             return FALSE;
-    //         }
-    //         range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-    //         range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
-    //     }
-    //     return TRUE;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500, 565
-    // ```c
-    //         if (aux_struct->WordFinder) {
-    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-    //                                    ...);
-    //
-    //             if (init_hitlist->total == 0) continue;
-    //         }
-    //     ...
-    //         if (hsp_list->hspcnt == 0) continue;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2873-2911, 2956
-    // ```c
-    //    if (!hsp_list || hsp_list->hspcnt == 0)
-    //       return 0;
-    //
-    //    /* If no previous HSP list, just return a copy of the new one. */
-    //    if (!combined_hsp_list) {
-    //    ...
-    //    if (contexts_per_query < 0) {      /* subject seq is split */
-    //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
-    //          hsp1 = combined_hsp_list->hsp_array[index1];
-    //          if (hsp1->subject.end > split_offsets[0]) {
-    //       ...
-    //       for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
-    //          hsp2 = hsp_list->hsp_array[index2];
-    //          if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) {
-    //    ...
-    //    if (hspcnt1 > 0 && hspcnt2 > 0) {
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1527-1537
-    // (quoted at blastn's `database::mask_hard_letters`): the partial fetch's slices are masked by
+    // (cited at blastn's `database::mask_hard_letters`): the partial fetch's slices are masked by
     // a scan that assumes sorted masks.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1326-1333
-    // ```c
-    //     } else if (program_number == eBlastTypeBlastn &&
-    //                options->word_size > DBSEQ_CHUNK_OVERLAP) {
-    //         ...
-    //                   "Word-size must be less than or equal to %d", DBSEQ_CHUNK_OVERLAP);
-    //         ...
-    //         return BLASTERR_OPTION_VALUE_INVALID;
-    // ```
     /// The shape of the stored masks `masks` (`[start, end)`, as stored, not empty) of a sequence
     /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan reads words
     /// of `scanned_word` letters (the word size, or the discontiguous template's length), or

@@ -5,11 +5,6 @@
 //! exactly as on the command line (LOSAT Web ABI v2 §7 does the same).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
-//! ```c++
-//! const string kArgQuery("query");
-//! const string kArgSubject("subject");
-//! const string kArgNumThreads("num_threads");
-//! ```
 #![warn(missing_docs, unused)]
 
 use super::error::Error;
@@ -17,19 +12,8 @@ use super::input::Inputs;
 use super::program::Program;
 use crate::cli::{Cli, Commands};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
-// ```c
-// arg_desc.AddDefaultKey(kArgOutput, "output_file",
-//                "Output file name",
-//                CArgDescriptions::eOutputFile, "-");
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c++
-//     arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                            kOutputFormatDescription,
-//                            CArgDescriptions::eString,
-//                            NStr::IntToString(dft_outfmt));
-// ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names, a database's name, and the PSSM file of a PSSM
 /// query, `-in_pssm` of psiblast and tblastn), the output file and the output format (arguments
@@ -51,6 +35,17 @@ const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 /// (`web_adapter::records_refused_options`).
 pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
     STRATEGY_FILES
+}
+
+/// The options of `program`'s command line that give the query as an alignment (psiblast's
+/// `-in_msa` with `-msa_master_idx` and `-ignore_msa_master`): the library API gives the query as
+/// records or `Inputs::pssm`, no `Inputs` holds an alignment yet, so `validate` refuses them and
+/// `describe` leaves them out.
+pub(crate) fn alignment_options(program: Program) -> &'static [&'static str] {
+    match program {
+        Program::Psiblast => &["in_msa", "msa_master_idx", "ignore_msa_master"],
+        _ => &[],
+    }
 }
 
 /// A program and an argv that the command line's parser accepted.
@@ -114,7 +109,7 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `blastinput::value_parsers::blastn_output_path`)
     /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
     /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
     /// and the arguments carry it to the search, which makes the file where the command line makes
@@ -127,16 +122,6 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1248
-    // ```c++
-    //     if (!m_IsDeltaBlast) {
-    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
-    //                                CArgDescriptions::eExcludes,
-    //                                kArgQuery);
-    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
-    //                                CArgDescriptions::eExcludes,
-    //                                kArgQueryLocation);
-    //     }
-    // ```
     /// The parsed arguments of the search of `inputs`: the command line's `-query` (or `-in_pssm`
     /// for a PSSM query, `Inputs::pssm`) and `-subject` or `-db` values, and `-out` for
     /// `run_to_file` (`Search::writing_to`). An option can hold for one kind of input only
@@ -279,6 +264,15 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
             ).into()));
         }
+        // `-in_msa` is the command line's alternative to a query (psiblast's alignment, series PS
+        // item PS6): the library API gives the query as records or `Inputs::pssm`, and no
+        // `Inputs` holds an alignment yet, so the three options of the alignment are refused
+        // (`-msa_master_idx` and `-ignore_msa_master` need `-in_msa`).
+        if alignment_options(program).contains(&name) {
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported"
+            ).into()));
+        }
         if API_OWNED.contains(&name) {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the inputs are given as records and the outputs as formats"
@@ -287,13 +281,6 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     }
     let argv: Vec<String> = argv.iter().map(|word| word.to_string()).collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381
-    // ```c++
-    //         ITERATE(vector<string>, dbarg, database_args) {
-    //             arg_desc.SetDependency(kArgSubjectLocation,
-    //                                    CArgDescriptions::eExcludes,
-    //                                    *dbarg);
-    //         }
-    // ```
     // An argv is checked before the inputs are known: it holds if it holds for one kind of
     // subject, and the search parses it again for the kind it has (`Search::command`).
     let query = (QUERY, std::ffi::OsStr::new("query"));
@@ -394,6 +381,42 @@ mod tests {
                     "{program} {argv:?}"
                 );
             }
+        }
+    }
+
+    // N5 of the PS6 review: the three options of psiblast's alignment query are refused by
+    // `validate`, in the words below, and only for psiblast (another program's parser rejects
+    // them as unknown options).
+    #[test]
+    fn the_alignment_options_are_refused_by_validate() {
+        for argv in [
+            &["-in_msa", "m.aln"][..],
+            &["-in_msa=m.aln"],
+            &["-evalue", "1", "--msa_master_idx", "2"],
+            &["-ignore_msa_master"],
+        ] {
+            let word = argv
+                .iter()
+                .find(|word| word.contains("msa"))
+                .copied()
+                .unwrap();
+            assert_eq!(
+                validate(Program::Psiblast, argv),
+                Err(Error::Argv(format!(
+                    "{} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported",
+                    key(word)
+                ).into())),
+                "{argv:?}"
+            );
+        }
+        for program in [Program::Blastp, Program::Tblastn] {
+            let error = validate(program, &["-in_msa", "m.aln"]).unwrap_err();
+            assert!(
+                !error
+                    .to_string_lossy()
+                    .contains("an alignment as the query"),
+                "{program}: {error}"
+            );
         }
     }
 
@@ -514,6 +537,7 @@ mod tests {
         let query = crate::api::read_fasta(
             Program::Psiblast,
             Role::Query,
+            // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
             b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n",
         )
         .unwrap();
@@ -528,7 +552,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `blastinput::value_parsers::blastn_output_path`)
     /// `run_to_file`'s file is the parser's `-out` (`Search::writing_to`): any name, one that looks
     /// like a toolkit word (`-dryrun`, `--`) or is not UTF-8 among them, is the file and leaves the
     /// argv as it is; a name of 256 bytes or more is NCBI's error.

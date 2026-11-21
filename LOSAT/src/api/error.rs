@@ -10,24 +10,7 @@
 //! command line writes one.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-//! ```c++
-//!     catch (const CArgException& e) {                                        \
-//!         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//!         exit_code = BLAST_INPUT_ERROR;                                      \
-//!     }                                                                       \
-//!     catch (const CObjReaderParseException& e) {                             \
-//!         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//!         exit_code = BLAST_INPUT_ERROR;                                      \
-//!     }                                                                       \
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
-//! ```c++
-//!     catch (const blast::CBlastException& e) {                               \
-//!         const string& msg = e.GetMsg();                                     \
-//!         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-//!             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-//!             exit_code = BLAST_INPUT_ERROR;                                  \
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::borrow::Cow;
@@ -78,17 +61,49 @@ impl Error {
     /// The engine's error as the API reports it: the error and its causes joined by `: `
     /// (anyhow's alternate form), the shape of LOSAT Web ABI v2 (docs/web/abi_v2.md §4).
     pub(crate) fn search(error: &anyhow::Error) -> Self {
-        Error::Search(format!("{error:#}").into_bytes())
+        Error::Search(chain_bytes(error))
     }
 
     /// The error of a run that failed after writing `text` to its standard error: that text,
     /// without its last line feeds (`Error::Search`).
-    pub(crate) fn written(mut text: Vec<u8>) -> Self {
-        while text.last() == Some(&b'\n') {
-            text.pop();
-        }
-        Error::Search(text)
+    pub(crate) fn written(text: Vec<u8>) -> Self {
+        Error::Search(without_line_feeds(text))
     }
+}
+
+/// The bytes of `error` in anyhow's alternate form (the error and its causes joined by `: `), with
+/// the bytes of each `cli::NativeError` and `NcbiException` of the chain, the text the command
+/// line writes: a name that is not UTF-8 keeps its bytes there (line LIB-B), where `{error:#}`
+/// would write U+FFFD.
+pub(crate) fn chain_bytes(error: &anyhow::Error) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (at, cause) in error.chain().enumerate() {
+        if at > 0 {
+            bytes.extend_from_slice(b": ");
+        }
+        if let Some(native) = cause.downcast_ref::<crate::cli::NativeError>() {
+            bytes.extend_from_slice(&native.message);
+        } else if let Some(exception) = cause.downcast_ref::<crate::ncbi_exception::NcbiException>()
+        {
+            bytes.extend_from_slice(&exception.what());
+        } else {
+            bytes.extend_from_slice(cause.to_string().as_bytes());
+        }
+    }
+    bytes
+}
+
+/// `bytes` without its last line feeds.
+fn without_line_feeds(mut bytes: Vec<u8>) -> Vec<u8> {
+    while bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    bytes
+}
+
+/// [`chain_bytes`] without the last line feeds (an input's error, `Error::Input`).
+pub(crate) fn input_bytes(error: &anyhow::Error) -> Vec<u8> {
+    without_line_feeds(chain_bytes(error))
 }
 
 /// The text of the message (`to_string_lossy`).

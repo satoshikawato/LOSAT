@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Comparison fixtures only. Run with NEW output directory and clean NCBI archive.
 NCBI source: c++/src/algo/blast/unit_tests/api/bl2seq_unit_test.cpp:1638-1654:
- CBl2Seq blaster(*query, *subj, eBlastx); TSeqAlignVector sav(blaster.Run());
-NCBI source: blastfilter_unit_test.cpp:949-1035: masks.push_back(TSeqRange(0,75));
+NCBI source: c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:949-1035
 NCBI source: c++/src/objects/seqfeat/gc.prt: ncbieaa / Base1 / Base2 / Base3.
 Synthetic inputs are deterministic probes, never hand-authored search expectations.
 """
@@ -13,6 +12,7 @@ from Bio import SeqIO
 ROOT=Path(__file__).resolve().parents[3]
 HERE=Path(__file__).resolve().parent
 CODES=[1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33]
+# Test protein: starts like E. coli AsnA (RefSeq NP_418200.1); the rest is not recorded.
 AA='MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQANLADKPEADKVKAKGDKVIGIDLGTTNSCVAIMDGTTPRVLENLEKKYP'
 CODONS=dict(zip('ACDEFGHIKLMNPQRSTVWY','GCT TGT GAT GAA TTT GGT CAT ATT AAA CTG ATG AAT CCT CAA CGT TCT ACT GTT TGG TAT'.split()))
 DNA=''.join(CODONS[a] for a in AA)

@@ -47,7 +47,6 @@ def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
 
 
 # NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-# (*thread)->Run(); (*thread)->Join(&result);
 # The WASI runners provide threads/IO only; native and NCBI bytes define output.
 def main() -> int:
     parser = argparse.ArgumentParser()

@@ -4,35 +4,7 @@
 //! diagonal-hash fold done by the owner thread in the original scan order.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-//! ```c
-//!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-//!
-//!         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-//!
-//!         if (hitsfound == 0)
-//!             continue;
-//!
-//!         total_hits += hitsfound;
-//!         hits_extended += extend(offset_pairs, hitsfound, word_params,
-//!                                 lookup_wrap, query, subject, matrix,
-//!                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-838,939-941
-//! ```c
-//!     diag = s_off - q_off;
-//!     s_end = s_off + word_length;
-//!     s_off_pos = s_off + hash_table->offset;
-//!     s_end_pos = s_end + hash_table->offset;
-//!
-//!     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-//! ...
-//!     if (s_off_pos < last_hit) return 0;
-//! ...
-//!     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-//!                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-//!                           hit_ready, s_off_pos, window_size + Delta + 1);
-//! ```
 //!
 //! NCBI scans the subject in pieces already: `scansub` stops when the offset array is full
 //! and the loop above calls it again from `scan_range[1]`, so a scan kernel restarts at any
@@ -136,6 +108,8 @@ pub(super) struct Inputs<'a> {
     pub(super) reduced_cutoff_scores: &'a [i32],
     pub(super) score_matrix: &'a [i32; 256],
     pub(super) nucl_score_table: &'a [i32; 256],
+    /// `ScanBatch::exact_ungapped` (matrix-only scoring or a word shorter than 11 letters).
+    pub(super) exact_ungapped: bool,
     pub(super) diag_offset: isize,
     pub(super) diag_hash_window: i32,
     pub(super) use_array_indexing: bool,
@@ -161,13 +135,6 @@ pub(super) struct DiagArray<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:135-149
-/// ```c
-/// typedef union BlastOffsetPair {
-///     struct {
-///         Uint4 q_off;  /**< Query offset */
-///         Uint4 s_off;  /**< Subject offset */
-///     } qs_offsets;     /**< Query/subject offset pair */
-/// ```
 /// A pair after the word extension of `s_BlastNaExtend` (`q_offset -= ext_left`,
 /// `s_offset -= ext_left`), with its context and the `s_range` of its scan range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -498,11 +465,6 @@ pub(super) fn takes_owner_chunks(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ```
 /// The scan ranges `scan_subject_kmers_with_ranges` visits (from `first_scan_range`: the whole
 /// subject when it is unmasked, else its `seq_ranges` one by one), each cut into strips of at
 /// most `per` grid points; the last strip of a range ends at the range's end. `s_range` is the
@@ -579,15 +541,6 @@ fn plan_strips(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
-/// ```c
-///    max_hits -= mb_lt->longest_chain;
-/// ...
-///             if (total_hits >= max_hits)
-///                 break;
-/// ...
-///             total_hits += s_BlastMBLookupRetrieve(mb_lt,
-///                 index, offset_pairs + total_hits, s_off);
-/// ```
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
 /// lookup width and step (`select_mb_scan_kind`: NCBI's Any scanner for a masked subject), from
 /// `job.start` to `job.end`; every lookup chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
@@ -627,11 +580,7 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
     let end = job.end;
     let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-        // ```c
-        // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-        // offset_pairs[i++].qs_offsets.s_off = s_off;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
         let mut pair = |q_off_1: u32| {
             if q_off_1 != 0 {
                 if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
@@ -690,11 +639,7 @@ fn scan_strip_csr<
     // run read again.
     let rank_once = super::x_bn_rank_once(true);
     let mut emit = |(kmer_start, index): (usize, u64), e: usize| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-        // ```c
-        // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-        // offset_pairs[i++].qs_offsets.s_off = s_off;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
         let mut run = if rank_once {
             csr.run_at(e)
         } else {
@@ -820,33 +765,6 @@ fn scan_kernel<F: FnMut(usize, u64) -> bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1106-1144
-/// ```c
-///         for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
-///             s_off--;
-///             q--;
-///             if (s_off % COMPRESSION_RATIO == 3)
-///                 s--;
-///             if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6)
-///                 != *q)
-///                 break;
-///         }
-///
-///         /* do the right extension if the left extension did not find all
-///            the bases required */
-///
-///         if (ext_left < ext_to) {
-///             Int4 ext_right = 0;
-///             s_off = s_offset + lut_word_length;
-///             if (s_off + ext_to - ext_left > s_range)
-///                 continue;
-/// ...
-///             if (ext_left + ext_right < ext_to)
-///                 continue;
-///         }
-///
-///         q_offset -= ext_left;
-///         s_offset -= ext_left;
-/// ```
 /// Phase 1 for one pair: the statements of `pair_extend::extend_offset_pairs` before the
 /// diagonal is read (context, bounds test, word extension), which read only the inputs. A pair that
 /// the reference drops with `continue` here is dropped; any other becomes a `Seed`, pushed to
@@ -866,10 +784,7 @@ fn seed_of_pair<O: SeedOut>(
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let encoded_query_concat_blastna_with_sentinels = x.encoded_query_concat_blastna_with_sentinels;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
-    // ```c
-    // Int4 context = BSearchContextInfo(q_off, query_info);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
     let context_idx = x.query_context_index.context_for_offset(q_off0);
     let ctx = &x.query_contexts[context_idx];
     let q_context_start = ctx.query_offset as usize;
@@ -957,43 +872,6 @@ struct FoldCounts {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-838,887-895,923-933,939-941
-/// ```c
-///     diag = s_off - q_off;
-///     s_end = s_off + word_length;
-///     s_off_pos = s_off + hash_table->offset;
-///     s_end_pos = s_end + hash_table->offset;
-///
-///     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-///
-///     /* if there is no record in hashtable, we set last_hit to be a very negative number */
-///     if(!rc)  last_hit = 0;
-///
-///     /* hit within the explored area should be rejected*/
-///     if (s_off_pos < last_hit) return 0;
-/// ...
-///     } else if (check_masks) {
-///         /* check the masks for the word */
-///         if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-///                         query_mask, query_info, s_range,
-///                         word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-///         /* update the right end*/
-///         s_end += extended;
-///         s_end_pos += extended;
-///     }
-/// ...
-///             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-/// ...
-///                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-///                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-///                           + hash_table->offset;
-///             } else {
-///                 hit_ready = 0;
-///             }
-/// ...
-///     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-///                           hit_ready, s_off_pos, window_size + Delta + 1);
-/// ```
 /// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
 /// strip, in order, statement for statement for the diagonal hash in one-hit mode (`two_hits`
 /// false, so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
@@ -1048,6 +926,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let diag_offset = x.diag_offset;
@@ -1071,15 +950,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         let s_ext_start = seed.s as usize;
         let s_range = seed.s_range as usize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-839
-        // ```c
-        // diag = s_off - q_off;
-        // s_end = s_off + word_length;
-        // s_off_pos = s_off + hash_table->offset;
-        // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-        // if(!rc)  last_hit = 0;
-        // if (s_off_pos < last_hit) return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, _hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
@@ -1113,17 +984,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         let mut hit_ready = true;
         let query_mask = ctx.masks.as_slice();
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
-        // ```c
-        // if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
-        //     return FALSE;
-        // }
-        // q_off = mb_lt->hashtable[index];
-        // while (q_off) {
-        //     if (q_off == q_pos) return TRUE;
-        //     q_off = mb_lt->next_pos[q_off];
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
             if s_pos + lut_word_length > s_len {
                 return true;
@@ -1140,17 +1001,6 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         };
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:887-895
-        // ```c
-        //     }  else if (check_masks) {
-        // 	 /* check the masks for the word */
-        //         if (!s_TypeOfWord(query, subject, &q_off, &s_off,
-        //                           query_mask, query_info, s_range,
-        //                           word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-        //         /* update the right end*/
-        //         s_end += extended;
-        //         s_end_pos += extended;
-        //     }
-        // ```
         // (`two_hits` is false; the small-query word extension is outside the scope, so the
         // locations are the query masks.)
         let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
@@ -1173,12 +1023,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         s_end += ext;
         s_end_pos += ext;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-        // ```c
-        // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                       hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
             part::insert_t::<PT, false, false, TRACK>(
@@ -1195,21 +1040,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
             continue;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-919
-        // ```c
-        //             if ( word_params->options->program_number == eBlastTypeBlastn &&
-        //                  (word_params->matrix_only_scoring || word_length < 11))
-        //             {
-        //                 s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-        //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-        //             }else {
-        //                 s_NuclUngappedExtend(query, subject, matrix, q_off, s_end,
-        //                                  s_off, -(cutoffs->x_dropoff),
-        //                                  ungapped_data,
-        //                                  word_params->nucl_score_table,
-        //                                  cutoffs->reduced_nucl_cutoff_score);
-        //             }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-920
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {
@@ -1217,7 +1048,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -1261,28 +1092,12 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         let ungapped_score = ungapped.score;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:928-929
-        // ```c
-        //                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-        //                           + hash_table->offset;
-        // ```
         let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932
-        // ```c
-        //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-        // ...
-        //             } else {
-        //                 hit_ready = 0;
-        //             }
-        // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-            // ```c
-            // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-            //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-            //                       hit_ready, s_off_pos, window_size + Delta + 1);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
             part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
@@ -1310,12 +1125,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
             out.hit_keys.push(x_key);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-        // ```c
-        // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                       hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         part::insert_t::<PT, false, false, TRACK>(
             diag_hash,
             out,
@@ -1648,13 +1458,6 @@ pub(super) fn seed_lists_on() -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-/// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): strips scanned by any thread, folded here in strip order into `hash` and
 /// `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the fold is split by
@@ -1861,16 +1664,6 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-///                                 lookup_wrap, query, subject, matrix,
-///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-///     }
-/// ```
 /// Dispatch of `prelim_subject::prelim_chunk_hits`: the seed stage of this chunk (the loop above
 /// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
 /// threads or more, one subject owner); `true` means it has run and the
@@ -2042,14 +1835,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:396-425
-    // ```c
-    //     while (index) {
-    //         if (table->chain[index].diag == diag) {
-    // ...
-    //         } else {
-    //             if (s_off - table->chain[index].level > window_size) {
-    //                 table->chain[index].diag = diag;
-    // ```
     // A random stream of seed outcomes on the diagonal hash: retrieve, the `last_hit` test,
     // then an insert as `fold` does (below the cutoff: `hit_len` = s_end_pos - s_off_pos,
     // not saved; saved: the ungapped end, `hit_len` 0). Diagonals d + 512 k share a bucket,
@@ -2190,11 +1975,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-    // ```c
-    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-    //
-    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-    // ```
     // The whole stage on random sequences (the subject made of mutated copies of query
     // pieces on both strands, query masks on one context) for the scan kernels of every
     // lookup width and step: the pairs of the reference wrapper
@@ -2344,6 +2124,7 @@ mod tests {
                 reduced_cutoff_scores: &[18, 18],
                 score_matrix: &score_matrix,
                 nucl_score_table: &nucl_score_table,
+                exact_ungapped: word_length < 11,
                 diag_offset,
                 diag_hash_window: diag_hash_insert_window(0, 0, word_length),
                 use_array_indexing: false,

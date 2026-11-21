@@ -11,7 +11,6 @@ from pathlib import Path
 # NCBI c++/src/app/blast/tblastn_app.cpp:250-252,275-301:
 # CBlastInput(..., GetQueryBatchSize()); GetNextSeqBatch; CLocalBlast.Run()
 # NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:105-127:
-# case eTblastn: retval = 20000;
 # NCBI c++/src/algo/blast/blastinput/blast_input.cpp:135-165:
 # the sequence that makes size_read >= batch_size stays in that batch.
 BATCH_RESIDUES = 20_000

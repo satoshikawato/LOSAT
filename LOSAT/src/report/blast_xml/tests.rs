@@ -292,6 +292,35 @@ fn blastn_parameters_and_the_statistics_without_a_valid_context() {
     assert!(text.contains("<Statistics_db-num>3</Statistics_db-num>\n      <Statistics_db-len>10000000000</Statistics_db-len>\n      <Statistics_hsp-len>0</Statistics_hsp-len>\n      <Statistics_eff-space>0</Statistics_eff-space>\n      <Statistics_kappa>-1</Statistics_kappa>\n      <Statistics_lambda>-1</Statistics_lambda>\n      <Statistics_entropy>-1</Statistics_entropy>"));
 }
 
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
+// D1a-4, SF1): a summed
+// `LENGTH` of exactly -2^63 (an alias file's `LENGTH` 2^63), which NCBI's serial XML writes as
+// `-0` (probe q13 of review C), is written as its digits.
+#[test]
+fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
+    let mut run = run_blastn();
+    run.db_num = 3;
+    run.db_len = i64::MIN;
+    let mut out = Vec::new();
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"",
+        len: 0,
+        stats: XmlStats::NONE,
+        message: Some(b"x"),
+        searched: true,
+        masks: &[],
+    };
+    BlastXmlWriter::new(0)
+        .query(&run, &query, &mut out, |_| Ok(()))
+        .unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("<Statistics_db-len>-9223372036854775808</Statistics_db-len>"),
+        "{text}"
+    );
+}
+
 fn run_blastn() -> XmlRun<'static> {
     XmlRun {
         program: "blastn",
@@ -375,7 +404,7 @@ fn strings_are_written_as_ncbis_us_ascii_stream_writes_them() {
     }
     // The trace of an object written with `WriteObject` has no named frame.
     let (_, _, _, thrown) = def(b"a\xe9");
-    let what = thrown.expect("thrown").exception().what();
+    let what = String::from_utf8(thrown.expect("thrown").exception().what()).unwrap();
     // NCBI's report (its header, then the three exceptions of the chain) in LOSAT's words
     // (`crate::wording::losat_text`).
     assert_eq!(what.lines().count(), 3, "{what}");
@@ -418,11 +447,11 @@ fn a_standard_xml_trace_names_the_choice_frames() {
     let exception = enc.take_thrown().expect("thrown").exception();
     assert_eq!(
         exception.get_msg(),
-        " Frame type= eFrameNamed, Object type= BlastOutput2"
+        b" Frame type= eFrameNamed, Object type= BlastOutput2"
     );
     // The frames of NCBI's report, in LOSAT's words (`crate::wording::losat_text`): the lines
     // after the first exception's, each with the indentation of a further exception.
-    let what = exception.what();
+    let what = String::from_utf8(exception.what()).unwrap();
     let frames: Vec<&str> = what.lines().skip(1).map(str::trim_start).collect();
     assert_eq!(
         frames,
@@ -536,11 +565,11 @@ fn a_header_exception_comes_back_after_its_posts() {
     assert_eq!(native.exit, 255);
     // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
     assert!(
-        native.message.starts_with(&*crate::wording::losat_text(
+        native.message.starts_with(crate::wording::losat_text(
             "Error: NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"
-        )),
+        ).as_bytes()),
         "{}",
-        native.message
+        String::from_utf8_lossy(&native.message)
     );
     let diagnostics = String::from_utf8_lossy(&diagnostics);
     assert!(

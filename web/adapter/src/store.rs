@@ -52,27 +52,9 @@ fn store() -> &'static Mutex<Store> {
 /// whether the input is protein (scan kind 2) or nucleotide (scan kind 1).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:328-330
-/// ```c++
-///     flags += (m_ReadProteins
-///               ? CFastaReader::fAssumeProt
-///               : CFastaReader::fAssumeNuc);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:51,106
-/// ```c++
-///     const bool kQueryIsProtein = true;
-/// ...
-///     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2554
-/// ```c++
-///         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:50,106
-/// ```c++
-///     const bool kQueryIsProtein = false;
-/// ...
-///     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-/// ```
 /// BLASTN and TBLASTX read nucleotides in both roles, BLASTP proteins in both, TBLASTN a
 /// protein query and nucleotide subjects, BLASTX a nucleotide query and protein subjects.
 fn reader_of(program: Program, role: u32) -> (&'static str, bool) {
@@ -188,11 +170,6 @@ fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines,
 /// loaders on (port plan Q3, as the CLI without `.ncbirc` or `DATA_LOADERS`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:78-80
-/// ```c++
-///     static const string kDataLoadersConfig("DATA_LOADERS");
-///
-///     if (registry.HasEntry("BLAST", kDataLoadersConfig)) {
-/// ```
 pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String), String> {
     let program = Program::parse(program)?;
     let role_name = match role {
@@ -226,33 +203,8 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     };
     let records = read().map_err(reader_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:211-216
-    // ```c++
-    //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-    //            	ERR_POST(Warning << "Query is Empty!");
-    //            	return BLAST_EXIT_SUCCESS;
-    //         }
-    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-    // ```c++
-    //         try { q.Reset(m_Source->GetNextSequence(scope)); }
-    //         catch (const CObjReaderParseException& e) {
-    //             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-    //                 break;
-    //             }
-    //             throw;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // ```c++
-    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-    //     : m_QueryVector(& queries)
-    // {
-    //     if (queries.Empty()) {
-    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-    //     }
-    // ```
     // A query of white space only is NCBI's `Query is Empty!` at run time; a query with
     // blank and comment lines only is not empty, and its first batch (`eEOF`, no query)
     // fails every run, so `register` fails with NCBI's error (port plan Q2).
@@ -356,13 +308,7 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
-// ```c++
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                           db_adapter, scope);
-//         ...
-//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-213
 /// Reads the query and subject FASTA bytes of the run of `words` (program name first) together, as
 /// the CLI reads its `-query` and `-subject` files for that argv: the library's reading of the
 /// inputs of a search (`read_search_inputs`, which the library API's `read_inputs` reads with):
@@ -696,6 +642,7 @@ mod tests {
     #[test]
     fn inputs_read_together_belong_to_their_argv() {
         let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
         let (query_bytes, subject_bytes) =
             (b">gb|AB000001.1| q\nMKTAYIAKQR\n", b">s1 t\nMKTAYIAKQR\n");
         let (query, subject, response) =

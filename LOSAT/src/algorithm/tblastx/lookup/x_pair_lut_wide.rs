@@ -8,32 +8,8 @@
 //! words of 2 and 3 letters.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-//! ```c
-//!     for (i = 0; i < lookup->backbone_size; i++) {
-//!         if (exact_backbone[i] != NULL) {
-//!             s_AddWordHits(lookup, matrix, query->sequence,
-//!                           exact_backbone[i], query_bias, row_max);
-//!             sfree(exact_backbone[i]);
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-590
-//! ```c
-//!         for (i = 0; i < alphabet_size; i++) {
-//!             if (score + row[i] >= threshold) {
-//!                 subject_word[current_pos] = i;
-//!                 for (j = 0; j < offset_list[1]; j++) {
-//!                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-//!                                           charsize, subject_word,
-//!                                           query_bias + offset_list[j + 2]);
-//!                 }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76
-//! ```c
-//!     /* add the hit */
-//!     chain[chain[1] + 2] = query_offset;
-//!     chain[1]++;
-//! ```
 //!
 //! # What is built
 //!
@@ -140,11 +116,6 @@ pub(crate) const fn x_wide_covers(word_length: usize) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:44-46
-// ```c
-//     /* compute the backbone cell to update */
-//
-//     index = ComputeTableIndex(wordsize, charsize, seq);
-// ```
 /// The backbone index of the `word_length`-letter word at `word` (32 bits; `x_wide_covers`).
 #[inline(always)]
 fn x_wide_index(word: &[u8], word_length: usize) -> u32 {
@@ -157,28 +128,6 @@ fn x_wide_index(word: &[u8], word_length: usize) -> u32 {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:79-132 (the loop of
 // `blast_lookup_index_query_exact_matches`, backbone.rs)
-// ```c
-// for (loc = locations; loc; loc = loc->next) {
-//     Int4 from = loc->ssr->left;
-//     Int4 to = loc->ssr->right;
-//     if (word_length > to - from + 1)
-//         continue;
-//     seq = query->sequence + from;
-//     word_target = seq + lut_word_length;
-//     for (offset = from; offset <= to; offset++, seq++) {
-//         if (seq >= word_target) {
-//             BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                                   seq - lut_word_length, offset - lut_word_length);
-//         }
-//         if (*seq & invalid_mask)
-//             word_target = seq + lut_word_length + 1;
-//     }
-//     if (seq >= word_target) {
-//         BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                               seq - lut_word_length, offset - lut_word_length);
-//     }
-// }
-// ```
 // The statements of `x_for_each_exact_word` (x_lut_direct.rs) with 32-bit indices: where the loop
 // calls BlastLookupAddWordHit, `visit` gets the word's backbone index and the query offset.
 /// `visit(index, offset)` for each word the exact backbone's build adds, in the order it adds them.
@@ -296,19 +245,6 @@ impl XWideScores {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604
-// ```c
-//     score -= info->row_max[query_word[current_pos]];
-//     row = info->matrix[query_word[current_pos]];
-// ...
-//         for (i = 0; i < alphabet_size; i++) {
-//             if (score + row[i] >= threshold) {
-//                 subject_word[current_pos] = i;
-// ...
-//     for (i = 0; i < alphabet_size; i++) {
-//         if (score + row[i] >= threshold) {
-//             subject_word[current_pos] = i;
-//             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
-// ```
 // The recursion of `x_record_neighbors` with the same tests in the same order; the letters chosen
 // so far are carried as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a
 // complete word's backbone index is `(prefix << charsize) | i`. Each level takes the letters that
@@ -375,31 +311,6 @@ fn x_wide_neighbors(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:490-496,504-509,518-519,539-543
-// ```c
-//     w = query + offset_list[2];
-//
-//     /* Compute the self-score of this word */
-//
-//     score = matrix[w[0]][w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += matrix[w[i]][w[i]];
-// ...
-//     if (lookup->threshold == 0 || score < lookup->threshold) {
-//         for (i = 0; i < offset_list[1]; i++) {
-//             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-//                                   lookup->charsize, w,
-//                                   query_bias + offset_list[i + 2]);
-//         }
-// ...
-//     if (lookup->threshold == 0)
-//         return;
-// ...
-//     score = row_max[w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += row_max[w[i]];
-//
-//     s_AddWordHitsCore(&info, score, 0);
-// ```
 // The statements of `x_target_list`, appending T(s) to `out` in ascending order of the cells: the
 // exact cell, which s_AddWordHits adds first, goes where its index falls among the neighbours (it
 // is none of them: they score at least the threshold, the word itself less), which changes no table
@@ -442,14 +353,8 @@ fn x_wide_targets(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-582,600-604 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-582,600-604 (cited at
 // `x_wide_neighbors`)
-// ```c
-//         for (i = 0; i < alphabet_size; i++) {
-//             if (score + row[i] >= threshold) {
-// ...
-//             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
-// ```
 // No NCBI counterpart for the count itself: `x_wide_neighbors`' words, counted (the same tests,
 // the last level's letters by their number), for LOSAT's choice of the blocks' ends.
 /// The number of words `x_wide_neighbors` appends for `query_word` from `current_pos` on.

@@ -6,19 +6,6 @@
 //! pool: these masks, the encoding and the Karlin blocks (`blast_engine/x_query_prep_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180
-//! ```c++
-//! void s_CombineDustMasksWithUserProvidedMasks(...)
-//! {
-//!     CSymDustMasker duster(level, window, linker);
-//!     CRef<CPacked_seqint> masked_locations =
-//!         duster.GetMaskedInts(*query_id, data);
-//! ...
-//!     for (size_t i = 0; i < queries.Size(); i++) {
-//!         ...
-//!         s_CombineDustMasksWithUserProvidedMasks(data, queries.GetQuerySeqLoc(i),
-//!                                                 queries.GetScope(i), query_id,
-//!                                                 masks, level, window, linker);
-//! ```
 //! NCBI makes a fresh `CSymDustMasker` for each query of the batch and masks the queries one
 //! after the other. `apply_dust_masking` does the same, serially, in query order. For a batch of
 //! thousands of queries that is most of the time before the lookup table is built, and no other

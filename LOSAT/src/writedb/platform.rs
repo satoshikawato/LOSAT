@@ -86,24 +86,8 @@ pub(crate) enum NcbiOs {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_lmdb.hpp:51-57
-// ```c++
-// #ifdef NCBI_OS_MSWIN
-// #define DEFAULT_LMDB_MAP_SIZE 500000
-// #define DEFAULT_TAXID_MAP_SIZE 500000
-// #else
-// #define DEFAULT_LMDB_MAP_SIZE 700000000
-// #define DEFAULT_TAXID_MAP_SIZE 300000000
-// #endif
-// ```
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:347-351
-// ```c++
-// int CWriteDB_IndexFile::x_Overhead(const string & T,
-//                                    const string & lmdbName,
-//                                    const string & D)
-// {
-//     return 5 * sizeof(int) + sizeof(long)
-// ```
 /// The platform values NCBI's source gives for the operating system `os` with a C `long` of
 /// `sizeof_long` bytes and a `size_t` of at most `max_map_size`.
 pub(crate) const fn ncbi_platform(

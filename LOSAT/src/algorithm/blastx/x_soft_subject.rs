@@ -20,18 +20,7 @@ use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::report::pairwise::PairwiseHit;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
-// ```c++
-//         /* Set the lower case mask, if it exists */
-//         if (subjects.GetMask(i).NotEmpty()) {
-//             ...
-//             s_SeqLoc2MaskedSubjRanges(masks, &*range, length,  masked_ranges);
-//             if ( !masked_ranges.empty() ) {
-//                 ...
-//             	subj->length = length;
-//                 BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
-//                                     static_cast<Uint4>(masked_ranges.size()) + 1, true, eSoftSubjMasking);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
 /// The scan ranges of subject `oid` when it is a record of `-subject` with lower-case runs
 /// (`FastaRecord::lowercase_masks`, read with `-lcase_masking` only); `None` for any other subject,
 /// whose scan is that of the whole subject.
@@ -46,11 +35,6 @@ pub(super) fn x_subject_scan_ranges(subjects: Subjects<'_>, oid: usize) -> Optio
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213
-// ```c
-//     // Fill out the boundary of the sequence to compliment the masks
-//     tmp[0].left = 0;
-//     tmp[num_seq_ranges - 1].right = seq_blk->length;
-// ```
 /// The scan ranges of `record`: `(left, right)`, one more than its lower-case runs. NCBI reads the
 /// array of runs one place along, so each range runs from the last letter of a run (inclusive) to
 /// the first letter of the next (as `blastp`'s `x_soft_subject::scan_ranges`).
@@ -105,39 +89,8 @@ pub(super) fn x_word_finder<S: super::seed::BxScoring>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505 (`s_BlastAaWordFinder_TwoHit`)
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-769 (`s_BlastAaWordFinder_OneHit`)
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     while (scan_range[1] <= scan_range[2]) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-59
-// ```c
-//     while (range[1] > range[2]) {
-//         range[0]++;
-//         if (range[0] >= (Int4)subject->num_seq_ranges) {
-//             return FALSE;
-//         }
-//         range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-//         range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
-//     }
-//     return TRUE;
-// ```
 /// The word finders' scan of `subject` (the residues and the sentinel) over `ranges`: `visit` with
 /// each batch of the scanner's pairs, in NCBI's order. The two-hit search (`window` above 0) raises
 /// the end of a first range too short for a word and scans that word; the one-hit search scans
@@ -184,43 +137,9 @@ pub(super) fn x_scan(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
-// ```c++
-//         // Union subject sequence ranges
-//         vector <TSeqRange> ranges;
-//         for (int i=0; i<hsp_list->hspcnt; i++) {
-//             const BlastHSP* hsp = hsp_list->hsp_array[i];
-//             TSeqRange rg;
-//             rg.SetFrom(hsp->subject.offset);
-//             rg.SetTo(hsp->subject.end);
-//             ranges.push_back(rg);
-//         }
-//
-//         // Extract subject masks
-//         TMaskedSubjRegions masks;
-//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
-// ```c++
-//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
-//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
-//            loc.IntersectingWith(target_ranges[ir])) {
-//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
-//            retval.push_back(sli);
-//            return;
-//         }
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4302-4304 (`x_FillLocList`)
-// ```c++
-//             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-//                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4302-4306 (`x_FillLocList`)
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
-// ```c++
-//                     } else if (m_SeqLocChar==eLowerCase){
-//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-//                     }
-// ```
 /// `hits` (the outfmt 0 rows) with each subject row's masked letters in lower case. NCBI keeps the
 /// lower-case runs of the subject's record that meet one of the HSP ranges of the query and the
 /// subject (`[offset, end]`, the end one past the HSP), then each row takes the kept runs that meet
@@ -280,32 +199,7 @@ pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaR
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
-// ```c++
-//         // Union subject sequence ranges
-//         vector <TSeqRange> ranges;
-//         for (int i=0; i<hsp_list->hspcnt; i++) {
-//             const BlastHSP* hsp = hsp_list->hsp_array[i];
-//             TSeqRange rg;
-//             rg.SetFrom(hsp->subject.offset);
-//             rg.SetTo(hsp->subject.end);
-//             ranges.push_back(rg);
-//         }
-//
-//         // Extract subject masks
-//         TMaskedSubjRegions masks;
-//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
-// ```c++
-//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
-//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
-//            loc.IntersectingWith(target_ranges[ir])) {
-//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
-//            retval.push_back(sli);
-//            return;
-//         }
-//     }
-// ```
 /// The subject masks of each query's hits (`GetSubjectMasks` of the query's results, by (query,
 /// subject)): the lower-case runs of the subject's record (record coordinates, inclusive) that
 /// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
@@ -465,7 +359,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-59 and
-    // aa_ungapped.c:495-505, :762-769 (quoted at `x_scan`): a range `(left, right)` holds the words
+    // aa_ungapped.c:495-505, :762-769 (cited at `x_scan`): a range `(left, right)` holds the words
     // that start at `left..=right - word`; a first range too short for a word holds its first word
     // in the two-hit search and stops the one-hit search's scan.
     #[test]
@@ -574,7 +468,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-213 (cited at
     // `scan_ranges`): the left end is the last letter of the run before, included.
     #[test]
     fn scan_ranges_run_from_the_last_lower_case_letter() {

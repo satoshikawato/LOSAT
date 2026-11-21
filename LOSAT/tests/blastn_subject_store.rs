@@ -2,14 +2,6 @@
 //! `src/sequence/packed_subject.rs`), on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-//! ```c
-//!     virtual SBlastSequence GetCompressedPlusStrand() {
-//!         SBlastSequence retval(size());
-//!         string ncbi4na = kEmptyStr;
-//!         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//!         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-//!         return retval;
-//! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
 //! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`) the reader's
 //! records keep their deflines and the letters are held packed (2 bits per base, the runs of
@@ -237,14 +229,6 @@ const STORE: (&str, &str) = ("LOSAT_X_BNSTORE", "1");
 type Search<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-// ```c
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-// ```
 // Every search below gives one report and the same messages (the warning of the subject without
 // letters among them) with the variable `0` (the default before 2026-10-18) and `1`: tabular, commented tabular and pairwise
 // reports, megablast, blastn and dc-megablast, `-lcase_masking`, one and three threads, and three

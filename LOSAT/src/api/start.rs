@@ -2,7 +2,7 @@
 //!
 //! NCBI's application starts before it reads its arguments: it opens the file of `-logfile`,
 //! loads its configuration (`<program>.ini` or the file of `-conffile`, then `.ncbirc`) and,
-//! after the arguments, ends a `-dryrun` (`ncbi_environment::ApplicationStart`, quoted there).
+//! after the arguments, ends a `-dryrun` (`ncbi_environment::ApplicationStart`, cited there).
 //! The command line's entry runs one start per process (`cli::main_entry`); the library runs one
 //! per call that needs it: at the call's beginning when its argv has `-logfile`, `-conffile` or
 //! `-dryrun` (`Search::starts`), else when the call first reads NCBI's settings, where NCBI's
@@ -143,7 +143,7 @@ impl CallStart {
         crate::ncbi_exception::MainDiag::enter(Some(self.diag.clone()))
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (cited at
     // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
     // arguments have passed their definitions)
     /// The start of a call of `search` with `inputs`, in the command line's order
@@ -194,11 +194,6 @@ impl CallStart {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:345-347
-    // ```c++
-    //     if (m_Config.GetDataLoaderConfig().UseDataLoaders()) {
-    //         m_InputReader.reset
-    //             (new CBlastInputReader(m_Config.GetDataLoaderConfig(),
-    // ```
     /// The application settings of the call, after running the start now (its messages on
     /// `diagnostics`) when it has not run. The records of a library call are read before its
     /// start, with NCBI's data loaders (`read_fasta`, `read_inputs`); settings that turn them off
@@ -286,7 +281,7 @@ impl RunLog {
     /// it. LOSAT's own refusals stay off the file, as on the command line (`cli::main_entry`).
     pub(super) fn post(&mut self, error: &anyhow::Error) {
         if let Some(native) = error.downcast_ref::<crate::cli::NativeError>() {
-            self.post_text(native.message.as_bytes());
+            self.post_text(&native.message);
         }
     }
 

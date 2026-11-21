@@ -1,13 +1,7 @@
 //! BLASTN's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:302-306
-//! ```c++
-//!             if (isArchiveFormat) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//!                 m_Bah.ResetMessages();
-//!             } else {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:302-307
 //! One archive per query batch, written after the batch's search; `report::archive` writes
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
@@ -241,16 +235,6 @@ impl<'a> AlignSource for BlastnAligns<'a> {
 /// The intervals of a query's `LCaseMask` parameter, in record coordinates.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:110-127
-/// ```c++
-///     SetDiagFilter(eDiagFilter_Post, "!(1305.31)");
-///     CRef<CSeq_loc_Mapper> mapper = s_CreateSeqLocMapper(*query_id, seqloc,
-///                                                         scope);
-///     query_masks.Reset(mapper->Map(*query_masks));
-///
-///     const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
-///     if (orig_query_mask.NotEmpty() && !orig_query_mask->IsNull()) {
-///         CRef<CSeq_loc> tmp = orig_query_mask->Add(*query_masks,  kTopFlags, 0);
-/// ```
 /// The query vector's mask is the lower case of the whole record (`-lcase_masking`, read
 /// before any `-query_loc` cut, for both strands) merged with the DUST intervals of the
 /// searched range, which the mapper puts in the order of the query's strand. A merge
@@ -263,17 +247,6 @@ impl<'a> AlignSource for BlastnAligns<'a> {
 /// which replaced the others: every interval once for each frame, in the masker's order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:179-189
-/// ```c++
-///         if (mqr) {
-///             CRef<CSeqLocInfo> info_plus
-///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFramePlus1));
-///             mqr->push_back(info_plus);
-///
-///             CRef<CSeqLocInfo> info_minus
-///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFrameMinus1));
-///             mqr->push_back(info_minus);
-///         }
-/// ```
 fn lcase_mask_intervals(
     record: &FastaRecord,
     dust: &[MaskedInterval],
@@ -677,7 +650,7 @@ mod tests {
         let native = |message: &str| {
             anyhow::Error::from(crate::cli::NativeError {
                 exit: 1,
-                message: message.to_string(),
+                message: message.to_string().into(),
             })
         };
         let lines = error_lines(

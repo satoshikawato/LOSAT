@@ -2,23 +2,6 @@
 //! file, and the side files on the file system (DESIGN_OF5 1.7).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2316-2330
-//! ```c++
-//! static string s_GetBaseName(const string & baseFile, bool isXML, bool withPath)
-//! {
-//! 	string dir = kEmptyStr;
-//! 	string base = kEmptyStr;
-//! 	string ext = kEmptyStr;
-//! 	CDirEntry::SplitPath(baseFile, withPath ? &dir:NULL, &base, &ext );
-//! 	if(!((isXML && NStr::CompareNocase(ext, ".xml") == 0 ) ||
-//! 	     (!isXML && NStr::CompareNocase(ext, ".json") == 0))){
-//! 		 base += ext;
-//! 	}
-//! 	if(withPath)
-//! 		return dir + base;
-//!
-//! 	return base;
-//! }
-//! ```
 //! The side file of the n-th report is `s_GetBaseName(-out, is_xml, true) + "_" + n + ".xml" |
 //! ".json"`; the master file lists `s_GetBaseName(-out, true, false) + "_" + n + ext` for both
 //! formats (blast_format.cpp:2432, :2449: the XML rule, no directory). So the master of an
@@ -32,60 +15,14 @@ use std::sync::Arc;
 
 use super::framing::{SideFiles, Xml2Kind};
 use crate::report::run_files::FileReceiver;
+use crate::utils::os_bytes::{path_bytes, path_from_bytes};
 
 /// The characters `CDirEntry::SplitPath` takes as the end of the directory part: `/` on Unix;
 /// `:`, `/` and `\` on Windows.
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:105-116, :358-377
-/// ```c++
-/// #  define ALL_SEPARATORS    ":/\\"          // NCBI_OS_MSWIN
-/// #  define ALL_SEPARATORS    "/"             // NCBI_OS_UNIX
-/// void CDirEntry::SplitPath(const string& path, string* dir,
-///                           string* base, string* ext)
-/// {
-///     // Get file name
-///     size_t pos = path.find_last_of(ALL_SEPARATORS);
-///     string filename = (pos == NPOS) ? path : path.substr(pos+1);
-///     // Get dir
-///     if ( dir ) {
-///         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
-///     }
-///     // Split file name to base and extension
-///     pos = filename.rfind('.');
-///     if ( base ) {
-///         *base = (pos == NPOS) ? filename : filename.substr(0, pos);
-///     }
-///     if ( ext ) {
-///         *ext = (pos == NPOS) ? kEmptyStr : filename.substr(pos);
-///     }
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-375, :358-377
 fn is_separator(byte: u8, windows: bool) -> bool {
     byte == b'/' || (windows && (byte == b'\\' || byte == b':'))
-}
-
-#[cfg(unix)]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    path.as_os_str().as_bytes().to_vec()
-}
-
-/// Off Unix a path is Unicode text to the program: a `-out` name that is not valid Unicode is
-/// changed by `to_string_lossy` (and `path_from_bytes`), which no NCBI run on Windows tells apart.
-#[cfg(not(unix))]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    path.to_string_lossy().into_owned().into_bytes()
-}
-
-#[cfg(unix)]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-    PathBuf::from(std::ffi::OsString::from_vec(bytes))
-}
-
-#[cfg(not(unix))]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// `s_GetBaseName`: the `-out` value without its extension when that is `.xml` (`xml`) or
@@ -126,15 +63,6 @@ fn base_name_of(path: &[u8], xml: bool, with_dir: bool, windows: bool) -> Vec<u8
 /// truncated if it exists (`IOS_BASE::out`; an older file of another name stays as it was).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-775
-/// ```c++
-/// BlastXML2_FormatReport(const IBlastXML2ReportData* data, string file_name)
-/// {
-/// 	blastxml2::CBlastOutput2 bxmlout;
-/// 		CNcbiOfstream out_stream;
-/// 		out_stream.open(file_name.c_str(), IOS_BASE::out);
-/// 		if(!out_stream.is_open())
-/// 			 NCBI_THROW(CArgException, eInvalidArg, "Cannot open output file");
-/// ```
 pub struct FsSideFiles {
     /// `s_GetBaseName(out, xml, true)`: the side files' path up to the `_<n>`.
     path_base: Vec<u8>,

@@ -119,16 +119,6 @@
 //! queries of about one window instead of all queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
-//! ```c
-//!         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-//!                 != kBlastHSPStream_Eof) {
-//! ...
-//!             theseMatches[i] = head->match;
-//! ...
-//!         int b;
-//! #pragma omp for schedule(static)
-//!         for (b = 0; b < numMatches; ++b) {
-//! ```
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -217,6 +207,9 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub subjects: super::x_redo_subjects::XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
+    /// Each query's context of the E-value adjustment with a composition P-value
+    /// (`kappa::evalue_adjust_contexts`).
+    pub evalue_adjust_contexts: &'a [super::kappa::EvalueAdjustContext],
     pub matrix: ScoringMatrix,
     pub gapped_params: &'a KarlinParams,
     pub gapped_gumbel: Option<&'a BlastGumbelBlk>,
@@ -245,14 +238,6 @@ struct XScratch {
 
 impl XScratch {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
-    // ```c
-    //         if ((int) compo_adjust_mode > 1 && !positionBased) {
-    //             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-    //             status_code = Blast_CompositionWorkspaceInit(
-    //                     NRrecord_tld[i],
-    //                     scoringParams->options->matrix
-    //             );
-    // ```
     fn new(range_cache: BlastpKappaSubjectRangeCache, matrix: ScoringMatrix) -> Self {
         let mut scratch = Self {
             composition_workspace: BlastCompositionWorkspace::new_blosum62(),
@@ -316,12 +301,6 @@ fn x_query_matches(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3511
-// ```c
-//         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-//                 != kBlastHSPStream_Eof) {
-// ...
-//                 BlastHSPList* localMatch = theseMatches[b];
-// ```
 /// The matches that are redone: those whose list has HSPs, counted from a query's compact list
 /// while it is not expanded (`x_query_matches`).
 pub(crate) fn x_matches(
@@ -331,16 +310,7 @@ pub(crate) fn x_matches(
     x_query_matches(lists, compact).into_iter().sum()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1561-1576
-// ```c
-// int
-// BlastCompo_EarlyTermination(double evalue,
-//                             BlastCompo_Heap significantMatches[],
-//                             int numQueries)
-// {
-//     ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1576
 // No NCBI counterpart for the bound: it decides only which results are computed ahead; the
 // replay runs the test for every match.
 /// For each query, the E-value above which the early termination test may end one of its matches
@@ -362,9 +332,7 @@ fn x_end_above(
             // The heaps after the query first: they are not filled unless the query is the
             // last one of its batch, so this ends the test at once for the other queries.
             let may_end = (q_idx + 1..batch.end).all(|other| heaps[other].filled_to_cutoff())
-                && (batch.start..=q_idx).all(|other| {
-                    heaps[other].n.saturating_add(matches[other]) >= heaps[other].heap_threshold
-                });
+                && (batch.start..=q_idx).all(|other| heaps[other].may_fill(matches[other]));
             may_end.then(|| {
                 batch
                     .map(|other| COMPO_HEAP_EVALUE_STRETCH * heaps[other].ecutoff)
@@ -414,12 +382,6 @@ struct XReplayed {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421
-// ```c
-//         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-//                 != kBlastHSPStream_Eof) {
-// ...
-//             theseMatches[i] = head->match;
-// ```
 /// The next job from `cursor` (the next list position to read) into `job`: up to
 /// `X_JOB_MATCHES` consecutive matches of one query in stream order, none when no match is
 /// left. `cursor` moves past them.
@@ -448,13 +410,6 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-// ```c
-//                 if (BlastCompo_EarlyTermination(
-//                         localMatch->best_evalue,
-//                         redoneMatches,
-//                         numQueries
-//                 )) {
-// ```
 /// The window that starts at `start`, on the heaps as the replay of the windows before left them:
 /// the jobs from there while it holds fewer than `jobs` jobs and, for a job at risk of query q,
 /// fewer than `caps[q]` jobs at risk of q. A match whose test is already true is marked ended;
@@ -514,7 +469,7 @@ fn x_window(
             let best_evalue = x_local_match(lists, matched).best_evalue;
             let may_end = batch_open
                 && end_above[q_idx].is_some_and(|above| best_evalue > above)
-                && heap.n.saturating_add(in_window + index) >= heap.heap_threshold;
+                && heap.may_fill(in_window + index);
             let ended = may_end
                 && blast_compo_early_termination(best_evalue, &heaps[query_batches[q_idx].clone()]);
             at_risk |= may_end && !ended;
@@ -623,16 +578,6 @@ impl<'a> XExpandAhead<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2308-2336
-// ```c
-// static BlastCompo_QueryInfo *
-// s_GetQueryInfo(Uint1 * query_data, const BlastQueryInfo * blast_query_info, Boolean skip)
-// {
-//     ...
-//     query_info->eff_search_space = (double) query_context->eff_searchsp;
-//     query_info->origin = query_context->query_offset;
-//     query_info->seq.data = &query_data[query_info->origin];
-//     query_info->seq.length = query_context->query_length;
-// ```
 /// The query workspace of the one-thread loop for query `q_idx`.
 fn x_query_workspace<P>(search: &XRedoParSearch<'_, P>, q_idx: usize) -> BlastpKappaQueryWorkspace {
     let ctx = &search.contexts[q_idx];
@@ -642,19 +587,11 @@ fn x_query_workspace<P>(search: &XRedoParSearch<'_, P>, q_idx: usize) -> BlastpK
         ctx.aa_len as i32,
         search.search_spaces[q_idx].length_adjustment as i32,
         search.search_spaces[q_idx].effective_space,
+        search.evalue_adjust_contexts[q_idx],
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3542,3624-3628
-// ```c
-//                 query_index = localMatch->query_index;
-// ...
-//                         *pStatusCode =
-//                                 Blast_RedoOneMatch(
-//                                         alignments,             // thread-local
-//                                         redo_align_params,      // thread-local
-//                                         incoming_aligns,        // thread-local
-// ```
 /// The redo of one match: the call of the one-thread loop, with the same arguments.
 fn x_redo_match<P>(
     search: &XRedoParSearch<'_, P>,
@@ -691,21 +628,6 @@ fn x_redo_match<P>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3511
-// ```c
-//         int b;
-// #pragma omp for schedule(static)
-//         for (b = 0; b < numMatches; ++b) {
-// ...
-//                 seqSrc               = seqsrc_tld[tid];
-//                 scoringParams        = score_params_tld[tid];
-//                 hitParams            = hit_params_tld[tid];
-//                 redoneMatches        = redoneMatches_tld[tid];
-//                 alignments           = alignments_tld[tid];
-//                 incoming_align_set   = incoming_align_set_tld[tid];
-//                 NRrecord             = NRrecord_tld[tid];
-// ...
-//                 BlastHSPList* localMatch = theseMatches[b];
-// ```
 /// The redo of a window's matches on the pool, in jobs of up to `X_JOB_MATCHES` consecutive
 /// matches of one query; the results in match order, `None` for a match ended before the window
 /// (not computed). `heaps` are the heaps as the window's start left them; nothing changes them
@@ -732,13 +654,6 @@ where
     }
     let queries = first.q_idx..last.q_idx + 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
-    // ```c
-    //         query_info_tld[i] = s_GetQueryInfo(
-    //                 queryBlk->sequence,
-    //                 queryInfo,
-    //                 (program_number == eBlastTypeBlastx)
-    //         );
-    // ```
     // Built by the first job of the query that needs it; the others wait for the same value.
     let workspaces: Vec<OnceLock<BlastpKappaQueryWorkspace>> =
         queries.clone().map(|_| OnceLock::new()).collect();
@@ -765,13 +680,6 @@ where
             }
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-        // ```c
-        //                 if (BlastCompo_EarlyTermination(
-        //                         localMatch->best_evalue,
-        //                         redoneMatches,
-        //                         numQueries
-        //                 )) {
-        // ```
         // No NCBI counterpart: the Newton lanes solve the first Newton problems of the job's
         // matches, four per vector (kappa::x_newton_lanes_prefetch_matches); a result is used
         // only by a call on this thread with the same input bits. It does not change any value
@@ -886,15 +794,6 @@ fn x_lpt_order(costs: &[u64]) -> Vec<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3497
-// ```c
-//         int b;
-// #pragma omp for schedule(static)
-//         for (b = 0; b < numMatches; ++b) {
-// ...
-//                 seqSrc               = seqsrc_tld[tid];
-//                 scoringParams        = score_params_tld[tid];
-//                 hitParams            = hit_params_tld[tid];
-// ```
 // No NCBI counterpart for the order: NCBI's threads take fixed shares of its loop; here the
 // threads take the jobs one at a time, largest first. Scheduling only.
 /// EXPERIMENT (LOSAT_X_BPREDOLPT): `run_job(scratch, job)` for every job index of `order`, run
@@ -953,29 +852,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3705-3719
-// ```c
-//                 if (BlastCompo_EarlyTermination(
-//                         localMatch->best_evalue,
-//                         redoneMatches,
-//                         numQueries
-//                 )) {
-// ...
-//                     if (BlastCompo_HeapWouldInsert(
-//                             &redoneMatches[query_index],
-//                             best_evalue,
-//                             best_score,
-//                             localMatch->oid
-//                     )) {
-//                         *pStatusCode =
-//                                 BlastCompo_HeapInsert(
-//                                         &redoneMatches[query_index],
-//                                         hsp_list,
-//                                         best_evalue,
-//                                         best_score,
-//                                         localMatch->oid,
-//                                         &discarded_aligns
-//                                 );
-// ```
 /// The steps of the one-thread loop that depend on order, for a window's matches in stream order,
 /// with the results computed for them: the early termination test on the heaps of the query's
 /// batch, the match's error, and the heap insertion.
@@ -1027,18 +903,6 @@ fn x_replay(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3447-3449,3735-3738
-// ```c
-//         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-//                 != kBlastHSPStream_Eof) {
-// ...
-// #pragma omp for schedule(static)
-//         for (b = 0; b < numMatches; ++b) {
-// ...
-// match_loop_cleanup:
-//                 if (seqSrc) {
-//                     localMatch = Blast_HSPListFree(localMatch);
-//                 } else {
-// ```
 /// The windows of a search, each computed (`compute`, with the lists and the heaps as the replay
 /// of the windows before left them) and then replayed in stream order into `heaps`. A query's
 /// preliminary list is released after the replay of the window that holds its last match. With
@@ -2343,6 +2207,7 @@ mod tests {
         subjects: Vec<EncodedProtein>,
         lists: Vec<Option<BlastpHitList>>,
         batches: Vec<Range<usize>>,
+        evalue_adjust_contexts: Vec<crate::algorithm::blastp::kappa::EvalueAdjustContext>,
         gapped_params: KarlinParams,
         gapped_gumbel: BlastGumbelBlk,
         matrix_info: crate::core::composition_adjustment::adjust_scores::BlastMatrixInfo,
@@ -2473,7 +2338,7 @@ mod tests {
             .map(|text| super::super::encoding::encode_protein_sequence(text))
             .collect();
         let db_letters: usize = subjects.iter().map(|subject| subject.aa_len).sum();
-        let search_spaces = contexts
+        let search_spaces: Vec<SearchSpace> = contexts
             .iter()
             .map(|ctx| {
                 let length_adjustment = 20_i64;
@@ -2488,12 +2353,22 @@ mod tests {
             .collect();
         let ideal = crate::stats::compute_blosum62_ideal_karlin_params()
             .expect("BLOSUM62 ideal parameters");
+        let batches = vec![0..3, 0..3, 0..3, 3..6, 3..6, 3..6];
+        let evalue_adjust_contexts = crate::algorithm::blastp::kappa::evalue_adjust_contexts(
+            &contexts,
+            &search_spaces,
+            &batches,
+            0,
+            None,
+        )
+        .expect("no refusal without unified P-values");
         XRedoFixture {
             contexts,
             search_spaces,
             subjects,
             lists,
-            batches: vec![0..3, 0..3, 0..3, 3..6, 3..6, 3..6],
+            batches,
+            evalue_adjust_contexts,
             gapped_params,
             gapped_gumbel: crate::stats::spouge::lookup_protein_gumbel_params(
                 &spec,
@@ -2595,6 +2470,7 @@ mod tests {
                             &fixture.subjects,
                         ),
                         query_batches: &fixture.batches,
+                        evalue_adjust_contexts: &fixture.evalue_adjust_contexts,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
                         gapped_gumbel: Some(&fixture.gapped_gumbel),
@@ -2723,6 +2599,7 @@ mod tests {
                             &fixture.subjects,
                         ),
                         query_batches: &fixture.batches,
+                        evalue_adjust_contexts: &fixture.evalue_adjust_contexts,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
                         gapped_gumbel: Some(&fixture.gapped_gumbel),

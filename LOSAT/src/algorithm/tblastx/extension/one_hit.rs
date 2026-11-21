@@ -1,6 +1,6 @@
 //! The one-hit ungapped extension (`-window_size 0`).
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use super::query_batch::{Again, InBatch, Pass, WalkEnd};
 use super::two_hit::{extend_left_ungapped, extend_right_ungapped};
@@ -17,46 +17,7 @@ pub(crate) struct OneHit {
     pub(crate) s_last_off: i32,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1037-1083
-// ```c
-//     for (i = 0; i < word_size; i++) {
-//         if (use_pssm)
-//             sum += matrix[q_off + i][s[s_off + i]];
-//         else
-//             sum += matrix[q[q_off + i]][s[s_off + i]];
-//
-//         if (sum > score) {
-//             score = sum;
-//             q_best_left_off = q_left_off;
-//             q_right_off = q_off + i;
-//         } else if (sum <= 0) {
-//             sum = 0;
-//             q_left_off = q_off + i + 1;
-//         }
-//     }
-//
-//     init_hit_width = q_right_off - q_left_off + 1;
-//
-//     q_left_off = q_best_left_off;
-//
-//     s_left_off = q_left_off + (s_off - q_off);
-//     s_right_off = q_right_off + (s_off - q_off);
-// ...
-//         left_score = s_BlastAaExtendLeft(matrix, subject, query,
-//                                          s_left_off - 1, q_left_off - 1,
-//                                          dropoff, &left_disp, score);
-//
-//         total_score = s_BlastAaExtendRight(matrix, subject, query,
-//                                            s_right_off + 1, q_right_off + 1,
-//                                            dropoff, &right_disp, left_score,
-//                                            s_last_off);
-//
-//     *hsp_q = q_left_off - left_disp;
-//     *hsp_s = s_left_off - left_disp;
-//     *hsp_len = left_disp + right_disp + init_hit_width;
-//
-//     return total_score;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1037-1085
 /// `s_BlastAaExtendOneHit` with the scores of `sc` (a matrix, not a PSSM) on a context's letters
 /// `q_seq` and a chunk's `s_seq`, from the word at `q_off` and `s_off`; `None` if the word does not
 /// fit in both. `init_hit_width` is taken from the last reset of the running sum, so the length is 0

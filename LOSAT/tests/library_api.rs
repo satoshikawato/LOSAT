@@ -628,6 +628,7 @@ fn check_ranges(
     }
 }
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// A protein, and a nucleotide sequence that translates to it.
 const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\
@@ -1219,12 +1220,6 @@ fn records_of(program: Program, role: Role, ids: &[&[u8]], title: &[u8]) -> Vec<
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
-// ```c++
-// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
-// {
-//     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
-// }
-// ```
 // The ids are bytes (`std::string`) that the report writes as they are.
 /// Titles whose first word holds bytes that are not UTF-8 (Latin-1's `é`, 0xE9; a continuation
 /// byte alone, 0x80; 0xFF) or UTF-8's own letters of two and three bytes (`é`, `€`): in every
@@ -1243,18 +1238,6 @@ fn the_ids_are_the_bytes_of_the_tabular_report() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:77-86
-// ```c++
-// struct CSeq_id_find_pred
-// {
-//     const char* kSymbols;
-//     bool operator()(const char ch)
-//     {
-//         if (ch<32 || ch>127) // non-ASCII is not allowed
-//             return true;
-//         return strchr(kSymbols, ch) != 0;
-//     }
-// };
-// ```
 /// With `-parse_deflines`, an id with a byte that is not ASCII (`lcl|q\xE9`, `gb|AB\xE9001.1|`)
 /// stops before it, and the rest of the word goes to the title: NCBI BLAST+ 2.17.0 writes `q` and
 /// `AB` in `qaccver` for these deflines (blastp, probed on 2026-11-20), and so does LOSAT in every
@@ -2366,11 +2349,6 @@ fn prints_as(value: f64, printed: f64) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
-// ```c++
-//     if (itr_num != numeric_limits<unsigned int>::max()) {
-//         m_Outfile << "Results from round " << itr_num << "\n";
-//     }
-// ```
 // Line RG item Q5: psiblast's rounds in the library: the records carry their round, the rounds of
 // a query hold each round's statistics (those its pairwise report prints) and its convergence, and
 // round 1 is the search of `-num_iterations 1`.
@@ -2770,13 +2748,6 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:254-258
-// ```c++
-//         default:
-//             CNcbiOstrstream os;
-//             os << "Unrecognized format specification: '%" << m_ReplTypes[i] << "'";
-//             NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                        CNcbiOstrstreamToString(os));
-// ```
 /// A tool's error is the bytes that the command line writes to standard error, also a byte that
 /// is not UTF-8: blastdbcmd reads `%é` as the specifier `%` and the first byte of `é` (C3), a
 /// `char` that NCBI's stream writes alone into its error.

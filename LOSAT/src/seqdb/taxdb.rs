@@ -60,7 +60,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::file::{DbFile, MAP_PAGE};
+use super::file::DbFile;
 use super::{SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
@@ -195,59 +195,7 @@ pub struct TaxDb {
 }
 
 impl TaxDb {
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:128-201
-    // ```c++
-    // CTaxDBFileInfo::CTaxDBFileInfo()
-    //     : m_AllTaxidCount(0), m_IndexPtr(NULL), m_DataPtr(NULL), m_DataFileSize(0), m_MissingDB(false)
-    // {
-    //     // It is reasonable for this database to not exist.
-    //     m_IndexFN =  SeqDB_ResolveDbPath("taxdb.bti");
-    //
-    //     if (m_IndexFN.size()) {
-    //         m_DataFN = m_IndexFN;
-    //         m_DataFN[m_DataFN.size()-1] = 'd';
-    //     }
-    //
-    //     if (! (m_IndexFN.size() &&
-    //            m_DataFN.size()  &&
-    //            CFile(m_IndexFN).Exists() &&
-    //            CFile(m_DataFN).Exists())) {
-    //         m_MissingDB = true;
-    //         return;
-    //     }
-    //     // Size for header data plus one taxid object.
-    //     Uint4 data_start = (4 + 4 + 16);
-    //     Uint4 idx_file_len = (Uint4) CFile(m_IndexFN).GetLength();
-    //     if (idx_file_len < (data_start + sizeof(CSeqDBTaxId))) {
-    //         m_MissingDB = true;
-    //         return;
-    //     }
-    //     ...
-    //     if (TAX_DB_MAGIC_NUMBER != SeqDB_GetStdOrd(magic_num_ptr ++)) {
-    //         m_MissingDB = true;
-    //         m_IndexFileMap.reset();
-    //         ERR_POST("Error: Tax database file has wrong magic number.");
-    //         return;
-    //     }
-    //     m_AllTaxidCount = SeqDB_GetStdOrd(magic_num_ptr ++);
-    //     // Skip the four reserved fields
-    //     magic_num_ptr += 4;
-    //     int taxid_array_size = int((idx_file_len - data_start)/sizeof(CSeqDBTaxId));
-    //     if (taxid_array_size != m_AllTaxidCount) {
-    //         m_MissingDB = true;
-    //         m_IndexFileMap.reset();
-    //         ERR_POST("SeqDB: Taxid metadata indicates (" << m_AllTaxidCount
-    //                    << ") entries but file has room for (" << taxid_array_size
-    //                    << ").");
-    //         ...
-    //         return;
-    //     }
-    //     m_DataFileMap.reset(new CMemoryFile(m_DataFN));
-    //     m_DataPtr = (char *) (m_DataFileMap->GetPtr());
-    //     m_DataFileSize = m_DataFileMap->GetSize();
-    //     m_IndexPtr = (CSeqDBTaxId*) magic_num_ptr;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:125-203
     // NCBI builds this object once per process, at the first lookup (`static
     // CTaxDBFileInfo t;` in `GetTaxNames`); a "missing" database stays missing
     // for the rest of the run. `CFile::Exists` and `GetLength` accept a regular
@@ -333,81 +281,6 @@ impl TaxDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-300
-    // ```c++
-    //     static CTaxDBFileInfo t;
-    //     if (t.IsMissingTaxInfo()) return false;
-    //
-    //     Int4 low_index  = 0;
-    //     Int4 high_index = t.GetTaxidCount() - 1;
-    //     ...
-    //     TTaxId low_taxid  = Index[low_index ].GetTaxId();
-    //     TTaxId high_taxid = Index[high_index].GetTaxId();
-    //
-    //     if((tax_id < low_taxid) || (tax_id > high_taxid))
-    //         return false;
-    //
-    //     Int4 new_index =  (low_index+high_index)/2;
-    //     Int4 old_index = new_index;
-    //
-    //     while(1) {
-    //         TTaxId curr_taxid = Index[new_index].GetTaxId();
-    //
-    //         if (tax_id < curr_taxid) {
-    //             high_index = new_index;
-    //         } else if (tax_id > curr_taxid){
-    //             low_index = new_index;
-    //         } else { /* Got it ! */
-    //             break;
-    //         }
-    //
-    //         new_index = (low_index+high_index)/2;
-    //         if (new_index == old_index) {
-    //             if (tax_id > curr_taxid) {
-    //                 new_index++;
-    //             }
-    //             break;
-    //         }
-    //         old_index = new_index;
-    //     }
-    //
-    //     if (tax_id == Index[new_index].GetTaxId()) {
-    //         info.taxid = tax_id;
-    //
-    //         Uint4 begin_data(Index[new_index].GetOffset());
-    //         Uint4 end_data(0);
-    //
-    //         if (new_index == high_index) {
-    //             // Last index is special...
-    //             end_data = Uint4(t.GetDataFileSize());
-    //
-    //             if (end_data < begin_data) {
-    //                 // Should not happen.
-    //                 ERR_POST( "Error: Offset error at end of taxdb file.");
-    //                 return false;
-    //             }
-    //         } else {
-    //             end_data = (Index[new_index+1].GetOffset());
-    //         }
-    //
-    //         const char * start_ptr = &Data[begin_data];
-    //
-    //         CSeqDB_Substring buffer(start_ptr, start_ptr + (end_data - begin_data));
-    //         CSeqDB_Substring sci, com, blast, king;
-    //         bool rc1, rc2, rc3;
-    //
-    //         rc1 = SeqDB_SplitString(buffer, sci, '\t');
-    //         rc2 = SeqDB_SplitString(buffer, com, '\t');
-    //         rc3 = SeqDB_SplitString(buffer, blast, '\t');
-    //         king = buffer;
-    //
-    //         if (rc1 && rc2 && rc3 && buffer.Size()) {
-    //             sci   .GetString(info.scientific_name);
-    //             ...
-    //             return true;
-    //         }
-    //     }
-    //     return false;
-    // ```
     // The index is not assumed to be sorted, as in NCBI: the search is NCBI's
     // loop with `Int4` taxids and `Int4` index arithmetic, and "the last
     // entry" is whatever `high_index` ends on (for a sorted index only the
@@ -520,7 +393,7 @@ impl TaxDb {
             });
         }
         // NCBI maps the file; the last page is padded with zero bytes.
-        let mapped = len.div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(len);
         let mut record = files.data.read_range(begin.min(len), end.min(len))?;
         record.resize((end.min(mapped).saturating_sub(begin)) as usize, 0);
         if end <= mapped {
@@ -594,7 +467,7 @@ impl TaxDb {
         let Some(files) = &self.files else {
             return Ok(false);
         };
-        let mapped = files.data.len().div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(files.data.len());
         let count = files.count as u64;
         let mut previous: Option<u32> = None;
         let mut block: Vec<u8> = Vec::new();
@@ -645,24 +518,6 @@ impl TaxDb {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:113-127
-// ```c++
-// bool SeqDB_SplitString(CSeqDB_Substring & buffer,
-//                        CSeqDB_Substring & front,
-//                        char               delim)
-// {
-//     for(int i = 0; i < buffer.Size(); i++) {
-//         if (buffer[i] == delim) {
-//             front = buffer;
-//
-//             buffer.EraseFront(i + 1);
-//             front.Resize(i);
-//
-//             return true;
-//         }
-//     }
-//     return false;
-// }
-// ```
 // Three splits at the first tab of what is left; a split that finds no tab
 // leaves the buffer as it is and returns false. The kingdom is what remains,
 // and must not be empty (`EraseFront` of the whole buffer empties it).
@@ -860,45 +715,7 @@ impl SourceNames {
 const TAX_CACHE_SLOTS: usize = 256;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1105-1107, 1140-1182
-// ```c++
-//     const bool provide_new_taxonomy_info = true;
-//     const bool use_taxinfo_cache         = (CThread::GetSelf() == 0 ? true : false);
-//     ...
-//         if (use_taxinfo_cache && m_TaxCache.Lookup(TAX_ID_TO(int, taxid)).NotEmpty()) {
-//             have_org_desc = true;
-//         }
-//
-//         SSeqDBTaxInfo tnames(taxid);
-//         bool found_taxid_in_taxonomy_blastdb = true;
-//
-//         if ((! have_org_desc) && provide_new_taxonomy_info) {
-//             try {
-//                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
-//             } catch (CSeqDBException &) {
-//                 found_taxid_in_taxonomy_blastdb = false;
-//             }
-//         }
-//         ...
-//                 if (use_taxinfo_cache) {
-//                     m_TaxCache.Lookup(TAX_ID_TO(int, taxid)) = desc;
-//                 }
-// ```
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1196
-// ```c++
-//     TValue & Lookup(int key)
-//     {
-//         _ASSERT(IS_POWER_OF_TWO(m_Slots.size()));
-//
-//         TSlot & slot = m_Slots[key & (m_Slots.size()-1)];
-//
-//         if (slot.first != key) {
-//             slot.first = key;
-//             slot.second = TValue();
-//         }
-//
-//         return slot.second;
-//     }
-// ```
 // NCBI's cache keeps the source of every lookup on the main thread, found or not (a
 // `CSeqDBException` of `GetTaxNames` counts as not found), so a volume asks the taxonomy database
 // again only where the slot of the taxid holds another one; on other threads it asks at every
@@ -962,6 +779,7 @@ mod tests {
     //! for them in `tests/seqdb/taxdb/expected.tsv`) and against files built
     //! here for the cases NCBI cannot be asked about.
 
+    use super::super::file::MAP_PAGE;
     use super::*;
     use std::path::Path;
 
@@ -1845,7 +1663,7 @@ mod tests {
         (names, messages, asked)
     }
 
-    // NCBI's `CSeqDBIntCache` (seqdbgeneral.hpp:1184-1196): a slot per `taxid & 255` that holds the
+    // NCBI's `CSeqDBIntCache` (c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1196): a slot per `taxid & 255` that holds the
     // last taxid looked up there. LOSAT keeps only the answers that a lookup gives again without
     // a text: those that wrote one, and the refusals, are asked again.
     #[test]

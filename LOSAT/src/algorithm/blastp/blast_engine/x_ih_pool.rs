@@ -2,22 +2,8 @@
 //! live in one pool shared by the threads, not in each thread's subject scratch.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:221-224
-//! ```c
-//!     init_hitlist->allocated = MIN_INIT_HITLIST_SIZE;
-//!
-//!     init_hitlist->init_hsp_array = (BlastInitHSP *)
-//!         malloc(MIN_INIT_HITLIST_SIZE * sizeof(BlastInitHSP));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:336-341
-//! ```c
-//!     if (num >= num_avail) {
-//!         if (init_hitlist->do_not_reallocate)
-//!             return FALSE;
-//!         num_avail *= 2;
-//!         match_array = (BlastInitHSP *)
-//!             realloc(match_array, num_avail * sizeof(BlastInitHSP));
-//! ```
-//! NCBI resets a thread's list for each subject (`BlastInitHitListReset`, blast_engine.c:491) and
+//! NCBI resets a thread's list for each subject (`BlastInitHitListReset`, c++/src/algo/blast/core/blast_engine.c:491) and
 //! keeps its array, so each thread holds the largest array any of its subjects needed. The subject
 //! scratch (`BlastpSubjectScratch::init_hsps`, cleared, never shrunk) did the same, and each
 //! worker's malloc arena also kept the arrays its vector outgrew: the search held the sum over the
@@ -47,10 +33,6 @@ use super::InitHSP;
 /// NCBI's first array size, `MIN_INIT_HITLIST_SIZE`.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:138-139
-/// ```c
-/// /** Minimal size of an array of initial word hits, allocated up front. */
-/// #define MIN_INIT_HITLIST_SIZE 100
-/// ```
 pub(super) const OWN_LEN: usize = 100;
 
 /// The arrays no subject uses: those of [`OWN_LEN`] (one per scratch whose subject holds a pool

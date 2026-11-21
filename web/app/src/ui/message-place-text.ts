@@ -3,7 +3,7 @@
 // that the engine gave, never one guessed from the program or the argv. The run's diagnostics are its Warnings in Run
 // details; the file of its -logfile is a tab of the Outputs (TBLASTX writes the messages of its run there); a -logfile
 // that names no file writes them nowhere.
-import type { MessagePlace } from 'losat/domain';
+import type { MessagePlace, OutputPlace } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 
 /**
@@ -16,8 +16,11 @@ export interface PlacePart {
 }
 
 /** What follows "its error is" (or "their error is"): where an error of `run` is, in parts (`placeText` joins them). */
-export function placeParts(place: MessagePlace, run: RunView): readonly PlacePart[] {
+export function placeParts(place: OutputPlace, run: RunView): readonly PlacePart[] {
   switch (place) {
+    // An output that a failed run does not keep (line WQA's sweep, D15, 2026-11-20): the Outputs of a run do not list it.
+    case 'run':
+      return [{ text: 'the error that ended the run' }];
     case 'diagnostics':
       return [{ text: 'under Warnings in Run details' }];
     case 'logfile': {
@@ -32,7 +35,7 @@ export function placeParts(place: MessagePlace, run: RunView): readonly PlacePar
 const LOGFILE: PlacePart = { text: '-logfile', option: true };
 
 /** The words of `placeParts` as one text. */
-export function placeText(place: MessagePlace, run: RunView): string {
+export function placeText(place: OutputPlace, run: RunView): string {
   return joined(placeParts(place, run));
 }
 

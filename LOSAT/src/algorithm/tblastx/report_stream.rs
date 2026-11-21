@@ -7,19 +7,6 @@
 //! `x_batch_pipe.rs` is), so that it reads that file's types.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-215
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!             CRef<CSearchResultSet> results = lcl_blast->Run();
-//!     ...
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//!     ...
-//!         }
-//!         formatter.PrintEpilog(opt);
-//! ```
 //!
 //! When the stream acts (`check`), the loop writes a batch's reports right after it has taken
 //! the batch (`-db`: its titles read and its prefetch done) and added its queries' warnings: it
@@ -55,7 +42,8 @@
 //!   database that cannot be read, a header file that cannot be read) comes after the reports of
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
-//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
+//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: a statistics
+//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, an ungapped
 //!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
 //!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
 //!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
@@ -242,7 +230,7 @@ pub(super) fn check(
     if unreadable {
         return Err(Off::Unreadable);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315
     // A batch's concatenated query holds each query's six frames, each at most a third of the
     // query's letters, after a sentinel byte: at most `2 * letters + 7` per query. All queries
     // bound every batch (`check_diag_table_window`).

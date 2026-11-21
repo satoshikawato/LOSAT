@@ -937,9 +937,10 @@ export class SearchDraft {
   }
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
-    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
     for (const role of ROLES) {
-      const problem = this.accessionProblem(role);
+      const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
     // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
@@ -954,6 +955,7 @@ export class SearchDraft {
       await this.idle();
     }
     const { program, threads, title } = this.state.get();
+    if (this.printsText()) return this.enqueuePrinting();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -1007,6 +1009,44 @@ export class SearchDraft {
     return this.deps.enqueueAll(requests);
   }
 
+  /**
+   * Whether the run of the draft's argv prints the command line's help or version in place of a search, as the engine's
+   * start says (`StartInfo.prints`; line WQA's D14, 2026-11-20): it needs no inputs, files or fetches, as the command
+   * line reads none for it.
+   */
+  private printsText(): boolean {
+    const { start, validation } = this.state.get();
+    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+  }
+
+  /**
+   * The one run of an argv that prints the command line's help or version (`printsText`): without inputs (the
+   * coordinator gives it none), with the registry file of its -conffile, which the command line reads before the help.
+   */
+  private enqueuePrinting(): Promise<EnqueueAllResult> {
+    const { program, threads, title } = this.state.get();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return Promise.resolve({ ok: false, message: messageOf(error) });
+    }
+    const state = this.state.get();
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
+    return this.deps.enqueueAll([
+      {
+        program,
+        query: { text: '' },
+        subject: { text: '' },
+        parameters: this.parameters(),
+        ...(extra.length === 0 ? {} : { extra }),
+        requestedThreads: threads,
+        ...(conffile === undefined ? {} : { conffile }),
+        ...(title.trim() === '' ? {} : { title }),
+      },
+    ]);
+  }
+
   /** Why the role cannot be searched as it is (the full message), or undefined. */
   private inputProblem(role: InputRole): string | undefined {
     return this.problemOf(role)?.message;
@@ -1017,6 +1057,7 @@ export class SearchDraft {
    * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
+    if (this.printsText()) return undefined;
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
@@ -1516,8 +1557,8 @@ export class SearchDraft {
     let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
-      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
-      // has the parser's message, as validate gives it.
+      // reads, under which the chosen file is checked. An argv that it cannot start (a program that
+      // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
       answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.

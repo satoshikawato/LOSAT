@@ -214,7 +214,7 @@ fn run_checks_with(words: &[&str], outfmts: &[i32], ungapped: bool) -> anyhow::R
     let args = args(words);
     let (counts, _) = report_counts_of(&args, outfmts).unwrap();
     check_scoring_options_with(&args, &counts, ungapped)?;
-    check_losat_limits_with(&args, &counts, ungapped)
+    check_losat_limits(&args)
 }
 
 #[test]
@@ -233,31 +233,15 @@ fn the_counts_a_run_derives_give_the_refusals_of_the_options() {
     assert!(run_checks(&["-num_alignments", "0"]).is_ok());
     assert!(run_checks(&["-num_descriptions", "0"]).is_ok());
     assert!(run_checks(&["-num_descriptions", "1", "-num_alignments", "0"]).is_ok());
-    // The preliminary hit list size overflows.
-    let error = run_checks(&["-num_alignments", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("(-num_descriptions / -num_alignments)")
-            && error.contains("not supported by LOSAT's BLASTN"),
-        "{error}"
-    );
-    let error = run_checks(&["-num_descriptions", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("whose preliminary hit list size overflows"),
-        "{error}"
-    );
-    // `-max_target_seqs` keeps its own wording (the default path, before O1b).
-    let error = run_checks(&["-max_target_seqs", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("a -max_target_seqs of 2147483598")
-            && error.contains("whose preliminary hit list size overflows"),
-        "{error}"
-    );
+    // A hit list size whose preliminary size overflows NCBI's `int` runs (LOSAT computes the
+    // size without overflow; PD-LOSAT-NCBI-DEFECTS, hit list sizes past `Int4`).
+    for words in [
+        &["-num_alignments", "2147483598"][..],
+        &["-num_descriptions", "2147483647"],
+        &["-max_target_seqs", "2147483647"],
+    ] {
+        assert!(run_checks(words).is_ok(), "{words:?}");
+    }
     // Without the counts of a run (`args.report_counts` at its default), no hit list is empty.
     assert!(
         check_scoring_options(&args(&["-num_descriptions", "0", "-num_alignments", "0"])).is_ok()
@@ -406,9 +390,10 @@ fn ungapped_option_checks_follow_gapped_calculation() {
     // is matrix-only scoring.
     assert!(run_checks_with(&["-reward", "0"], &[6], true).is_err());
     assert!(run_checks_with(&["-reward", "0", "-penalty", "0"], &[6], true).is_ok());
-    // The preliminary hit list of an ungapped search is the hit list: 2147483598 is accepted.
+    // The preliminary hit list size of 2147483598 runs, ungapped (the size itself, as NCBI) and
+    // gapped (without NCBI's overflow).
     assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], true).is_ok());
-    assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_err());
+    assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_ok());
 }
 
 // NCBI 2.17.0's greedy offsets (`greedy_xdrop_offset`, x86-64 `Int4`) and the refusals of

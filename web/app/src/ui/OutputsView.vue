@@ -5,7 +5,8 @@
 // (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
 // saved, says why (application/outputs.ts), and so does an output that the run could not write, which is empty, with
 // where its error is (`ResultSetRef.failed`; line WQA's sweep, D7, 2026-11-19 and 2026-11-20). After the formats, the files that the run made besides
-// its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles).
+// its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles). A run that printed the command line's help or
+// version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
@@ -17,6 +18,7 @@ import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
 import PlaceWords from './PlaceWords.vue';
 import OutputText from './OutputText.vue';
+import PrintedText from './PrintedText.vue';
 import RunFiles from './RunFiles.vue';
 import TabList from './TabList.vue';
 import { useStore } from './useStore';
@@ -28,11 +30,16 @@ import { useStore } from './useStore';
 const props = withDefaults(defineProps<{ coordinator: Coordinator; run: RunView; files?: boolean }>(), { files: true });
 /** The tab of the run's files, after the formats. */
 const FILES = 'run-files';
+/** The tab of the text that the run printed in place of a search, its one output. */
+const PRINTED = 'printed';
+type Tab = RunOutput | typeof FILES | typeof PRINTED;
 const chosen = ref<RunOutput>(6);
 /** The tab of the run's files is chosen (the output chosen before stays read). */
 const filesChosen = ref(false);
-/** The outputs that the run kept: all of a completed run's, the argv's own for a failed run (`keptOutputs`). */
-const outputs = computed(() => keptOutputs(props.run));
+/** What the run printed in place of a search (the command line's help or version), if it did. */
+const printed = computed(() => props.run.snapshot.prints);
+/** The outputs that the run kept: all of a completed run's, the argv's own for a failed run (`keptOutputs`); none of a run that printed. */
+const outputs = computed(() => (printed.value === undefined ? keptOutputs(props.run) : []));
 const runFiles = computed(() => (props.files ? (props.run.record.runFiles ?? []) : []));
 /** The output shown: the one chosen, or outfmt 6 for a run that does not keep it, else the first that it kept. */
 const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : outputs.value.includes(6) ? 6 : (outputs.value[0] ?? 6)));
@@ -47,15 +54,26 @@ const filesShown = computed(() => filesChosen.value && runFiles.value.length > 0
 /** The formats, then the run's files: tabs of one panel, the output or the files shown (WA2-AX-12). */
 const ids = useId();
 const shown = computed({
-  get: (): RunOutput | typeof FILES => (filesShown.value ? FILES : format.value),
-  set: (value: RunOutput | typeof FILES) => {
+  get: (): Tab => (filesShown.value ? FILES : printed.value !== undefined ? PRINTED : format.value),
+  set: (value: Tab) => {
     filesChosen.value = value === FILES;
-    if (value !== FILES) chosen.value = value;
+    if (value !== FILES && value !== PRINTED) chosen.value = value;
   },
 });
 const tabs = computed(() => [
+  ...(printed.value === undefined
+    ? []
+    : [
+        {
+          value: PRINTED as Tab,
+          label: printed.value === 'help' ? 'Help' : 'Version',
+          testid: 'format-printed',
+          id: `${ids}-tab-${PRINTED}`,
+          panel: `${ids}-panel`,
+        },
+      ]),
   ...outputs.value.map((f) => ({
-    value: f as RunOutput | typeof FILES,
+    value: f as Tab,
     label: `outfmt ${outfmtOf(props.run.snapshot.argv, f)}`,
     testid: f === CUSTOM_OUTPUT ? 'format-custom' : `format-${f}`,
     id: `${ids}-tab-${f}`,
@@ -66,7 +84,7 @@ const tabs = computed(() => [
     ? []
     : [
         {
-          value: FILES as RunOutput | typeof FILES,
+          value: FILES as Tab,
           label: `-logfile ${runFiles.value.map((file) => file.name).join(', ')}`,
           testid: 'format-run-files',
           id: `${ids}-tab-${FILES}`,
@@ -78,7 +96,14 @@ const tabs = computed(() => [
 const reader = new OutputReader(props.coordinator);
 const output = useStore(reader.state);
 // The reader keeps the latest choice: a later one may be read first.
-watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt, !isBinaryOutput(run.snapshot.argv, fmt)), { immediate: true });
+// A run that printed a text in place of a search has no output to read.
+watch(
+  [() => props.run, format],
+  ([run, fmt]) => {
+    if (run.snapshot.prints === undefined) void reader.show(run, fmt, !isBinaryOutput(run.snapshot.argv, fmt));
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -87,6 +112,9 @@ watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt, !isB
     <TabList v-model="shown" label="Output format" :tabs="tabs" manual />
     <div v-if="filesShown" :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${FILES}`" class="outputs-panel">
       <RunFiles :key="run.snapshot.runId" :coordinator="coordinator" :run="run" />
+    </div>
+    <div v-else-if="printed !== undefined" :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${PRINTED}`" class="outputs-panel">
+      <PrintedText :key="run.snapshot.runId" :coordinator="coordinator" :run="run" />
     </div>
     <div v-else :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">

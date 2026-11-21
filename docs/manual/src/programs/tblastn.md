@@ -118,7 +118,6 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
 - `-db_hard_mask` on a database with a sequence whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part (masks at or near either end of a sequence, for example).
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback.
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).

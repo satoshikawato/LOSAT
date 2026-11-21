@@ -106,16 +106,6 @@ pub(crate) fn check_in_pssm_options(
     {
         return Ok(());
     }
-    // A query of the molecule `other`: NCBI writes one line in place of each alignment of outfmt 0
-    // (`Sequence with id <id> no longer exists in database...alignment skipped`, as where its
-    // heading throws, `report::pairwise::write_skipped_alignment`); LOSAT's alignments of outfmt 0
-    // do not know that line's id for each subject yet (the tabular formats are ported,
-    // `BlastpTabular::query_other_coding`).
-    if psi.query_other_coding.is_some() && outfmts.contains(&0) {
-        bail!(
-            "output format 0 with a PSSM query whose molecule type is other (NCBI BLAST+ writes a line in place of each alignment, which LOSAT does not yet) is not supported by LOSAT's PSIBLAST"
-        );
-    }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
     if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
         let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };

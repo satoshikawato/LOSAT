@@ -43,7 +43,11 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
 
 <template>
   <div class="result-notices" aria-live="polite">
-    <p v-if="reason === 'dry-run'" class="notice" data-testid="results-notice" data-kind="dry-run">{{ NO_HSP_TEXT['dry-run'] }}</p>
+    <!-- A run that printed the command line's help or version searched nothing (line WQA's D14, 2026-11-20). -->
+    <p v-if="reason === 'printed-help' || reason === 'printed-version'" class="notice" data-testid="results-notice" :data-kind="reason">
+      {{ NO_HSP_TEXT[reason] }}
+    </p>
+    <p v-else-if="reason === 'dry-run'" class="notice" data-testid="results-notice" data-kind="dry-run">{{ NO_HSP_TEXT['dry-run'] }}</p>
     <div v-else-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
       <p>{{ NO_HSP_TEXT['empty-query'] }}</p>
       <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>

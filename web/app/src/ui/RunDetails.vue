@@ -83,6 +83,11 @@ const inputs = computed(() => [
           <dt>-dryrun</dt>
           <dd data-testid="run-dry-run">a dry run: no search</dd>
         </template>
+        <template v-if="snapshot.prints">
+          <!-- The command line's help or version, which the run printed in place of a search (line WQA's D14, 2026-11-20). -->
+          <dt>Printed</dt>
+          <dd data-testid="run-printed">the command line's {{ snapshot.prints }}: no search</dd>
+        </template>
         <dt>Threads requested</dt>
         <dd>{{ snapshot.requestedThreads === 'auto' ? 'Auto' : snapshot.requestedThreads }}</dd>
         <dt>Submitted</dt>

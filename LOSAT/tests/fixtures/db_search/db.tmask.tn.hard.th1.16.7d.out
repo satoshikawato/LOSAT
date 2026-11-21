@@ -1,0 +1,67 @@
+# TBLASTN 2.17.0+
+# Query: pn1 t1 450-899 frame +1
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+pn1	t1	85.906	149	21	0	2	150	454	900	2.32e-70	210
+pn1	t1	35.294	17	9	1	6	20	1352	1302	9.9	15.4
+pn1	t2	79.054	148	31	0	2	149	154	597	1.50e-63	187
+pn1	t3	37.037	27	17	0	121	147	1412	1332	0.044	22.7
+pn1	t3	50.000	14	7	0	112	125	749	790	2.0	17.7
+pn1	t3	71.429	7	2	0	114	120	3859	3879	8.5	15.8
+# TBLASTN 2.17.0+
+# Query: pn2 t1 1000-1299 frame -1
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+pn2	t1	84.848	99	15	0	2	100	1297	1001	1.54e-31	105
+pn2	t2	71.875	64	18	0	36	99	895	704	8.27e-14	55.1
+pn2	t3	50.000	10	5	0	90	99	1918	1947	7.0	15.0
+# TBLASTN 2.17.0+
+# Query: pn3 t3 2301-2800 frame +2
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+pn3	t3	85.455	165	24	0	1	165	2302	2796	9.37e-58	183
+# TBLASTN 2.17.0+
+# Query: pn4 t3 4650-5000 frame -2
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+pn4	t3	86.207	116	16	0	1	116	5000	4653	7.72e-41	133
+pn4	t3	46.154	13	7	0	2	14	413	375	4.9	15.8
+pn4	t3	66.667	6	2	0	82	87	1946	1963	7.0	15.4
+# TBLASTN 2.17.0+
+# Query: pn5 t4 200-499 frame +3
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+pn5	t4	88.000	100	12	0	1	100	201	500	6.58e-30	99.8
+pn5	t4	45.455	22	12	0	32	53	996	1061	0.11	20.4
+pn5	t1	31.818	44	24	1	46	89	1320	1207	0.12	20.4
+pn5	t1	83.333	6	1	0	79	84	757	740	6.5	15.4
+pn5	t3	57.143	7	3	0	19	25	3314	3334	7.5	15.0
+# TBLASTN 2.17.0+
+# Query: pn6 t4 550-849 frame -3
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+pn6	t4	84.000	100	16	0	1	100	850	551	1.90e-51	156
+pn6	t1	41.176	17	10	0	46	62	79	29	2.9	16.2
+pn6	t1	35.714	14	9	0	46	59	1042	1083	5.8	15.4
+pn6	t3	41.667	12	7	0	25	36	3052	3087	4.6	15.8
+pn6	t3	75.000	8	2	0	79	86	1452	1475	7.8	15.0
+# TBLASTN 2.17.0+
+# Query: pn7 t4 1000-1199 frame +1
+# Database: tests/db_search/dbmaskt/th1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+pn7	t4	90.909	66	6	0	1	66	1001	1198	5.99e-38	119
+pn7	t3	45.833	24	13	0	33	56	2319	2248	0.059	20.4
+pn7	t3	62.500	8	3	0	6	13	3589	3566	1.9	16.2
+pn7	t3	44.444	18	10	0	19	36	3912	3965	3.7	15.4
+pn7	t3	50.000	10	5	0	6	15	109	138	6.1	14.6
+pn7	t1	100.000	4	0	0	24	27	1322	1311	2.5	15.8
+pn7	t1	40.000	10	6	0	22	31	810	839	4.9	15.0
+pn7	t2	66.667	6	2	0	26	31	522	539	5.1	14.6
+# BLAST processed 7 queries

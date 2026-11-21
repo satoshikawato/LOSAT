@@ -256,6 +256,8 @@ fn parse_blastn_args(
         window_masker: None,
         window_masker_counts: None,
         window_masker_registry: None,
+        filtering_db: None,
+        repeat_filter: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
         subject_taxdb: None,
@@ -289,6 +291,7 @@ fn parse_blastn_args(
         // The command line's progress bar; a web search writes nothing to standard error.
         progress_bar: false,
         one_query_batch: false,
+        hits_only: false,
         first_query_ordinal: 0,
     };
 
@@ -374,6 +377,8 @@ fn parse_tblastx_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4b).
+        db_mask: Default::default(),
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,

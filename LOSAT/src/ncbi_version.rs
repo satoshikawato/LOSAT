@@ -2,8 +2,10 @@
 //! `-version-full-xml` and `-version-full-json` (`CVersionAPI::Print`, `PrintXml`, `PrintJson`),
 //! the words that its application start reads before the arguments (`ncbi_environment::preparse`).
 //!
-//! The forms are NCBI's; the values are LOSAT's (line RG DECISIONS E3-1). The first line (the
-//! program and its version, `blastn: 2.17.0+`) is NCBI's. NCBI's package is the BLAST+ build,
+//! The forms are NCBI's; the values are LOSAT's (line RG DECISIONS E3-1). The first line names the
+//! program and LOSAT's version (`blastn: LOSAT 0.2.0`, `wording::LOSAT_VERSION`; NCBI's
+//! `blastn: 2.17.0+`, the Owner 2026-11-21 「Q1=B」), as do the XML and JSON version of the
+//! program. NCBI's package is the BLAST+ build,
 //! LOSAT's is LOSAT: the text's `Package:` line names LOSAT and the BLAST+ release its output
 //! follows, and the XML and JSON name LOSAT and its version. What NCBI's build writes about
 //! itself (`Package-Config`'s configure line, `Build-Signature`, the build dates, `Revision`,
@@ -55,11 +57,11 @@ impl VersionRequest {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-1000
-/// The text that `request` prints for the program `appname` whose version prints as `version`
-/// (`CVersionInfo::Print`: `2.17.0+` for the BLAST+ programs, whose `CBlastVersion::Print` adds
-/// the `+`, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
-pub fn print(request: VersionRequest, appname: &str, version: &str) -> String {
-    print_with_components(request, appname, version, &[])
+/// The text that `request` prints for the program `appname`: LOSAT's version
+/// (`wording::LOSAT_VERSION`) where NCBI's `CVersionInfo::Print` writes the program's own
+/// (`2.17.0+` for the BLAST+ programs, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
+pub fn print(request: VersionRequest, appname: &str) -> String {
+    print_with_components(request, appname, &[])
 }
 
 /// A component of an application's version (`CVersionAPI::AddComponentVersion`): its name,
@@ -79,9 +81,9 @@ pub struct Component {
 pub fn print_with_components(
     request: VersionRequest,
     appname: &str,
-    version: &str,
     components: &[Component],
 ) -> String {
+    let version = crate::wording::LOSAT_VERSION;
     match request {
         VersionRequest::Version => format!("{appname}: {version}\n{}", package_line()),
         VersionRequest::Full => {
@@ -91,8 +93,8 @@ pub fn print_with_components(
             }
             text
         }
-        VersionRequest::FullXml => print_xml(appname, version, components),
-        VersionRequest::FullJson => print_json(appname, version, components),
+        VersionRequest::FullXml => print_xml(appname, components),
+        VersionRequest::FullJson => print_json(appname, components),
     }
 }
 
@@ -182,13 +184,13 @@ fn print_text(appname: &str, version: &str) -> String {
     )
 }
 
-/// `CVersionAPI::PrintXml(appname, fPrintAll)` with LOSAT's values (`print_text`): the package
-/// is LOSAT, with its version, an empty build information and an empty `config`.
+/// `CVersionAPI::PrintXml(appname, fPrintAll)` with LOSAT's values (`print_text`): the program's
+/// version and the package's are LOSAT's, with an empty build information and an empty `config`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:778-820
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:567-579 (`SBuildInfo::PrintXml`,
 /// without a date, tag or other value)
-fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
+fn print_xml(appname: &str, components: &[Component]) -> String {
     format!(
         "<?xml version=\"1.0\"?>\n\
          <ncbi_version xmlns=\"ncbi:version\"\n  \
@@ -206,7 +208,7 @@ fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
          <build_info>\n\
          </build_info>\n\
          </ncbi_version>\n",
-        version_info_xml(&VersionNumbers::of_print(version)),
+        version_info_xml(&VersionNumbers::losat()),
         components.iter().map(component_xml).collect::<String>(),
         version_info_xml(&VersionNumbers::losat()),
     )
@@ -216,7 +218,7 @@ fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
 /// components is empty, as NCBI's BLAST+ programs write it, except for windowmasker.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:829-884
-fn print_json(appname: &str, version: &str, components: &[Component]) -> String {
+fn print_json(appname: &str, components: &[Component]) -> String {
     format!(
         "{{\n  \"ncbi_version\": {{\n    \
          \"appname\": \"{appname}\",\n    \
@@ -228,7 +230,7 @@ fn print_json(appname: &str, version: &str, components: &[Component]) -> String 
          \"build_info\": {{}},\n      \
          \"config\": \"\"}},\n    \
          \"build_info\": {{}}\n  }}\n}}\n",
-        version_info_json(&VersionNumbers::of_print(version)),
+        version_info_json(&VersionNumbers::losat()),
         components_json(components),
         version_info_json(&VersionNumbers::losat()),
     )
@@ -243,22 +245,8 @@ struct VersionNumbers<'a> {
     name: &'a str,
 }
 
-impl<'a> VersionNumbers<'a> {
-    /// The numbers of `version` as `CVersionInfo::Print` writes it (`2.17.0+`: `CBlastVersion`
-    /// adds the `+` to the text, not to the numbers).
-    fn of_print(version: &'a str) -> Self {
-        let numbers = version.strip_suffix('+').unwrap_or(version);
-        let mut parts = numbers.splitn(3, '.');
-        let mut next = || parts.next().unwrap_or("0");
-        Self {
-            major: next(),
-            minor: next(),
-            patch: next(),
-            name: "",
-        }
-    }
-
-    /// LOSAT's version, the package's.
+impl VersionNumbers<'_> {
+    /// LOSAT's version, the program's and the package's.
     fn losat() -> VersionNumbers<'static> {
         VersionNumbers {
             major: env!("CARGO_PKG_VERSION_MAJOR"),

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.66
+- Version: 1.67
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -284,7 +284,16 @@
   reproduction of its wrapped sizes and the rule-3 rejection of the sizes on which NCBI crashes;
   proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of
   2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, and accepted by the
-  maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked; numbered after 1.65)
+  maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked; numbered after 1.65);
+  1.67 2026-11-20 (the approved difference of `losat rpsbproc`'s sorts: Rust's standard sort, so hits
+  equal in E-value and bit score and data rows of one key keep their input order, and a NaN
+  E-value or bit score sorts after every number; the explicit rejection of 1.17 of hits whose NaN
+  values would make NCBI's sort read outside its vector removed; decided by the Owner on
+  2026-11-20, line LIB `DECISIONS.md` 33; the place of a NaN Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; line LIB-S item S1; numbered after 1.66; first 1.54, then 1.56, 1.58, 1.62 and 1.66 at
+  the merges of dev that brought line RG item X5's 1.54, then line RG item X6's 1.55 and line RG
+  item D1a-4's 1.56 and 1.57, then line RG's 1.58 to 1.61, then the 1.62 to 1.65 of lines LIB-O,
+  RG and PS, then line NP's 1.66)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1027,6 +1036,61 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
     (`LOSAT/src/algorithm/blastp/hsp.rs`).
 
+## Approved difference (`losat rpsbproc`, the order of tied hits, version 1.67)
+
+Decided by the Owner on 2026-11-20 (line LIB `DECISIONS.md` 33; the Owner's words are in
+[`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat rpsbproc` sorts with Rust's
+standard sort. NCBI's order is deterministic for its binary, so rule 2 would otherwise reproduce
+it. The place of a NaN (below) is Owner-delegated (2026-11-20, standing instruction 2026-09-29,
+restated 2026-10-07).
+
+rpsbproc 0.5.1 sorts with `std::sort` in five places whose order the output reads: the hits of a
+query, twice, by `TDomAlignOrderByEValue` (the E-value ascending, then the bit score descending,
+`common/cdalignproc_base.hpp:62-70`), before it picks the representative, standard and specific hits
+(`common/cdalignproc_base.cpp:197-270`) and the structural domains (`:305-342`); and the rows of
+its CDD data by PSSM-ID, by accession and by cluster (`CPtrMap::Reset`, `common/ptrmap.hpp:167-179`).
+A sixth map, the clusters by PSSM-ID (`m_pssmid2fam.Reset`, `common/basedata.cpp:2585` and `:2688`),
+is sorted but never searched, so its order does not reach the output; LOSAT does not build it.
+The C++ standard does not keep the order of elements that compare equal in `std::sort`; NCBI's
+Linux builds leave them in the order that their C++ library's sort gives. LOSAT sorts with
+Rust's `slice::sort_unstable_by`, which sorts in place, by NCBI's comparisons made a total order
+and then by the element's place in the input, which gives the order of a stable sort
+(`rpsbproc::data::sort_ties_in_input_order`):
+
+- Hits equal in E-value and bit score (the numbers compared as C++ compares doubles: -0.0 and 0.0
+  are equal) keep the order of the archive or XML. Data rows of one key keep the order of their
+  file; no CDD v3.22 file has two rows of one key.
+- A hit whose E-value or bit score is NaN (printed `-nan`) sorts after every hit with a number in
+  that key (Owner-delegated, 2026-11-20): a NaN E-value after every E-value that is a number, a NaN
+  bit score last among the hits of one E-value; two NaNs are equal. NCBI's comparison orders a NaN
+  against no number (no strict weak ordering), so its place for such a hit depends on the steps of its library's sort. Of the six
+  fixtures whose sorts hold NaN keys, the place after every number leaves 2 equal to NCBI and 46
+  lines different in the other 4, the place before every number also 2, with 59 lines.
+
+Where it shows: in the DOMAINS lines of `-m std` and `-m full` within one query, tied hits change
+order, and which of two tied hits becomes `Specific` can change (`-m std` prints the other hit's
+line, `-m full` swaps their hit types). In a query with a NaN hit, the order of its hits, which hit
+is representative, `Specific` or its superfamily's, and the SITES and MOTIFS lines that follow can
+change. Line LIB measured the stable sort on 2026-11-20 (dev e851ce5a7, the same order of numbers
+as here): 6 of the 408 fixture outputs and 18 of 74 real-size outputs (E. coli K-12 MG1655 proteins
+with rpsblast, `-evalue` 0.01 and 10, and its genome in 929 pieces of 5 kb with rpstblastn, against
+CDD v3.22, as archives and as XML) differed, by 1 to 6 lines each, every one from the first sort of
+hits; in 7 of them one query (`Query_4017` of the `-evalue` 10 search) printed smart00370 in place
+of smart00369 as `Specific` (both E-value 0.759289 and bit score 28.0864). No real-size output holds
+a NaN. With the NaN rule, 9 of the 408 fixture outputs differ: `tie1.std`, `tie1.std.f`, `tie1.full`,
+`tie1.full.f` and `x.tie1.doms.full` by 2 lines each (two tied hits change places), and
+`x.h_tnan3.full`, `x.h_tnan3.both`, `x.h_ntnanthird.full` and `x.h_ntnanthird.both`, inputs with NaN
+values made by hand (fixture README).
+
+Fixtures: the rows of `use` `tied` in `LOSAT/tests/fixtures/rpsbproc/CASES.tsv` hold LOSAT's bytes
+(`tied/`), and the test `tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits`
+(`LOSAT/tests/rpsbproc_fixtures.rs`) compares them with NCBI's frozen bytes (`oracle/`): standard
+error and exit status are equal, and the standard output differs only inside query blocks, either in
+runs of DOMAINS lines that share one query, E-value and bit score with the same hit types, or in a
+query with a NaN E-value or bit score, with the number of such blocks and lines that
+`tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
+`rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
+
 ## Reproduced as NCBI (rule 2)
 
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
@@ -1485,15 +1549,10 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     `Hsp_hit-from` of `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of
     `ParseAlignStrings`) to exception 12. Every case is made by hand; none occurs in the 2,310 jobs
     of PS16d probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
-  - NaN E-values and bit scores of hits, archives and XML alike (version 1.17, the PS16d review
-    S3-3; it narrows PS16a's refusal of every NaN): NCBI's `HUGE_VAL/HUGE_VAL` (sign set, printed
-    `-nan`) is kept and the hits are sorted as libstdc++'s `std::sort` sorts them with
-    `TDomAlignOrderByEValue`, which a NaN makes no strict weak order. Refused only where one of
-    that sort's unguarded loops would read outside its vector (the comparison stays irreflexive and
-    asymmetric with a NaN, so the partition's sentinels hold; the final insertion's walk can leave
-    the vector only after the heap sort of the leftmost part, when it reaches the depth limit). The
-    permutations of 86 NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows
-    `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
+  - NaN E-values and bit scores of hits, archives and XML alike: no longer refused since version
+    1.67 (NCBI's `HUGE_VAL/HUGE_VAL`, sign set, printed `-nan`, is kept and sorted after every
+    number; the approved difference of version 1.67). Version 1.17 (the PS16d review S3-3) had
+    refused the hits whose sort would read outside NCBI's vector.
 
 - TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated;
   version 1.48): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative

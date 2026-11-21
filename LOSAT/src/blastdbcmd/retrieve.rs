@@ -261,7 +261,14 @@ impl<'a> Source<'a> {
     pub fn tax_info(&self, taxid: i32) -> Result<(std::sync::Arc<SourceNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
         let names = self.source_names.names(taxid, &mut texts, |messages| {
-            self.taxdb.lookup(self.db, taxid, messages)?.into_names()
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:873-886
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:902-912
+            // The formatter's names catch any exception of the lookup, so a file of the taxonomy
+            // database that does not open gives `N/A` (line WQA D18b probe 12, `%S %L %B %K`).
+            match self.taxdb.lookup(self.db, taxid, messages) {
+                Err(SeqDbError::TaxdbThrows { .. }) => Ok(None),
+                lookup => lookup?.into_names(),
+            }
         })?;
         Ok((names, texts))
     }

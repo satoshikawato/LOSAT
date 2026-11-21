@@ -22,6 +22,7 @@ mod range;
 mod retrieve;
 mod taxonomy;
 
+use crate::wording::DATABASE_ERROR;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
@@ -42,12 +43,12 @@ const PROGRAM: &str = "BLASTDBCMD";
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
-/// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
+/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` states LOSAT's version
+/// where NCBI's states BLAST+'s (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the
+/// prefix `[blastdbcmd]`.
 static TOOL: Tool = Tool {
     program: "blastdbcmd",
     refusal_name: PROGRAM,
-    version: crate::NCBI_BLAST_VERSION,
     help: HELP,
     descs: args::DESCS,
     dependencies: args::dependencies,
@@ -271,7 +272,7 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
     }
     match error.ncbi_message() {
         Some(text) => {
-            diag.post_bytes(&[b"BLAST Database error: ".as_slice(), &text].concat());
+            diag.post_bytes(&[DATABASE_ERROR.as_bytes(), b" ", &text].concat());
             2
         }
         None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(

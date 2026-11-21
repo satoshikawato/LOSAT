@@ -1726,3 +1726,40 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
         "{error}"
     );
 }
+
+/// A lookup whose file cannot be read (line WQA D18 review r2 L1, 2026-11-21): NCBI crashes only
+/// where it reads bytes of a file it has mapped and the system no longer gives them (a later read,
+/// `SeqDbError::Read`: SIGBUS). A first byte that cannot be read where the file is opened
+/// (`SeqDbError::Map`) is NCBI's failed mapping, an error it reports, also where LOSAT has no
+/// text for it (a code without NCBI's text on WASI, Windows): LOSAT's text, as a file that does
+/// not open.
+#[test]
+fn only_a_later_read_of_a_lookup_file_is_ncbis_crash() {
+    use crate::seqdb::SeqDbError;
+    let path = std::path::PathBuf::from("/d/db.psi");
+    let later = LookupFailure::of_error(&SeqDbError::Read {
+        path: path.clone(),
+        source: std::io::Error::from_raw_os_error(5),
+    });
+    assert_eq!(later.what_ncbi_does(), LookupFailure::NCBI_CRASHES);
+    assert_eq!(later.ncbi_message(), None);
+    let without_text = |error: SeqDbError| {
+        let failure = LookupFailure::of_error(&error);
+        assert_eq!(
+            failure.what_ncbi_does(),
+            LookupFailure::NCBI_READS,
+            "{error}"
+        );
+        assert_eq!(failure.ncbi_message(), None, "{error}");
+        assert_eq!(failure.to_string(), error.to_string());
+    };
+    without_text(SeqDbError::Map {
+        path: path.clone(),
+        len: 64,
+        source: std::io::Error::other("no system code"),
+    });
+    without_text(SeqDbError::Open {
+        path,
+        source: std::io::Error::other("no system code"),
+    });
+}

@@ -348,8 +348,8 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }
-        None => BdbError::Refused(
-            crate::algorithm::common::database::refusal(&error.to_string(), program).to_string(),
-        ),
+        None => BdbError::Refused(crate::algorithm::common::database::losat_reader_error(
+            &error, program,
+        )),
     }
 }

@@ -17,6 +17,12 @@ use super::stage_d_linking::{
 mod culling;
 pub(super) use culling::PrelimCulling;
 
+// `-best_hit_overhang` / `-best_hit_score_edge`: NCBI's best hit writer and pipe over these hit
+// lists (a child module for the private fields of `KappaResultHitList`).
+#[path = "besthit.rs"]
+mod besthit;
+pub(super) use besthit::PrelimBestHit;
+
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:152-181;
 // core/blast_kappa.c:2494-2515:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2510-2510

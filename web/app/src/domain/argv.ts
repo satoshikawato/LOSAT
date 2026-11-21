@@ -26,12 +26,12 @@ export const DATABASE_FLAGS: readonly string[] = Object.freeze([
 
 /**
  * The database masks (`-db_soft_mask`, `-db_hard_mask`): filters of a database search that the
- * CLI of the modes of DATABASE_MASK_PROGRAMS has (the other modes' engines refuse them by name).
+ * CLI of the modes of DATABASE_MASK_PROGRAMS has.
  */
 export const DATABASE_MASK_FLAGS: readonly string[] = Object.freeze(['-db_soft_mask', '-db_hard_mask']);
 
-/** The modes whose CLI has the database masks (BLASTN; BLASTP and BLASTX, series NP M4b). */
-export const DATABASE_MASK_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx']);
+/** The modes whose CLI has the database masks (BLASTN; BLASTP, BLASTX, TBLASTN and TBLASTX, series NP M4b). */
+export const DATABASE_MASK_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
 
 /** The modes whose CLI has -mt_mode, which needs -num_threads (TBLASTX's has none). */
 const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn']);

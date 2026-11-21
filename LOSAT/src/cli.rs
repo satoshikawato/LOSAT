@@ -1252,8 +1252,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -1273,8 +1271,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",

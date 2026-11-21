@@ -25,6 +25,9 @@ FASTA files:
   it is a neighbour of `AOA` and both subjects are found; with words of 6 (`db.oseed.w6.6`) the compressed alphabet
   has no letter for O or X. `oseed_bx_q.fna` is `q_x` as DNA (ATT for I, GCT for A, NNN for X), the BLASTX query of
   `db.oseed.bx.6`.
+- `len0_l0015` (rows `db.ung.len0.*`, line NP item O4b, PR (c)): the subject of `tests/fasta/outfmt0/len0_l0015_s.faa`
+  (one protein of 189 letters), searched by the 3 proteins of `len0_l0015_q.faa` with `-ungapped -window_size 0
+  -word_size 7 -threshold 9 -matrix PAM30 -seg yes`: query `q1` shows an ungapped HSP of length 0 at subject offset 23.
 - `oreal.faa` / `oreal_q.faa` (row `db.oreal.psi.6`, line NP item DBO): four proteins of `LOSAT/tests/fasta/AP027132.faa`
   (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
   `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
@@ -193,6 +196,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "stored O against the query's X" -blastdb_version 4
     makeblastdb -in tests/db_search/oseed.faa -dbtype prot -out tests/db_search/oseed \
         -title "stored O and X in words under the threshold" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/len0_l0015_s.faa -dbtype prot -out tests/db_search/len0_l0015 \
+        -title "len0 l0015 subject" -blastdb_version 4
     makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
         -title "four proteins with stored O, X and U" -blastdb_version 4
     makeblastdb -in tests/db_search/opssm.faa -dbtype prot -out tests/db_search/opssm \

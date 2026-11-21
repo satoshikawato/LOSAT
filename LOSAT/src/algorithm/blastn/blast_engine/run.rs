@@ -8607,6 +8607,7 @@ fn run_in_pool(
                         &query_offsets,
                         window_masker_masks.as_deref(),
                         &lower_case_before,
+                        &masks_outside,
                         source,
                         Some((&mut *outputs, &output_formats[..])),
                         parallel_pool,
@@ -10161,6 +10162,7 @@ fn refused_batch_setup_error(
     query_offsets: &[usize],
     window_masker_masks: Option<&[Vec<MaskedInterval>]>,
     lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
     subjects: SubjectSource<'_>,
     outputs: BatchOutputs<'_, '_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
@@ -10193,10 +10195,19 @@ fn refused_batch_setup_error(
             .map(|&query| lower_case_before[query - start])
             .collect()
     };
+    let outside: Vec<MasksOutside> = if masks_outside.is_empty() {
+        Vec::new()
+    } else {
+        chosen
+            .iter()
+            .map(|&query| masks_outside[query - start])
+            .collect()
+    };
     let stage = BatchStage::Search {
         query_offsets: &offsets,
         query_masks: masks.as_deref(),
         lower_case_before: &letter_before,
+        masks_outside: &outside,
         last: true,
         setup_only: true,
     };

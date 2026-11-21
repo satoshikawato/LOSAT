@@ -521,7 +521,8 @@ def single_volume_exception(bin_dir, case_dir, argv, rc, stderr, stamp, env):
     `-logfile` file, the exit status is 0, and the metadata file is NCBI's `blastdbcmd -metadata`
     of the database. `stamp` is a file touched before the run. Returns the exit status and the
     standard error."""
-    if "-gi_mask" not in argv:
+    if "-gi_mask" not in argv or "-dbtype" not in argv:
+        # Without -dbtype the argument reader stops before anything is written (e10, e11).
         return rc, stderr
     out = argv[argv.index("-out") + 1]
     dbtype = argv[argv.index("-dbtype") + 1]

@@ -176,7 +176,9 @@ fn choice(ty: u16, name: &str, value: Value) -> Value {
 /// no run can end here.
 fn enum_value(ty: u16, member: &str, name: &str) -> Value {
     let found = match &resolved(child(ty, member)).kind {
-        Kind::Enumerated { values, .. } => values.values().iter().find(|value| value.name() == name),
+        Kind::Enumerated { values, .. } => {
+            values.values().iter().find(|value| value.name() == name)
+        }
         _ => None,
     };
     match found {
@@ -967,10 +969,7 @@ impl Content {
             hist_ty,
             vec![(
                 "replaces",
-                seq(
-                    rec_ty,
-                    vec![("ids", Value::Texts(ids.clone()))],
-                ),
+                seq(rec_ty, vec![("ids", Value::Texts(ids.clone()))]),
             )],
         ))
     }

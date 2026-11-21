@@ -1,0 +1,114 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "YP_009220478.1 hypothetical protein [White spot syndrome virus]",
+          "query_len": 295,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 30,
+            "eff_space": 124550,
+            "kappa": 0.050373036,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "tk_lc TK-TMK with residues 61-120 in lower case",
+          "query_len": 398,
+          "query_masking": [
+            {
+              "from": 60,
+              "to": 119
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 208.852,
+                  "score": 531,
+                  "evalue": 1.10208e-70,
+                  "identity": 190,
+                  "positive": 190,
+                  "query_from": 1,
+                  "query_to": 190,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGtivthageviegcttvssikelisvlpevvdvilidegqfftdlvlvnrladkgkriviaALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 32,
+            "eff_space": 169824,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

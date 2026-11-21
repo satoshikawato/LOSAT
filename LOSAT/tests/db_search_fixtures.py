@@ -1046,12 +1046,21 @@ def freeze(args: argparse.Namespace) -> int:
 
 
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
-    """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
-    written as `{db_dir}` where the row says so."""
+    """`freeze` of an rpsblast or rpstblastn row: NCBI's run with BLASTDB the inflated database, its
+    directory written as `{db_dir}` where the row says so; a row of outfmt 13 or 14 with its files
+    (`xinclude.wants_files`) freezes the master and the side files as other programs' rows."""
+    files = xinclude.wants_files(row)
+    if files and rps_dir_token(row):
+        raise SystemExit(f"{row['row_id']}: a row with files writes no {{db_dir}}")
     db_dir = inflate_rps(row["db"], rps_dir_token(row))
+    run_env = {**row_env(row, env), "BLASTDB": str(db_dir)}
     try:
-        run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
-                         env={**row_env(row, env), "BLASTDB": str(db_dir)})
+        if files:
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                              timeout=TIMEOUT, env=run_env)
+            run = written.run
+        else:
+            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=run_env)
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
     refuse_signal(row, run.returncode)
@@ -1059,7 +1068,10 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
     if rps_dir_token(row):
         stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")
         stderr = stderr.replace(str(db_dir).encode(), b"{db_dir}")
-    (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
+    if files:
+        xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+    else:
+        (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
     err = FROZEN / f"{row['row_id']}.err"
     if stderr:
         err.write_bytes(stderr)
@@ -1067,7 +1079,10 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
         err.unlink(missing_ok=True)
     row.update(rc=str(run.returncode), stdout_sha256=sha256(stdout), stdout_bytes=str(len(stdout)),
                stderr_sha256=sha256(stderr) if stderr else "")
-    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}")
+    if files:
+        row.update(xinclude.observed(written))
+    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}"
+          + (f"\tsides={len(written.sides)}" if files else ""))
 
 
 def status_differs(observed: int, expected: int, library: bool) -> bool:
@@ -1096,26 +1111,26 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+    # An RPS row runs with BLASTDB the inflated database (`inflate_rps`), its files rows as any other.
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
-    if db_dir is not None:
-        try:
-            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
-                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
-        finally:
+    run_env = row_env(row, env) if db_dir is None else {**row_env(row, env), "BLASTDB": str(db_dir)}
+    try:
+        if files:
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                              env=run_env, timeout=TIMEOUT)
+            run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                           env=run_env, timeout=TIMEOUT)
+            run = pssms.run
+        else:
+            run = run_search(command, row, cwd=ENGINE, env=run_env, timeout=TIMEOUT)
+    finally:
+        if db_dir is not None:
             shutil.rmtree(db_dir, ignore_errors=True)
-        if rps_dir_token(row):
-            run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
-            run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
-    elif files:
-        written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
-                                          env=row_env(row, env), timeout=TIMEOUT)
-        run = written.run
-    elif pssm:
-        pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                       env=row_env(row, env), timeout=TIMEOUT)
-        run = pssms.run
-    else:
-        run = run_search(command, row, cwd=ENGINE, env=row_env(row, env), timeout=TIMEOUT)
+    if db_dir is not None and rps_dir_token(row):
+        run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
+        run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.

@@ -1,0 +1,2 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+lower,CDD:101,100.000,190,0,0,1,570,1,190,1.52e-113,310

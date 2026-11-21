@@ -43,6 +43,26 @@ pub(super) fn is_protein(program: Program, role: Role) -> bool {
     }
 }
 
+/// A query that a file holds in place of FASTA records (`Inputs::pssm`, `Inputs::msa`): the
+/// search reads the file as the command line reads its `-in_pssm` or `-in_msa`, and the one query
+/// is the sequence it gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryFile<'a> {
+    /// A PSSM file (`-in_pssm` of psiblast and tblastn).
+    Pssm(&'a std::path::Path),
+    /// A multiple sequence alignment (`-in_msa` of psiblast), made into the query's PSSM.
+    Alignment(&'a std::path::Path),
+}
+
+impl<'a> QueryFile<'a> {
+    /// The file.
+    pub(crate) fn path(self) -> &'a std::path::Path {
+        match self {
+            QueryFile::Pssm(path) | QueryFile::Alignment(path) => path,
+        }
+    }
+}
+
 /// The reader configuration of the command line for the input of `role`: the program's flags,
 /// and NCBI's data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`) or as the
 /// application's settings give them (`data_loaders`, `ApplicationSettings::data_loaders`).
@@ -252,10 +272,11 @@ pub fn read_search_inputs(
 /// from [`FastaRecord::new`]. A database subject comes from [`Inputs::database`]: the engine
 /// opens it by its name, as the command line opens `-db`. A PSSM query of psiblast and tblastn
 /// comes from [`Inputs::pssm`] and [`Inputs::pssm_database`]: the engine reads the file, as the
-/// command line reads `-in_pssm`.
+/// command line reads `-in_pssm`. A query alignment of psiblast comes from [`Inputs::msa`] and
+/// [`Inputs::msa_database`]: the engine reads the file as the command line reads `-in_msa`.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
-    /// The query records (`-query`); none for a PSSM query (`pssm`).
+    /// The query records (`-query`); none for a query file (`query_file`).
     pub(crate) query: &'a [FastaRecord],
     /// The subject records (`-subject`); none for a database.
     pub(crate) subject: &'a [FastaRecord],
@@ -267,8 +288,9 @@ pub struct Inputs<'a> {
     pub(crate) subject_name: &'a str,
     /// Whether the subject is the database `subject_name` (`-db`).
     pub(crate) database: bool,
-    /// The PSSM file whose sequence is the one query (`-in_pssm`), in place of query records.
-    pub(crate) pssm: Option<&'a std::path::Path>,
+    /// The file whose sequence is the one query (`-in_pssm`, `-in_msa`), in place of query
+    /// records.
+    pub(crate) query_file: Option<QueryFile<'a>>,
 }
 
 impl<'a> Inputs<'a> {
@@ -280,7 +302,7 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: "subject",
             database: false,
-            pssm: None,
+            query_file: None,
         }
     }
 
@@ -295,7 +317,7 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: name,
             database: true,
-            pssm: None,
+            query_file: None,
         }
     }
 
@@ -309,7 +331,7 @@ impl<'a> Inputs<'a> {
     /// show it).
     pub fn pssm(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
         Self {
-            pssm: Some(path),
+            query_file: Some(QueryFile::Pssm(path)),
             ..Self::new(&[], subject)
         }
     }
@@ -318,21 +340,44 @@ impl<'a> Inputs<'a> {
     /// `-in_pssm path -db name` (`Inputs::pssm`, `Inputs::database`).
     pub fn pssm_database(path: &'a std::path::Path, name: &'a str) -> Self {
         Self {
-            pssm: Some(path),
+            query_file: Some(QueryFile::Pssm(path)),
             ..Self::database(&[], name)
         }
     }
 
-    /// The number of queries: the records, or the one sequence of a PSSM file.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
+    /// The query of the alignment file `path` against the subject records: the command line's
+    /// `-in_msa path` of psiblast, in place of `-query`. The search reads the file as the command
+    /// line reads it, with its messages and errors (not `-`, the command line's standard input);
+    /// the one query is the alignment's master (query 0 of the results, `HspRecord::query_id` as
+    /// the reports show it), whose row `-msa_master_idx` and `-ignore_msa_master` of the argv
+    /// choose, as on the command line. Only psiblast searches an alignment.
+    pub fn msa(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
+        Self {
+            query_file: Some(QueryFile::Alignment(path)),
+            ..Self::new(&[], subject)
+        }
+    }
+
+    /// The query of the alignment file `path` against the BLAST database `name`: the command
+    /// line's `-in_msa path -db name` (`Inputs::msa`, `Inputs::database`).
+    pub fn msa_database(path: &'a std::path::Path, name: &'a str) -> Self {
+        Self {
+            query_file: Some(QueryFile::Alignment(path)),
+            ..Self::database(&[], name)
+        }
+    }
+
+    /// The number of queries: the records, or the one sequence of a PSSM or alignment file.
     pub(crate) fn query_count(&self) -> usize {
-        match self.pssm {
+        match self.query_file {
             Some(_) => 1,
             None => self.query.len(),
         }
     }
 
     /// The same inputs, shown with these names (the file names of a command line whose output
-    /// the search is to reproduce). A database keeps its name, a PSSM query its file.
+    /// the search is to reproduce). A database keeps its name, a PSSM or alignment query its file.
     pub fn named(self, query_name: &'a str, subject_name: &'a str) -> Self {
         Self {
             query_name,
@@ -347,121 +392,5 @@ impl<'a> Inputs<'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
-    const PROTEIN: &[u8] =
-        b">p1 a protein\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n";
-
-    #[test]
-    fn records_carry_the_readers_local_ids_and_titles() {
-        let query = read_fasta(Program::Blastp, Role::Query, PROTEIN).unwrap();
-        let subject = read_fasta(Program::Blastp, Role::Subject, PROTEIN).unwrap();
-        assert_eq!(query.len(), 1);
-        assert_eq!(query[0].local_id, "Query_1");
-        assert_eq!(subject[0].local_id, "Subject_1");
-        assert_eq!(query[0].title(), b"p1 a protein");
-        assert_eq!(query[0].seq().len(), 66);
-        // An input of white space only has no record; an empty input neither.
-        assert!(read_fasta(Program::Blastn, Role::Query, b" \n\t\n")
-            .unwrap()
-            .is_empty());
-        assert!(read_fasta(Program::Blastn, Role::Query, b"")
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn the_readers_flags_follow_the_programs_molecules() {
-        assert!(!is_protein(Program::Blastn, Role::Query));
-        assert!(!is_protein(Program::Blastn, Role::Subject));
-        assert!(is_protein(Program::Blastp, Role::Query));
-        assert!(is_protein(Program::Blastp, Role::Subject));
-        assert!(!is_protein(Program::Blastx, Role::Query));
-        assert!(is_protein(Program::Blastx, Role::Subject));
-        assert!(is_protein(Program::Tblastn, Role::Query));
-        assert!(!is_protein(Program::Tblastn, Role::Subject));
-        assert!(!is_protein(Program::Tblastx, Role::Query));
-        assert!(!is_protein(Program::Tblastx, Role::Subject));
-    }
-
-    #[test]
-    fn a_reader_error_is_the_command_lines_message() {
-        // A first line that is neither a defline nor plausible data (`!`, `#` and `;` open
-        // comment lines): NCBI's CFastaReader error, with the CLI's prefix.
-        let error = read_fasta(Program::Blastn, Role::Query, b"xyz{}[]|~`^&*()=+\n");
-        match error {
-            Err(error @ Error::Input(_)) => {
-                let message = error.to_string();
-                assert!(
-                    message.starts_with("BLAST query error: CFastaReader: Near line 1"),
-                    "{message}"
-                );
-                assert!(!message.ends_with('\n'));
-            }
-            other => panic!("expected a reader error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_file_reads_as_the_command_line_opens_it() {
-        use std::io::Write;
-        let directory = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-read-input-file-{}",
-            crate::utils::test_dir::process_id()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        let plain = directory.join("q.fa");
-        std::fs::write(&plain, PROTEIN).unwrap();
-        assert_eq!(read_input_file(Role::Query, &plain).unwrap(), PROTEIN);
-        let packed = directory.join("q.fa.gz");
-        let mut encoder = flate2::write::GzEncoder::new(
-            std::fs::File::create(&packed).unwrap(),
-            flate2::Compression::default(),
-        );
-        encoder.write_all(PROTEIN).unwrap();
-        encoder.finish().unwrap();
-        assert_eq!(read_input_file(Role::Subject, &packed).unwrap(), PROTEIN);
-        let missing = directory.join("none.fa");
-        let error = read_input_file(Role::Subject, &missing).unwrap_err();
-        assert_eq!(
-            error,
-            Error::Input(
-                format!(
-                "Command line argument error: Argument \"subject\". File is not accessible:  `{}'",
-                missing.display()
-            )
-                .into()
-            )
-        );
-        // A name that is not UTF-8 keeps its bytes, as on the command line (line LIB-B).
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            let missing = directory.join(std::ffi::OsStr::from_bytes(b"none\xE9.fa"));
-            let error = read_input_file(Role::Query, &missing).unwrap_err();
-            let expected = [
-                b"Command line argument error: Argument \"query\". File is not accessible:  `"
-                    .as_slice(),
-                missing.as_os_str().as_bytes(),
-                b"'",
-            ]
-            .concat();
-            assert_eq!(error, Error::Input(expected));
-        }
-        std::fs::remove_dir_all(&directory).unwrap();
-    }
-
-    #[test]
-    fn inputs_default_names_are_query_and_subject() {
-        let records = read_fasta(Program::Blastp, Role::Query, PROTEIN).unwrap();
-        let inputs = Inputs::new(&records, &records);
-        assert_eq!(
-            (inputs.query_name, inputs.subject_name),
-            ("query", "subject")
-        );
-        let named = inputs.named("q.faa", "s.faa");
-        assert_eq!((named.query_name, named.subject_name), ("q.faa", "s.faa"));
-    }
-}
+#[path = "input_tests.rs"]
+mod tests;

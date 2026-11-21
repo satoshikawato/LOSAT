@@ -236,6 +236,11 @@ pub(super) struct RedoInputs<'a, P> {
     /// (`kappa::evalue_adjust_contexts`).
     pub(super) evalue_adjust_contexts: &'a [kappa::EvalueAdjustContext],
     pub(super) build_redo_align_params: &'a P,
+    /// The marks of the lists that the redo reaches and its fetch excludes, by query and place
+    /// (`database::exclude_fetched`; empty without a database or a negative seqid list): only the
+    /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
+    /// status, so its paths read the lists without them.
+    pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
     #[cfg(all(
@@ -1019,6 +1024,50 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
     .into()
 }
 
+/// NCBI's Smith-Waterman redo at a list whose subject its fetch excludes (`mark`, a list that
+/// `database::exclude_fetched` removed; `batch_heaps`, the heaps of the list's query batch): the
+/// list is freed without a change of the status when the early termination test holds, and
+/// otherwise the excluded fetch sets the status back to 0, which clears an earlier failure of
+/// the batch (`sw_last_failed`). Nothing is fetched, redone or inserted.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
+#[inline]
+fn fetch_excluded_reached(
+    mark: &super::database::FetchExcludedMatch,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    if !blast_compo_early_termination(mark.best_evalue, batch_heaps) {
+        *sw_last_failed = false;
+    }
+}
+
+/// NCBI's Smith-Waterman redo at the lists of one query whose subjects its fetch excludes
+/// (`marks`, in stream order), read after the query's loop. `status_position` is the place of
+/// the query's last kept list whose redo set the status (`None` where no redo of the query did).
+/// A list before that place changes nothing, since that redo sets the status again. After it no
+/// list of the query enters a heap (each one ends early), so each later excluded list meets the
+/// heaps as they are after the loop (`batch_heaps`) and goes through `fetch_excluded_reached`.
+/// With no such redo the query changed no heap, and every excluded list goes through it.
+///
+/// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
+/// is NCBI's one-thread status of the batch.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+fn query_fetch_excluded_reached(
+    marks: &[super::database::FetchExcludedMatch],
+    status_position: Option<usize>,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    let after_status = status_position.map_or(0, |at| at + 1);
+    for mark in marks.iter().filter(|mark| mark.position >= after_status) {
+        fetch_excluded_reached(mark, batch_heaps, sw_last_failed);
+    }
+}
+
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
 /// in stream order, each query's compact list expanded when the loop reaches it and its preliminary
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
@@ -1054,6 +1103,7 @@ where
         kappa_query_batches,
         evalue_adjust_contexts,
         build_redo_align_params,
+        fetch_excluded,
         ..
     } = *redo;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -1079,12 +1129,27 @@ where
         .use_sw_tback
         .then(kappa::smith_waterman::SwMatchScratch::new);
     let mut sw_last_failed = false;
+    // The marks of the lists that the Smith-Waterman redo reaches and whose fetch excludes the
+    // subject (`fetch_excluded_reached`), by query; the X-drop redo reads none.
+    let mut fetch_excluded = if sw_scratch.is_some() {
+        fetch_excluded
+    } else {
+        &[][..]
+    };
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
         if batch.start == q_idx {
             sw_last_failed = false;
         }
+        let excluded_here = fetch_excluded
+            .iter()
+            .take_while(|mark| mark.query == q_idx)
+            .count();
+        let (excluded_here, excluded_after) = fetch_excluded.split_at(excluded_here);
+        fetch_excluded = excluded_after;
+        // The place of the query's last list whose Smith-Waterman redo set the status.
+        let mut x_status_position = None;
         let redo_align_params = build_redo_align_params(q_idx)?;
 
         let ctx = &contexts[q_idx];
@@ -1200,10 +1265,12 @@ where
                 ) {
                     Ok(postprocessed) => {
                         sw_last_failed = false;
+                        x_status_position = Some(x_match_position);
                         postprocessed
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
                         sw_last_failed = true;
+                        x_status_position = Some(x_match_position);
                         continue;
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
@@ -1238,6 +1305,14 @@ where
                 redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
             }
         }
+        // The excluded lists of the query, read after its loop (none without `-use_sw_tback`, so
+        // the loop above has no test of them).
+        query_fetch_excluded_reached(
+            excluded_here,
+            x_status_position,
+            &redone_matches[batch.clone()],
+            &mut sw_last_failed,
+        );
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
@@ -1266,3 +1341,7 @@ where
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "redo_run_tests.rs"]
+mod tests;

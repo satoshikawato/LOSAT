@@ -8,9 +8,9 @@
 //! failure's message is the text that the command line writes to its standard error without
 //! `-logfile` (the example ends every failure with exit status 1).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-871, 926-1022 (quoted at
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-871, 926-1022 (cited at
 //! `ncbi_environment::log_file`, `preparse` and `conf_file_path`), and
-//! c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at `ncbi_environment::run_messages_follow_log`).
+//! c++/src/app/blast/tblastx_app.cpp:93-95 (cited at `ncbi_environment::run_messages_follow_log`).
 #![cfg(unix)]
 
 use std::fs;

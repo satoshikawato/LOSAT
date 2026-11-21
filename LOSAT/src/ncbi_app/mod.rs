@@ -52,14 +52,6 @@ pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
-// ```c++
-//     if (detailed) {
-//         x.AddDetails(arr);
-//     } else {
-//         arr.push_back(kEmptyStr);
-//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
-//     }
-// ```
 /// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
 /// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
 /// convert2blastmask's) or the optional ones.
@@ -118,10 +110,6 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-    // ```c++
-    //     SetDiagPostLevel(eDiag_Warning);
-    //     SetDiagPostPrefix("blastdbcmd");
-    // ```
     /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the application
     /// (`Tool::post_prefix`), the message.
     pub(crate) fn err_post(&mut self, message: &str) {
@@ -158,28 +146,7 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-710
-    // ```c++
-    //         if ( s_HandleExceptions() ) {
-    //             try {
-    //                 *exit_code = m_DryRun ? DryRun() : Run();
-    //             }
-    //             catch (CArgException& e) {
-    //                 NCBI_RETHROW_SAME(e, "Application's execution failed");
-    //             }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
-    // ```c++
-    // void CException::AddBacklog(const CDiagCompileInfo& info,
-    //                             const string& message,
-    //                             EDiagSev severity)
-    // {
-    //     const CException* prev = m_Predecessor;
-    //     m_Predecessor = x_Clone();
-    //     ...
-    //     x_Init(info, message, 0, severity);
-    //     m_MainText = false;
-    // }
-    // ```
     /// A `CArgException` that the program's `Run` throws (`files::open_input_file`,
     /// `Args::output_file`): the application adds `Application's execution failed` to it and
     /// reports it as an argument error, after the usage; exit status 1.
@@ -188,48 +155,7 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
-    // ```c++
-    //     catch (const CArgException& e) {
-    //         // Print USAGE and the exception error message
-    //         if ( e.GetErrCode() != CArgException::eNoValue &&  m_ArgDesc.get() ) {
-    //             x_AddDefaultArgs();
-    //             string str;
-    //             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fNoUsage) ) {
-    //                 m_ArgDesc->PrintUsage(str);
-    //                 cerr << str;
-    //             }
-    //             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fDupErrToCerr) ) {
-    //                 CStreamDiagHandler* errh =
-    //                     dynamic_cast<CStreamDiagHandler*>(GetDiagHandler());
-    //                 if (!errh  ||  errh->GetStream() != &cerr) {
-    //                     cerr << "Error in command-line arguments. "
-    //                         "See error logs for more details." << endl;
-    //                 }
-    //             }
-    //             ...
-    //             cerr << string(72, '=') << endl << endl;
-    //         }
-    //         SetDiagPostAllFlags(eDPF_Severity);
-    //         NCBI_REPORT_EXCEPTION_X(18, "", e);
-    //         got_exception = true;
-    //         exit_code = 1;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7877-7888
-    // ```c++
-    //     for (pex = &ex; pex; pex = pex->GetPredecessor()) {
-    //         pile.push(pex);
-    //         if (!main_pex  &&  pex->HasMainText())
-    //             main_pex = pex;
-    //     }
-    //     if (!main_pex)
-    //         main_pex = pile.top();
-    //     if ( !IsOssEmpty(*m_Buffer.m_Stream) ) {
-    //         *this << "(" << main_pex->GetType() << "::"
-    //                      << main_pex->GetErrCodeString() << ") "
-    //               << s_GetExceptionText(main_pex);
-    //     }
-    // ```
     // With `eDPF_Severity` alone each exception of the chain is posted as `Error: <text>`, oldest
     // first, then the title's line, `Error: ` and the empty title, ` (CArgException::<code>) `
     // and the text of the newest exception that has its main text: the one the reader threw (a
@@ -304,15 +230,7 @@ pub(crate) type Body = fn(
 ) -> i32;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the
-// configuration before the arguments are read; quoted at `ApplicationStart`)
-// ```c++
-// void CNcbiApplicationAPI::x_TryInit(EAppDiagStream diag, const char* conf)
-// {
-//     // Load registry from the config file
-//     if ( conf ) {
-//         string x_conf(conf);
-//         LoadConfig(*m_Config, &x_conf);
-// ```
+// configuration before the arguments are read; cited at `ApplicationStart`)
 /// The run of `tool` with `words`, its standard input `input`, its output on `out` and its
 /// errors on `err`; the exit status. The library API's run, which runs NCBI's application start
 /// of this process as the command line's entry does (`ApplicationStart::of_process`): the usage
@@ -439,7 +357,7 @@ fn run_app(
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
     };
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (cited at
     // `cli::main_entry`: blastdbcmd and dustmasker keep the default `DryRun`, which returns 0
     // after the arguments have passed their definitions; LOSAT refuses the settings it refuses
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and

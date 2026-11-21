@@ -8,9 +8,6 @@ use super::CountsSource;
 /// The file under `<directory>/<taxid>/`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:73
-/// ```c++
-/// static string s_WINDOW_MASKER_STAT_FILE_NAME("wmasker.obinary");
-/// ```
 const STAT_FILE_NAME: &str = "wmasker.obinary";
 
 /// `WindowMaskerTaxidToDb(taxid)`: the counts file of `taxid` under `directory` (the registry
@@ -23,28 +20,6 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 /// and cannot be read.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:389-408
-/// ```c++
-///     if (retval == kEmptyStr) {
-///         retval = CDir::GetCwd();
-///     }
-/// #if defined(NCBI_OS_MSWIN)
-///     // We address this here otherwise CDirEntry::IsAbsolutePath() fails
-///     if (NStr::StartsWith(retval, "//")) {
-///         NStr::ReplaceInPlace(retval, "//", "\\\\");
-///     }
-/// #endif
-///     return retval;
-/// }
-///
-/// string WindowMaskerTaxidToDb(const string& window_masker_path, int taxid)
-/// {
-///     string path = window_masker_path;
-///     path += CFile::GetPathSeparator() + NStr::IntToString(taxid)
-///         + CFile::GetPathSeparator();
-///     const string binpath = path + s_WINDOW_MASKER_STAT_FILE_NAME;
-///     return (CFile(binpath).Exists() ? binpath : kEmptyStr);
-/// }
-/// ```
 /// `CFile::Exists` is `IsFile()`, which follows links (ncbifile.hpp:4039-4042).
 pub fn taxid_stat_file(
     directory: Option<&str>,

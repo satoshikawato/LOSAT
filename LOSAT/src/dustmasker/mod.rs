@@ -18,18 +18,6 @@ use crate::ncbi_app::{no_dependencies, Tool};
 const PROGRAM: &str = "DUSTMASKER";
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:76-85
-// ```c++
-// const char * const CDustMaskApplication::USAGE_LINE
-//     = "Low complexity region masker based on Symmetric DUST algorithm";
-//
-// //-------------------------------------------------------------------------
-// void CDustMaskApplication::Init(void)
-// {
-//     HideStdArgs(fHideLogfile | fHideConffile | fHideVersion | fHideDryRun);
-//     unique_ptr< CArgDescriptions > arg_desc( new CArgDescriptions );
-//     arg_desc->SetUsageContext( GetArguments().GetProgramBasename(),
-//                                USAGE_LINE );
-// ```
 /// The text of `dustmasker -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
 /// descriptions in `DESCS` after `HideStdArgs`: `-logfile`, `-conffile`, `-version` and `-dryrun`
 /// are not shown). Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument
@@ -37,55 +25,7 @@ const PROGRAM: &str = "DUSTMASKER";
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:86-117
-// ```c++
-//     arg_desc->AddDefaultKey( kInput, "input_file_name",
-//                              "input file name",
-//                              CArgDescriptions::eInputFile, "-" );
-//     arg_desc->AddDefaultKey( kOutput, "output_file_name",
-//                              "output file name",
-//                              CArgDescriptions::eOutputFile, "-");
-//     arg_desc->AddDefaultKey( "window", "window_size",
-//                              "DUST window length",
-//                              CArgDescriptions::eInteger, "64" );
-//     arg_desc->AddDefaultKey( "level", "level",
-//                              "DUST level (score threshold for subwindows)",
-//                              CArgDescriptions::eInteger, "20" );
-//     arg_desc->AddDefaultKey( "linker", "linker",
-//                              "DUST linker (how close masked intervals "
-//                              "should be to get merged together).",
-//                              CArgDescriptions::eInteger, "1" );
-//     arg_desc->AddDefaultKey( kInputFormat, "input_format",
-//                              "input format (possible values: fasta, blastdb)",
-//                              CArgDescriptions::eString, *kInputFormats );
-//     arg_desc->AddDefaultKey( kOutputFormat, "output_format",
-//                              "output format",
-//                              CArgDescriptions::eString, *kOutputFormats );
-//     arg_desc->AddFlag      ( "parse_seqids",
-//                              "Parse Seq-ids in FASTA input", true );
-//     arg_desc->AddFlag      ( "hard_masking",
-//                              "Use hard masking for fasta outfmt", true );
-//     CArgAllow_Strings* strings_allowed = new CArgAllow_Strings();
-//     for (size_t i = 0; i < kNumOutputFormats; i++) {
-//         strings_allowed->Allow(kOutputFormats[i]);
-//     }
-//     strings_allowed->Allow("acclist");
-//     arg_desc->SetConstraint( kOutputFormat, strings_allowed );
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_cmdline_args.cpp:40-51
-// ```c++
-// const std::string kInput("in");
-// const std::string kInputFormat("infmt");
-// const std::string kOutput("out");
-// const std::string kOutputFormat("outfmt");
-// const size_t kNumInputFormats = 2;
-// const size_t kNumOutputFormats = 8;
-// const char* kInputFormats[] =  { "fasta", "blastdb" };
-// const char* kOutputFormats[] =
-//     { "interval", "fasta",
-//       "seqloc_asn1_bin", "seqloc_asn1_text", "seqloc_xml",
-//       "maskinfo_asn1_bin", "maskinfo_asn1_text", "maskinfo_xml",
-//     };
-// ```
 /// The arguments of `CDustMaskApplication::Init` in the order it describes them; NCBI's reader
 /// adds the help flags before them and `-logfile` and `-conffile` after them (`ncbi_app::args`).
 /// The values that `-outfmt` allows are listed in the order of their `std::set`.
@@ -117,13 +57,6 @@ const DESCS: &[Desc] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.hpp:51-55
-// ```c++
-//     CDustMaskApplication() {
-//         CRef<CVersion> version(new CVersion());
-//         version->SetVersionInfo(1, 0, 0);
-//         SetFullVersion(version);
-//     }
-// ```
 /// dustmasker as NCBI's application runs it (`ncbi_app`): its own version, no dependencies
 /// between its arguments and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
@@ -138,12 +71,6 @@ static TOOL: Tool = Tool {
 };
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42
-// ```c++
-// int main( int argc, char * argv[] )
-// {
-//     return CDustMaskApplication().AppMain(argc, argv);
-// }
-// ```
 /// Runs `dustmasker` with `words` (the command line after `losat dustmasker`), after its
 /// application start `start`, on the process's standard streams; the exit status.
 pub(crate) fn run(

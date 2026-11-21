@@ -45,7 +45,7 @@ fn strings(texts: &[&str]) -> Vec<String> {
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (cited at
 // `integer_value`).
 #[test]
 fn integer_keys_convert_as_ncbi_s_reader() {

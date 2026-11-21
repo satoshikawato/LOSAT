@@ -101,24 +101,12 @@ pub(crate) struct MaskFastaReader<R: Read> {
 }
 
 impl<R: Read> MaskFastaReader<R> {
-    /// `CMaskFastaReader(newInputStream, is_nucl, parse_seqids)` (its flags are quoted at
+    /// `CMaskFastaReader(newInputStream, is_nucl, parse_seqids)` (its flags are cited at
     /// `ReaderFlags::mask_fasta_reader`). The `CFastaReader` constructor over a stream makes
     /// the line reader of `ILineReader::New`, the `CBufferedLineReader` of makeblastdb:
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:269-270
-    /// ```c++
-    /// CFastaReader::CFastaReader(CNcbiIstream& in, TFlags flags, FIdCheck f_idcheck)
-    ///     : CFastaReader(*(ILineReader::New(in)), flags, f_idcheck) {}
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:69-74
-    /// ```c++
-    /// CRef<ILineReader> ILineReader::New(CNcbiIstream& is, EOwnership ownership)
-    /// {
-    ///     CRef<ILineReader> lr;
-    ///     lr.Reset(new CBufferedLineReader(is, ownership));
-    ///     return lr;
-    /// }
-    /// ```
     /// `CBufferedLineReader` reads its first buffer in its constructor. The stream's state
     /// test after it (`eBadStream`) does not throw for a stream that NCBI's argument
     /// parser opened: a failed read throws first (dustmasker 2.17.0 with `-in` a directory:
@@ -138,62 +126,7 @@ impl<R: Read> MaskFastaReader<R> {
     /// `GetNextSequence`: the next record, or `None` at the end of the input.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_fasta_reader.cpp:43-62
-    /// ```c++
-    /// CRef< CSeq_entry > CMaskFastaReader::GetNextSequence()
-    /// {
-    ///     while( !fasta_reader_.AtEOF() )
-    ///     {
-    ///         CRef< CSeq_entry > aSeqEntry( null );
-    ///         aSeqEntry = fasta_reader_.ReadSet( 1 );
-    ///
-    ///         if( !input_stream && !input_stream.eof() ) {
-    ///             NCBI_THROW( Exception, eBadStream,
-    ///                     "error reading input stream" );
-    ///         }
-    ///
-    ///         if( aSeqEntry != 0 && aSeqEntry->IsSeq() &&
-    ///             aSeqEntry->GetSeq().IsNa() == is_nucleotide_)
-    ///             return aSeqEntry;
-    ///         else break;
-    ///     }
-    ///
-    ///     return CRef< CSeq_entry >( null );
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:442-472
-    /// ```c++
-    /// CRef<CSeq_entry> CFastaReader::ReadSet(int max_seqs, ILineErrorListener * pMessageListener)
-    /// {
-    ///     CRef<CSeq_entry> entry(new CSeq_entry);
-    ///     if (TestFlag(fOneSeq)) {
-    ///         max_seqs = 1;
-    ///     }
-    ///     for (int i = 0;  i < max_seqs  &&  !GetLineReader().AtEOF();  ++i) {
-    ///         try {
-    ///             CRef<CSeq_entry> entry2(ReadOneSeq(pMessageListener));
-    ///             if (max_seqs == 1) {
-    ///                 return entry2;
-    ///             }
-    ///             if (entry2.NotEmpty())
-    ///               entry->SetSet().SetSeq_set().push_back(entry2);
-    ///         } catch (const CObjReaderParseException& e) {
-    ///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-    ///                 break;
-    ///             } else {
-    ///                 throw;
-    ///             }
-    ///         }
-    ///     }
-    ///
-    ///
-    ///     if (entry->IsSet()  &&  entry->GetSet().GetSeq_set().size() == 1) {
-    ///         return entry->SetSet().SetSeq_set().front();
-    ///     } else {
-    ///         entry->Parentize();
-    ///         return entry;
-    ///     }
-    /// }
-    /// ```
     /// After `eEOF` `ReadSet` returns an entry that is neither a Seq nor a set, which ends
     /// the reading. With `fForceType` every record is of the reader's molecule, so the
     /// molecule test always passes. A failed read throws from within the reader in NCBI;
@@ -264,7 +197,7 @@ impl<R: Read> MaskFastaReader<R> {
 
 /// The ids, the title and the letters of a record that `reader` read.
 ///
-/// Without `-parse_seqids` the reader generated the record's id (`CSeqIdGenerator`, quoted at
+/// Without `-parse_seqids` the reader generated the record's id (`CSeqIdGenerator`, cited at
 /// `reader::RecordState::parse_def_line`): a local id, counting the records from 1.
 fn mask_record<R: Read>(record: Record, reader: &mut FastaReader<R>) -> MaskRecord {
     let ids = if reader.parses_ids() {
@@ -404,21 +337,6 @@ fn iupacaa_letters(residues: &mut [u8]) {
 /// `ncbieaa` to `iupacaa` map of NCBI's code tables, from `*` (42) on.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:6566-6575,6594-6595
-/// ```c++
-///     " from ncbieaa ,\n",
-///     " to iupacaa ,\n",
-///     " num 49 ,\n",
-///     " start-at 42 ,\n",
-///     " table {\n",
-///     " 88 ,   -- termination -> X\n",
-///     " 255,\n",
-///     " 255,\n",
-///     " 88,    -- Gap -> X\n",
-///     " 255,\n",
-/// ...
-///     " 65 ,    -- from here they map directly\n",
-///     " 66 ,\n",
-/// ```
 /// The letters `A` to `Z` map to themselves (`J`, `O` and `U` too); the reader stores no
 /// other byte.
 fn ncbieaa_to_iupacaa(residue: u8) -> u8 {

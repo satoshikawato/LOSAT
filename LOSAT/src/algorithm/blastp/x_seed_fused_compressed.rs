@@ -96,54 +96,6 @@ fn x_prefetch_cell(lookup: &BlastCompressedAaLookupTable, index: usize) {
 /// Writes the hits of backbone cell `index` (with `numhits` > 0 hits) into `dest` in NCBI's scan
 /// order and returns `numhits`; `dest` holds at least `numhits + 8` entries.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:348-396
-// ```c
-//              dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-//              dest[0].qs_offsets.s_off = s_off;
-//
-//              if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
-//             	 dest ++;
-//                 /* hits all live in the backbone */
-//                 for (i = 0; i < numhits-1; i++) {
-//                    dest[i].qs_offsets.q_off = backbone_cell->payload.query_offsets[i];
-//                    dest[i].qs_offsets.s_off = s_off;
-//                 }
-//              }
-//              else {
-//                 /* hits are in the backbone cell and in the overflow list */
-//                 CompressedOverflowCell* curr_cell =
-//                                     backbone_cell->payload.overflow_list.head;
-//                 ...
-//                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
-//
-//                 /* copy hits from backbone */
-//                 dest[1].qs_offsets.q_off = backbone_cell->payload.overflow_list.query_offsets[0];
-//                 dest[1].qs_offsets.s_off = s_off;
-//                 dest[2].qs_offsets.q_off = backbone_cell->payload.overflow_list.query_offsets[1];
-//                 dest[2].qs_offsets.s_off = s_off;
-//
-//                 /* handle the overflow list */
-//
-//                 /* first cell can be partially filled */
-//                 dest += 3;
-//                 for (i = 0; i < first_cell_entries; i++) {
-//                    dest[i].qs_offsets.q_off =  curr_cell->query_offsets[i];
-//                    dest[i].qs_offsets.s_off = s_off;
-//                 }
-//
-//                 /* handle the rest of the list */
-//                 if (first_cell_entries) {
-//                    curr_cell = curr_cell->next;
-//                 }
-//                    while (curr_cell != NULL) {
-//                       dest += i;
-//                       for (i = 0; i < COMPRESSED_HITS_PER_OVERFLOW_CELL; i++) {
-//                          dest[i].qs_offsets.q_off =  curr_cell->query_offsets[i];
-//                          dest[i].qs_offsets.s_off = s_off;
-//                       }
-//                       curr_cell = curr_cell->next;    /* prefetch */
-//                    }
-//              }
-// ```
 // A list of NCBI's shape holds `numhits - 3` offsets: the head `first_cell_entries` (or 4), every
 // other cell 4. The copies here are of whole cells (one move of four offsets); the offsets copied
 // past the cell's hits are overwritten by the next cell or never read.
@@ -206,76 +158,7 @@ fn x_cell_hits(
 /// `subject` starts at the first residue and keeps the sentinel after the last one, as the
 /// reference scan reads it; `subject_length` is the number of residues.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-503
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341
-// ```c
-//     /* prime the index */
-//     for(s = s_first; s <= s_last; s++){
-//         index = s_ComputeCompressedIndex(word_length - 1, s,
-//                                          compressed_alphabet_size,
-//                                          &skip, lookup);
-//         if(!skip)
-//           break;
-//     }
-//
-//     next_char = ((s <= s_last)? s[word_length-1] : 0);
-//     preshift = (Int4)((((Int8)index) * recip) >> 32);
-//
-//     /* main scanning loop */
-//     for (; s <= s_last; s++) {
-//        /* compute the index value */
-//
-//        compressed_char = scaled_compress_table[next_char];
-//        next_char = s[word_length];
-//
-//        if(compressed_char < 0){ /* flush (rare) "bad" character(s) */
-//          preshift = 0;
-//          s++;
-//          for(skip = word_length-1; skip && (s <= s_last) ; s++){
-//            compressed_char = scaled_compress_table[next_char];
-//            next_char = s[word_length];
-//
-//            if(compressed_char < 0){ /* not again! */
-//              skip = word_length-1;
-//              preshift = 0;
-//              continue;
-//            }
-//
-//            index = preshift + compressed_char;
-//            preshift = (Int4)((((Int8)( index )) * recip) >> 32);
-//            skip--;
-//          }
-//
-//          s--; /*undo the following increment*/
-//          continue;
-//        }
-//        ...
-//        index = preshift + compressed_char;
-//        preshift = (Int4)((((Int8)( index )) * recip) >> 32);
-//
-//        /* if there are hits */
-//        if (PV_TEST(pv, index, pv_array_bts)) {
-//           Int4 s_off = (Int4)(s - subject->sequence);
-//
-//           CompressedLookupBackboneCell* backbone_cell =
-//                                         lookup->backbone + index;
-//
-//           numhits = backbone_cell->num_used;
-//
-//           /* and there is enough space in the destination array */
-//           if (numhits) {
-//           if (numhits <= (array_size - totalhits)) {
-// ```
 // The rounds that `array_size` makes are not repeated (module header). The scan first lists the
 // offsets whose index passes `PV_TEST` (with the index), then reads their cells in that order, a few
 // cells ahead of the test (the cells are read, and their hits tested, in the reference's order).
@@ -406,18 +289,7 @@ fn x_scan_cells<V>(
 /// word hit in the reference's order; `candidate(query_offset, subject_offset, last_hit, diff,
 /// entry)` receives each hit that needs the rest of the test, with its diagonal entry. The
 /// arguments are those of `x_seed_fused::x_scan_two_hit`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-518
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_two_hit_compressed<F>(
     lookup: &BlastCompressedAaLookupTable,
@@ -672,19 +544,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1288-1301
-    // ```c
-    //     /* set word size and threshold information. The reciprocals
-    //        below are 2^32 / (compressed alphabet size) */
-    //     ...
-    //     if (word_size == 6 || word_size == 5) {
-    //         lookup->compressed_alphabet_size = 15;
-    //         lookup->reciprocal_alphabet_size = 286331154;
-    //     }
-    //     else {
-    //         lookup->compressed_alphabet_size = 10;
-    //         lookup->reciprocal_alphabet_size = 429496730;
-    //     }
-    // ```
     // The resumed rounds of the reference scan give the rolling index only if the reciprocal gives
     // the exact quotient for every index the scan forms (module header).
     #[test]
@@ -704,22 +563,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-844
-    // ```c
-    //     default:
-    //     {
-    //         ...
-    //         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-    //
-    //         if (cell_index == 0 ) { /* can't be empty => it's full  */
-    //
-    //             /* fetch next vacant cell */
-    //         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-    //
-    //             /* shuffle the pointers */
-    //             new_cell->next = backbone_cell->payload.overflow_list.head;
-    //             backbone_cell->payload.overflow_list.head = new_cell;
-    //         }
-    // ```
     // Cells of 1 to 20 hits (every position of the newest group), each word once in the subject and
     // between letters outside the alphabet: the fused loop gives each cell's hits in the order of
     // NCBI's scan, with arrays that make the reference stop before many cells.

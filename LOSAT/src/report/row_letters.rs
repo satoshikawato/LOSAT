@@ -4,19 +4,7 @@
 //! columns whose `-` is a residue (`stored_gap_columns`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:116-121
-//! ```c++
-//!         CBioseq_Handle h = GetBioseqHandle(row);
-//!         CSeqVector vec = h.GetSeqVector
-//!             (CBioseq_Handle::eCoding_Iupac,
-//!              IsPositiveStrand(row) ?
-//!              CBioseq_Handle::eStrand_Plus :
-//!              CBioseq_Handle::eStrand_Minus);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-//! ```c++
-//!                     } else if (m_SeqLocChar==eLowerCase){
-//!                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-//! ```
 //! NCBI's reports read the letters of every row from its Bioseq and compare them as they are; a
 //! mask lowers a letter only where outfmt 0 prints the row. A FASTA record's Bioseq holds its
 //! letters in upper case (NCBI's reader keeps the lower case as a mask, fasta.cpp:945-949), and
@@ -183,51 +171,7 @@ pub(crate) fn stored_gap_columns(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
-// ```c++
-// void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
-//                                           const string& sequence ,
-//                                           int& match, int& positive,
-//                                           string& middle_line)
-// {
-//     match = 0;
-//     positive = 0;
-//     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
-//     if(m_AlignOption & eShowMiddleLine){
-//         middle_line = sequence;
-//     }
-//     for(int i=0; i<min_length; i++){
-//         if(sequence_standard[i]==sequence[i]){
-//             if(m_AlignOption & eShowMiddleLine){
-//                 if(m_MidLineStyle == eBar ) {
-//                     middle_line[i] = '|';
-//                 } else if (m_MidLineStyle == eChar){
-//                     middle_line[i] = sequence[i];
-//                 }
-//             }
-//             match ++;
-//         } else {
-//             if ((m_AlignType&eProt)
-//                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
-//                 positive ++;
-//                 if(m_AlignOption & eShowMiddleLine){
-//                     if (m_MidLineStyle == eChar){
-//                         middle_line[i] = '+';
-//                     }
-//                 }
-//             } else {
-//                 if (m_AlignOption & eShowMiddleLine){
-//                     middle_line[i] = ' ';
-//                 }
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1798
-// ```c++
-//     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
-//                        aln_vec_info->alnRowInfo->sequence[1],
-//                        aln_vec_info->match,
-//                        aln_vec_info->positive,
-//                        aln_vec_info->alnRowInfo->middleLine);
-// ```
 /// The positives of the rows `query` and `subject` (identities included), as NCBI counts them
 /// on the Bioseqs' letters before a mask lowers any (`QueryCase`: the query's letters as `case`
 /// reads them, the subject's capitals).
@@ -253,7 +197,7 @@ pub(crate) fn display_positives(
 mod tests {
     use super::*;
 
-    // NCBI showalign.cpp:2131-2155 and align_format_util.cpp:3563-3581 (quoted above and at
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155 and c++/src/objtools/align_format/align_format_util.cpp:3563-3581 (cited above and at
     // `protein_display_score`): a masked capital compares as its capital; a PSSM query's
     // lower-case letter is identical to no subject letter and scores -1000.
     #[test]

@@ -29,13 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::gapalign::BlastpPreliminaryHsp;
 use super::hsp::{BlastpHitList, BlastpHspList, HitListHsp};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
-// ```c
-// Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
-//               Int4 subject_end, Int4 query_gapped_start,
-//               Int4 subject_gapped_start, Int4 query_context,
-//               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:151-178
 // NCBI keeps one BlastHSP; this is the part of it the preliminary stage sets, with the E-value of
 // Blast_HSPListGetEvalues (blast_engine.c:1523-1530).
 /// A preliminary HSP as the subject scan keeps it.

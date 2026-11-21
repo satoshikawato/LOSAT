@@ -101,11 +101,11 @@ pub(super) fn unsupported(what: &str) -> String {
 pub(super) fn report(failure: Failure, diag: &mut Diag) -> i32 {
     match failure {
         Failure::Ncbi(exception) => {
-            diag.write_text(
-                exception
-                    .report_default_ex(106, 16, "Application's execution failed")
-                    .as_bytes(),
-            );
+            diag.write_text(&exception.report_default_ex(
+                106,
+                16,
+                "Application's execution failed",
+            ));
             3
         }
         Failure::Std(what) => {

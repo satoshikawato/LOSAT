@@ -69,24 +69,10 @@ impl<'a> RpsVolumeSet<'a> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-937 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-937 (cited at
 // `SeqDb::statistics_total_length`) and c++/src/algo/blast/core/blast_engine.c:1129-1143
-// ```c
-//     num_db_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-//     dbsize = BlastSeqSrcGetTotLen(seq_src) + num_db_seqs;
-//     if (dbsize > INT4_MAX)
-//       return -3;
-//     ...
-//     concat_db.length = (Int4) dbsize;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-139 (a bare
 // volume walks no alias file: its index files store no shortest length, and it has no STATS key)
-// ```c++
-//             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
-//         }
-//         m_NumSeqsStats     = x_GetNumSeqsStats();
-//         m_TotalLengthStats = x_GetTotalLengthStats();
-// ```
 /// The numbers of one search unit's `BlastSeqSrc` that NCBI's statistics and RPS engine read
 /// (`RpsUnits`; line RG D1a-4, model M2), with NCBI's types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,7 +103,7 @@ pub(crate) struct RpsUnit {
 
 impl RpsUnit {
     /// The concatenated length `Lc` of the unit's search, `concat_db.length = (Int4) dbsize`
-    /// (blast_engine.c:1143, quoted above): the low 32 bits of `engine_size`. A bare volume's is
+    /// (blast_engine.c:1143, cited above): the low 32 bits of `engine_size`. A bare volume's is
     /// the letters of its index and one delimiter row per profile, the rows of its `.rps` file; an
     /// alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or above them, also
     /// to a negative value. The RPS engine reads it in three places (`RpsRun::concat_length`): the
@@ -167,30 +153,10 @@ impl RpsUnit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:250-262, 380-399
-// ```c++
-// CRef<CSearchResultSet> s_RunLocalRpsSearch(const string & db,
-// 										   CBlastQueryVector  & query_vector,
-// 										   CRef<CBlastOptionsHandle> opt_handle)
-// {
-// 	CSearchDatabase			search_db(db, CSearchDatabase::eBlastDbIsProtein);
-// 	CRef<CLocalDbAdapter> 	db_adapter(new CLocalDbAdapter(search_db));
-// ...
-// 		if(1 == m_num_of_dbs)
-// 		{
-// 			return s_RunLocalRpsSearch(m_db_name, *m_query_vector, m_opt_handle);
-// 		}
-// 		else
-// 		{
-// 		   	s_ModifyVolumePaths(m_rps_databases);
-// 			...
-// 				results.push_back(s_RunLocalRpsSearch(m_rps_databases[i],
-// 													  *m_query_vector,
-// 													   m_opt_handle));
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371 (quoted above
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371 (cited above
 // `search_sets`): `x_AdjustDbSize`, before the volumes of several.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727 (quoted at
-// `stats::setup::eff_lengths_database`) and 912-923 (the Gumbel block's `db_length`, quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727 (cited at
+// `stats::setup::eff_lengths_database`) and 912-923 (the Gumbel block's `db_length`, cited at
 // `blastx::parameters::gumbel_db_length`)
 /// The search units of an RPS search (`rpsblast`, `rpstblastn`; line RG D1a-4, model M1) and the
 /// statistics of each, the one owner of both programs: NCBI's `CLocalRPSBlast` searches the
@@ -271,7 +237,7 @@ impl RpsUnits {
         &self.units[0]
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727 (cited at
     // `stats::setup::eff_lengths_database`)
     /// `BLAST_CalcEffLengths`' database length and number of sequences of `unit` (`T'`, `n'`):
     /// the `DbLength` option when above 0, else the setup's total; the `DbSeqNum` option when
@@ -330,25 +296,6 @@ impl RpsUnits {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181
-    // ```c++
-    //     if (options->GetEffectiveSearchSpace() != 0) {
-    //         return;
-    //     }
-    //
-    //     const BlastSeqSrc* seqsrc = full_data->m_SeqSrc->GetPointer();
-    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
-    //     if (total_length <= 0)
-    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
-    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
-    //     if (num_seqs <= 0)
-    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
-    //
-    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
-    //                                          num_seqs, total_length,
-    //                                          full_data->m_ScoreBlk->GetPointer());
-    //     ...
-    //     options->SetEffectiveSearchSpace(eff_searchsp);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:107-147 (the
     // memento restores the local options after each unit's search; the remote options, which a
     // request holds, keep the value of the last unit)
@@ -381,7 +328,7 @@ impl RpsUnits {
     }
 
     /// The database length and count of `SplitQuery_SetEffectiveSearchSpace` for `unit`
-    /// (quoted above `request_space`): the unit's total before the setup's fallback to OID 0 and
+    /// (cited above `request_space`): the unit's total before the setup's fallback to OID 0 and
     /// its count without the fallback, under the `DbLength` and `DbSeqNum` options; `None` where
     /// that length is 0 (`BLAST_CalcEffLengths` then sets no space, blast_setup.c:729-732).
     fn split_query_lengths(&self, unit: &RpsUnit) -> Option<(i64, i32)> {
@@ -400,17 +347,6 @@ impl RpsUnits {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221 and
     // c++/src/algo/blast/core/blast_setup.c:775-778, 822-841
-    // ```c++
-    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
-    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
-    //                                        m_InternalData);
-    // ...
-    //       Int8 effective_search_space =
-    //           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
-    //                                               blast_message);
-    // ...
-    //          if (effective_search_space == 0) {
-    // ```
     /// The effective lengths of `unit`'s preliminary search where they differ from the setup's
     /// (`eff_lengths`), else `None`: NCBI's preliminary stage reads the search space that
     /// `SplitQuery_SetEffectiveSearchSpace` puts in the options for each context (under a memento
@@ -430,7 +366,7 @@ impl RpsUnits {
             .filter(|&lengths| lengths != self.eff_lengths(unit))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010 (quoted at
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010 (cited at
     // `common::database::report_sum_refusal`): the serial writer's `-n` of INT64_MIN.
     /// The `DbLength` option that `x_AdjustDbSize` writes into the options handle at each query
     /// batch's set-up (`search_sets`): `D` for any value where it runs, `None` elsewhere. The
@@ -453,7 +389,7 @@ impl RpsUnits {
 }
 
 impl RpsUnit {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (cited at
     // `stats::setup::setup_subject_length`)
     /// LOSAT's refusal of the unit where its setup counts 0 sequences of a positive total in a
     /// search without the Gumbel block (`gumbel` false: `-searchsp`, `OLD_FSC`): NCBI divides the
@@ -467,13 +403,12 @@ impl RpsUnit {
     /// unit's, the one that can count 0 (`blastp::blast_engine::call_setup::setup_count_refused`;
     /// review C of D1a-4, MF1 and N2; review D, N2).
     pub(crate) fn check_setup_count(&self, gumbel: bool, program: &str) -> Result<()> {
-        if !gumbel && self.setup_total > 0 && self.setup_count == 0 {
-            return Err(crate::algorithm::common::database::refusal(
-                crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-                program,
-            ));
-        }
-        Ok(())
+        crate::algorithm::common::database::check_setup_count(
+            self.setup_total,
+            self.setup_count,
+            gumbel,
+            program,
+        )
     }
 
     /// `BLAST_GapAlignSetUp`'s `min_subject_length` of the unit's setup
@@ -492,19 +427,8 @@ impl RpsUnit {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1129-1149 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1129-1149 (cited at
     // `RpsUnit` and in `rps_search`'s module header) and c++/src/algo/blast/core/blast_extend.c:42-67
-    // ```c
-    // static BLAST_DiagTable*
-    // s_BlastDiagTableNew (Int4 qlen, Boolean multiple_hits, Int4 window_size)
-    // {
-    //         ...
-    //         diag_array_length = 1;
-    //         /* What power of 2 is just longer than the query? */
-    //         while (diag_array_length < (qlen+window_size)) {
-    //                 diag_array_length = diag_array_length << 1;
-    //         }
-    // ```
     /// LOSAT's refusals of the unit's concatenated length (`concat_length`), the one owner of both
     /// programs and of every unit, where NCBI's RPS engine (`s_RPSPreliminarySearchEngine`) meets
     /// them: at the unit's search of the first query batch that NCBI searches, after that
@@ -537,45 +461,7 @@ impl RpsUnit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371,374-379
-// ```c++
-// void CLocalRPSBlast::x_AdjustDbSize(void)
-// {
-// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
-// 		return;
-//
-// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
-// 		return;
-//
-// 	CSeqDB db(m_db_name, CSeqDB::eProtein);
-//
-// 	Uint8 db_size = db.GetTotalLengthStats();
-// 	...
-// 	if(0 == db_size)
-// 	    db_size = db.GetTotalLength();
-// 	...
-// 	m_opt_handle->SetOptions().SetDbLength(db_size);
-// 	m_opt_handle->SetOptions().SetDbSeqNum(num_seq);
-// ...
-// CRef<CSearchResultSet> CLocalRPSBlast::Run(void)
-// {
-// 	if(1 != m_num_of_dbs)
-// 	{
-// 		x_AdjustDbSize();
-// 	}
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83
-// ```c++
-// CSetupFactory::CreateRpsStructures(const string& rps_dbname,
-//                                    CRef<CBlastOptions> options)
-// {
-//     ...
-//     CRef<CBlastRPSInfo> retval(new CBlastRPSInfo(rps_dbname, mode));
-//     options->SetMatrixName(retval->GetMatrixName());
-//     options->SetGapOpeningCost(retval->GetGapOpeningCost());
-//     options->SetGapExtensionCost(retval->GetGapExtensionCost());
-//     return retval;
-// }
-// ```
 /// What the set-up of each query batch of an RPS search (rpsblast, rpstblastn) writes into NCBI's
 /// options handle, in its order, which the search strategy's requests after the first hold
 /// (`report::archive::OptionsHandle::pass`; NCBI BLAST+ 2.17.0 `p9.rps.q40.f6`,
@@ -623,35 +509,13 @@ pub(crate) fn search_sets(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1414-1418 (quoted
 // at `SeqDb::included_ordinal`): the formatter's `CSeqDB`, opened over the `-db` name with its
 // alias keys, finds no OID that the alias files' ranges leave out.
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185 (quoted in
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185 (cited in
 // PD-LOSAT-NCBI-DEFECTS 1.37): `sacc` and `saccver` of such a subject are a null pointer exception.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:810-813 and
 // c++/src/objtools/align_format/align_format_util.cpp:1014-1039 (`PruneSeqalign`)
-// ```c++
-//         if (results.HasAlignments()) {
-//     	    CSeq_align_set copy_aln_set;
-//             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-// ...
-//             subid = &((*iter)->GetSeq_id(1));
-//             if(is_first_aln || (!is_first_aln && !subid->Match(*previous_id))){
-//                 ++num_align;
-//             }
-//
-//             if(num_align > number) {
-//                  break;
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:51-57 and
 // c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:793-813 (the Seq-aligns of each volume's
 // results name a profile by the Seq-ids of its header, read by OID whatever the ranges include)
-// ```c++
-// void GetSequenceLengthAndId(const blast::IBlastSeqInfoSrc * seqinfo_src,
-//                             int                      oid,
-// ...
-//     list<CRef<CSeq_id> > seqid_list = seqinfo_src->GetId(oid);
-// ...
-//     if (const CSeqDBVol * vol = m_VolSet.FindVol(oid, vol_oid)) {
-// ```
 /// The ordinal ids of the profiles of one query batch's final hit lists `lists`, renamed from
 /// their OIDs (`shift_ordinal_ids`), for the reports, which look them up by ordinal id: NCBI's
 /// lookup table holds every profile of a volume and its search ignores the alias files'
@@ -823,7 +687,7 @@ fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError
 }
 
 /// The number of HSP lists at the start of `list` that NCBI's formatter keeps in its cut to `cut`
-/// subjects (`PruneSeqalign`, quoted at `report_ordinal_ids`): following lists whose profiles'
+/// subjects (`PruneSeqalign`, cited at `report_ordinal_ids`): following lists whose profiles'
 /// Seq-align ids match count as one subject, as NCBI's Seq-aligns name them (the headers read by
 /// OID, `SeqDb::read_header_of_oid`). Two volumes that hold one profile (a volume given twice
 /// under two paths) give such lists; the reports keep the same number
@@ -859,10 +723,6 @@ fn formatter_kept(
 /// has no list, or no valid query, as NCBI does (review B of PS12a, S3).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1176-1177
-/// ```c
-///       if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
-///           continue;
-/// ```
 pub(crate) struct Consensus<'a> {
     setup: &'a RpsVolumeSetup,
     volume: &'a Volume,
@@ -925,14 +785,6 @@ impl RpsVolumeSetup {
     /// error of a missing `.freq` names it as given, and each volume of several by its path.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346, 380-386
-    /// ```c++
-    /// 	CSeqDB::FindVolumePaths(db, CSeqDB::eProtein, m_rps_databases, NULL, true, true);
-    /// 	m_num_of_dbs = static_cast<unsigned int>(m_rps_databases.size());
-    /// 	...
-    /// 		if(1 == m_num_of_dbs)
-    /// 		{
-    /// 			return s_RunLocalRpsSearch(m_db_name, *m_query_vector, m_opt_handle);
-    /// ```
     pub(crate) fn with_database(mut self, name: &str, num_volumes: usize) -> Self {
         self.database_name = (num_volumes == 1).then(|| name.to_string());
         self
@@ -1038,12 +890,6 @@ impl RpsVolumeSetup {
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-83
-        // ```c++
-        //     if (rps_info) {
-        //         opts_memento->m_ScoringOpts->matrix = strdup(rps_info->aux_info.orig_score_matrix);
-        //         opts_memento->m_ScoringOpts->gap_open = rps_info->aux_info.gap_open_penalty;
-        //         opts_memento->m_ScoringOpts->gap_extend = rps_info->aux_info.gap_extend_penalty;
-        // ```
         // The search's Karlin, Gumbel and cutoff values are those of BLOSUM62 11/1 (blastp's
         // task); a database of other costs is refused, and so are volumes whose costs differ
         // (each volume sets its own in NCBI; the statistics are one set).
@@ -1126,35 +972,7 @@ impl RpsVolumeSetup {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:177-190
-// ```c
-//    case eRPSLookupTable:
-//        {
-//            BlastRPSLookupTable *lookup;
-//            Int4 alphabet_size;
-//            RPSLookupTableNew(rps_info, (BlastRPSLookupTable* *)
-//                                         (&lookup_wrap->lut));
-//
-//            /* if the alphabet size from the RPS database is too
-//               small, mask all unsupported query letters */
-//            lookup = (BlastRPSLookupTable*)(lookup_wrap->lut);
-//            alphabet_size = lookup->alphabet_size;
-//            if (alphabet_size < BLASTAA_SIZE)
-//                Blast_MaskUnsupportedAA(query, alphabet_size);
-//            break;
-//        }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1336-1346
-// ```c
-// Blast_MaskUnsupportedAA(BLAST_SequenceBlk* seq, Uint1 min_invalid)
-// {
-//     ...
-//     for (i = 0; i < length; i++) {
-//         if (sequence[i] >= min_invalid) {
-//             sequence[i] = kProtMask;
-//         }
-//     }
-// }
-// ```
 // The lookup table is made after the score block, so the queries' Karlin-Altschul values
 // keep their letters; the search (scan, extensions, traceback, rescale) reads them masked.
 pub(crate) fn mask_unsupported_letters(aa_seq: &[u8], alphabet: usize) -> Option<Vec<u8>> {
@@ -1198,50 +1016,7 @@ pub(crate) fn shift_ordinal_ids(hit_list: &mut BlastpHitList, start: u32) {
 /// merged set, and outfmt 7 counts its HSPs before the cut.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:69-137
-/// ```c++
-///     while(input_it != input_list.end())
-///     {
-///         double final_evalue;
-///         double input_evalue;
-///
-///         (*final_it)->GetNamedScore(CSeq_align::eScore_EValue, final_evalue);
-///         (*input_it)->GetNamedScore(CSeq_align::eScore_EValue, input_evalue);
-///
-///         if(input_evalue == final_evalue)
-///         {
-///             //Pulling a trick here to keep the program flow simple
-///             //Replace the final evalue with input bitscore and vice versa
-///             (*final_it)->GetNamedScore(CSeq_align::eScore_BitScore, input_evalue);
-///             (*input_it)->GetNamedScore(CSeq_align::eScore_BitScore, final_evalue);
-///         }
-///
-///         if(input_evalue <  final_evalue)
-///         {
-///             ... (the whole group of the input's subject)
-///             final_list.insert(final_it, start_input_it, input_it);
-///         }
-///         else
-///         {
-///             ... (final_it past the whole group of its subject)
-///             if(final_it == final_list.end())
-///             {
-///                 final_list.insert(final_it, input_it, input_list.end());
-///                 break;
-///             }
-///         }
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-160
-/// ```c++
-///             if(thread_results[d]->HasAlignments())
-///             {
-///                 CConstRef<CSeq_align_set>  thread_align_set = thread_results[d]->GetSeqAlign();
-///                 if(align_set->IsEmpty())
-///                 {
-///                     align_set->Set().insert(align_set->Set().begin(),
-///                                         thread_align_set->Get().begin(),
-///                                         thread_align_set->Get().end());
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-166
 #[cold]
 #[inline(never)]
 pub(crate) fn merge_volume(
@@ -1278,11 +1053,6 @@ pub(crate) fn merge_volume(
 /// reads with `GetNamedScore`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1131 (and `:62`)
-/// ```c++
-/// #define SMALLEST_EVALUE 1.0e-180
-/// ...
-///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-/// ```
 fn seqalign_evalue(e_value: f64) -> f64 {
     if e_value < 1.0e-180 {
         0.0
@@ -1430,7 +1200,7 @@ mod tests {
         assert_eq!(negative.request_space(0, &gapped, "RPSBLAST").unwrap(), 0);
     }
 
-    // prelim_stage.cpp:219-221 (quoted at `RpsUnits::prelim_lengths`): the preliminary stage reads
+    // prelim_stage.cpp:219-221 (cited at `RpsUnits::prelim_lengths`): the preliminary stage reads
     // SplitQuery's space, whose lengths are the setup's except for a negative total (review A of
     // D1a-4, MF1): `LENGTH` 2^63 + 1 and `NSEQ` 600 over one volume, SplitQuery's 208 (1 times the
     // query's 208 letters less no adjustment) where the setup reads OID 0's 190 letters and 1.
@@ -1457,7 +1227,7 @@ mod tests {
         assert_eq!(several.prelim_lengths(&volume, 0), None);
     }
 
-    // blast_setup.c:826-846 (quoted at `stats::setup::calc_eff_lengths`): with `-dbsize` each
+    // blast_setup.c:826-846 (cited at `stats::setup::calc_eff_lengths`): with `-dbsize` each
     // volume's space reads the given length and its own sequence count; an effective database
     // length of 0 or below is 1; a product past `Int8` is refused.
     #[test]

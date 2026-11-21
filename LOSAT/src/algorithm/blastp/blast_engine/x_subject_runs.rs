@@ -66,82 +66,9 @@
 //! (`-db`) already search with one table and are not changed.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:160-172
-//! ```c
-//! Int2
-//! Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)
-//! {
-//!     if (!ewp)
-//!         return -1;
-//!
-//!     if (ewp->diag_table) {
-//!         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//!             ewp->diag_table->offset = ewp->diag_table->window;
-//!             s_BlastDiagClear(ewp->diag_table);
-//!         } else {
-//!             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//!         }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-103
-//! ```c
-//! static Int4 s_BlastDiagClear(BLAST_DiagTable * diag)
-//! {
-//!     Int4 i, n;
-//!     DiagStruct *diag_struct_array;
-//!
-//!     if (diag == NULL)
-//!         return 0;
-//!
-//!     n = diag->diag_array_length;
-//!
-//!     diag->offset = diag->window;
-//!
-//!     diag_struct_array = diag->hit_level_array;
-//!
-//!     for (i = 0; i < n; i++) {
-//!         diag_struct_array[i].flag = 0;
-//!         diag_struct_array[i].last_hit = -diag->window;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-544
-//! ```c
-//!             diag_coord = (query_offset - subject_offset) & diag_mask;
-//!
-//!             /* If the reset bit is set, an extension just happened. */
-//!             if (diag_array[diag_coord].flag) {
-//!                 /* If we've already extended past this hit, skip it. */
-//!                 if ((Int4) (subject_offset + diag_offset) <
-//!                     diag_array[diag_coord].last_hit) {
-//!                     continue;
-//!                 }
-//!                 /* Otherwise, start a new hit. */
-//!                 else {
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     diag_array[diag_coord].flag = 0;
-//!                 }
-//!             }
-//!             /* If the reset bit is cleared, try to start an extension. */
-//!             else {
-//!                 /* find the distance to the last hit on this diagonal */
-//!                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!                 diff = subject_offset - last_hit;
-//!
-//!                 if (diff >= window) {
-//!                     /* We are beyond the window for this diagonal; start a
-//!                        new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//!                 }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ...
-//!          /* Save the results. */
-//!          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-//! ```
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -201,20 +128,7 @@ fn x_cut_runs(lengths: &[usize], parts: usize) -> Vec<Range<usize>> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-// ```c
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
-// ```c
-//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//             ewp->diag_table->offset = ewp->diag_table->window;
-//             s_BlastDiagClear(ewp->diag_table);
-//         } else {
-//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//         }
-// ```
 /// The subjects of one run, `run`, searched with `scratch` into `slots` (the run's slots of the
 /// subject results).
 fn x_search_run<K>(

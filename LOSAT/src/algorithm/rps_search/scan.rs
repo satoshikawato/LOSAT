@@ -128,15 +128,6 @@ struct ScanWord {
 /// group.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:197-208
-/// ```c
-///     lookup->num_buckets = num_pssm_rows / RPS_BUCKET_SIZE + 1;
-///     lookup->bucket_array = (RPSBucket *) malloc(lookup->num_buckets *
-///                                                 sizeof(RPSBucket));
-///     for (i = 0; i < lookup->num_buckets; i++) {
-///         RPSBucket *bucket = lookup->bucket_array + i;
-///         bucket->num_filled = 0;
-///         bucket->num_alloc = 1000;
-/// ```
 pub(crate) struct RpsBuckets {
     /// The buckets of the volume (`lookup->num_buckets`).
     num_buckets: usize,
@@ -406,15 +397,6 @@ impl RpsBuckets {
     /// `s_bits` (`entry_bits`) at the end of the bucket of its row.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:422-436
-    /// ```c
-    /// static void s_AddToRPSBucket(RPSBucket * b, Uint4 q_off, Uint4 s_off)
-    /// {
-    ///     ...
-    ///     offset_pairs[i].qs_offsets.q_off = q_off;
-    ///     offset_pairs[i].qs_offsets.s_off = s_off;
-    ///     b->num_filled++;
-    /// }
-    /// ```
     ///
     /// The hits of `list` (entries of a cell, `taken` of the cell's entries before it) into the
     /// buckets of the group (`g0` its first bucket; the lookup of the bucket is the one range test of
@@ -703,77 +685,7 @@ fn next_word_index(index: i32, subject: &[u8], s: i32) -> i32 {
 /// the same order, after the scan, group by group); `*offset` becomes the word the next scan starts
 /// at. Returns the number of hits.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:472-547
-/// ```c
-///     const Int4 max_hits = 4000000;
-///     ...
-///     for (index = 0; index < lookup->num_buckets; index++)
-///         bucket_array[index].num_filled = 0;
-///
-///     s_first = abs_start + *offset;
-///     s_last = abs_start + sequence->length - lookup->wordsize;
-///     pv = lookup->pv;
-///     ...
-///     table_correction = lookup->wordsize - 1;
-///
-///     /* prime the index */
-///     index = ComputeTableIndex(lookup->wordsize - 1,
-///                           lookup->charsize, s_first);
-///
-///     for (s = s_first; s <= s_last; s++) {
-///         /* compute the index value */
-///         index = ComputeTableIndexIncremental(lookup->wordsize,
-///                                              lookup->charsize,
-///                                              lookup->mask, s, index);
-///
-///         /* if there are hits... */
-///         if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-///             cell = &lookup->rps_backbone[index];
-///             numhits = cell->num_used;
-///
-///             ASSERT(numhits != 0);
-///
-///             if (numhits <= (max_hits - totalhits)) {
-///                 Int4 *src;
-///                 Int4 i;
-///                 Uint4 q_off;
-///                 Uint4 s_off = (Uint4)(s - abs_start);
-///                 if (numhits <= RPS_HITS_PER_CELL) {
-///                     for (i = 0; i < numhits; i++) {
-///                         q_off = cell->entries[i] - table_correction;
-///                         s_AddToRPSBucket(bucket_array +
-///                                          q_off / RPS_BUCKET_SIZE, q_off,
-///                                          s_off);
-///                     }
-///                 } else {
-///                     /* hits (past the first) live in overflow array */
-///                     src =
-///                         lookup->overflow + (cell->entries[1] / sizeof(Int4));
-///                     q_off = cell->entries[0] - table_correction;
-///                     s_AddToRPSBucket(bucket_array + q_off / RPS_BUCKET_SIZE,
-///                                      q_off, s_off);
-///                     for (i = 0; i < (numhits - 1); i++) {
-///                         q_off = src[i] - table_correction;
-///                         s_AddToRPSBucket(bucket_array +
-///                                          q_off / RPS_BUCKET_SIZE, q_off,
-///                                          s_off);
-///                     }
-///                 }
-///
-///                 totalhits += numhits;
-///             } else
-///                 /* not enough space in the destination array; return early */
-///             {
-///                 break;
-///             }
-///         }
-///     }
-///
-///     /* if we get here, we fell off the end of the sequence */
-///     *offset = (Int4)(s - abs_start);
-///
-///     return totalhits;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:472-550
 /// The table's hits name rows inside the concatenation (checked when the volume is opened,
 /// `seqdb::rps`), so every bucket index is in range.
 pub(crate) fn scan_subject(

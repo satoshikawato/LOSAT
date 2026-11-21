@@ -39,17 +39,6 @@ use window::Window;
 /// (all 0: the window is unit + 4 letters and the thresholds come from the counts file).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:101-109
-/// ```c
-///     Uint1 arg_window_size            = 0; // [allow setting of this field?]
-///     Uint4 arg_window_step            = 1;
-///     Uint1 arg_unit_step              = 1;
-///     Uint4 arg_textend                = 0; // [allow setting of this field?]
-///     Uint4 arg_cutoff_score           = 0; // [allow setting of this field?]
-///     Uint4 arg_max_score              = 0; // [allow setting of this field?]
-///     Uint4 arg_min_score              = 0; // [allow setting of this field?]
-///     Uint4 arg_set_max_score          = 0; // [allow setting of this field?]
-///     Uint4 arg_set_min_score          = 0; // [allow setting of this field?]
-/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MaskerParams {
     /// `-window`; 0 = unit size + 4.
@@ -74,7 +63,7 @@ pub struct MaskerParams {
 pub enum WinMaskError {
     /// `CSeqMaskerIstatFactory::eOpen`: "could not open `<name>`"
     /// (`seq_masker_istat_factory.cpp:171`).
-    Open { name: String },
+    Open { name: Vec<u8> },
     /// An exception of a reader (`eFormat`, `eBadParam`, `eBadHashParam`) at `site`; the
     /// factory rethrows it as "could not create a unit counts container"
     /// (`seq_masker_istat_factory.cpp:358-359`). `warnings` are the warnings NCBI posted
@@ -112,7 +101,7 @@ pub enum WinMaskError {
     /// (`seq_masker_istat_oascii.cpp:82-87, 111`).
     UnsetHashParameter { field: &'static str },
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
-    /// NCBI reads past its `new Uint4[0]` (`seq_masker_cache_boost.cpp:40-48`).
+    /// NCBI reads past its `new Uint4[0]` (`c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
     /// A sequence of 2^32 letters or more: NCBI's positions are 32-bit (`TSeqPos`).
     SequenceTooLong { length: usize },
@@ -135,16 +124,13 @@ impl WinMaskError {
 impl fmt::Display for WinMaskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Open { name } => write!(f, "could not open {name}"),
+            Self::Open { name } => write!(f, "could not open {}", String::from_utf8_lossy(name)),
             Self::Format { site, .. } => f.write_str(site.message()),
             Self::CreateFail { message } => f.write_str(message),
-            Self::Exception { exception, .. } => f.write_str(exception.get_msg()),
+            Self::Exception { exception, .. } => {
+                f.write_str(&String::from_utf8_lossy(exception.get_msg()))
+            }
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-125
-            // ```c
-            //         os << "window size (" << (int)window_size << ") "
-            //               "must be greater or equal to unit size (" <<
-            //               (int)ustat->UnitSize() << ")";
-            // ```
             Self::WindowSize { window, unit, .. } => write!(
                 f,
                 "window size ({window}) must be greater or equal to unit size ({unit})"
@@ -166,10 +152,6 @@ impl fmt::Display for WinMaskError {
                 "a sequence of {length} letters is longer than WindowMasker's 32-bit positions"
             ),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
-            // ```c
-            //             r << "bad index at key " << hash.first
-            //               << " : " << htp[hash.first];
-            // ```
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
             Self::PctLine { line } => write!(
                 f,
@@ -234,19 +216,6 @@ impl SeqMasker {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:119-129
-    /// ```c
-    ///     if( window_size == 0 ) window_size = ustat->UnitSize() + 4;
-    ///
-    ///     if( window_size < ustat->UnitSize() ) {
-    ///         std::ostringstream os;
-    ///         os << "window size (" << (int)window_size << ") "
-    ///               "must be greater or equal to unit size (" <<
-    ///               (int)ustat->UnitSize() << ")";
-    ///         NCBI_THROW( CSeqMaskerException, eValidation, os.str() );
-    ///     }
-    ///
-    ///     trigger_score = score = new CSeqMaskerScoreMean( ustat );
-    /// ```
     /// `ustat` must have been read with the same `params` (the thresholds are set there).
     /// `window_size` is a `Uint1`: an ascii file's unit size of 252 to 255 gives a window of
     /// 0 to 3 letters and NCBI's error (NCBI BLAST+ 2.17.0, line NP M3d). A unit size of 17 to
@@ -291,86 +260,6 @@ impl SeqMasker {
     /// ends included (`CSeqMasker::TMaskList`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:170-262
-    /// ```c
-    ///     ustat->total_ = 0;
-    ///     unique_ptr<TMaskList> mask(new TMaskList);
-    ///     Uint4 cutoff_score = ustat->get_threshold();
-    ///     Uint4 textend = ustat->get_textend();
-    /// ...
-    ///     CSeqMaskerWindow & window = *window_ptr;
-    ///     score->SetWindow( window );
-    /// ...
-    ///     Uint4 start = 0, end = 0, cend = 0;
-    ///     Uint4 limit = textend;
-    ///     const CSeqMaskerIstat::optimization_data * od
-    ///         = ustat->get_optimization_data();
-    ///
-    ///     CSeqMaskerCacheBoost booster( window, od );
-    ///
-    ///     while( window )
-    ///     {
-    ///         Uint4 ts = (*trigger_score)();
-    ///         Uint4 s = (*score)();
-    ///         Uint4 adv = window_step;
-    ///
-    ///         if( s < limit )
-    ///         {
-    ///             if( end > start )
-    ///             {
-    ///                 if( window.Start() > cend )
-    ///                 {
-    ///                     mask->push_back( TMaskedInterval( start, end ) );
-    ///                     start = end = cend = 0;
-    ///                 }
-    ///             }
-    ///
-    ///             if( od != 0 && od->cba_ != 0 )
-    ///             {
-    ///                 adv = window.Start();
-    ///
-    ///                 if( !booster.Check() )
-    ///                     break;
-    ///
-    ///                 adv = window_step*( 1 + window.Start() - adv );
-    ///             }
-    ///         }
-    ///         else if( ts < cutoff_score )
-    ///         {
-    ///             if( end  > start )
-    ///             {
-    ///                 if( window.Start() > cend + 1 )
-    ///                 {
-    ///                     mask->push_back( TMaskedInterval( start, end ) );
-    ///                     start = end = cend = 0;
-    ///                 }
-    ///                 else cend = window.End();
-    ///             }
-    ///         }
-    ///         else
-    ///         {
-    ///             if( end > start )
-    ///             {
-    ///                 if( window.Start() > cend + 1 )
-    ///                 {
-    ///                     mask->push_back( TMaskedInterval( start, end ) );
-    ///                     start = window.Start();
-    ///                 }
-    ///             }
-    ///             else start = window.Start();
-    ///
-    ///             cend = end = window.End();
-    ///         }
-    ///
-    ///
-    ///         if( adv == window_step )
-    ///             ++window;
-    ///
-    ///         score->PostAdvance( adv );
-    ///     }
-    ///
-    ///     if( end > start )
-    ///         mask->push_back( TMaskedInterval( start, end ) );
-    /// ```
     /// With the "mean" trigger `trigger_score` and `score` are the same object, so `ts == s`.
     /// `merge_pass` is false (`winmask_filter.cpp:110`, `win_mask_config.cpp:336`).
     pub fn mask(&self, data: &[u8]) -> Result<Vec<(u32, u32)>, WinMaskError> {
@@ -470,12 +359,6 @@ struct CacheBoost {
 
 impl CacheBoost {
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_cache_boost.hpp:55-58
-    /// ```c
-    ///         CSeqMaskerCacheBoost( CSeqMaskerWindow & window,
-    ///                               const CSeqMaskerIstat::optimization_data * od )
-    ///             : window_( window ), od_( od ), last_checked_( 0 )
-    ///         { nu_ = window_.NumUnits(); }
-    /// ```
     fn new(nu: usize) -> Self {
         Self {
             last_checked: 0,
@@ -484,16 +367,6 @@ impl CacheBoost {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48
-    /// ```c
-    /// inline Uint1 CSeqMaskerCacheBoost::bit_at( TUnit pos ) const
-    /// {
-    ///     pos /= od_->divisor_;
-    ///     TSeqPos word = pos/(8*sizeof( Uint4 ));
-    ///     TSeqPos bit = pos%(8*sizeof( Uint4 ));
-    ///     Uint1 res = (((od_->cba_[word])>>bit)&0x1) == 0 ? 0 : 1;
-    ///     return res;
-    /// }
-    /// ```
     /// `divisor_` is `32/(8*sizeof( Uint4 ))` = 1 (`seq_masker_istat.hpp:67-68`,
     /// `seq_masker_istat_obinary.cpp:185`).
     #[inline]
@@ -502,38 +375,11 @@ impl CacheBoost {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_cache_boost.cpp:50-56
-    /// ```c
-    ///     for( unsigned int i = 0; i < nu_; ++i )
-    ///         if( bit_at( window_[i] ) != 0 )
-    ///             return false;
-    ///
-    ///     return true;
-    /// ```
     fn full_check(&self, window: &Window<'_>, cba: &[u32]) -> bool {
         (0..self.nu).all(|i| !Self::bit_at(cba, window.unit(i)))
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_cache_boost.cpp:60-79
-    /// ```c
-    ///     if( od_ == 0 || od_->cba_ == 0 )
-    ///         return true;
-    ///
-    ///     while( window_ )
-    ///     {
-    ///         if( last_checked_ + 1 != window_.End() )
-    ///         {
-    ///             if( !full_check() )
-    ///                 break;
-    ///         }
-    ///         else if( bit_at( window_[nu_-1] ) != 0 )
-    ///                 break;
-    ///
-    ///         last_checked_ = window_.End();
-    ///         ++window_;
-    ///     }
-    ///
-    ///     return bool( window_ );
-    /// ```
     fn check(&mut self, window: &mut Window<'_>, cba: &[u32]) -> bool {
         while window.state() {
             if self.last_checked.wrapping_add(1) != window.end() {

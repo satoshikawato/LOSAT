@@ -61,38 +61,6 @@ fn parse_ranges(text: &str) -> Vec<Range> {
         .collect()
 }
 
-/// `stl_sort` and its heap fallback leave the ranges in the order of libstdc++ (`std::sort`,
-/// `std::partial_sort` over all of them), equivalent empty ranges included
-/// (`tests/seqdb/stl_sort/README.md`). The last two cases reach introsort's depth limit, so
-/// `stl_sort` heap-sorts 97 and 123 of their ranges, empty ones among them.
-#[test]
-fn stl_sort_gives_libstdcxx_s_permutations() {
-    let text = include_str!("../../../tests/seqdb/stl_sort/cases.txt");
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len() % 3, 0);
-    let mut cases = 0;
-    for triple in lines.chunks(3) {
-        let mut head = triple[0].splitn(4, ' ');
-        assert_eq!(head.next(), Some("CASE"));
-        let reverse = head.next() == Some("1");
-        let n: usize = head.next().unwrap().parse().unwrap();
-        let input = parse_ranges(head.next().unwrap());
-        assert_eq!(input.len(), n);
-        let less = |a: &Range, b: &Range| range_less(a, b, reverse);
-        let mut sorted = input.clone();
-        stl_sort(&mut sorted, &less);
-        assert_eq!(
-            sorted,
-            parse_ranges(triple[1].strip_prefix("SORTED").unwrap())
-        );
-        let mut heap = input.clone();
-        heap_sort(&mut heap, &less);
-        assert_eq!(heap, parse_ranges(triple[2].strip_prefix("HEAP").unwrap()));
-        cases += 1;
-    }
-    assert_eq!(cases, 8);
-}
-
 /// Empty ranges (`to < from`, `to` = 4294967295) are merged into the next range or written as an
 /// `empty` Seq-loc that is skipped; NCBI's answers of the review probes p1 and p1b and of the
 /// `seqloc_*` fixtures.

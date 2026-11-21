@@ -1,0 +1,2 @@
+Error: (CSeqDBException::eInvalid) To be memory mapped the file must exist: '/losat-oidlist-fixture-missing/none.msk'
+Error: (106.16) Application's execution failed (CSeqDBException::eInvalid) To be memory mapped the file must exist: '/losat-oidlist-fixture-missing/none.msk'

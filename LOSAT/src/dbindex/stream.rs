@@ -8,12 +8,11 @@ use std::io::Read;
 use std::rc::Rc;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_facts;
-use crate::report::defline::generate_bioseq_defline;
 use crate::seqdb::mask::MaskRanges;
 use crate::seqdb::SeqType;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{BdbError, MaskBdbReader};
+use crate::sequence::title::get_title_without_source;
 use crate::writedb::fasta_source::reader::{
     past_seq_pos_refusal, FastaReader, ReadError, ReaderFlags, ReaderWarning, Record, SeqInst,
 };
@@ -35,29 +34,33 @@ pub(crate) struct SeqData {
     pub(crate) texts: Vec<String>,
 }
 
-/// `base_value(r)`: 1 + the NCBI2na value of an IUPACna letter `A`, `C`, `G`, `T`; 0 for any
-/// other letter.
+/// The bit of `CODES` that marks a letter other than A, C, G or T.
+const INVALID: u8 = 4;
+
+/// `base_value(r) - 1` of each IUPACna letter `r` as the index packs it: the NCBI2na value of
+/// `A`, `C`, `G`, `T`, and 0 with `INVALID` for any other letter (`base_value` 0).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:103-112
-#[inline]
-fn base_value(r: u8) -> u8 {
-    match r {
-        b'A' => 1,
-        b'C' => 2,
-        b'G' => 3,
-        b'T' => 4,
-        _ => 0,
-    }
-}
+const CODES: [u8; 256] = {
+    let mut codes = [INVALID; 256];
+    codes[b'A' as usize] = 0;
+    codes[b'C' as usize] = 1;
+    codes[b'G' as usize] = 2;
+    codes[b'T' as usize] = 3;
+    codes
+};
+
+/// The letters of a byte of `Bases::packed`.
+const CR: usize = super::CR as usize;
 
 /// The letters of a sequence as the index reads them: whether each is A, C, G or T
-/// (`base_value` above 0), and the sequence packed as `seq_store_` holds it. The letters
+/// (NCBI's `base_value` above 0), and the sequence packed as `seq_store_` holds it. The letters
 /// themselves (one byte each) are not kept.
 #[derive(Debug, Default)]
 pub(crate) struct Bases {
     /// The number of letters.
     len: usize,
-    /// Four letters to a byte, the first in the two highest bits, each `base_value(r) - 1` (0
-    /// for a letter other than A, C, G, T), the last byte's unused bits 0.
+    /// Four letters to a byte, the first in the two highest bits, each `CODES[r] & 3` (0 for a
+    /// letter other than A, C, G, T), the last byte's unused bits 0.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:814-876
     packed: Vec<u8>,
     /// The runs `[from, to)` of letters other than A, C, G and T, in increasing order.
@@ -76,33 +79,60 @@ impl Bases {
         bases
     }
 
-    /// Adds the next letters of the sequence.
+    /// Adds the next letters of the sequence: the letters that complete a partly filled byte one
+    /// at a time, then each whole group of four as one byte, then the rest one at a time.
     fn push(&mut self, letters: &[u8]) {
-        self.packed.reserve(letters.len() / super::CR as usize + 1);
-        for &r in letters {
-            let value = base_value(r);
-            if value == 0 {
-                let pos = self.len as u32;
-                match self.invalid.last_mut() {
-                    Some(run) if run.1 == pos => run.1 = pos + 1,
-                    _ => self.invalid.push((pos, pos + 1)),
-                }
-            }
-            self.accum = (self.accum << 2) + value.saturating_sub(1);
-            self.pending += 1;
-            if u64::from(self.pending) == super::CR {
-                self.packed.push(self.accum);
-                (self.accum, self.pending) = (0, 0);
-            }
-            self.len += 1;
+        let mut rest = letters;
+        while self.pending != 0 {
+            let Some((&r, after)) = rest.split_first() else {
+                return;
+            };
+            self.push_letter(r);
+            rest = after;
         }
+        let (groups, tail) = rest.as_chunks::<CR>();
+        let start = self.len;
+        let invalid = &mut self.invalid;
+        // One byte more for the letters that `finish` packs.
+        self.packed.reserve(groups.len() + 1);
+        self.packed
+            .extend(groups.iter().enumerate().map(|(group, letters)| {
+                let codes = letters.map(|r| CODES[usize::from(r)]);
+                if (codes[0] | codes[1] | codes[2] | codes[3]) & INVALID != 0 {
+                    for (k, &code) in codes.iter().enumerate() {
+                        if code & INVALID != 0 {
+                            add_invalid(invalid, (start + group * CR + k) as u32);
+                        }
+                    }
+                }
+                codes.iter().fold(0, |byte, &code| (byte << 2) | (code & 3))
+            }));
+        self.len += groups.len() * CR;
+        for &r in tail {
+            self.push_letter(r);
+        }
+    }
+
+    /// Adds one letter.
+    fn push_letter(&mut self, r: u8) {
+        let code = CODES[usize::from(r)];
+        if code & INVALID != 0 {
+            add_invalid(&mut self.invalid, self.len as u32);
+        }
+        self.accum = (self.accum << 2) | (code & 3);
+        self.pending += 1;
+        if usize::from(self.pending) == CR {
+            self.packed.push(self.accum);
+            (self.accum, self.pending) = (0, 0);
+        }
+        self.len += 1;
     }
 
     /// Ends the sequence: its last letters fill the high bits of the last byte.
     fn finish(&mut self) {
         if self.pending > 0 {
             self.packed
-                .push(self.accum << ((super::CR as u8 - self.pending) * 2));
+                .push(self.accum << ((CR as u8 - self.pending) * 2));
             (self.accum, self.pending) = (0, 0);
         }
         self.packed.shrink_to_fit();
@@ -119,9 +149,17 @@ impl Bases {
         &self.packed
     }
 
-    /// The runs of letters other than A, C, G and T (`base_value` 0).
+    /// The runs of letters other than A, C, G and T (NCBI's `base_value` 0).
     pub(crate) fn invalid(&self) -> &[(u32, u32)] {
         &self.invalid
+    }
+}
+
+/// Adds the letter at `pos` to the runs of letters other than A, C, G and T.
+fn add_invalid(invalid: &mut Vec<(u32, u32)>, pos: u32) {
+    match invalid.last_mut() {
+        Some(run) if run.1 == pos => run.1 = pos + 1,
+        _ => invalid.push((pos, pos + 1)),
     }
 }
 
@@ -163,39 +201,12 @@ fn first_word(title: &[u8]) -> Vec<u8> {
     title[..end].to_vec()
 }
 
-/// `sequence::GetTitle(bsh)` of a nucleotide `Bioseq` with the ids `ids` and the title
-/// descriptor `title` (`CDeflineGenerator`), then its first word; the source's taxonomy name
-/// `taxname` when the title is made of it.
-fn title_id(
-    ids: &[ParsedSeqId],
-    title: &[u8],
-    taxname: Option<std::sync::Arc<[u8]>>,
-    has_source: bool,
-) -> Result<Vec<u8>, StreamError> {
-    let mut facts = bioseq_facts(ids);
-    facts.taxname = taxname;
-    facts.has_source = has_source;
-    let defline = generate_bioseq_defline(title, false, false, &facts).map_err(|_| {
-        StreamError::Refused(super::unsupported(
-            "a title whose encoding NCBI cannot tell",
-        ))
-    })?;
-    if defline.reads_past_end {
-        return Err(StreamError::Refused(super::unsupported(
-            "a title on which NCBI's defline generator reads past its end",
-        )));
-    }
-    Ok(first_word(&defline.text))
-}
-
 /// `CSequenceIStreamBlastDB`: the sequences of a BLAST database, from its OID 0
 /// (`CSeqDB::GetBioseq`), each with the masks of one filtering algorithm when one is used.
 pub(crate) struct BlastDbStream {
     reader: MaskBdbReader,
     /// `filter_algo_id_` when `use_filter_`.
     filter: Option<i32>,
-    /// `-idmap`: the sequences' titles are read.
-    titles: bool,
 }
 
 /// The exception or refusal of a database error of the reader.
@@ -227,18 +238,15 @@ impl BlastDbStream {
         registry: Result<Option<&str>, &str>,
         titles: bool,
     ) -> Result<Self, StreamError> {
-        let reader = MaskBdbReader::open(
-            dbname,
-            SeqType::Nucleotide,
-            registry,
-            titles,
-            super::PROGRAM,
-        )
-        .map_err(bdb_error)?;
+        let mut reader =
+            MaskBdbReader::open(dbname, SeqType::Nucleotide, registry, false, super::PROGRAM)
+                .map_err(bdb_error)?;
+        if titles {
+            reader.ask_get_title();
+        }
         let mut stream = BlastDbStream {
             reader,
             filter: None,
-            titles,
         };
         stream.filter = match filter {
             Filter::None => None,
@@ -336,8 +344,19 @@ impl SequenceStream for BlastDbStream {
         else {
             return Ok(None);
         };
-        let mut bases = Bases::default();
         let length = ambiguity.length();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // `GetBioseq` gives a null Bioseq for a sequence without letters, which `next` dereferences:
+        // a `CCoreException` (`eNullPtr`) whose report prints a stack trace with the run's memory
+        // addresses (PD-LOSAT-NCBI-DEFECTS rule 3).
+        if length == 0 {
+            return Err(StreamError::Refused(super::unsupported(&format!(
+                "sequence {oid} of the database, which has no letters (NCBI's makembindex reads the \
+                 null sequence its database reader gives for it and stops with a report of the run's \
+                 memory addresses),"
+            ))));
+        }
+        let mut bases = Bases::default();
         let mut from = 0;
         while from < length {
             let to = length.min(from + READ_BLOCK);
@@ -372,16 +391,7 @@ impl SequenceStream for BlastDbStream {
                 }
             }
         }
-        let id = if self.titles {
-            Some(title_id(
-                &record.ids,
-                &record.title,
-                record.taxname.clone(),
-                record.has_source,
-            )?)
-        } else {
-            None
-        };
+        let id = record.get_title.as_deref().map(first_word);
         Ok(Some(Rc::new(SeqData {
             bases,
             masks,
@@ -457,15 +467,13 @@ impl<'a> FastaStream<'a> {
             )));
         }
         let id = if self.titles {
-            let ids = vec![ParsedSeqId::Local(crate::seqid::model::ObjectId::Id(
+            let ids = [ParsedSeqId::Local(crate::seqid::model::ObjectId::Id(
                 record.local_id as i32,
             ))];
-            Some(title_id(
+            Some(first_word(&get_title_without_source(
                 &ids,
                 record.title_descr.as_deref().unwrap_or_default(),
-                None,
-                false,
-            )?)
+            )))
         } else {
             None
         };
@@ -508,3 +516,7 @@ impl SequenceStream for FastaStream<'_> {
         std::mem::take(&mut self.warnings)
     }
 }
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod tests;

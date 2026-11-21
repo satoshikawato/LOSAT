@@ -23,6 +23,9 @@ pub struct Volume {
     defline_rule: Option<LineRule>,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
+    /// The failure of NCBI's OID list that a search meets at its first read of a sequence
+    /// (`Volume::fail_sequence_reads`), none when the list can be built.
+    read_failure: Option<super::oid_list::OidListError>,
 }
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
@@ -112,6 +115,7 @@ impl Volume {
             hdr: OnceLock::new(),
             defline_rule: None,
             columns: OnceLock::new(),
+            read_failure: None,
         })
     }
 
@@ -163,7 +167,17 @@ impl Volume {
     }
 
     fn seq_file(&self) -> Result<&DbFile, SeqDbError> {
+        if let Some(failure) = &self.read_failure {
+            return Err(failure.to_error());
+        }
         self.lazy_file(&self.seq, "sq")
+    }
+
+    /// Makes every read of the sequence file fail with `failure`, the failure of NCBI's OID
+    /// list of the database, before which a search reads no sequence
+    /// (`SeqDb::fail_search_reads_with_oid_list`).
+    pub(super) fn fail_sequence_reads(&mut self, failure: super::oid_list::OidListError) {
+        self.read_failure = Some(failure);
     }
 
     /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
@@ -1527,6 +1541,16 @@ impl SequenceBlock {
             u64::from(self.seq_offsets[i]),
             u64::from(self.seq_offsets[i + 1]) - 1,
         )
+    }
+
+    /// The residues of protein `i`, to be changed in place: the copy that a fetch after the
+    /// preliminary stage of a search with `-db_hard_mask` masks
+    /// (`algorithm::common::db_mask_search::mask_protein_letters`).
+    pub fn protein_mut(&mut self, i: usize) -> &mut [u8] {
+        self.expect(SeqType::Protein);
+        let lo = (u64::from(self.seq_offsets[i]) - self.data_start) as usize;
+        let hi = (u64::from(self.seq_offsets[i + 1]) - 1 - self.data_start) as usize;
+        &mut self.data[lo..hi]
     }
 
     /// Protein `i` with the sentinel byte (NUL in a well-formed volume)

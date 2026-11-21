@@ -1332,6 +1332,7 @@ fn excluded_lists_leave_marks_of_their_places() {
         &settings,
         "BLASTP",
         Some(&negative),
+        None,
         &mut std::io::sink(),
     )
     .unwrap();
@@ -1404,7 +1405,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         .collect();
     let lengths: Vec<usize> = stored.iter().map(Vec::len).collect();
     assert_eq!(lengths[3], 300);
-    let subjects = listed.redo_subjects(&database);
+    let subjects = listed.redo_subjects(&database, None);
     assert_eq!(subjects.len(), 4);
     for (rank, &length) in lengths.iter().enumerate() {
         assert_eq!(subjects.aa_len(rank), Some(length));
@@ -1433,7 +1434,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
         // The redo reads the subjects of the final lists (and finds the O of p03).
         for rank in [1, 3] {
-            shown.redo_subjects(&database).read(rank).unwrap();
+            shown.redo_subjects(&database, None).read(rank).unwrap();
         }
         shown
             .x_read_shown(&database, &final_lists, residues, query_recounted)

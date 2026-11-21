@@ -2,9 +2,9 @@
 //! alias key `OID_MASK_TYPE` reads — the mask types, the file of a volume and its name, and the
 //! test of a predicted RefSeq accession that both sides apply to a sequence's ids.
 //!
-//! The file `<volume>.pxm` / `.nxm` of `fExcludeModel` is the volume's last OID as a big-endian
-//! `Int4`, then one bit per OID, the first OID of each byte in its most significant bit, 0 for an
-//! OID that is masked (`writedb::oid_list` writes it).
+//! The file `<volume>.pxm` / `.nxm` of `fExcludeModel` is an OID list file of the volume, whose
+//! layout `seqdb::oid_list` owns, with the bit 0 for an OID that is masked (`writedb::oid_list`
+//! writes it).
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:147-150
 

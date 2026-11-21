@@ -379,15 +379,15 @@ fn an_empty_document_writes_nothing_and_finish_empties_it() {
     assert!(!document.has_records());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80 and
-// c++/src/objtools/align_format/align_format_util.cpp:1150-1206 (`CreateDensegFromDendiag`): an
-// ungapped search's Seq-align of a subject holds a Dense-diag per HSP, which the formatter joins
-// into one Dense-seg: one record per subject. Its tags are the first HSP's (the first of each
-// score, sam_formatter.cpp:246-279), PI over the summed lengths; the sort key is
-// `min(GetSeqStart(0), GetSeqStop(0))` by the strand of the first segment (Dense_seg.cpp:165-238),
-// ties broken by the last HSP's e-value (`GetAlnScores` keeps the last one, :229-268).
-// NCBI 2.17.0 shows the same on O/O4a2/probe (megablast_17: k3 sorts after k1 though its
-// lowest query start is lower; tie1 sorts before tie2).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:67-82
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1149-1208
+// (`CreateDensegFromDendiag`): an ungapped search's Seq-align of a subject holds a Dense-diag per
+// HSP, which the formatter joins into one Dense-seg: one record per subject. Its tags are the
+// first HSP's (the first of each score, sam_formatter.cpp:247-279), PI over the summed lengths;
+// the sort key is `min(GetSeqStart(0), GetSeqStop(0))` by the strand of the first segment
+// (Dense_seg.cpp:165-238), ties broken by the last HSP's e-value (`s_GetBlastScore` keeps the
+// last one, align_format_util.cpp:229-270). NCBI BLAST+ 2.17.0 sorts the same way (a subject
+// whose lowest query start is lower sorts after one with a lower key; the tie above).
 #[test]
 fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
     let run = RunRecord {
@@ -469,4 +469,59 @@ fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
         .map(|l| l.split('\t').nth(2).unwrap())
         .collect();
     assert_eq!(names, ["Subject_1", "Subject_2", "Subject_3", "Subject_4"]);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276 and
+// c++/src/objtools/format/cigar_formatter.cpp:164, :324-346: the aligned length that PI divides
+// by is `int len = GetAlignLength(false)` (a `TSeqPos` sum) and the CIGAR count a `TSeqPos` sum.
+// NCBI BLAST+ 2.17.0 on a 16-letter unit repeated 11,600 and 16,400 times against itself
+// (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M` (4303359968 - 2^32)
+// with `PI:f:3.13`.
+#[test]
+fn an_ungapped_record_sums_its_lengths_in_32_bits() {
+    let run = RunRecord {
+        gapped: false,
+        ..run_record()
+    };
+    let unit = 1 << 30;
+    let record = |copies: i32, ident: i32| {
+        let hsps: Vec<HspRecord<'_>> = (0..copies)
+            .map(|_| HspRecord {
+                num_ident: ident,
+                ..hsp((0, unit), (0, unit), 1, ident, &[])
+            })
+            .collect();
+        let mut document = SamDocument::new(SamSpec::default(), "2.17.0+", None);
+        document
+            .query(
+                &run,
+                &query_seq(0, "Query_1"),
+                &[subject_seq(0, "Subject_1")],
+                &hsps,
+                &mut NoLetters,
+            )
+            .unwrap();
+        let mut out = Vec::new();
+        document.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let line = text
+            .lines()
+            .find(|l| !l.starts_with('@'))
+            .unwrap()
+            .to_string();
+        let fields: Vec<String> = line.split('\t').map(str::to_string).collect();
+        (fields[5].clone(), fields[14].clone())
+    };
+    // 3 * 2^30 = 3221225472 is above 2^31 - 1: as an int it is -1073741824.
+    assert_eq!(
+        record(3, unit),
+        ("3221225472M".to_string(), "PI:f:-100.00".to_string())
+    );
+    // 5 * 2^30 wraps to 2^30, which the identities then equal.
+    assert_eq!(
+        record(5, unit),
+        ("1073741824M".to_string(), "PI:f:100.00".to_string())
+    );
+    // 4 * 2^30 wraps to 0: 100 * 1 / 0 is infinity and `min(99.99, inf)` 99.99.
+    assert_eq!(record(4, 1), ("0M".to_string(), "PI:f:99.99".to_string()));
 }

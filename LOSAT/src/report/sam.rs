@@ -20,7 +20,8 @@ use anyhow::Result;
 
 use super::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use super::serial::seqalign::{
-    gapped_segments, seqalign_evalue, ungapped_segments, Segments, Strand, GAP_VALUE,
+    gapped_segments, seq_align_hsps, seqalign_evalue, ungapped_segments, Segments, Strand,
+    GAP_VALUE,
 };
 
 /// The words of the custom specification of outfmt 17 that NCBI reads.
@@ -160,7 +161,8 @@ struct Scratch {
     buf: Vec<u8>,
     letters: Vec<u8>,
     name: Vec<u8>,
-    ops: Vec<(u8, i64)>,
+    /// The CIGAR's operations and counts (`TSeqPos`).
+    ops: Vec<(u8, u32)>,
 }
 
 /// The document of a run.
@@ -200,7 +202,7 @@ impl SamDocument {
     /// subjects are remapped (`-subject`) and whether the search is gapped (a Seq-align and a
     /// record per HSP) or ungapped (a Seq-align and a record per subject: its run of HSPs).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:50-80
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:54-82
     pub fn query(
         &mut self,
         run: &RunRecord<'_>,
@@ -216,7 +218,7 @@ impl SamDocument {
         scratch.rows.clear();
         scratch.buf.clear();
         let result = (|| -> Result<()> {
-            for align in hsps.chunk_by(|a, b| !run.gapped && a.subject == b.subject) {
+            for align in seq_align_hsps(run, hsps) {
                 let subject = align[0].subject as usize;
                 self.render(run, query, &subjects[subject], align, letters, &mut scratch)?;
                 scratch.rows.last_mut().expect("a row was rendered").subject = subject;
@@ -307,9 +309,12 @@ impl SamDocument {
         } else {
             ungapped_segments(query_record, subject_record, align, &mut scratch.segments);
         }
-        // The tags read the first of each score of the Seq-align (`AddRow`): its first HSP's.
-        // `CreateDensegFromDendiag` joins the HSPs' score lists, each with a score, an e-value, a
-        // bit score and a number of identities (a BLASTN HSP has no sum statistics).
+        // The tags read the first of each score of the Seq-align (`AddRow`): its first HSP's. For
+        // an ungapped search `CreateDensegFromDendiag` joins the HSPs' score lists into the
+        // Dense-seg's scores and `Print` swaps them into the Seq-align's, each list with a score,
+        // an e-value, a bit score and a number of identities (a BLASTN HSP has no sum statistics).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:71-74
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:247-279
         let hsp = &align[0];
         let segments = &scratch.segments;
         let starts = segments.starts();
@@ -332,15 +337,21 @@ impl SamDocument {
         let ref_minus = strands[ref_row] == Strand::Minus;
         let numseg = lens.len();
         // The CIGAR (`CCIGAR_Formatter::x_FormatLine`, widths 1), merging neighbours of the
-        // same type; the ranges of the rows are the unions of their segments.
+        // same type; the ranges of the rows are the unions of their segments. The counts and the
+        // aligned length (`GetAlignLength(false)`, the lengths of the segments without a gap) are
+        // `TSeqPos` sums, which wrap at 2^32: an ungapped subject's record adds up all its HSPs,
+        // whose diagonals may cover the same letters many times (a long tandem repeat).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/cigar_formatter.cpp:164, :324-346
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1867-1892
         let ops = &mut scratch.ops;
         ops.clear();
         let mut ref_range = (i64::MAX, i64::MIN);
         let mut tgt_range = (i64::MAX, i64::MIN);
-        let mut aligned: i64 = 0;
+        let mut aligned: u32 = 0;
         for idx in 0..numseg {
             let seg = if ref_minus { numseg - idx - 1 } else { idx };
             let len = i64::from(lens[seg]);
+            let count = lens[seg] as u32;
             let ref_start = start_of(seg, ref_row);
             let tgt_start = start_of(seg, tgt_row);
             let ref_seq = ref_start != GAP_VALUE;
@@ -350,7 +361,7 @@ impl SamDocument {
             } else if !tgt_seq && ref_seq {
                 b'D'
             } else if tgt_seq && ref_seq {
-                aligned += len;
+                aligned = aligned.wrapping_add(count);
                 b'M'
             } else {
                 continue;
@@ -364,15 +375,16 @@ impl SamDocument {
                 tgt_range.1 = tgt_range.1.max(i64::from(tgt_start) + len);
             }
             match ops.last_mut() {
-                Some((last, count)) if *last == kind => *count += len,
-                _ => ops.push((kind, len)),
+                Some((last, sum)) if *last == kind => *sum = sum.wrapping_add(count),
+                _ => ops.push((kind, count)),
             }
         }
-        let num_dif: i64 = ops
+        // NM: `int m_NumDif` adds the count of each operation other than M (`AddSegment`).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:150-157
+        let num_dif = ops
             .iter()
             .filter(|(kind, _)| *kind != b'M')
-            .map(|(_, count)| *count)
-            .sum();
+            .fold(0i32, |sum, &(_, count)| sum.wrapping_add(count as i32));
         // The target's clips (`AddRow`).
         let (target, reference) = if subject_ref {
             (query, subject)
@@ -432,7 +444,7 @@ impl SamDocument {
             buf.push(b'H');
         }
         for &(kind, count) in ops.iter() {
-            push_int(buf, count);
+            push_int(buf, i64::from(count));
             buf.push(kind);
         }
         if let Some(back) = clip_back {
@@ -452,12 +464,16 @@ impl SamDocument {
         buf.extend_from_slice(b"\tEV:f:");
         push_g(buf, seqalign_evalue(hsp.evalue));
         buf.extend_from_slice(b"\tNM:i:");
-        push_int(buf, num_dif);
+        push_int(buf, i64::from(num_dif));
         buf.extend_from_slice(b"\tPI:f:");
-        let identity = if i64::from(hsp.num_ident) == aligned {
+        // `int len = aln.GetAlignLength(false)`: from 2^31 on the length is negative, and so is PI
+        // (NCBI BLAST+ 2.17.0 writes `PI:f:-0.01` for a subject whose HSPs add up to 2152959968).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276
+        let len = aligned as i32;
+        let identity = if hsp.num_ident == len {
             100.0
         } else {
-            f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / aligned as f64)
+            f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / f64::from(len))
         };
         push_fixed2(buf, identity);
         buf.extend_from_slice(b"\tBS:f:");
@@ -465,6 +481,8 @@ impl SamDocument {
         buf.push(b'\n');
         let end = buf.len();
         // The sort reads the last e-value of the Seq-align's scores (`GetAlnScores`).
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:229-270
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
         let last = align.last().expect("a Seq-align holds an HSP");
         scratch.rows.push(Rendered {
             start: query_row_start(segments, offsets[0]),

@@ -196,11 +196,6 @@ impl Volume {
         self.oid
     }
 
-    /// The residues or bases in this volume (`m_Letters` of its index file).
-    pub(crate) fn letters(&self) -> u64 {
-        self.idx.letters()
-    }
-
     /// `GetVolumeName`: the path of the volume without extension.
     pub(crate) fn volume_name(&self) -> &str {
         &self.vol_name

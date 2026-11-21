@@ -23,7 +23,7 @@ fn int4(length: usize) -> i32 {
 /// The key of an HSP for the lists: its start on the plus strand of the query (a minus context
 /// folds its range over the query length) and its query extent.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 /// `qlen` is `BlastQueryInfoGetQueryLength` (the length of the query's searched context);
 /// `query_offset` and `query_end` are the HSP's offsets within its context.
 fn best_hit_key(
@@ -74,7 +74,7 @@ impl PrelimBestHit {
 
     /// `s_BlastHSPBestHitRun` for the HSPs of subject `oid` (all queries, both strands).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-333
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(super) fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         for hit in hits {
             let query = hit.query_idx as usize;
@@ -118,7 +118,7 @@ impl PrelimBestHit {
 /// their order), every HSP in that order put into a new list with the overhang and the score
 /// edge of the options, and the kept HSPs made into the query's hit list again.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:463-484
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:520-539
 /// The lists are per query, so the pipe of a batch is this function for each of its queries.
 /// `query_len` is the length of each context of the query (`finish_query_hit_list`). The HSP
 /// offsets are those within the HSP's context and the context is minus for a negative frame.
@@ -140,7 +140,7 @@ pub(super) fn best_hit_traceback(
         .first()
         .map_or(0, |list| list.query_index);
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:470-480
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:525-532
     let qlen = int4(query_len);
     let mut lists = BestHitLists::pipe(params, prelim_hitlist_size);
     for list in std::mem::take(&mut hit_list.hsplist_array) {

@@ -23,7 +23,7 @@ use crate::core::hspfilter_besthit::{BestHitKey, BestHitLists, BestHitParams};
 
 /// The key of an HSP for the lists.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-267
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 /// The context's frame is 0, so the start is the HSP's own `query.offset` (`q_start`, 0-based,
 /// within the searched range of the query or the query part of a chunk) and the extent is
 /// `query.end - query.offset`.
@@ -104,7 +104,7 @@ impl PrelimBestHit {
     /// `s_BlastHSPBestHitRun` for the HSPs of subject `oid`: all queries and all frames, in the
     /// order of the subject's list; the query of an HSP is its context.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-333
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(in crate::algorithm::tblastn) fn add(
         &mut self,
         oid: usize,

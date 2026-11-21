@@ -69,7 +69,7 @@ fn params() -> BestHitParams {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243: the key of a
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266: the key of a
 // blastp HSP (frame 0) is its own 0-based query offset, its query extent, its score and e-value.
 #[test]
 fn the_key_is_the_query_offset_and_extent() {
@@ -88,7 +88,7 @@ fn the_key_is_the_query_offset_and_extent() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:245-262: a later
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:271-288: a later
 // subject's HSP inside a better HSP of an earlier subject is dropped; one of the same query
 // elsewhere, and one of another query over the same range, are kept.
 #[test]

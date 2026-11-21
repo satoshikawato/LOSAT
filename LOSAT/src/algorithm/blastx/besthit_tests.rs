@@ -67,7 +67,7 @@ fn scores(hit_list: &HitList) -> Vec<(usize, Vec<i32>)> {
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243: a plus frame's
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266: a plus frame's
 // HSP starts at its own offset in the frame.
 #[test]
 fn a_plus_frame_key_is_the_offset_in_the_frame() {
@@ -84,7 +84,7 @@ fn a_plus_frame_key_is_the_offset_in_the_frame() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-240: a minus frame's
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266: a minus frame's
 // HSP starts at the query's length (`BlastQueryInfoGetQueryLength`: 2 plus the three plus frames'
 // lengths, 33 + 33 + 32 for 100 letters) less its end in the frame.
 #[test]

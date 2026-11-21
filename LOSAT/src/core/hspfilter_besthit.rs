@@ -85,7 +85,7 @@ pub(crate) fn translated_query_length(context_lengths: &[i32]) -> i32 {
 /// (`begin`, already folded for a minus context by the caller, and `len`, the query extent of
 /// the HSP), its raw score and its e-value.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:233-243
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BestHitKey {
     pub(crate) begin: i32,
@@ -185,7 +185,7 @@ impl<H> BestHitLists<H> {
     /// must come in the order NCBI writes them (the subjects in OID order, each subject's HSPs
     /// in the order of its list), because the result depends on it.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-332
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(crate) fn save(&mut self, query: usize, sid: u32, key: BestHitKey, hsp: H) {
         if self.lists.len() <= query {
             self.lists.resize_with(query + 1, Vec::new);
@@ -199,7 +199,7 @@ impl<H> BestHitLists<H> {
         let param_s = self.param_s;
         let den_a = f64::from(score_a) / f64::from(len_a) / param_s;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:245-262
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:271-288
         // Is the new HSP bad: does an HSP of the list hold it with a better e-value and score?
         let list = &self.lists[query];
         let mut at = 0;
@@ -215,7 +215,7 @@ impl<H> BestHitLists<H> {
             at += 1;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:264-294
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:290-323
         // The HSPs of the list that the new HSP makes bad are removed.
         let param_overhang = self.overhang;
         let overhang = i64::from(ncbi_int4_from_double(
@@ -255,7 +255,7 @@ impl<H> BestHitLists<H> {
             }
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:296-320
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:325-345
         // The new HSP goes before the first HSP whose start is not smaller.
         let slot = self.store(hsp);
         let list = &mut self.lists[query];

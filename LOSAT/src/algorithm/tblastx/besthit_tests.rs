@@ -67,7 +67,7 @@ fn run(
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266,
 // c++/src/algo/blast/core/blast_query_info.c:141-161: a minus frame folds its frame range over
 // the query's length, 2 plus its three frames (a DNA length; the offsets are residues).
 #[test]

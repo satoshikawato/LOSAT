@@ -1299,7 +1299,7 @@ fn filter_final_hitlists(
                 super::stage_d_pipeline::preliminary_hitlist_size(
                     resolved.hitlist_size,
                     compo_adjust_mode,
-                )?,
+                ),
             )),
             None => None,
         };

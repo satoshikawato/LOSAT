@@ -37,7 +37,7 @@ fn params() -> BestHitParams {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243: a minus
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266: a minus
 // HSP is folded to the plus strand, so a minus HSP over the plus range of a better plus HSP
 // is dropped, and one elsewhere is not.
 #[test]

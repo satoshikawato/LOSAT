@@ -36,7 +36,7 @@ fn either_option_turns_the_filter_on() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:245-262: a
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:271-288: a
 // contained HSP with a worse e-value and a lower score per letter (by more than the score
 // edge) is dropped; a contained HSP with a higher score per letter is kept.
 #[test]
@@ -52,7 +52,7 @@ fn a_contained_worse_hsp_is_dropped() {
     assert_eq!(kept(lists), vec![(0, vec![(0, vec![1]), (2, vec![3])])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:264-294: a new
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:290-323: a new
 // better HSP removes the HSPs it contains, within its overhang (the pipe's) but not past it.
 #[test]
 fn a_better_hsp_removes_the_ones_it_contains() {

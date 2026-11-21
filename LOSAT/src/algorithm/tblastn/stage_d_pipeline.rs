@@ -1288,7 +1288,8 @@ fn run_local_search_with_pool(
             .map_or(gapped, |psi| psi.gapped_karlin(&gapped)),
         &cutoff_arrays,
     );
-    let prelim_size = preliminary_hitlist_size(profile.max_target_seqs, compo_adjust_mode)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
+    let prelim_size = preliminary_hitlist_size(profile.max_target_seqs, compo_adjust_mode);
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
@@ -2643,21 +2644,17 @@ fn query_set_setup<'a>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:592-607
 /// The preliminary hit list size of a search (`GetPrelimHitlistSize` of a gapped search): the
 /// size of the collector's lists, and of the best hit writer's and pipe's hit lists, which NCBI
-/// takes from the same options. The size is NCBI's `int` (`blastn/hsp.rs`
-/// `get_prelim_hitlist_size`); a size that is not positive (NCBI crashes) is rejected with the
-/// options (`args.rs`).
+/// takes from the same options. Computed without NCBI's `int` overflow (`blastn/hsp.rs`
+/// `get_prelim_hitlist_size`, the approved exception for hit list sizes past `Int4`).
 pub(super) fn preliminary_hitlist_size(
     max_target_seqs: usize,
     compo_adjust_mode: BlastCompoAdjustMode,
-) -> Result<usize> {
-    usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+) -> usize {
+    crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         max_target_seqs,
         compo_adjust_mode.is_enabled(),
         true,
-    ))
-    .ok()
-    .filter(|&size| size > 0)
-    .context("TBLASTN preliminary hit list size is not positive")
+    )
 }
 
 // The inputs of the preliminary stage over the subjects for one query set (the whole batch,

@@ -42,7 +42,7 @@ impl QueryFrames {
     /// minus frame is the query's length less the HSP's end; the length of the HSP's query range;
     /// its raw score and its e-value.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:233-243
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
     /// The query's length is `BlastQueryInfoGetQueryLength` of a translated query (a length of
     /// nucleotides) and the HSP's offsets are those of its frame (residues): NCBI mixes the two
     /// units, and so does the key.
@@ -140,7 +140,7 @@ impl BestHitWriter {
 
     /// `s_BlastHSPBestHitRun` for the HSPs of subject `oid`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-352
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(crate) fn write(&mut self, oid: usize, hsps: Vec<Hsp>) {
         self.frames.save(&mut self.lists, oid, hsps);
     }

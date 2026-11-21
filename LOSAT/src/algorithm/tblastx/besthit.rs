@@ -25,7 +25,7 @@ use super::report::HitFilters;
 /// The key of an HSP for the lists: its range in its frame (`query.offset`, `query.end` of the
 /// HSP: the frame offsets of `Blast_HSPInit`), folded over `qlen` for a minus frame.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 /// `qlen` is the query's `BlastQueryInfoGetQueryLength`, 2 plus the lengths of its three frames
 /// (`translated_query_length`): a DNA length, while the offsets are those of the frame's
 /// residues, as in NCBI.
@@ -96,7 +96,7 @@ impl BestHitWriter {
 
     /// `s_BlastHSPBestHitRun` for subject `oid`'s HSPs of query `q_idx`, in their order.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:248-333
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(super) fn add(&mut self, q_idx: u32, oid: u32, hsps: Vec<TblastxHsp>) {
         let query = q_idx as usize;
         let qlen = self.query_lengths[query];

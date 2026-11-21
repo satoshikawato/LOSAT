@@ -56,8 +56,8 @@ pub(crate) struct TranslatedRpsSearch {
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
     /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
-    /// the search strategy's requests (`handle_sets`); set by `for_database` of a run that writes
-    /// one.
+    /// the requests of the archive and of the search strategy (`handle_sets`); set by `for_database`
+    /// of a run that writes one.
     pub(crate) costs: Option<(String, i32, i32)>,
     /// The database length that `x_AdjustDbSize` writes into the options handle
     /// (`RpsUnits::strategy_db_length`), for the same requests; set with `costs`.
@@ -65,9 +65,8 @@ pub(crate) struct TranslatedRpsSearch {
     /// The search units of the database and their statistics (`RpsUnits`), set by
     /// `for_database`.
     pub(crate) units: Option<RpsUnits>,
-    /// Whether the run writes a search strategy, the one reader of each batch's
-    /// `EffectiveSearchSpace` option (`WindowBatch::request_space`; RPSTBLASTN writes no BLAST
-    /// archive); set by `for_database`.
+    /// Whether the run writes a BLAST archive or a search strategy, the readers of each batch's
+    /// `EffectiveSearchSpace` option (`WindowBatch::request_space`); set by `for_database`.
     pub(crate) strategy: bool,
     /// The set-up that checked the volumes in `for_database` (series PR, item PS12m): the run
     /// maps them again for each batch with it (`RpsVolumeSetup::reopen`), which knows the volumes
@@ -80,7 +79,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         &self,
         options: &ResolvedOptions,
         database: Option<&BlastxDatabase>,
-        strategy: bool,
+        requests: bool,
     ) -> Result<Arc<dyn RpsTblastnSearch>> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -93,7 +92,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             options.db_length,
             PROGRAM,
         )?;
-        let strategy_db_length = strategy.then(|| units.strategy_db_length()).flatten();
+        let strategy_db_length = requests.then(|| units.strategy_db_length()).flatten();
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
@@ -109,15 +108,15 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         if !faulty_files {
             self.check_options()?;
         }
-        // The volumes' costs are read for the search strategy's requests only (`handle_sets`;
+        // The volumes' costs are read for the requests of the archive and of the search strategy only (`handle_sets`;
         // after volume files that failed NCBI's checks, `costs` opens the first volume's again).
-        let costs = strategy.then(|| setup.costs(volumes.first())).flatten();
+        let costs = requests.then(|| setup.costs(volumes.first())).flatten();
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
             costs,
             strategy_db_length,
             units: Some(units),
-            strategy,
+            strategy: requests,
             setup: Some(Arc::new(setup)),
             ..self.clone()
         }))
@@ -549,6 +548,8 @@ impl TranslatedRpsSearch {
                         .as_deref()
                         .expect("a searching batch has its score blocks"),
                     masked,
+                    i32::from(options.outfmt)
+                        != crate::blastinput::app::output_format::ARCHIVE_FORMAT,
                 ));
                 spans.push(queries.len() - start);
             }
@@ -933,10 +934,14 @@ fn unsearched_batch(
 /// `sequence_start` holds each frame with letters between two sentinels at its context's offset;
 /// `masked` holds a frame's letters where a 26-column database masks some
 /// (`mask_unsupported_letters`). `-qcov_hsp_perc` reads the batch's first query's frames.
+/// `recount_identities` is false for the BLAST archive (outfmt 11), whose Seq-aligns show the
+/// traceback's counts on the searched letters, not the formatter's counts on the letters as read
+/// (`traceback::formatter_identities`).
 pub(crate) fn frame_queries<'a>(
     prepared: &'a PreparedQueryBatch,
     parameters: &[ContextParameters],
     masked: &'a [Option<Vec<u8>>],
+    recount_identities: bool,
 ) -> Vec<RpsQuery<'a>> {
     let frame = |context: usize| -> RpsFrame<'a> {
         let c = &prepared.contexts[context];
@@ -954,7 +959,7 @@ pub(crate) fn frame_queries<'a>(
         RpsFrame {
             frame: c.frame,
             aa_seq,
-            aa_seq_nomask: (nomask != aa_seq).then_some(nomask),
+            aa_seq_nomask: (recount_identities && nomask != aa_seq).then_some(nomask),
             valid: p.valid && c.length > 0,
             kbp_std: p.ungapped,
             search_space: p.search_space,
@@ -1077,7 +1082,7 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, &masked, true);
         assert_eq!(queries.len(), 2);
         let frames: Vec<i8> = queries[0].frames.iter().map(|f| f.frame).collect();
         assert_eq!(frames, [1, 2, 3, -1, -2, -3]);
@@ -1118,7 +1123,7 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, &masked, true);
         for frame in &queries[0].frames {
             assert_eq!(frame.valid, frame.length() > 0);
         }
@@ -1133,21 +1138,21 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options_both).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, &masked, true);
         // Frames of 59 letters: +1 19, +2 19, +3 19, -1 19, -2 19, -3 19 ((59 - i) / 3).
         assert_eq!(queries[0].stat_length(), queries[0].frames[5].length());
         let options_plus = options(&["-strand", "plus"]);
         let prepared = prepare_unit_queries(&[record("b", DNA)], None, &options_plus).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, &masked, true);
         assert_eq!(queries[0].stat_length(), 19);
         // A query of 4 letters: one letter in frames +1, -1 only (frames +2, +3: (4 - 1) / 3 =
         // 1, (4 - 2) / 3 = 0 letters).
         let prepared = prepare_unit_queries(&[record("c", b"ACGT")], None, &options_both).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, &masked, true);
         let lengths: Vec<usize> = queries[0].frames.iter().map(RpsFrame::length).collect();
         assert_eq!(lengths, [1, 1, 0, 1, 1, 0]);
         assert_eq!(queries[0].stat_length(), 1);
@@ -1164,7 +1169,7 @@ mod tests {
             let prepared = prepare_unit_queries(&[record("a", letters)], None, &options).unwrap();
             let parameters = score_block(&prepared);
             let masked = vec![None; prepared.contexts.len()];
-            let queries = frame_queries(&prepared, &parameters, &masked);
+            let queries = frame_queries(&prepared, &parameters, &masked, true);
             let first = prepared.contexts[0].offset;
             let contexts: Vec<(usize, usize)> = prepared.contexts[..NUM_FRAMES]
                 .iter()

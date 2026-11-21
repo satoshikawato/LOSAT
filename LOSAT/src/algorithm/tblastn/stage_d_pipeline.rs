@@ -1172,7 +1172,12 @@ fn run_local_search_with_pool(
     // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
     // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports
     // (`SetupRefusal`); a run whose batches have no valid context does not reach it and is
-    // reported as NCBI's.
+    // reported as NCBI's. `query_set_setup` above (NCBI's `BLAST_CalcEffLengths`,
+    // blast_setup.c:946-951, before the division at :975) refuses first where NCBI's search
+    // space overflows: with a count of 0 as well, that LOSAT refusal takes the place of this one
+    // for a run that NCBI does not finish. It is not a batch failure, so it comes before the
+    // reports of the batches before, which NCBI writes before it crashes (line RG D1a-6,
+    // review A F2).
     if valid_contexts.iter().any(|&valid| valid) {
         crate::algorithm::common::database::check_setup_count(
             total_nt,

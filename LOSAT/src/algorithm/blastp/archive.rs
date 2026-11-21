@@ -37,8 +37,15 @@ use crate::stats::tables::KarlinParams;
 /// always sets it (`S/DESIGN_OF8.md` 2.2). An application whose search is BLASTP's (psiblast,
 /// rpsblast) gives its own (`BlastpArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
+    // The archive's `HitlistSize` is that of outfmt 11, whoever made the other options.
+    let hitlist_size = args
+        .max_target_seqs
+        .or(args.num_alignments)
+        .map_or(500, |size| size as i32);
     if let Some(inputs) = &args.request_inputs {
-        return OptionInputs::clone(inputs);
+        let mut inputs = OptionInputs::clone(inputs);
+        inputs.hitlist_size = hitlist_size;
+        return inputs;
     }
     let mut inputs = OptionInputs::new(Program::Blastp, &args.task);
     inputs.dbsize = args.dbsize;
@@ -70,10 +77,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
         .seg
         .as_deref()
         .and_then(crate::report::archive::options::seg_filter);
-    inputs.hitlist_size = args
-        .max_target_seqs
-        .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+    inputs.hitlist_size = hitlist_size;
     if let Ok((mode, unified_p)) =
         crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, true, false)
     {

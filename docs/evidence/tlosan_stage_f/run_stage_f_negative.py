@@ -11,7 +11,6 @@ sys.path.insert(0, str(ROOT / "docs/evidence/tlosan_stage_e"))
 from run_stage_e_negative import CASES, LOSAT, QUERY, SUBJECT
 
 # NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
-# arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
 # Stage F replaces Stage E's threads=2 rejection with valid parallel search.
 OPTIONS = {name: value for name, value in CASES.items() if name != "threads"}
 OPTIONS["zero_threads"] = ["-num_threads", "0"]

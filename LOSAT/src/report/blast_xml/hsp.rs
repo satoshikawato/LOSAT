@@ -5,14 +5,7 @@ use super::matrix::FormattingMatrix;
 use super::records::QueryMask;
 
 /// `sprintf("%.*g", 6, x)` then `atof` (blastxml_format.cpp:131-136):
-/// ```c++
-///         //Print 6 significant digits for double values
-///         char tmp[512];
-///         sprintf(tmp,"%.*g", 6, bit_score );
-///         bit_score = atof(tmp);
-///         sprintf(tmp,"%.*g", 6, evalue );
-///         evalue = atof(tmp);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:119-124
 /// Both conversions are correctly rounded (glibc's `printf` and `strtod`; Rust's `{:e}` with a
 /// precision and `parse`), ties to even on the exact binary value.
 pub fn round6(value: f64) -> f64 {
@@ -35,54 +28,6 @@ pub enum MaskLetter {
 /// (`s_MaskQuerySeq`, blastfmtutil.cpp:446-521), literally.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:446-521
-/// ```c++
-///     vector<CRange<int> > masks_v;
-///     int aln_stop = static_cast<int>(query_seq.size()) - 1;
-///     ITERATE(ncbi::TMaskedQueryRegions, mask_iter, mask_info) {
-///         if ((*mask_iter)->GetFrame() != query_frame)
-///             continue;
-///         int start =
-///             alnvec.GetAlnPosFromSeqPos(0,
-///                                        (*mask_iter)->GetInterval().GetFrom());
-///         int stop =
-///             alnvec.GetAlnPosFromSeqPos(0,
-///                                        (*mask_iter)->GetInterval().GetTo());
-///         // For negative frames, start and stop must be swapped.
-///         ...
-///         if (start >= 0) {
-///             if (stop < 0)
-///                 stop = aln_stop;
-///             CRange<int>  range(start, stop);
-///             masks_v.push_back(range);
-///         }
-///     }
-///
-///     sort(masks_v.begin(), masks_v.end(), SRangeStartSort());
-///
-///     // Mask the sequence
-///     int mask_index = 0;
-///     for (int seg_index = 0;
-///          seg_index < (int) segs_v.size() && mask_index < (int) masks_v.size();
-///          ++seg_index) {
-///         ...
-///         while (mask_index < (int) masks_v.size() &&
-///                (mask_pos = max(seg_start, masks_v[mask_index].GetFrom()))
-///                <= seg_stop) {
-///             int mask_stop = min(seg_stop, masks_v[mask_index].GetTo());
-///             // Mask the respective part of the sequence
-///             for ( ; mask_pos <= mask_stop; ++mask_pos) {
-///                 if(  query_seq[mask_pos] == '-' ) continue; // preserve gap
-///                 ...
-///             }
-///             // Advance to the next mask if this mask is done with. Otherwise
-///             // break out of the loop.
-///             if (mask_pos < seg_stop)
-///                 ++mask_index;
-///             else
-///                 break;
-///         }
-///     }
-/// ```
 /// `GetAlnPosFromSeqPos(0, position)` is -1 for a position outside the HSP's query range, so a
 /// mask that starts before the HSP is dropped whole, and a mask that ends after it is cut at
 /// the last column.
@@ -190,23 +135,7 @@ pub fn mask_query_row(
 
 /// The identities, positives and midline of an HSP, recounted from the unmasked rows
 /// (blastxml_format.cpp:296-331):
-/// ```c++
-///         for (unsigned int i = 0; i < kMaxOffset; ++i) {
-///             if (query_seq[i] == subject_seq[i]) {
-///                 ++num_ident;
-///                 ++num_positives;
-///                 if (kIsBlastn)
-///                     middle_seq[i] = '|';
-///             } else if (matrix &&
-///                        (*matrix)(query_seq[i], subject_seq[i]) > 0 &&
-///                        !kIsBlastn) {
-///                 ++num_positives;
-///                 middle_seq[i] = kIsBlastn ? ' ' : '+';
-///             } else {
-///                 middle_seq[i] = ' ';
-///             }
-///         }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:302-314
 /// `matrix` is `None` for BLASTN. The midline starts as a copy of the query row (an identity
 /// keeps its letter). Returns `(identity, positive)`.
 pub fn recount(
@@ -240,17 +169,6 @@ pub fn recount(
 /// reading frame by the record's own coordinates, whatever interval was searched.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:88-96
-/// ```c++
-///     int frame;
-///
-///     if (plus_strand) {
-///         frame = (start - 1) % 3 + 1;
-///     } else {
-///         frame = -((seq_length - end) % 3 + 1);
-///     }
-///
-///     return frame;
-/// ```
 pub fn translation_frame(plus_strand: bool, start: i32, end: i32, length: i32) -> i32 {
     if plus_strand {
         (start - 1) % 3 + 1

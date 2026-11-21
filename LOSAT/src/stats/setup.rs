@@ -39,31 +39,6 @@ impl std::fmt::Display for SearchSpaceOverflow {
 impl std::error::Error for SearchSpaceOverflow {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-740
-// ```c
-//    /* use overriding value from effective lengths options or the real value
-//       from effective lengths parameters. */
-//    if (eff_len_options->db_length > 0)
-//       db_length = eff_len_options->db_length;
-//    else
-//       db_length = eff_len_params->real_db_length;
-//
-//    /* If database (subject) length is not available at this stage, and
-//     * overriding value of effective search space is not provided by user,
-//     * do nothing.
-//     ...
-//    if (db_length == 0 &&
-//        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-//       return 0;
-//    }
-//
-//    if (Blast_SubjectIsTranslated(program_number))
-//       db_length = db_length/3;
-//
-//    if (eff_len_options->dbseq_num > 0)
-//       db_num_seqs = eff_len_options->dbseq_num;
-//    else
-//       db_num_seqs = eff_len_params->real_num_seqs;
-// ```
 // The command lines have no `dbseq_num` option (it is 0): the number is the real one.
 /// The database length and number of sequences that `BLAST_CalcEffLengths` computes the
 /// contexts with: `dbsize` (`-dbsize`) when above 0, else `real_db_length` (the setup's total,
@@ -90,34 +65,6 @@ pub(crate) fn eff_lengths_database(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-848
-// ```c
-//       Int8 effective_search_space =
-//           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
-//                                               blast_message);
-//       ...
-//       if (query_info->contexts[index].is_valid &&
-//           ((query_length = query_info->contexts[index].query_length) > 0) ) {
-//          ...
-//          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-//                                        alpha/kbp->Lambda, beta,
-//                                        query_length, db_length,
-//                                        db_num_seqs, &length_adjustment);
-//
-//          if (effective_search_space == 0) {
-//             ...
-//         	 Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-//
-//         	 // Just in case effective_db_length < 0
-//         	 if (effective_db_length <= 0)
-//         		 effective_db_length = 1;
-//
-//              effective_search_space = effective_db_length *
-//                              (query_length - length_adjustment);
-//          }
-//       }
-//       query_info->contexts[index].eff_searchsp = effective_search_space;
-//       query_info->contexts[index].length_adjustment = length_adjustment;
-// ```
 // `db_num_seqs` is NCBI's `Int4`, negative for an alias file's negative `NSEQ` (or one of 2^31
 // or more): the length adjustment is computed with it as a double, and `(Int8)db_num_seqs *
 // length_adjustment` cannot overflow. The subtraction (a negative product with a length near
@@ -164,12 +111,6 @@ pub(crate) fn calc_eff_lengths(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-824
-// ```c
-//          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-//                                        alpha/kbp->Lambda, beta,
-//                                        query_length, db_length,
-//                                        db_num_seqs, &length_adjustment);
-// ```
 /// The length adjustment of `BLAST_CalcEffLengths` for a valid context of `query_length` letters
 /// (`calc_eff_lengths`' own, which the reports that keep only the search space read again):
 /// `BLAST_ComputeLengthAdjustment` with NCBI's `Int4` count, written as an `Int4`.
@@ -183,50 +124,9 @@ pub(crate) fn length_adjustment(
         .length_adjustment as i32
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220
-// ```c++
-//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
-//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
-//                                        m_InternalData);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181
-// ```c++
-//     // If the effective search options have been set, we don't need to
-//     // recompute those...
-//     if (options->GetEffectiveSearchSpace() != 0) {
-//         return;
-//     }
-//
-//     const BlastSeqSrc* seqsrc = full_data->m_SeqSrc->GetPointer();
-//     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
-//     if (total_length <= 0)
-//         total_length = BlastSeqSrcGetTotLen(seqsrc);
-//     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
-//     if (num_seqs <= 0)
-//         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
-//
-//     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
-//                                          num_seqs, total_length,
-//                                          full_data->m_ScoreBlk->GetPointer());
-//     BlastQueryInfo* qinfo = full_data->m_QueryInfo;
-//     _ASSERT(qinfo);
-//
-//     vector<Int8> eff_searchsp;
-//     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
-//         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
-//     }
-//     options->SetEffectiveSearchSpace(eff_searchsp);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/effsearchspace_calc.cpp:115-121
-// ```c++
-//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
-//                                        db_num_bases, db_num_seqs,
-//                                        &eff_len_params);
-//
-//     Int2 status =
-//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
-//                              eff_len_params, sbp, m_QueryInfo, NULL);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/query_data.cpp:52-58 and
 // blast_aux_priv.cpp:150-152 (`MakeLocalQueryData` caches the query data; the setup's
 // `m_QueryInfo` is its query information).
@@ -282,22 +182,6 @@ pub(crate) fn preliminary_option_space(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1014
-// ```c
-// Int2 BLAST_OneSubjectUpdateParameters(EBlastProgramType program_number,
-//                     Uint4 subject_length,
-//                     const BlastScoringOptions* scoring_options,
-//                     BlastQueryInfo* query_info,
-//                     const BlastScoreBlk* sbp,
-//                     BlastHitSavingParameters* hit_params,
-//                     BlastInitialWordParameters* word_params,
-//                     BlastEffectiveLengthsParameters* eff_len_params)
-// {
-//    Int2 status = 0;
-//    eff_len_params->real_db_length = subject_length;
-//    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
-//                                 eff_len_params, sbp, query_info, NULL)) != 0)
-//       return status;
-// ```
 // `real_num_seqs` stays the setup's number (`DbStatistics::setup_count`: 1 after the fallback to
 // OID 0, `STATS_NSEQ` with `STATS_TOTLEN`), and the options' spaces are the preliminary stage's
 // (`preliminary_option_space`). A subject that NCBI searches has letters (blast_engine.c:1429).
@@ -360,33 +244,7 @@ impl SubjectSpaceOverflow {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:903-906,969-983
-// ```c
-//    Uint4 max_subject_length;
-//    Uint4 min_subject_length;
-//    Int8 total_length = -1;
-//    Int4 num_seqs = -1;
-//    ...
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-//
-//    if ((status = BlastHitSavingParametersNew(program_number, hit_options, sbp,
-// 		                                     query_info, min_subject_length,
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-// ```c
-//     case BLASTERR_SUBJECT_LENGTH_INVALID:
-//         new_msg->message = strdup("The average subject length is too short");
-// ```
 /// NCBI's error of a setup whose `min_subject_length` is 0 (`setup_subject_length`): the one
 /// text of blastp's, psiblast's, rpsblast's, rpstblastn's, blastx's, tblastn's, blastn's and
 /// tblastx's error (review C of line RG D1a-4, N1; reviews D and E, N1).
@@ -426,21 +284,7 @@ pub(crate) fn setup_subject_length(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:755-760
-// ```c
-//    if (!sbp->kbp_gap)
-//       gapped_calculation = FALSE;
-//
-//    if (options->do_sum_stats && gapped_calculation && avg_subj_length <= 0)
-//        return 1;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:242-248
-// ```c
-//     /* Unknown error */
-//     default:
-//         {
-//             char buf[512];
-//             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
-// ```
 // `BLAST_GapAlignSetUp` returns the status after the "too short" test (blast_setup.c:982-987):
 // NCBI 2.17.0 blastx and tblastn with `-searchsp` over an alias file's `NSEQ 4294967295` (-1 as
 // NCBI's `int`) end with `BLAST engine error: Unknown error code 1`, exit status 3 (probe run1 of

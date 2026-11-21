@@ -7,16 +7,6 @@ use super::WinMaskError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:165-172
-/// ```c
-/// CSeqMaskerIstatFactory::EStatType CSeqMaskerIstatFactory::DiscoverStatType(
-///         string const & name, vector< string > & md, size_t & skip ) {
-///     GetMetaDataLines( name, md, skip );
-///     CNcbiIfstream check( name.c_str() );
-///
-///     if( !check ) {
-///         NCBI_THROW( Exception, eOpen, string( "could not open " ) + name );
-///     }
-/// ```
 fn open_exception(name: &[u8]) -> NcbiException {
     const OPEN: ThrowSite = ThrowSite {
         file: "src/algo/winmask/seq_masker_istat_factory.cpp",
@@ -28,19 +18,6 @@ fn open_exception(name: &[u8]) -> NcbiException {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:355-366
-/// ```c
-///     catch( CException & e)
-///     {
-///         NCBI_RETHROW( e, Exception, eCreateFail,
-///                       "could not create a unit counts container" );
-///     }
-///     catch( std::exception & e )
-///     {
-///         NCBI_THROW( Exception, eCreateFail,
-///                     std::string( "could not create a unit counts container: " ) +
-///                     e.what() );
-///     }
-/// ```
 const fn create_site(line: u32) -> ThrowSite {
     ThrowSite {
         file: "src/algo/winmask/seq_masker_istat_factory.cpp",
@@ -53,11 +30,6 @@ const fn create_site(line: u32) -> ThrowSite {
 const CREATE_FAIL: &str = "could not create a unit counts container";
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:461-463
-/// ```c
-///     case eValidation:
-///
-///         return "validation error";
-/// ```
 const WINDOW_SIZE: ThrowSite = ThrowSite {
     file: "src/algo/winmask/seq_masker.cpp",
     line: 126,
@@ -85,13 +57,7 @@ impl WinMaskError {
     /// the errors that are not NCBI's exceptions there (LOSAT's checks of the masker's input, a
     /// bad index of the hash table).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:336-340
-    /// ```c
-    ///             case eOBinary: res = new CSeqMaskerIstatOBinary(
-    ///                                    name,
-    /// ...
-    /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:332-340
     pub fn create_report(&self) -> Option<Vec<u8>> {
         let exception = match self {
             Self::Open { name } => rethrown(open_exception(name)),
@@ -106,15 +72,6 @@ impl WinMaskError {
             }
             Self::Exception { exception, .. } => rethrown((**exception).clone()),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-126
-            // ```c
-            //     if( window_size < ustat->UnitSize() ) {
-            //         std::ostringstream os;
-            //         os << "window size (" << (int)window_size << ") "
-            //               "must be greater or equal to unit size (" <<
-            //               (int)ustat->UnitSize() << ")";
-            //         NCBI_THROW( CSeqMaskerException, eValidation, os.str() );
-            //     }
-            // ```
             // Thrown by the masker after the factory returned, so not rethrown by it;
             // `s_BuildSeqMasker` gives its `what()` to blastn's error (`winmask_filter.cpp:147-151`).
             Self::WindowSize { .. } => NcbiException::new(WINDOW_SIZE, self.to_string()),

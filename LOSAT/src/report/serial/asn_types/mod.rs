@@ -8,26 +8,6 @@
 //! (`blastinput::pssm_text`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397
-//! ```c++
-//! void CObjectIStreamAsn::ReadClassSequential(const CClassTypeInfo* classType,
-//!                                             TObjectPtr classPtr)
-//! {
-//!     BEGIN_OBJECT_FRAME3(eFrameClass, classType, classPtr);
-//!     StartBlock();
-//!
-//!     ReadClassSequentialContentsBegin(classType);
-//!
-//!     TMemberIndex index;
-//!     while ( (index = BeginClassMember(classType,*pos)) != kInvalidMember ) {
-//!         ReadClassSequentialContentsMember(classPtr);
-//!     }
-//!
-//!     ReadClassSequentialContentsEnd(classPtr);
-//!
-//!     EndBlock();
-//!     END_OBJECT_FRAME();
-//! }
-//! ```
 //!
 //! What the table holds of a type is what NCBI's text reader reads of it: the kind, the members
 //! or variants in module order with their tags, OPTIONAL and DEFAULT marks and the delayed member

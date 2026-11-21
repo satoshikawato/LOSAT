@@ -7,11 +7,6 @@
 //! discontiguous table of one template (`build_disc_mb_lookup_kept`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262,1376
-//! ```c
-//!    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-//! ...
-//!    sfree(mb_lt->hashtable);
-//! ```
 //!
 //! What it changes. Each query batch builds its table (`BlastMBLookupTableNew`) and frees it with
 //! the batch (`LookupTableWrapFree`, `BlastMBLookupTableDestruct`). A table of 4^12 cells is 64
@@ -447,9 +442,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
-    // ```c
-    //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-    // ```
     // Random queries (ambiguity codes, masks, both cell orders) of tables of 4^4 to 4^12 cells in
     // a row through one keep, one after another and on pools of 2 and 5 threads (the pool fill
     // with the `resident` flag; these queries are too short for the prefault round, which the

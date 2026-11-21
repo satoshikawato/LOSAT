@@ -9,23 +9,6 @@ use crate::ncbi_str::parse_escapes;
 /// left, without reading the replacement again.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3371-3385
-/// ```c++
-///     } else {
-///         // Replacing string is shorter or have the same length.
-///         // ReplaceInPlace() can be faster on some platform, but not much,
-///         // so we use regular algorithm even for equal lengths here.
-///         dst = src;
-///         for (SIZE_TYPE count = 0; !(max_replace && count >= max_replace); count++){
-///             start_pos = dst.find(search, start_pos);
-///             if (start_pos == NPOS)
-///                 break;
-///             dst.replace(start_pos, search.size(), replace);
-///             start_pos += replace.size();
-///             if (num_replace)
-///                 (*num_replace)++;
-///         }
-///     }
-/// ```
 fn replace(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len());
     let mut pos = 0;
@@ -52,9 +35,6 @@ pub(crate) fn fasta_reader_fasta(defline_field: &[u8]) -> Result<Vec<u8>, &'stat
 /// `TAB_REPLACEMENT`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1714
-/// ```c++
-/// #define TAB_REPLACEMENT "   "
-/// ```
 const TAB_REPLACEMENT: &[u8] = b"   ";
 
 /// The title of `x_GetFastaReaderDeflines` without `parse_ids`, from the `DefLine` field
@@ -62,38 +42,6 @@ const TAB_REPLACEMENT: &[u8] = b"   ";
 /// with its `>`); `None` when the field is empty (no definition line from the user object).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1752-1760,1766-1767,1782-1798
-/// ```c++
-///                     if (f.CanGetLabel() &&
-///                         f.GetLabel().IsStr() &&
-///                         f.GetLabel().GetStr() == "DefLine" &&
-///                         f.CanGetData() &&
-///                         f.GetData().IsStr()) {
-///                         fasta = NStr::Replace(f.GetData().GetStr(), "\\t", TAB_REPLACEMENT);
-///                         fasta = NStr::ParseEscapes(fasta);
-///                         break;
-///                     }
-/// ...
-///     if (fasta.empty())
-///         return;
-/// ...
-///     if (!parse_ids) {
-///
-///         // Generate an BL_ORD_ID in case no parse is needed
-///         CRef<CSeq_id> gnl_id(new CSeq_id());
-///         gnl_id->SetGeneral().SetDb("BL_ORD_ID");
-///         gnl_id->SetGeneral().SetTag().SetId(0);  // will be filled later
-///
-///         // Build the local defline.
-///         defline.Reset(new CBlast_def_line);
-///         defline->SetSeqid().push_back(gnl_id);
-///
-///         string title(fasta, 1, fasta.size());
-///         // Replace ^A with space
-///         NStr::ReplaceInPlace(title, "\001", " ");
-///         // Replace tabs with three spaces
-///         NStr::ReplaceInPlace(title, "\t", TAB_REPLACEMENT);
-///         defline->SetTitle(title);
-/// ```
 /// The field is searched for the two characters `\t` before its escapes are read, so a
 /// tab of the definition line (written `\t`) becomes three spaces, and so does a
 /// backslash followed by `t` (written `\\t`): the search finds the second backslash with

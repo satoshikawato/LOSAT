@@ -9,15 +9,7 @@
 //! the same in both builds), LOSAT's package, and none of the lines that NCBI's build writes about
 //! itself (they differ between NCBI's two builds).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at `ncbi_version::print`)
-//! ```c++
-//!             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//!                 delete[] v;
-//!                 // Print full VERSION
-//!                 cout << GetFullVersion().Print( appname );
-//!                 diag_context.DiscardMessages();
-//!                 return 0;
-//! ```
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at `ncbi_version::print`)
 
 #![cfg(unix)]
 

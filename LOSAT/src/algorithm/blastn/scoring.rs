@@ -22,110 +22,21 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 
 /// NCBI's checks of the options (`Validate`), before the query is read.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:881-906
-/// ```c
-///            if ( ! ( options->penalty == 0 && options->reward == 0 ) )
-///            {
-/// 		if (options->penalty >= 0)
-/// 		{
-/// 			Blast_MessageWrite(blast_msg, eBlastSevWarning, kBlastMessageNoContext,
-///                             "BLASTN penalty must be negative");
-/// 			return BLASTERR_OPTION_VALUE_INVALID;
-/// 		}
-/// ...
-///              if (options->gapped_calculation && options->gap_open > 0 && options->gap_extend == 0)
-///              {
-///                      Blast_MessageWrite(blast_msg, eBlastSevWarning, kBlastMessageNoContext,
-///                         "BLASTN gap extension penalty cannot be 0");
-///                      return BLASTERR_OPTION_VALUE_INVALID;
-///              }
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1326-1333
-/// ```c
-///     } else if (program_number == eBlastTypeBlastn &&
-///                options->word_size > DBSEQ_CHUNK_OVERLAP) {
-///         char buffer[256];
-///         int bytes_written = snprintf(buffer, DIM(buffer),
-///                   "Word-size must be less than or equal to %d", DBSEQ_CHUNK_OVERLAP);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
-/// ```c
-/// static Boolean
-/// s_DiscWordOptionsValidate(Int4 word_size, Uint1 template_length,
-///                           Uint1 template_type,
-///                           Blast_Message** blast_msg)
-/// {
-///    if (template_length == 0)
-///       return TRUE;
-///
-///
-///    if (word_size != 11 && word_size != 12) {
-///       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-///                          "Invalid discontiguous template parameters: word "
-///                          "size must be either 11 or 12");
-///       return FALSE;
-///    }
-/// ...
-///     if (/*program_number == eBlastTypeBlastn &&*/
-///         Blast_ProgramIsNucleotide(program_number) &&
-///         !Blast_QueryIsPattern(program_number) &&
-///         options->mb_template_length > 0) {
-///       if (!s_DiscWordOptionsValidate(options->word_size,
-///               options->mb_template_length,
-///               options->mb_template_type,
-///               blast_msg)) {
-///          return BLASTERR_OPTION_VALUE_INVALID;
-///       } else if (options->lut_type != eMBLookupTable) {
-///          Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-///             "Invalid lookup table type for discontiguous Mega BLAST");
-///          return BLASTERR_OPTION_VALUE_INVALID;
-///       }
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:881-906
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1326-1333
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
 /// The template length and type are 16, 18 or 21 and 0, 1 or 2 by the argument
 /// constraints (`-template_length`, `-template_type`); a caller of `run_local` can set another
 /// length, which the length's check refuses (the type is an enum of the three).
 /// The lookup table type of the options is the task's: megablast and dc-megablast
 /// `eMBLookupTable`, blastn and blastn-short `eNaLookupTable`
 /// (blast_nucl_options.cpp:137-150, disc_nucl_options.cpp:55-64).
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1523
-/// ```c
-/// 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
-/// 	{
-/// 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-///          "expect value or cutoff score must be greater than zero");
-/// 		return BLASTERR_OPTION_VALUE_INVALID;
-/// 	}
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1699-1711
-/// ```c
-///     if (program_number == eBlastTypeBlastn)
-///     {
-///         if (score_options->gap_open == 0 && score_options->gap_extend == 0)
-///         {
-///             if (ext_options->ePrelimGapExt != eGreedyScoreOnly &&
-///                 ext_options->eTbackExt != eGreedyTbck)
-///                 {
-///                     Blast_MessageWrite(blast_msg, eBlastSevWarning,
-///                                        kBlastMessageNoContext,
-///                                        "Greedy extension must be used if gap existence and extension options are zero");
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1699-1711
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
 /// runs the scoring, lookup table, hit saving and extension-scoring checks in this order)
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3636-3639
-/// ```c
-///     try { retval->Validate(); }
-///     catch (const CBlastException& e) {
-///         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
-///     }
-/// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-175
-/// ```c
-///     catch (const blast::CInputException& e) {                               \
-///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-///         exit_code = BLAST_INPUT_ERROR;                                      \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3636-3639
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
 /// Only megablast extends greedily (dc-megablast and blastn-short use dynamic programming,
 /// `coordination.rs` `task_defaults`). The reward and the penalty are NCBI's 16-bit values
 /// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
@@ -151,31 +62,10 @@ fn check_scoring_options_with(
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
     } else if !ungapped && spec.gap_open > 0 && spec.gap_extend == 0 {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:900-904
-        // ```c
-        //  if (options->gapped_calculation && options->gap_open > 0 && options->gap_extend == 0)
-        //  {
-        //      Blast_MessageWrite(blast_msg, eBlastSevWarning, kBlastMessageNoContext,
-        //         "BLASTN gap extension penalty cannot be 0");
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:900-904
         "BLASTN gap extension penalty cannot be 0".to_string()
     } else if word_size == 0 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1326
-        // ```c
-        //     if (options->word_size <= 0)
-        //     {
-        //         if ( !Blast_ProgramIsRpsBlast(program_number)) {
-        //             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //                                      "Word-size must be greater than zero");
-        //             return BLASTERR_OPTION_VALUE_INVALID;
-        //         }
-        //     } else if (/*program_number == eBlastTypeBlastn*/
-        //                Blast_ProgramIsNucleotide(program_number) &&
-        //                !Blast_QueryIsPattern(program_number) && options->word_size < 4)
-        //     {
-        //         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //                   "Word-size must be 4 or greater for nucleotide comparison");
-        // ```
         // The command line's `-word_size` is at least 4 (`blastn_word_size`); a caller of
         // `run_local` sets the field itself.
         "Word-size must be greater than zero".to_string()
@@ -187,13 +77,6 @@ fn check_scoring_options_with(
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
     } else if template_length > 0 && !matches!(template_length, 16 | 18 | 21) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1263-1269
-        // ```c
-        //    if (template_length != 16 && template_length != 18 &&
-        //        template_length != 21) {
-        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //                          "Invalid discontiguous template parameters: "
-        //                          "template length must be 16, 18, or 21");
-        // ```
         // The command line's `-template_length` is one of the three (`blastn_template_length`);
         // a caller of `run_local` sets the field itself.
         "Invalid discontiguous template parameters: template length must be 16, 18, or 21"
@@ -202,30 +85,17 @@ fn check_scoring_options_with(
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
     } else if args.limit_lookup && word_size < 16 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1422-1427
-        // ```c
-        //    if (options->db_filter && options->word_size < 16) {
-        //        Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //                           "The limit_lookup option can only be used with "
-        //                           "word size >= 16");
-        // ```
         // `limit_lookup` has no command-line spelling in LOSAT; a caller of `run_local` sets it.
         "The limit_lookup option can only be used with word size >= 16".to_string()
     } else if args.off_diagonal_range.is_some_and(|range| range != 0)
         && super::coordination::determine_window_size(args) == 0
     {
-        // NCBI reference: c++/src/algo/blast/core/blast_options.c:1583-1596
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:620-624,1583-1596
         // (`BlastInitialWordOptionsValidate`, after the lookup table's checks and before the
         // hit saving's)
-        // ```c
-        //    if (program_number == eBlastTypeBlastn &&
-        //        options->scan_range && !options->window_size)
-        //    {
-        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //                             "off_diagonal_range is only useful in 2-hit algorithm");
-        // ```
         "off_diagonal_range is only useful in 2-hit algorithm".to_string()
     } else if counts.hitlist_size < 1 {
-        // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
         // check comes before the e-value's (the message of `ReportCounts::validate`, which
         // is not called because this check has its place among the others).
         "No hits are being saved".to_string()
@@ -285,27 +155,8 @@ fn check_losat_limits_with(
         !ungapped,
         "BLASTN",
     )?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520
-    // ```c
-    //     sbp->loscore = BLAST_SCORE_MAX;
-    //     sbp->hiscore = BLAST_SCORE_MIN;
-    //     matrix = sbp->matrix->data;
-    //     for (index1=0; index1<sbp->alphabet_size; index1++)
-    //     {
-    //       for (index2=0; index2<sbp->alphabet_size; index2++)
-    //       {
-    //          score = matrix[index1][index2];
-    //          if (score <= BLAST_SCORE_MIN || score >= BLAST_SCORE_MAX)
-    //             continue;
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2175-2179
-    // ```c
-    //          score = matrix[index1][index2];
-    //          if (score >= sbp->loscore)
-    //          {
-    //             sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
-    //          }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1520
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2175-2179
     // NCBI leaves a reward of BLAST_SCORE_MAX (32767) or a penalty of BLAST_SCORE_MIN
     // (-32768) out of the score range of the ungapped Karlin-Altschul computation. It then
     // counts a reward of 32767 beyond the end of the frequency array (oracle: invalid
@@ -346,23 +197,8 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
 /// dynamic programming: both run (`TaskConfig::matrix_only`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183,191-193,208-209
-/// ```c
-///    if (score_params->reward % 2 == 1) {
-/// ...
-///    } else {
-///       reward = score_params->reward;
-///       penalty = -score_params->penalty;
-/// ...
-///    if (score_params->gap_open==0 && score_params->gap_extend==0) {
-///       d_diff = (Xdrop+reward/2)/(penalty+reward)+1;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:979-981 (`match_score_half`
 /// is `match_score / 2`, :837)
-/// ```c
-///         xdrop_score = max_score[d - xdrop_offset] +
-///                       score_common_factor * d - xdrop_threshold;
-///         xdrop_score = (Int4)ceil((double)xdrop_score / match_score_half);
-/// ```
 pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let greedy = args.task == "megablast" && !args.no_greedy;
@@ -376,10 +212,7 @@ pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Re
     Ok(())
 }
 
-// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
-// ```c
-// #define DBSEQ_CHUNK_OVERLAP 100
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192
 use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 
 /// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
@@ -390,81 +223,21 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 /// and a query without letters (`true` in `empty_queries`, one item per query of the
 /// batch) keeps its set-up warning after it.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
-/// ```c
-///             // applies to all queries
-///             CRef<CSearchMessage> sm(new CSearchMessage(blmsg->severity,
-///                                                        kBlastMessageNoContext,
-///                                                        msg));
-///             NON_CONST_ITERATE(TSearchMessages, query_messages, messages) {
-///                 query_messages->push_back(sm);
-///             }
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1013-1024
-/// ```c
-/// TSearchMessages::ToString() const
-/// {
-///     string retval;
-///     ITERATE(vector<TQueryMessages>, qm, *this) {
-///         if (qm->empty()) {
-///             continue;
-///         }
-///         ITERATE(TQueryMessages, msg, *qm) {
-///             retval += (*msg)->GetMessage() + " ";
-///         }
-/// ```
-/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:180-183
-/// ```c
-///     string GetMessage(bool withSeverity = true) const
-///     {
-///     	if (withSeverity) {
-///     		return GetSeverityString() + ": " + m_Message;
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640 (the query's
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1024
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:180-183
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640 (the query's
 /// warning, before the score block: its id is the query's index)
-/// ```c
-///         } catch (const CException& e) {
-///             ...
-///             CRef<CSearchMessage> m
-///                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-///             messages[index].push_back(m);
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1042-1052 (after the error is
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1042-1052 (after the error is
 /// added, blast_aux_priv.cpp:107-108)
-/// ```c
-/// TSearchMessages::RemoveDuplicates()
-/// {
-///     NON_CONST_ITERATE(TSearchMessages, sm, (*this)) {
-///         ...
-///         sort(sm->begin(), sm->end(), TQueryMessagesLessComparator());
-/// ```
-/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:294-303
-/// ```c
-/// CSearchMessage::operator<(const CSearchMessage& rhs) const
-/// {
-///     if (m_ErrorId < rhs.m_ErrorId ||
-///         m_Severity < rhs.m_Severity ||
-///         m_Message < rhs.m_Message) {
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:294-303
 /// `operator<` is no order: the error is below the warning by id (`kBlastMessageNoContext`,
 /// -1, against the query's index) and the warning below the error by severity. Of two
 /// messages, libstdc++'s insertion sort moves the second one (the error, added after the
 /// set-up warning) to the front, so the error comes first (TBLASTX's unknown matrix has the
 /// same order, `run_impl.rs`).
-/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:170-184
-/// ```c
-///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
-///     if (status != 0 &&
-///     ...
-///             		msg = search_messages.ToString();
-///     ...
-///                 NCBI_THROW(CBlastException, eCoreBlastError, msg);
-/// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:225-227
-/// ```c
-///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-///             exit_code = BLAST_ENGINE_ERROR;                                 \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170-184
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn karlin_error(
     message: &str,
     empty_queries: impl IntoIterator<Item = bool>,
@@ -522,31 +295,11 @@ pub(crate) struct ContextKarlin {
 /// or its reverse complement); `None` for a context whose block cannot be computed, which
 /// NCBI does not search (both strands of an invalid query).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2762-2784
-/// ```c
-///    for (context = query_info->first_context;
-///         context <= query_info->last_context; ++context) {
-///     ...
-///       query_length = contexts[context].query_length;
-///       context_offset = contexts[context].query_offset;
-///       buffer = &query[context_offset];
-///
-///       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-///       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-///       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2762-2784
 /// The two strands have the same composition in another order, so their blocks can
 /// differ in the last bits.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2771-2772
-/// ```c
-///       if ( !contexts[context].is_valid )
-///           continue;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
 /// A context without letters (a query without letters) is invalid from its set-up
 /// (`s_QueryInfo_SetContext`): it gets no block and no message here.
 /// The contexts come in BLASTNA (the search holds them in no other encoding).
@@ -571,23 +324,7 @@ pub(crate) fn context_ungapped_blocks<'a>(
 /// numbers. With no valid context, NCBI computes no gapped block and raises no error.
 /// The error is NCBI's message (`NuclValues`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:73-107
-/// ```c
-///     for (index = query_info->first_context;
-///          index <= query_info->last_context; index++) {
-///
-///         if ( !query_info->contexts[index].is_valid ) {
-///             continue;
-///         }
-///
-///         sbp->kbp_gap_std[index] = Blast_KarlinBlkNew();
-///     ...
-///               retval =
-///                 Blast_KarlinBlkNuclGappedCalc(sbp->kbp_gap_std[index],
-///                     scoring_options->gap_open, scoring_options->gap_extend,
-///                     scoring_options->reward, scoring_options->penalty,
-///                     sbp->kbp_std[index], &(sbp->round_down), error_return);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:73-107
 pub(crate) fn context_blocks(
     ungapped: &[Option<KarlinParams>],
     spec: &NuclScoringSpec,
@@ -616,30 +353,9 @@ pub(crate) fn context_blocks(
 /// asked for the gap costs and a pair of scores without a table row is no error: its alpha
 /// and beta stay 0 and the length adjustment is 0.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:513-529
-/// ```c
-///     if (scoring_options->gapped_calculation) { ... s_BlastScoreBlkGappedFill ... }
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
-/// ```c
-///     double alpha = 0, beta = 0; /* alpha and beta for new scoring system */
-///     ...
-///     kbp_ptr = sbp->kbp;   (ungapped)
-///     ...
-///             Blast_GetNuclAlphaBeta(scoring_options->reward, scoring_options->penalty,
-///                 scoring_options->gap_open, scoring_options->gap_extend,
-///                 sbp->kbp_std[index], scoring_options->gapped_calculation, &alpha, &beta);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
-/// ```c
-///     if (status)
-///        return status;       (s_GetNuclValuesArray: no table row for the pair; alpha, beta unset)
-///     ...
-///     if (!found) {
-///         *alpha = kbp->Lambda/kbp->H;
-///         *beta = s_GetUngappedBeta(reward, penalty);
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:513-529
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
 pub(crate) fn context_blocks_ungapped(
     ungapped: &[Option<KarlinParams>],
     spec: &NuclScoringSpec,
@@ -674,26 +390,8 @@ pub(crate) fn context_blocks_ungapped(
 /// The gapped X-drops of the search (raw scores of the preliminary and the final
 /// extension), from the smallest gapped Lambda of the valid contexts of a batch.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:92-116
-/// ```c
-///     double min_lambda = (double) INT4_MAX;
-///     ...
-///     for (i=query_info->first_context; i<=query_info->last_context; i++) {
-///         ...
-///         if (s_BlastKarlinBlkIsValid(kbp_in[i])) {
-///             if (min_lambda > kbp_in[i]->Lambda)
-///             {
-///                 min_lambda = kbp_in[i]->Lambda;
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:455-463
-/// ```c
-///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-///       params->gap_x_dropoff = (Int4)
-///           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-///     ...
-///       params->gap_x_dropoff_final = (Int4)
-///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:92-116
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
 /// Gapped blocks from the tables are the same for every context; blocks copied from the
 /// ungapped ones differ with the composition, so the X-drops depend on the contexts of the
 /// batch. Without a valid context the batch is not searched. The conversion is the protein
@@ -728,30 +426,9 @@ pub(crate) fn gap_x_dropoffs(
 ///   protein programs refuse their kernels' X-drops before the search.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183-188, 207, 257
-/// ```c
-///    if (score_params->reward % 2 == 1) {
-///       reward = 2*score_params->reward;
-///       penalty = -2*score_params->penalty;
-///       if (!Xdrop)
-///           Xdrop = 2*MAX(ext_params->gap_x_dropoff,
-///                     ext_params->gap_x_dropoff_final);
-///    ...
-///       d_diff = (Xdrop+reward/2)/(penalty+reward)+1;
-///    ...
-///    gamp->max_score = (Int4*) malloc(sizeof(Int4) * (max_d + 1 + d_diff));
-/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3008-3010
-/// ```c
-///    Int4 x_dropoff =  gap_align->gap_x_dropoff;
-///    if(init_hsp->ungapped_data->score < x_dropoff) x_dropoff = init_hsp->ungapped_data->score;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496-498
-/// ```c
-///     max_score = aux_data->max_score + xdrop_offset;
-///     for (index = 0; index < xdrop_offset; index++)
-///         aux_data->max_score[index] = 0;
-/// ```
 ///
 /// Under matrix-only scoring (`matrix_only`) the X-drops are the options' values as raw scores
 /// (`subject_env`, from blast_parameters.c:208-217 and 472-482; the final one is not raised to
@@ -848,17 +525,7 @@ mod tests {
         .unwrap()
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
-    // ```c
-    //    if (word_size != 11 && word_size != 12) {
-    //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //                          "Invalid discontiguous template parameters: word "
-    //                          "size must be either 11 or 12");
-    // ...
-    //       } else if (options->lut_type != eMBLookupTable) {
-    //          Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //             "Invalid lookup table type for discontiguous Mega BLAST");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
     #[test]
     fn discontiguous_templates_are_checked_after_the_word_size_limit() {
         let word = "Invalid discontiguous template parameters: word size must be either 11 or 12";
@@ -966,7 +633,7 @@ mod tests {
         .contains("Word-size must be less than"));
     }
 
-    // NCBI blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
     #[test]
     fn min_raw_gapped_score_above_zero_allows_an_evalue_of_zero() {
         const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n";
@@ -1134,7 +801,7 @@ mod tests {
         assert!(context_blocks(&[ungapped, ungapped], &spec).is_err());
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963, 3989-3992, 4024-4029
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3955-3963, 3989-3992, 4024-4029
     // (oracle `-ungapped`: 2/-3 beta -2, 1/-1 beta -2, 2/-2 and 4/-6 beta 0, 1/-6 and 3/-1 no table
     // row: alpha = beta = 0 and a length adjustment of 0, effective search space 377 x 373)
     #[test]

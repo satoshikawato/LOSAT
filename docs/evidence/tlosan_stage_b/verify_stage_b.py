@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Comparison-only Stage B source, CLI, and genetic-code checks.
 
-NCBI: c++/src/objects/seqfeat/gc.prt:105-357; blastinput/blast_args.cpp:997-1056;
+NCBI: c++/src/objects/seqfeat/gc.prt:105-357; c++/src/algo/blast/blastinput/blast_args.cpp:997-1056;
 blastinput/tblastn_args.cpp:45-152; api/blast_aux.cpp:588-613.
 """
 from __future__ import annotations

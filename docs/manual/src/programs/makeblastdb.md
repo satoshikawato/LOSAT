@@ -39,7 +39,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 | `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
-| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ reads for an alias file with `OID_MASK_TYPE 1` (LOSAT refuses that alias key for now). |
+| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ and LOSAT read for an alias file with `OID_MASK_TYPE 1`. |
 
 For every option: `losat makeblastdb -help`.
 

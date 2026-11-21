@@ -1435,9 +1435,13 @@ impl SeqDb {
                 alias::AliasOids {
                     words: None,
                     all_bits_special_set: false,
+                    mask_types: Vec::new(),
                 }
             }
         };
+        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
+            volume.set_exclude_model(oid_mask::excludes_models(mask_type));
+        }
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);

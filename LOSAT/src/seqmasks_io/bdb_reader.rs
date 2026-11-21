@@ -207,6 +207,25 @@ impl MaskBdbReader {
                  (it writes an error each time it reads them)"
             )));
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1358-1362
+        // `GetBioseq` gives no Bioseq for a sequence whose every definition line the alias files'
+        // `OID_MASK_TYPE` erased (line RG D1b-2), before it reads the letters: the record of a
+        // sequence without letters, which the maskers skip (probe S2_seg_walk of line RG D1b) and
+        // makembindex refuses.
+        if set.deflines.is_empty() {
+            let record = BdbRecord {
+                ids: Vec::new(),
+                title: Vec::new(),
+                taxname: None,
+                has_source: false,
+                get_title: None,
+                residues: Vec::new(),
+                texts: Vec::new(),
+            };
+            let ambiguity =
+                (self.molecule == SeqType::Nucleotide && !letters).then(NucleotideAmbiguity::none);
+            return Ok(Some((record, ambiguity)));
+        }
         let ids = set
             .deflines
             .first()

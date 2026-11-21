@@ -3,10 +3,10 @@
 //! LOSAT reads the keys a multi-volume database of makeblastdb uses, `TITLE`
 //! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
 //! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
-//! `walk_totals`), the OID ranges `FIRST_OID` / `LAST_OID` and the OID lists of
-//! `OIDLIST` (`compute_masks`, `alias_oids`). The keys that select sequences
-//! by a list of ids or a membership bit, `OID_MASK_TYPE` and `MASKLIST` are
-//! explicit errors (not supported yet);
+//! `walk_totals`), the OID ranges `FIRST_OID` / `LAST_OID`, the OID lists of
+//! `OIDLIST` and the mask type of each, `OID_MASK_TYPE` (`compute_masks`,
+//! `alias_oids`). The keys that select sequences by a list of ids or a
+//! membership bit and `MASKLIST` are explicit errors (not supported yet);
 //! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
 //! NCBI.
 //!
@@ -43,6 +43,10 @@ pub(super) struct AliasNode {
     /// The path of the OID list file of the alias file's `OIDLIST` as `ComputeMasks`
     /// resolves it (`compute_masks`); `None` before it ran and for a node without the key.
     pub oid_list: Option<String>,
+    /// The `OID_MASK_TYPE` of that OID list (`EOidMaskType` bits, `NStr::StringToUInt` of the
+    /// value: `compute_masks`); 0 without the key, before `compute_masks` ran and for a node
+    /// without `OIDLIST`.
+    pub oid_mask_type: u32,
     /// The directory of the alias file (`m_DBPath`), which a relative `OIDLIST` is joined to;
     /// empty for the top node.
     pub db_path: String,
@@ -107,22 +111,20 @@ pub(super) struct AliasTree {
 
 /// Alias keys that LOSAT recognises and does not support: they select
 /// sequences by a list of ids or a membership bit (alias_files.txt "Type:
-/// filter"), remove the definition lines of model sequences (`OID_MASK_TYPE`),
-/// or name masks LOSAT does not read (`MASKLIST`). They are the keys NCBI's
-/// reader looks up (seqdbalias.cpp) but those LOSAT reads: `TITLE`, `DBLIST`,
-/// the counts of the walks (`walk_totals`), the OID ranges and the OID lists
-/// (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
+/// filter"), or name masks LOSAT does not read (`MASKLIST`). They are the keys
+/// NCBI's reader looks up (seqdbalias.cpp) but those LOSAT reads: `TITLE`,
+/// `DBLIST`, the counts of the walks (`walk_totals`), the OID ranges, the OID
+/// lists and their mask types (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
 /// (seqdbimpl.cpp:972-976 takes the maximum from the volumes), and `VDBLIST`,
 /// which only NCBI's VDB tools read (vdbalias.cpp; `CSeqDBAliasNode` looks it
 /// up nowhere), are ignored as unknown keys are.
-const UNSUPPORTED_KEYS: [&str; 7] = [
+const UNSUPPORTED_KEYS: [&str; 6] = [
     "GILIST",
     "TILIST",
     "SEQIDLIST",
     "TAXIDLIST",
     "MEMB_BIT",
     "MASKLIST",
-    "OID_MASK_TYPE",
 ];
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-182
@@ -698,8 +700,8 @@ impl Resolver<'_> {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
                             "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ, \
-                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID, LAST_OID \
-                             and OIDLIST"
+                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID, LAST_OID, \
+                             OIDLIST and OID_MASK_TYPE"
                         )));
                     }
                     if other == b"OIDLIST" && std::str::from_utf8(value).is_err() {
@@ -1267,11 +1269,13 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64))
 // that is not a regular file (`exists`) and the node names volumes itself, it is the value joined
 // to the directory of the first of them (probes I5, I7, I8 and I1b of line RG D1b: a volume
 // found through `BLASTDB` or in the current directory moves it there). The file is read where
-// NCBI builds its OID list (`alias_oids`). `OID_MASK_TYPE`, which NCBI converts here after
-// `OIDLIST`, is refused when the alias file is read.
+// NCBI builds its OID list (`alias_oids`). `OID_MASK_TYPE` is converted only beside `OIDLIST`
+// (probe E_abc_no_oidlist of line RG D1b: `OID_MASK_TYPE abc` without it is never read), after its
+// path; its errors are those of `FIRST_OID` (probes E_t_abc, E_t_4294967296, E_t_empty; a
+// conversion error of `FIRST_OID` comes first, E_order_first).
 /// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID` (`NStr::StringToUInt`), then the
-/// path of `OIDLIST`, of every node from the top down, a node before its sub-nodes; the first value
-/// that does not convert is the error.
+/// path of `OIDLIST` and its `OID_MASK_TYPE` (`NStr::StringToUInt`), of every node from the top
+/// down, a node before its sub-nodes; the first value that does not convert is the error.
 pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
     let first_oid = node.value("FIRST_OID").map(string_to_uint).transpose()?;
     let last_oid = node.value("LAST_OID").map(string_to_uint).transpose()?;
@@ -1290,6 +1294,11 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
             }
         }
         node.oid_list = Some(path);
+        node.oid_mask_type = node
+            .value("OID_MASK_TYPE")
+            .map(string_to_uint)
+            .transpose()?
+            .unwrap_or(0);
     }
     for subnode in &mut node.subnodes {
         compute_masks(subnode)?;
@@ -1342,6 +1351,9 @@ pub(super) struct AliasOids {
     pub words: Option<Vec<u64>>,
     /// Whether NCBI's bit set of the volume set (`m_AllBits`) is the special all-set one.
     pub all_bits_special_set: bool,
+    /// The `OID_MASK_TYPE` that each volume of `volumes` (in their order) is left with
+    /// (`CSeqDBVol::SetOidMaskType`, [`volume_set`]): 0 for a volume that no OID list reaches.
+    pub mask_types: Vec<u32>,
 }
 
 /// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
@@ -1356,7 +1368,8 @@ pub(super) fn alias_oids(
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
     let mut all = Shape::new(0, u64::from(num_oids), Special::None);
     let mut files = std::collections::HashMap::new();
-    for &(name, start, end) in volumes {
+    let mut mask_types = vec![0u32; volumes.len()];
+    for (&(name, start, end), mask_type) in volumes.iter().zip(&mut mask_types) {
         let Some(node) = specialize(root, name) else {
             continue;
         };
@@ -1364,7 +1377,7 @@ pub(super) fn alias_oids(
             start: u64::from(start),
             end: u64::from(end),
         };
-        let set = volume_set(&node, frame, &mut files)?;
+        let set = volume_set(&node, frame, &mut files, mask_type)?;
         all = match all.union_with(set.shape) {
             Union::Left => all,
             Union::Right => set.shape,
@@ -1377,6 +1390,7 @@ pub(super) fn alias_oids(
     Ok(AliasOids {
         words,
         all_bits_special_set: all.special == Special::AllSet,
+        mask_types,
     })
 }
 
@@ -1393,22 +1407,27 @@ pub(super) fn alias_oids(
 // a node that names it: the first file that fails is NCBI's error (`oid_list::OidListError`).
 // An OID list is read relative to each volume (bit `i` is the volume's OID `i`, probe F1 of line
 // RG D1b), a bit array over the volume's OIDs (`x_GetOidMask`); the ranges count the OIDs of the
-// whole volume set. The `int` bounds of a range become `size_t`: a negative one is sign-extended
-// past every OID (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a
-// negative `LAST_OID` is no upper bound, as `bound` reads them.
+// whole volume set. Each OID list sets the volume's `OID_MASK_TYPE` to its node's
+// (`SetOidMaskType`, which overwrites): the last one read wins, a parent's over its sub-nodes', a
+// later sub-node's over an earlier one's, and a node that names the volume reads none below it
+// (probes J2, J4a, J4b, J3 of line RG D1b). The `int` bounds of a range become `size_t`: a
+// negative one is sign-extended past every OID (line RG D1a-2, survey A M2), so a negative
+// `FIRST_OID` keeps no OID and a negative `LAST_OID` is no upper bound, as `bound` reads them.
 /// NCBI's bit set of the OIDs of one volume (`frame`) that the specialised tree `node` keeps
-/// (`CSeqDBOIDList::x_ComputeFilters`).
+/// (`CSeqDBOIDList::x_ComputeFilters`); `mask_type` is the volume's `OID_MASK_TYPE`, set by each
+/// OID list read.
 fn volume_set<'a>(
     node: &VolumeNode<'a>,
     frame: Frame,
     files: &mut std::collections::HashMap<&'a str, OidListFile>,
+    mask_type: &mut u32,
 ) -> Result<OidSet, OidListError> {
     let map = if node.volumes > 0 {
         OidSet::special(frame.start, frame.end, Special::AllSet)
     } else {
         let mut map = OidSet::special(frame.start, frame.end, Special::AllClear);
         for sub in &node.nodes {
-            let sub = volume_set(sub, frame, files)?;
+            let sub = volume_set(sub, frame, files, mask_type)?;
             map = map.union_with(sub, frame);
         }
         map
@@ -1426,6 +1445,7 @@ fn volume_set<'a>(
         };
         let bits = file.volume_words((frame.end - frame.start) as u32)?;
         filter = filter.intersect_with(OidSet::array(frame, bits), frame);
+        *mask_type = node.oid_mask_type;
     }
     if map.clears_outside(&filter) {
         return Err(OidListError::RangeOutsideBits(std::path::PathBuf::from(
@@ -1726,6 +1746,8 @@ struct VolumeNode<'a> {
     name: Option<&'a str>,
     range: Option<OidRange>,
     oid_list: Option<&'a str>,
+    /// The `OID_MASK_TYPE` of `oid_list`.
+    oid_mask_type: u32,
     nodes: Vec<VolumeNode<'a>>,
     volumes: usize,
 }
@@ -1743,6 +1765,7 @@ fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
         name: node.this_name.as_deref(),
         range: node.range,
         oid_list: node.oid_list.as_deref(),
+        oid_mask_type: node.oid_mask_type,
         nodes: Vec::new(),
         volumes: 0,
     };
@@ -1845,3 +1868,7 @@ pub(super) fn info_volumes(
 pub(super) fn test_split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
     split_quoted(dbname, keep_quote)
 }
+
+#[cfg(test)]
+#[path = "alias_tests.rs"]
+mod tests;

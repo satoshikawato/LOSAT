@@ -139,10 +139,9 @@ impl FormatSpec {
         if !self.get_defline {
             return print(None, &mut line);
         }
+        // `GetHdr` gives a set, empty where the alias files' `OID_MASK_TYPE` erased every line
+        // (line RG D1b-2): nothing is written for it, and a target is not found in it.
         let set = source.deflines(oid)?;
-        if set.deflines.is_empty() {
-            return Ok(());
-        }
         match target {
             None => {
                 for defline in &set.deflines {

@@ -1,0 +1,247 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: omn.fna
+           8 sequences; 3,392 total letters
+
+
+
+Query= qn1
+
+Length=426
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NM_000001.1 normal one                                                787     0.0  
+NM_000004.1 normal four                                               754     0.0  
+nloc5 local five                                                      749     0.0  
+NR_000008.1 noncoding eight                                           649     0.0  
+AJ000007.1 embl seven                                                 621     0.0  
+
+
+>NM_000001.1 normal one
+Length=426
+
+ Score = 787 bits (426),  Expect = 0.0
+ Identities = 426/426 (100%), Gaps = 0/426 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ATGGTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCC  60
+
+Query  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+
+Query  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+
+Query  181  AAGAAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAGAAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCC  240
+
+Query  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+
+Query  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+
+Query  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+
+Query  421  TACCGC  426
+            ||||||
+Sbjct  421  TACCGC  426
+
+
+>NM_000004.1 normal four
+Length=426
+
+ Score = 754 bits (408),  Expect = 0.0
+ Identities = 420/426 (99%), Gaps = 0/426 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCC  60
+            ||||||||||||||||||||||||| |||||||||||||||||||||||||||||||| |
+Sbjct  1    ATGGTGCTGAGCCCCGCCGACAAGAGCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGGC  60
+
+Query  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+
+Query  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+
+Query  181  AAGAAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCC  240
+            ||||||||||||||||||||||||   ||||||| |||||||||||||||||||||||||
+Sbjct  181  AAGAAGGTGGCCGACGCCCTGACCCTGGCCGTGGGCCACGTGGACGACATGCCCAACGCC  240
+
+Query  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+
+Query  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+
+Query  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+
+Query  421  TACCGC  426
+            ||||||
+Sbjct  421  TACCGC  426
+
+
+>nloc5 local five
+Length=423
+
+ Score = 749 bits (405),  Expect = 0.0
+ Identities = 417/423 (99%), Gaps = 0/423 (0%)
+ Strand=Plus/Plus
+
+Query  4    GTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCCCAC  63
+            |||||||||||||||||||||| |||||||||||||||||||||||||||||||| ||||
+Sbjct  1    GTGCTGAGCCCCGCCGACAAGAGCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGGCCAC  60
+
+Query  64   GCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACCAAG  123
+            |||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   GCCGGCGACTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACCAAG  120
+
+Query  124  ACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGCAAG  183
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  ACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGCAAG  180
+
+Query  184  AAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCCCTG  243
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCCCTG  240
+
+Query  244  AGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAGCTG  303
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  AGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAGCTG  300
+
+Query  304  CTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCCGCC  363
+            |||||||||||||||||||||||||||||||||||||  |||||||| ||||||||||||
+Sbjct  301  CTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCACCCCGCCGACTTCACCCCCGCC  360
+
+Query  364  GTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAGTAC  423
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAGTAC  420
+
+Query  424  CGC  426
+            |||
+Sbjct  421  CGC  423
+
+
+>NR_000008.1 noncoding eight
+Length=426
+
+ Score = 649 bits (351),  Expect = 0.0
+ Identities = 401/426 (94%), Gaps = 0/426 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCC  60
+            |||||||||||| |||||||||||  |||||||||||||||||||||||||||||||| |
+Sbjct  1    ATGGTGCTGAGCGCCGCCGACAAGGGCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGGC  60
+
+Query  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+            ||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CACGCCGCCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+
+Query  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+
+Query  181  AAGAAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCC  240
+               |||||||||| |||||||||||| |||||||  ||| |||||||| |||||  ||||
+Sbjct  181  GCCAAGGTGGCCGCCGCCCTGACCAAGGCCGTGGAGCACCTGGACGACCTGCCCGGCGCC  240
+
+Query  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+            |||||||  |||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CTGAGCGAGCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+
+Query  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+            |||||||||||| ||||||||||||||||||||  ||||||||||  ||| |||||||||
+Sbjct  301  CTGCTGAGCCACAGCCTGCTGGTGACCCTGGCCAGCCACCTGCCCAGCGACTTCACCCCC  360
+
+Query  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+            |||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||
+Sbjct  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAACGTGAGCACCGTGCTGACCAGCAAG  420
+
+Query  421  TACCGC  426
+            ||||||
+Sbjct  421  TACCGC  426
+
+
+>AJ000007.1 embl seven
+Length=426
+
+ Score = 621 bits (336),  Expect = 0.0
+ Identities = 396/426 (93%), Gaps = 0/426 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGTGCTGAGCCCCGCCGACAAGACCAACGTGAAGGCCGCCTGGGGCAAGGTGGGCGCC  60
+            ||||||||||||  ||  ||||||| |||| | |||||||||||||||||| | |||| |
+Sbjct  1    ATGGTGCTGAGCGGCGAGGACAAGAGCAACATCAAGGCCGCCTGGGGCAAGATCGGCGGC  60
+
+Query  61   CACGCCGGCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCCTGAGCTTCCCCACCACC  120
+            |||| || ||||||||||||||||||||||||||||||||||   |||||||||||||||
+Sbjct  61   CACGGCGCCGAGTACGGCGCCGAGGCCCTGGAGCGCATGTTCGCCAGCTTCCCCACCACC  120
+
+Query  121  AAGACCTACTTCCCCCACTTCGACCTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+            |||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||
+Sbjct  121  AAGACCTACTTCCCCCACTTCGACGTGAGCCACGGCAGCGCCCAGGTGAAGGGCCACGGC  180
+
+Query  181  AAGAAGGTGGCCGACGCCCTGACCAACGCCGTGGCCCACGTGGACGACATGCCCAACGCC  240
+            ||||||||||||||||||||| ||| |||||  | |||| |||||||| |||||  ||||
+Sbjct  181  AAGAAGGTGGCCGACGCCCTGGCCAGCGCCGCCGGCCACCTGGACGACCTGCCCGGCGCC  240
+
+Query  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CTGAGCGCCCTGAGCGACCTGCACGCCCACAAGCTGCGCGTGGACCCCGTGAACTTCAAG  300
+
+Query  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTGCCCGCCGAGTTCACCCCC  360
+            |||||||||||||||||||||||||||||||||  |||||  |||||||| |||||||||
+Sbjct  301  CTGCTGAGCCACTGCCTGCTGGTGACCCTGGCCAGCCACCACCCCGCCGACTTCACCCCC  360
+
+Query  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GCCGTGCACGCCAGCCTGGACAAGTTCCTGGCCAGCGTGAGCACCGTGCTGACCAGCAAG  420
+
+Query  421  TACCGC  426
+            ||||||
+Sbjct  421  TACCGC  426
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 1357944
+
+
+  Database: omn.fna
+    Posted date:  Nov 21, 2026  5:53 PM
+  Number of letters in database: 3,392
+  Number of sequences in database:  8
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

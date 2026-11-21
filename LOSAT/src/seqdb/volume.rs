@@ -21,6 +21,10 @@ pub struct Volume {
     /// The definition lines a taxid or seqid list keeps (`SeqDb::restrict_taxids`,
     /// `restrict_seqids`), none without one.
     defline_rule: Option<LineRule>,
+    /// Whether the alias files' `OID_MASK_TYPE` of the volume erases the definition lines of
+    /// model sequences after `defline_rule` (`m_OidMaskType & fExcludeModel`,
+    /// `oid_mask::excludes_models`; `SeqDb::read_alias_tree`).
+    exclude_model: bool,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
     /// The failure of NCBI's OID list that a search meets at its first read of a sequence
@@ -114,6 +118,7 @@ impl Volume {
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
             defline_rule: None,
+            exclude_model: false,
             columns: OnceLock::new(),
             read_failure: None,
         })
@@ -568,6 +573,18 @@ impl Volume {
         self.defline_rule = Some(LineRule { rule, volume_start });
     }
 
+    /// Sets whether the reads of this volume erase the definition lines of model sequences
+    /// (the volume's `OID_MASK_TYPE`, `SeqDb::read_alias_tree`).
+    pub(super) fn set_exclude_model(&mut self, exclude_model: bool) {
+        self.exclude_model = exclude_model;
+    }
+
+    /// Whether the reads of this volume remove definition lines: a list's rule or the erasure of
+    /// model lines.
+    fn filters_lines(&self) -> bool {
+        self.defline_rule.is_some() || self.exclude_model
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1990-1995
     // This is the read of `GetBioseq` (seqdbvol.cpp:1324-1325); the overload with a stream, for
     // `GetSeqIDs`, does the same (2106-2111). The rule reads the Seq-ids of a volume whose first
@@ -596,26 +613,69 @@ impl Volume {
         Ok(line_rule.rule.keep_mask(set))
     }
 
-    /// [`Volume::rule_mask`] for a read of the sequence `oid` (volume-relative): the reader's
-    /// error for a tag NCBI's read cannot adjust, LOSAT's refusal (`no_line_kept`) where a seqid
-    /// rule keeps no line.
-    fn line_mask(
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2006-2058
+    // The list's tests come first and the erasure of model lines last, on the lines the list
+    // keeps; a line whose every test passes is kept. A sequence whose every line is erased is
+    // read with none, as NCBI's `GetHdr` gives it (probes A2, A7a of line RG D1b): its hits get no
+    // Seq-align (`keeps_line`), and `GetBioseq` gives none. The accession guide's warning about an
+    // id (`oid_mask::is_predicted`) is posted at each of NCBI's header reads that is not served
+    // by its cache of filtered headers (seqdbvol.cpp:1977-1988, a cache of the main thread):
+    // LOSAT does not count those reads and refuses such an id.
+    /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
+    /// keep, as NCBI's filtered header read tests them (the volume's list rule, `rule_mask`, then
+    /// the erasure of model lines): `None` where a seqid rule keeps none; the reader's error for
+    /// a tag NCBI's read cannot adjust, LOSAT's refusal of an id the accession guide warns about.
+    fn filtered_mask(
         &self,
-        line_rule: &LineRule,
         oid: u32,
         set: &crate::seqid::DeflineSet,
-    ) -> Result<Vec<bool>, SeqDbError> {
-        Self::rule_mask(line_rule, set)
-            .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+    ) -> Result<Option<Vec<bool>>, SeqDbError> {
+        let mut mask = match &self.defline_rule {
+            Some(line_rule) => match Self::rule_mask(line_rule, set)
+                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+            {
+                Some(mask) => mask,
+                None => return Ok(None),
+            },
+            None => vec![true; set.deflines.len()],
+        };
+        if self.exclude_model {
+            let mut warned = false;
+            for (keep, defline) in mask.iter_mut().zip(&set.deflines) {
+                if *keep {
+                    *keep = !super::oid_mask::is_model_line(&defline.ids, &mut |_| warned = true);
+                }
+            }
+            if warned {
+                return Err(SeqDbError::Unsupported {
+                    path: self.base.clone(),
+                    message: format!(
+                        "sequence {oid}: a Seq-id that NCBI's accession guide warns about, under \
+                         the alias files' OID_MASK_TYPE (NCBI writes the warning at each of its \
+                         uncached reads of the header)"
+                    ),
+                });
+            }
+        }
+        Ok(Some(mask))
+    }
+
+    /// [`Volume::filtered_mask`] for a read of the sequence `oid` (volume-relative): LOSAT's
+    /// refusal (`no_line_kept`) where a seqid rule keeps no line.
+    fn line_mask(&self, oid: u32, set: &crate::seqid::DeflineSet) -> Result<Vec<bool>, SeqDbError> {
+        self.filtered_mask(oid, set)?
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a seqid list's, positive or negative
+    /// Whether the reads of the volume may leave a sequence without a line: its rule is a seqid
+    /// list's, positive or negative, or its `OID_MASK_TYPE` erases model lines
     /// (`SeqDb::drops_lineless_hits`).
-    pub(super) fn has_seqid_rule(&self) -> bool {
-        self.defline_rule
-            .as_ref()
-            .is_some_and(|line_rule| line_rule.rule.reads_seqids())
+    pub(super) fn may_drop_every_line(&self) -> bool {
+        self.exclude_model
+            || self
+                .defline_rule
+                .as_ref()
+                .is_some_and(|line_rule| line_rule.rule.reads_seqids())
     }
 
     /// Whether the volume's rule is a negative seqid list's with at least one id
@@ -626,22 +686,19 @@ impl Volume {
         })
     }
 
-    /// Whether the volume's rule keeps a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none; the reader's error for a
-    /// tag that NCBI's read cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there).
+    /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
+    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none or the erasure of model
+    /// lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
+    /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
     pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
-        let Some(line_rule) = self
-            .defline_rule
-            .as_ref()
-            .filter(|line_rule| line_rule.rule.reads_seqids())
-        else {
+        if !self.may_drop_every_line() {
             return Ok(true);
-        };
+        }
         let (record, path) = self.header_record(oid)?;
         let set = decode_full(&record, path)?;
-        Self::rule_mask(line_rule, &set)
-            .map(|mask| mask.is_some())
-            .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))
+        Ok(self
+            .filtered_mask(oid, &set)?
+            .is_some_and(|mask| mask.contains(&true)))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those
@@ -653,11 +710,11 @@ impl Volume {
         path: &Path,
         decoded: Result<T, SeqDbError>,
     ) -> Result<T, SeqDbError> {
-        let Some(line_rule) = &self.defline_rule else {
+        if !self.filters_lines() {
             return decoded;
-        };
+        }
         let mut decoded = decoded?;
-        let keep = self.line_mask(line_rule, oid, &decode_full(record, path)?)?;
+        let keep = self.line_mask(oid, &decode_full(record, path)?)?;
         decoded.retain_lines(&keep);
         Ok(decoded)
     }
@@ -698,8 +755,8 @@ impl Volume {
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let mut set = decode_full(record, path)?;
-        if let Some(line_rule) = &self.defline_rule {
-            let keep = self.line_mask(line_rule, oid, &set)?;
+        if self.filters_lines() {
+            let keep = self.line_mask(oid, &set)?;
             set.retain_lines(&keep);
         }
         Ok(set)
@@ -1185,6 +1242,12 @@ pub struct NucleotideAmbiguity {
 }
 
 impl NucleotideAmbiguity {
+    /// The ambiguity of a sequence without letters, which nothing reads (`seqmasks_io`'s record of
+    /// a sequence that NCBI's `GetBioseq` gives no Bioseq for).
+    pub(crate) fn none() -> Self {
+        Self::new(0, 0, Vec::new())
+    }
+
     fn new(length: usize, packed_start: u64, runs: Vec<AmbiguityRun>) -> Self {
         let ordered = runs.windows(2).all(|pair| {
             u64::from(pair[0].offset) + u64::from(pair[0].length) <= u64::from(pair[1].offset)

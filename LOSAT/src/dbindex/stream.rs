@@ -345,15 +345,18 @@ impl SequenceStream for BlastDbStream {
             return Ok(None);
         };
         let length = ambiguity.length();
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
-        // `GetBioseq` gives a null Bioseq for a sequence without letters, which `next` dereferences:
-        // a `CCoreException` (`eNullPtr`) whose report prints a stack trace with the run's memory
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1358-1386
+        // `GetBioseq` gives a null Bioseq for a sequence without letters, and for one whose every
+        // definition line the alias files' `OID_MASK_TYPE` erased (the reader's record without
+        // letters, line RG D1b-2: probe mk_old_ntall), which `next` dereferences: a
+        // `CCoreException` (`eNullPtr`) whose report prints a stack trace with the run's memory
         // addresses (PD-LOSAT-NCBI-DEFECTS rule 3).
         if length == 0 {
             return Err(StreamError::Refused(super::unsupported(&format!(
-                "sequence {oid} of the database, which has no letters (NCBI's makembindex reads the \
-                 null sequence its database reader gives for it and stops with a report of the run's \
-                 memory addresses),"
+                "sequence {oid} of the database, which has no letters or no definition line left by \
+                 the alias files' OID_MASK_TYPE (NCBI's makembindex reads the null sequence its \
+                 database reader gives for it and stops with a report of the run's memory \
+                 addresses),"
             ))));
         }
         let mut bases = Bases::default();

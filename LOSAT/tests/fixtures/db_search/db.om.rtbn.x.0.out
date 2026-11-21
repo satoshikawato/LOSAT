@@ -1,0 +1,143 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini model
+           3 sequences; 560 total letters
+
+
+
+Query= tkcut570
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  14.6    3.0  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.6    3.0  
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 14.6 bits (26),  Expect = 3.0
+ Identities = 4/10 (40%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = -2
+
+Query  431  IELVYGSNLC  402
+            + ++  SNLC
+Sbjct  143  VGIIKSSNLC  152
+
+
+ Score = 14.2 bits (25),  Expect = 3.8
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  259  PEVVDVI  279
+             +V D I
+Sbjct  29   LDVKDFI  35
+
+
+ Score = 13.9 bits (24),  Expect = 6.2
+ Identities = 2/9 (22%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  505  NDNDNNVIC  531
+            +D++   +C
+Sbjct  159  SDSEETAVC  167
+
+
+ Score = 13.9 bits (24),  Expect = 6.4
+ Identities = 5/15 (33%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+ Frame = +2
+
+Query  101  INKKTEAINIAFL*S  145
+            IN+K+   N+  + S
+Sbjct  134  INRKSNQENVGIIKS  148
+
+
+ Score = 13.9 bits (24),  Expect = 6.7
+ Identities = 7/26 (27%), Positives = 12/26 (46%), Gaps = 2/26 (8%)
+ Frame = +3
+
+Query  432  CETSVEVH--DLQD*YERGTLYGKIR  503
+            C    +VH  + +  YE+    GK +
+Sbjct  79   CPGLSDVHGEEFKALYEKYEAEGKGK  104
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.6 bits (26),  Expect = 3.0
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  538  GAEMYAAACR  567
+            GA + A  CR
+Sbjct  149  GAHITAGKCR  158
+
+
+ Score = 13.5 bits (23),  Expect = 7.5
+ Identities = 7/18 (39%), Positives = 8/18 (44%), Gaps = 6/18 (33%)
+ Frame = -3
+
+Query  229  SLSYTPQLL------RPR  194
+            SL Y  Q+L      RP 
+Sbjct  130  SLEYMLQVLPIMLIDRPY  147
+
+
+ Score = 13.5 bits (23),  Expect = 7.7
+ Identities = 5/17 (29%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  503  PNLTVKGASFVSILQIM  453
+            PN+ V  A      +I+
+Sbjct  93   PNMNVTAAGMDYFPEIV  109
+
+
+ Score = 13.5 bits (23),  Expect = 8.2
+ Identities = 3/12 (25%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  330  QPIDKYKICEKL  295
+            +     +I E L
+Sbjct  58   RQTPITRIEESL  69
+
+
+ Score = 13.1 bits (22),  Expect = 9.7
+ Identities = 2/10 (20%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = -2
+
+Query  299  NCPSSIKITS  270
+            N   ++ +T+
+Sbjct  90   NTSPNMNVTA  99
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+  Database: rps_mini model
+    Posted date:  Nov 21, 2026  5:54 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

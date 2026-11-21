@@ -1,0 +1,204 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: omn limited by exclude model oid masks
+           6 sequences; 2,550 total letters
+
+
+
+Query= q1
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NM_000001.1 normal one                                                286     1e-105
+NM_000004.1 normal four                                               278     2e-102
+nloc5 local five                                                      275     5e-101
+AJ000007.1 embl seven                                                 253     3e-92 
+NR_000008.1 noncoding eight                                           252     5e-92 
+
+
+>NM_000001.1 normal one
+Length=426
+
+ Score = 286 bits (733),  Expect = 1e-105, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +1
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  180
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  181  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  360
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  361  AVHASLDKFLASVSTVLTSKYR  426
+
+
+ Score = 15.0 bits (27),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  133  VSTVLT  138
+            VSTVLT
+Sbjct  413  VSTVLT  396
+
+
+>NM_000004.1 normal four
+Length=426
+
+ Score = 278 bits (712),  Expect = 2e-102, Method: Compositional matrix adjust.
+ Identities = 138/142 (97%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+ Frame = +1
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  180
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  181  KKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  360
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  361  AVHASLDKFLASVSTVLTSKYR  426
+
+
+ Score = 15.0 bits (27),  Expect = 2.7, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 13/26 (50%), Gaps = 0/26 (0%)
+ Frame = -1
+
+Query  47   FDLSHGSAQVKGHGKKVADALTNAVA  72
+              ++HG  Q  GH   VA  L  AVA
+Sbjct  225  VHVAHGQGQGVGHLLAVALHLGAAVA  148
+
+
+ Score = 14.6 bits (26),  Expect = 3.4, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  133  VSTVLT  138
+            VSTVLT
+Sbjct  413  VSTVLT  396
+
+
+>nloc5 local five
+Length=423
+
+ Score = 275 bits (702),  Expect = 5e-101, Method: Compositional matrix adjust.
+ Identities = 136/141 (96%), Positives = 139/141 (99%), Gaps = 0/141 (0%)
+ Frame = +1
+
+Query  2    VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  61
+            VLSPADK+NVKAAWGKVG HAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK
+Sbjct  1    VLSPADKSNVKAAWGKVGGHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  180
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PA+FTPA
+Sbjct  181  KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPADFTPA  360
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+            VHASLDKFLASVSTVLTSKYR
+Sbjct  361  VHASLDKFLASVSTVLTSKYR  423
+
+
+ Score = 15.0 bits (27),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  133  VSTVLT  138
+            VSTVLT
+Sbjct  410  VSTVLT  393
+
+
+>AJ000007.1 embl seven
+Length=426
+
+ Score = 253 bits (645),  Expect = 3e-92, Method: Compositional matrix adjust.
+ Identities = 122/142 (86%), Positives = 131/142 (92%), Gaps = 0/142 (0%)
+ Frame = +1
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLS  DK+N+KAAWGK+G H  EYGAEALERMF SFPTTKTYFPHFD+SHGSAQVKGHG
+Sbjct  1    MVLSGEDKSNIKAAWGKIGGHGAEYGAEALERMFASFPTTKTYFPHFDVSHGSAQVKGHG  180
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADAL +A  H+DD+P ALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA+H PA+FTP
+Sbjct  181  KKVADALASAAGHLDDLPGALSALSDLHAHKLRVDPVNFKLLSHCLLVTLASHHPADFTP  360
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  361  AVHASLDKFLASVSTVLTSKYR  426
+
+
+ Score = 15.0 bits (27),  Expect = 3.0, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  133  VSTVLT  138
+            VSTVLT
+Sbjct  413  VSTVLT  396
+
+
+>NR_000008.1 noncoding eight
+Length=426
+
+ Score = 252 bits (643),  Expect = 5e-92, Method: Compositional matrix adjust.
+ Identities = 125/142 (88%), Positives = 131/142 (92%), Gaps = 0/142 (0%)
+ Frame = +1
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLS ADK NVKAAWGKVG HA EYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSAADKGNVKAAWGKVGGHAAEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  180
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+             KVA ALT AV H+DD+P ALS LSDLHAHKLRVDPVNFKLLSH LLVTLA+HLP++FTP
+Sbjct  181  AKVAAALTKAVEHLDDLPGALSELSDLHAHKLRVDPVNFKLLSHSLLVTLASHLPSDFTP  360
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLA+VSTVLTSKYR
+Sbjct  361  AVHASLDKFLANVSTVLTSKYR  426
+
+
+ Score = 14.6 bits (26),  Expect = 3.6, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  133  VSTVLT  138
+            VSTVLT
+Sbjct  413  VSTVLT  396
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 79120
+
+
+  Database: omn limited by exclude model oid masks
+    Posted date:  Nov 21, 2026  5:53 PM
+  Number of letters in database: 2,550
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

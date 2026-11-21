@@ -1,0 +1,8 @@
+q1	ref|NP_000001.1|	ref|NP_000001.1|	normal protein one	normal protein one	2.12e-105	286
+q1	ref|XP_000002.1|	ref|XP_000002.1|	predicted protein two	predicted protein two	1.14e-103	282
+q1	ref|XP_000003.1|	ref|XP_000003.1|	mixed ids in one line three	mixed ids in one line three	2.54e-103	281
+q1	ref|XP_000004.1|	ref|XP_000004.1|;ref|NP_000004.1|	predicted four	predicted four<>normal four	3.54e-102	278
+q1	loc5	loc5	local five	local five	1.06e-100	275
+q1	ref|XP_000006.1|	ref|XP_000006.1|	predicted six	predicted six	3.73e-97	266
+q1	sp|P00007.1|NAME_HUMAN	sp|P00007.1|NAME_HUMAN	swissprot seven	swissprot seven	5.65e-92	253
+q1	ref|WP_000008.1|	ref|WP_000008.1|	nonredundant eight	nonredundant eight	9.89e-92	252

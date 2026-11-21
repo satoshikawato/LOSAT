@@ -1,0 +1,6 @@
+TITLE rps_mini model walk
+DBLIST rps_mini
+OIDLIST rps_mini.msk
+OID_MASK_TYPE 1
+NSEQ 3
+LENGTH 560

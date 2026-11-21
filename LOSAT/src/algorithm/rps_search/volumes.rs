@@ -540,6 +540,21 @@ pub(crate) fn report_ordinal_ids(
     cut: usize,
     program: &str,
 ) -> Result<Option<Vec<usize>>> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1580-1586 (cited at
+    // `SeqDb::drops_lineless_hits`)
+    // A profile whose every definition line the alias files' `OID_MASK_TYPE` erased gets no
+    // Seq-align (its header is read by OID, whatever the ranges include): its lists leave the
+    // reports, outfmt 7's count and the prefetch, before the formatter's cut (probes rps_* of
+    // line RG D1b-2: the hits of profile `ref|XP_000101.1|` are gone, exit 0). A header that
+    // cannot be read counts as kept: the reads below give its error.
+    if db.drops_lineless_hits() {
+        for list in lists.iter_mut().flatten() {
+            list.hsplist_array.truncate(list.hsplist_count);
+            list.hsplist_array
+                .retain(|hsp_list| db.keeps_line_of_oid(hsp_list.oid).unwrap_or(true));
+            list.hsplist_count = list.hsplist_array.len();
+        }
+    }
     if db.ordinal_ids_are_oids() {
         return Ok(None);
     }

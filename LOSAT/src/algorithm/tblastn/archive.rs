@@ -370,6 +370,7 @@ pub(super) fn write_tblastn_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Tblastn,
         db_title: data.shown.db_title(),
         gapped: true,
@@ -381,6 +382,7 @@ pub(super) fn write_tblastn_archives(
         let first = span.start;
         let mut aligns = TblastnAligns {
             run: RunRecord {
+                pssm_type: None,
                 program: run.program,
                 db_title: run.db_title,
                 gapped: run.gapped,

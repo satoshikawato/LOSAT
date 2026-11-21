@@ -115,6 +115,7 @@ const MB_HSP2: [GapEditOp; 9] = [
 /// complement (its first query start is 480 - 30 - 164 = 286).
 fn megablast_documents(format: SerialFormat) -> Vec<u8> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: None,
         gapped: true,
@@ -186,6 +187,7 @@ fn blastp_db_documents(format: SerialFormat, db_title: &[u8]) -> Vec<u8> {
 /// with the strands of the subject remap).
 fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastp,
         db_title,
         gapped: true,
@@ -372,6 +374,7 @@ fn long_database_title_without_spaces_breaks_at_column_78() {
 #[test]
 fn score_list_follows_ncbi_conditions() {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastp,
         db_title: None,
         gapped: true,
@@ -419,6 +422,7 @@ fn score_list_follows_ncbi_conditions() {
 #[test]
 fn score_zero_hsps_write_nothing() {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: None,
         gapped: true,
@@ -539,6 +543,7 @@ const BP_UNGAPPED_SUBJECTS: [u32; 6] = [4, 83, 24, 22, 82, 11];
 /// remap of the strands (BLASTP `-subject` writes `unknown`, unlike its gapped Dense-segs).
 fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastp,
         db_title,
         gapped: false,
@@ -714,6 +719,7 @@ const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
 #[test]
 fn blastn_ungapped_dendiag_documents_equal_ncbi() {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: None,
         gapped: false,
@@ -778,6 +784,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
 #[test]
 fn an_ungapped_query_without_hsps_writes_nothing() {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: None,
         gapped: false,
@@ -951,6 +958,7 @@ impl std::io::Write for Combined {
 /// `title`: the report alone, the posts alone, and both in one stream.
 fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastp,
         db_title: Some(title),
         gapped: true,
@@ -1068,6 +1076,7 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
     let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 12, 0), &ops);
     let segments = |db_title: Option<&'static [u8]>| {
         let run = RunRecord {
+            pssm_type: None,
             program: Program::Blastx,
             db_title,
             gapped: true,
@@ -1102,6 +1111,7 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
 #[test]
 fn ungapped_translated_hsps_are_diags_seq_aligns() {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Tblastx,
         db_title: None,
         gapped: false,
@@ -1168,6 +1178,7 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
     let ops = [Sub(30)];
     for gapped in [true, false] {
         let run = RunRecord {
+            pssm_type: None,
             program: if gapped {
                 Program::Blastp
             } else {

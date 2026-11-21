@@ -46,6 +46,7 @@ pub(crate) fn write_blastn_seqalign(
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: subjects.db_title(),
         gapped,

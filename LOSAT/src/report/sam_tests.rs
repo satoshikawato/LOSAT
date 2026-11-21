@@ -71,6 +71,7 @@ fn document(
     letters: &mut dyn SamLetters,
 ) -> String {
     let run = RunRecord {
+        pssm_type: None,
         program: crate::blastinput::app::Program::Blastn,
         db_title: None,
         gapped: true,
@@ -250,6 +251,7 @@ fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
 
 fn run_record() -> RunRecord<'static> {
     RunRecord {
+        pssm_type: None,
         program: crate::blastinput::app::Program::Blastn,
         db_title: None,
         gapped: true,
@@ -391,6 +393,7 @@ fn an_empty_document_writes_nothing_and_finish_empties_it() {
 #[test]
 fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
     let run = RunRecord {
+        pssm_type: None,
         gapped: false,
         ..run_record()
     };
@@ -480,6 +483,7 @@ fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
 #[test]
 fn an_ungapped_record_sums_its_lengths_in_32_bits() {
     let run = RunRecord {
+        pssm_type: None,
         gapped: false,
         ..run_record()
     };

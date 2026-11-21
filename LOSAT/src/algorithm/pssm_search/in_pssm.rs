@@ -179,6 +179,22 @@ pub(crate) struct PssmReader<'a> {
     pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
+/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
+/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, tblastn's and psiblast's
+/// `-in_pssm` of a missing file with `-subject` and with `-db`), as for the files that
+/// `report::archive::error_lines` takes as the subjects' (`subject_file`).
+pub(crate) fn file_error_in_run(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some_and(|native| {
+            native
+                .message
+                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
+        })
+}
+
 impl PssmReader<'static> {
     /// psiblast's reader.
     pub(crate) const PSIBLAST: Self = Self {
@@ -495,6 +511,7 @@ fn stopped_as_query_joins_scope(
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
+        archive_pssm: None,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -975,6 +992,7 @@ pub(crate) fn psi_search_and_object_of(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        archive_pssm: None,
         annot,
         defline_reads_annot,
         round_query: None,

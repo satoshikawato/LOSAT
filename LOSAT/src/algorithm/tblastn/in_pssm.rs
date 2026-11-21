@@ -71,22 +71,6 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
-/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
-/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
-/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, `-in_pssm` of a missing file
-/// with `-subject` and with `-db`), as for the files that `archive::error_lines` takes as the
-/// subjects' (`subject_file`).
-pub(super) fn file_error_in_run(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<crate::cli::NativeError>()
-        .is_some_and(|native| {
-            native
-                .message
-                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
-        })
-}
-
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
 /// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
 /// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI).

@@ -74,11 +74,13 @@ impl EngineCounts {
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
 /// query's warnings before it (`write_hit_list_seqaligns`). `gapped` is `!args.ungapped`: an
-/// ungapped search's HSPs are Dense-diag Seq-aligns (`report::serial::seqalign`).
+/// ungapped search's HSPs are Dense-diag Seq-aligns (`report::serial::seqalign`). `pssm_type` is
+/// psiblast's "Blast Type" (`RunRecord::pssm_type`), `None` for BLASTP's.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
     gapped: bool,
+    pssm_type: Option<crate::report::record::PssmBlastType>,
     hit_lists: &[Option<BlastpHitList>],
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
@@ -88,6 +90,7 @@ pub(crate) fn write_blastp_seqalign(
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type,
         program: Program::Blastp,
         db_title: subjects.db_title(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440

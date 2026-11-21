@@ -125,6 +125,22 @@ pub struct RunRecord<'a> {
     /// Whether the search is gapped (`BLASTHspListToSeqAlign`) or ungapped
     /// (`BLASTUngappedHspListToSeqAlign`).
     pub gapped: bool,
+    /// The "Blast Type" of a PSSM search, which `program` does not name (`None`: `program`'s).
+    pub pssm_type: Option<PssmBlastType>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:666-673
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-694
+/// The program type of a PSSM search's options, which the formatter's program name is
+/// (`Blast_ProgramNameFromType`): the Seq-annots' "Blast Type" is `ProgramNameToEnum` of it, so
+/// psiblast's (also of a FASTA query's first round) and PSI-TBLASTN's (tblastn `-in_pssm`) are
+/// their own, not BLASTP's and TBLASTN's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PssmBlastType {
+    /// `psiblast`, `ePSIBlast`.
+    Psiblast,
+    /// `psitblastn`, `ePSITblastn`.
+    PsiTblastn,
 }
 
 impl RunRecord<'_> {

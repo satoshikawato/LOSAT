@@ -371,6 +371,9 @@ fn run_queries(
                 );
                 let mut search =
                     PsiSearch::from_engine(&current.engine, records[0].clone(), setup_messages);
+                // The PSSM that the round's archive holds (made only for a run that writes one,
+                // `query_pssm`'s `archive`).
+                search.archive_pssm = args.archive.as_ref().and(current.object.clone());
                 // The query source is fixed for the run: a PSSM query's warning label keeps its
                 // title rule in every round (`PsiSearch::warning_title`).
                 search.warning_title = args
@@ -1160,6 +1163,7 @@ fn next_pssm(
         &|s_idx| keys.key(s_idx),
         ancillary,
         &mut unread,
+        args.archive.is_some(),
     );
     keys.unread_warnings(args.app.ncbi_name(), &unread, warnings);
     pssm

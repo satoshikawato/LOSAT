@@ -161,7 +161,8 @@ pub struct ArchiveRequest {
     /// from the records).
     pub database: Option<Vec<u8>>,
     /// The `Web_StepNumber` format option: psiblast's `-num_iterations` with `-db`, when it is not
-    /// 0.
+    /// 0 (the search strategy's; psiblast's archive of a round has the round's number,
+    /// `writer::ArchiveRound`).
     pub step_number: Option<i32>,
 }
 

@@ -2902,6 +2902,8 @@ fn psiblast_pssms(
             &|s_idx| keys.key(s_idx),
             ancillary,
             &mut unread,
+            // The PSSM after the last round, which no archive holds.
+            false,
         );
         let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
@@ -4350,7 +4352,9 @@ pub fn run(
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {
-                if let Some(lines) = super::archive::error_lines(error, false) {
+                // psiblast's `-in_pssm` file, which NCBI opens inside `Run` too.
+                let in_run = crate::algorithm::pssm_search::in_pssm::file_error_in_run(error);
+                if let Some(lines) = super::archive::error_lines(error, in_run) {
                     let _ = crate::report::archive::write_error_archive_after_post(
                         handle,
                         error,
@@ -4363,7 +4367,8 @@ pub fn run(
                     // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
                     // psiblast's `-in_pssm` reader, NCBI's object manager): the archive of the
                     // messages saved before it, with no text before it, as tblastn's end writes.
-                    let _ = crate::report::archive::write_error_archive(handle, &lines, &mut stream);
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
                 }
             }
             Ok(()) => {

@@ -142,6 +142,7 @@ pub(crate) fn write_tblastx_seqalign(
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Tblastx,
         db_title: match subjects {
             SeqalignSubjects::Records { .. } => None,

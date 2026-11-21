@@ -54,6 +54,7 @@ pub(super) fn write_tblastn_seqalign(
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Tblastn,
         db_title: shown.db_title(),
         gapped: true,

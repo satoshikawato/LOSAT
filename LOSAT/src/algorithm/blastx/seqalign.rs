@@ -68,6 +68,7 @@ pub(super) fn write_blastx_seqalign(
     batches: &[BatchResults],
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastx,
         db_title: match names {
             SeqalignSubjects::Records => None,

@@ -60,7 +60,7 @@ BLAST+ `tblastx`: one run), and of 5 LOSAT runs and one NCBI BLAST+ run at 1 thr
   range is 1.1 (`blastn-short`, `rpstblastn`) to 4.8 (`blastn`), and 104 in `tblastx` (62.35 s
   against 6,493.88 s).
 - NCBI BLAST+'s max RSS at 16 threads was 1.3 (`tblastx`) to 24.6 (`blastn`) times LOSAT's.
-- LOSAT wrote NCBI BLAST+'s output in every search but `blastp` and `blastp-fast`. There a `-db`
+- LOSAT wrote NCBI BLAST+'s output (apart from the version line, which names LOSAT) in every search but `blastp` and `blastp-fast`. There a `-db`
   search and a `-subject` search give different statistics in NCBI BLAST+ too; compared form by form
   at 1 thread, LOSAT `-subject` wrote the bytes of NCBI BLAST+ `-subject`, and LOSAT `-db` those of
   NCBI BLAST+ `-db`.
@@ -86,7 +86,7 @@ search:
 
 The output does not depend on the thread count: the same command writes the same bytes with any
 `-num_threads`, and on the release test set those are the bytes of NCBI BLAST+ 2.17.0 run with one
-thread. The release tests compare 1, 2 and 4 threads, and the benchmarks on this page up to 16. You can
+thread (apart from the version line, which names LOSAT). The release tests compare 1, 2 and 4 threads, and the benchmarks on this page up to 16. You can
 raise `-num_threads` without checking the results again.
 
 `-mt_mode` is accepted for compatibility, and the output does not depend on it either.
@@ -161,7 +161,7 @@ Bakta, Biopython, BlobToolKit, BRIG, BUSCO, CheckV, ECTyper, Easyfig, Galaxy, Ka
 MOB-suite, nf-core/blast, OrthoFinder, Prokka, pyani (ANIb), QIIME 2, rBLAST, ResFinder and
 PlasmidFinder, RGI, Roary, SISTR, Trinotate, Unicycler and ViPTreeGen.
 
-- **Output.** In every compared run LOSAT wrote NCBI BLAST+ 2.17.0's output. In BUSCO and QIIME 2,
+- **Output.** In every compared run LOSAT wrote NCBI BLAST+ 2.17.0's output, apart from the line that names the program's version in the formats that have one. In BUSCO and QIIME 2,
   NCBI BLAST+'s own output with several threads differs from its 1-thread output; there LOSAT's output
   at every thread count equals NCBI BLAST+'s 1-thread output.
 - **Time.** Counting only the tools' searches in which NCBI BLAST+ took at least 1 s per BLAST run
@@ -182,7 +182,7 @@ measures program start-up more than search speed.
 
 ## WebAssembly
 
-The serial WASI build (`wasm32-wasip1`) matches NCBI BLAST+ 2.17.0 on the release test set, with the
+The serial WASI build (`wasm32-wasip1`) matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT), with the
 same bytes as the Linux x64 native binary. The threaded WASI build (`wasm32-wasip1-threads`) takes
 `-num_threads` like the native program; it is tested in CI, outside the release's NCBI parity claim.
 Both run slower than the native program, because WebAssembly's vector instructions are narrower than

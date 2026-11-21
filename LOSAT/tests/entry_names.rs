@@ -94,20 +94,13 @@ fn a_shim_prints_what_the_subcommand_prints() {
     let installed = install(&dir);
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
-        // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
-        // which is not part of BLAST+, and the maskers have their own: `rpsbproc: 0.5.1`,
-        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`; makembindex prints the
-        // release without the `+`: `makembindex: 2.17.0`).
+        // `blastn -version` is what tools read the version from (`blastn: LOSAT 0.2.0`, where NCBI's
+        // is `blastn: 2.17.0+`; rpsbproc and the maskers write LOSAT's too, where NCBI's are
+        // `rpsbproc: 0.5.1`, `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`,
+        // `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
-        let first_line = match name {
-            "rpsbproc" => "rpsbproc: 0.5.1\n".to_string(),
-            "dustmasker" => "dustmasker: 1.0.0\n".to_string(),
-            "segmasker" => "segmasker: 1.0.0\n".to_string(),
-            "windowmasker" => "windowmasker: 1.0.0\n".to_string(),
-            "makembindex" => "makembindex: 2.17.0\n".to_string(),
-            _ => format!("{name}: 2.17.0+\n"),
-        };
+        let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
         assert!(
             version.stdout.starts_with(first_line.as_bytes()),
             "{name}: {version:?}"
@@ -225,7 +218,9 @@ fn installing_twice_is_fine_and_another_file_is_left_alone() {
     assert!(replaced.status.success(), "{replaced:?}");
     let version = run(shim(&moved, "blastx"), &["-version"]);
     assert!(
-        version.stdout.starts_with(b"blastx: 2.17.0+\n"),
+        version
+            .stdout
+            .starts_with(concat!("blastx: LOSAT ", env!("CARGO_PKG_VERSION"), "\n").as_bytes()),
         "{version:?}"
     );
     let help = run(losat(), &["-h"]);
@@ -248,7 +243,9 @@ fn the_default_directory_is_the_executables_and_the_links_are_relative() {
     assert!(installed.status.success(), "{installed:?}");
     let version = run(shim(&dir, "blastn"), &["-version"]);
     assert!(
-        version.stdout.starts_with(b"blastn: 2.17.0+\n"),
+        version
+            .stdout
+            .starts_with(concat!("blastn: LOSAT ", env!("CARGO_PKG_VERSION"), "\n").as_bytes()),
         "{version:?}"
     );
     #[cfg(unix)]

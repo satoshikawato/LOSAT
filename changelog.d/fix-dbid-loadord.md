@@ -2,7 +2,7 @@
   at a parsed Seq-id that a database of the list cannot look up and another reported sequence's load writes a
   message of the taxonomy database (a damaged `taxdb`): every search program now writes the messages of the
   sequences that NCBI BLAST+ loads before the stop (in the order of its Seq-id handles: gis, accessions, and
-  `gnl|db|n` such as `gnl|BL_ORD_ID|n`, by their number, other ids last) and `BLAST Database error: DB contains no
+  `gnl|db|n` such as `gnl|BL_ORD_ID|n`, by their number, other ids last) and `LOSAT database error: DB contains no
   accession info.` (exit status 2), as NCBI BLAST+ does; LOSAT refused such a run. A load whose order NCBI takes from
   memory addresses (the same number, ids that are not packed, more than 200 ids in the batch) that writes a message
   stays refused. Where a batch has several such Seq-ids, the first that NCBI BLAST+ looks up ends its loads, as in
@@ -23,7 +23,7 @@
   taxonomy database's messages that those loads would have written where NCBI BLAST+ writes them: at the first load
   after the left-out iteration that makes the same lookup, in a query batch between it and the stop (its reports or
   its prefetch) or else in the stopping batch's prefetch before the stop (in NCBI BLAST+'s order of the loads), or not
-  at all where only loads after the stop would make it, then `BLAST Database error: DB contains no accession info.`
+  at all where only loads after the stop would make it, then `LOSAT database error: DB contains no accession info.`
   (exit status 2); LOSAT refused such a batch where any of its other loads looked a tax id up. The sequences of the
   left-out iteration no longer count as loaded: a stop at a Seq-id that one of them holds is now NCBI BLAST+'s
   error, as in NCBI BLAST+, where LOSAT refused it. A load whose order to the stop LOSAT does not know that would

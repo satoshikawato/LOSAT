@@ -182,10 +182,7 @@ impl RpsblastArgs {
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: None,
@@ -323,6 +320,8 @@ pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bo
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::Sam
+                    | ReportFormat::ArchiveFormat
+                    | ReportFormat::Xml
             )
         {
             bail!(
@@ -412,7 +411,7 @@ mod tests {
 
     #[test]
     fn options_of_later_items_are_refused() {
-        for extra in [&["-outfmt", "5"][..], &["-outfmt", "1"]] {
+        for extra in [&["-outfmt", "8"][..], &["-outfmt", "1"]] {
             let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
             assert!(
                 error

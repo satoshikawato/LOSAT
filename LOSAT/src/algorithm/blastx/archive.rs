@@ -40,8 +40,15 @@ use crate::stats::tables::KarlinParams;
 /// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
 /// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    // The archive's `HitlistSize` is that of outfmt 11, whoever made the other options.
+    let hitlist_size = args
+        .max_target_seqs
+        .or(args.num_alignments.map(|size| size as i32))
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size);
     if let Some(inputs) = &args.request_inputs {
-        return OptionInputs::clone(inputs);
+        let mut inputs = OptionInputs::clone(inputs);
+        inputs.hitlist_size = hitlist_size;
+        return inputs;
     }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
@@ -73,10 +80,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
-    inputs.hitlist_size = args
-        .max_target_seqs
-        .or(args.num_alignments.map(|size| size as i32))
-        .map_or(args.formatting.recorded_hitlist_start(), |size| size);
+    inputs.hitlist_size = hitlist_size;
     inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
 }
@@ -151,6 +155,18 @@ struct FirstContext {
 fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstContext {
     let parameters = &batch.parameters[..6];
     let valid = parameters.iter().find(|parameters| parameters.valid);
+    // RPSTBLASTN's first query of a batch has its profile's K (`BatchResults::gapped_k`, the
+    // footer's and the XML's), the table's otherwise.
+    let gapped = gapped.map(|mut block| {
+        if let Some(&k) = batch
+            .gapped_k
+            .as_ref()
+            .and_then(|gapped_k| gapped_k.first())
+        {
+            block.k = k;
+        }
+        block
+    });
     FirstContext {
         karlin: valid.map(|parameters| (parameters.ungapped, gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),

@@ -520,10 +520,22 @@ fn run_inner(
             || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
-            bail!(
-                "unsupported BLASTX query input for -outfmt {}: use a regular file",
-                choice.number
-            );
+            // RPSTBLASTN reads such a query into an unnamed temporary file first and reads it
+            // from there (twice); BLASTX keeps DECISIONS 22's refusal. The copy is read as
+            // the stream is read (`InputFile::into_seekable_copy`).
+            let copy = args
+                .rpstblastn
+                .is_some()
+                .then(|| query_file.into_seekable_copy())
+                .flatten();
+            query_file = match copy {
+                Some(copy) => copy,
+                None => bail!(
+                    "unsupported {} query input for -outfmt {}: use a regular file",
+                    program.upper,
+                    choice.number
+                ),
+            };
         }
         // The read before the search reads the open file itself (a `.gz` query is an unnamed
         // inflated file, `input_files::open_file_input`, which no path reaches) and gives it back
@@ -624,14 +636,16 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
-        // What each batch's RPS set-up writes into the options handle, which the search strategy's
-        // later requests hold (`OptionsHandle::pass`): the search for the database knows its
-        // volumes' costs.
-        if let Some(strategy) = &strategy {
-            strategy
-                .options()
-                .set_search_sets(Vec::new(), search.handle_sets())?;
+        let handle = archive
+            .as_ref()
+            .map(crate::report::archive::ArchiveHandle::options)
+            .or_else(|| strategy.as_ref().map(|strategy| strategy.options()));
+        let search = search.for_database(&options, database.as_ref(), handle.is_some())?;
+        // What each batch's RPS set-up writes into the options handle, which the requests of the
+        // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
+        // database knows its volumes' costs and its units' database length.
+        if let Some(handle) = handle {
+            handle.set_search_sets(Vec::new(), search.handle_sets())?;
         }
         options.rpstblastn = Some(search);
     }

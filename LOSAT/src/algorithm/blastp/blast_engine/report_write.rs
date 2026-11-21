@@ -121,6 +121,8 @@ pub(super) struct ReportView<'a> {
     pub(super) context: &'a ReportContext,
     pub(super) call_batches: &'a archive::CallBatches<'a>,
     pub(super) filtered_empty: bool,
+    /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
+    pub(super) rps_multi_volume: bool,
     pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
@@ -306,6 +308,7 @@ pub(super) fn write_xml(
         hit_loads,
         pairwise_hits,
         filtered_empty,
+        rps_multi_volume,
         xml_matrix_failure,
         xml_only_xml2,
         ..
@@ -393,6 +396,11 @@ pub(super) fn write_xml(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
+            // rpsblast over several volumes keeps no warning in the merged results
+            // (`query_warning_lines`).
+            if rps_multi_volume {
+                return Vec::new();
+            }
             crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],
@@ -459,7 +467,13 @@ pub(super) fn write_xml(
         placements: &ranges.query_input.placements,
     };
     let db_name = database.map(|database| database.name().to_string());
-    let version = format!("BLASTP {}", crate::NCBI_BLAST_VERSION);
+    // `BlastOutput_program` and `_version` name the application: `blastp`, `rpsblast`
+    // (`Blast_ProgramNameFromType` of its search's program, `RPSBLAST 2.17.0+`).
+    let version = format!(
+        "{} {}",
+        args.app.ncbi_name().to_ascii_uppercase(),
+        crate::NCBI_BLAST_VERSION
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
     // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
     let filter = crate::report::blast_xml::filter::filter_string(
@@ -470,7 +484,7 @@ pub(super) fn write_xml(
     );
     let xml = blast_xml::BlastpXml {
         run: crate::report::blast_xml::XmlRun {
-            program: "blastp",
+            program: args.app.ncbi_name(),
             version: &version,
             reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             db_name: db_name.as_deref().unwrap_or(""),
@@ -504,7 +518,7 @@ pub(super) fn write_xml(
             .iter()
             .map(|&skipped| !skipped)
             .collect(),
-        program: "BLASTP",
+        program: args.app.name(),
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
         only_xml2: xml_only_xml2,

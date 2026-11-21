@@ -49,10 +49,10 @@ enum InputHandle {
     Own(std::fs::File),
     /// The process's standard input (`standard_input`), never closed by LOSAT.
     StandardInput(std::mem::ManuallyDrop<std::fs::File>),
-    /// A test's file read as the standard input is read (`InputFile::as_standard_input`), closed
-    /// when dropped.
-    #[cfg(test)]
-    TestStandardInput(std::fs::File),
+    /// A file read as the standard input is read (`InputFile::as_standard_input`), closed when
+    /// dropped: a test's, or the copy of the standard input that a run reads twice
+    /// (`InputFile::into_seekable_copy`).
+    CopiedStandardInput(std::fs::File),
 }
 
 impl InputFile {
@@ -62,11 +62,40 @@ impl InputFile {
         Self(InputHandle::StandardInput(file))
     }
 
-    /// A test's `file` read as `-` reads the standard input (`is_standard_input`), but closed
-    /// when dropped.
-    #[cfg(test)]
+    /// A `file` read as `-` reads the standard input (`is_standard_input`), but closed when
+    /// dropped.
     pub(crate) fn as_standard_input(file: std::fs::File) -> Self {
-        Self(InputHandle::TestStandardInput(file))
+        Self(InputHandle::CopiedStandardInput(file))
+    }
+
+    /// The bytes of this input from its position to its end, copied into an unnamed temporary
+    /// file under `temp_dir()` and read from there from the start, as this input is read (the
+    /// standard input stays `cin`'s kind of stream, `is_standard_input`; a path stays a file).
+    /// For a run that reads its query twice, which a pipe or a stream cannot be read for.
+    /// `None` where there is no temporary directory (WASI) or the copy fails; the read
+    /// consumes the input as the run's own read would.
+    pub(crate) fn into_seekable_copy(mut self) -> Option<Self> {
+        use std::io::{Seek, Write};
+        let directory = temporary_directory()?;
+        let mut copy = unnamed_temporary_file(&directory, "query").ok()?;
+        let mut sink = std::io::BufWriter::with_capacity(1 << 16, &mut copy);
+        let mut buffer = vec![0u8; 1 << 16];
+        loop {
+            match std::io::Read::read(&mut self, &mut buffer) {
+                Ok(0) => break,
+                Ok(read) => sink.write_all(&buffer[..read]).ok()?,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        }
+        sink.flush().ok()?;
+        drop(sink);
+        copy.seek(std::io::SeekFrom::Start(0)).ok()?;
+        Some(if self.is_standard_input() {
+            Self::as_standard_input(copy)
+        } else {
+            Self::from(copy)
+        })
     }
 
     /// The file to read, seek and ask about.
@@ -74,8 +103,7 @@ impl InputFile {
         match &self.0 {
             InputHandle::Own(file) => file,
             InputHandle::StandardInput(file) => file,
-            #[cfg(test)]
-            InputHandle::TestStandardInput(file) => file,
+            InputHandle::CopiedStandardInput(file) => file,
         }
     }
 
@@ -87,8 +115,7 @@ impl InputFile {
         match self.0 {
             InputHandle::Own(_) => false,
             InputHandle::StandardInput(_) => true,
-            #[cfg(test)]
-            InputHandle::TestStandardInput(_) => true,
+            InputHandle::CopiedStandardInput(_) => true,
         }
     }
 }
@@ -774,6 +801,38 @@ mod tests {
         drop(second);
         // SAFETY: `raw` is still open (neither input closed it) and nothing else owns it.
         drop(unsafe { OwnedFd::from_raw_fd(raw) });
+    }
+
+    // No NCBI counterpart (the copy only makes a stream a file that a run can read twice): the
+    // bytes of a pipe from the input's position are read from the start of the copy, which has a
+    // position and is read as `cin` when the input was the standard input.
+    #[test]
+    fn a_stream_copied_for_a_second_read_has_a_position_and_keeps_its_kind() {
+        use std::io::{Read, Seek, SeekFrom};
+        for standard in [false, true] {
+            let path = crate::utils::test_dir::temp_dir().join(format!(
+                "losat-input-files-seekable-copy-{standard}-{}",
+                crate::utils::test_dir::process_id()
+            ));
+            std::fs::write(&path, b">q\nACGT\n").unwrap();
+            let mut file = std::fs::File::open(&path).unwrap();
+            file.seek(SeekFrom::Start(3)).unwrap();
+            let input = if standard {
+                super::InputFile::as_standard_input(file)
+            } else {
+                super::InputFile::from(file)
+            };
+            let mut copy = input.into_seekable_copy().unwrap();
+            assert_eq!(copy.is_standard_input(), standard);
+            assert!(super::has_stream_position(&copy));
+            for _ in 0..2 {
+                copy.seek(SeekFrom::Start(0)).unwrap();
+                let mut bytes = Vec::new();
+                copy.read_to_end(&mut bytes).unwrap();
+                assert_eq!(bytes, b"ACGT\n");
+            }
+            std::fs::remove_file(&path).unwrap();
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped

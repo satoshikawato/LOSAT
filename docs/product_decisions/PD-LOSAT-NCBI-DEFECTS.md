@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.59
+- Version: 1.60
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -240,8 +240,12 @@
   it answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic agree, and refused under
   rule 3 only where they differ, as NCBI's result then depends on the machine it was built for
   (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.57, line
-  RG's approved exception 17);
-  1.59 2026-11-21 (approved exception 18, the Owner's decision of 2026-11-20 on line RG's question
+  RG's approved exception 17)
+  1.59 2026-11-21 (BLASTP `-use_sw_tback`, line RG item X4-excl: a match whose subject NCBI's
+  fetch excludes sets the batch's status back to 0 unless NCBI's early termination skips it, so a
+  failed Smith-Waterman redo before it neither fails the batch nor crashes NCBI, reproduced, rule 2;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.58);
+  1.60 2026-11-21 (approved exception 18, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
   F2, `-import_search_strategy`)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -1678,7 +1682,14 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   above (fixture rows `db.x4.sw.fail.c.*` and `db.x4.sw.fail.h.*`, whose outfmt 0 and 7 stdout is
   NCBI's of a near input that fails at the same step, rows `db.x4.sw.fail.f.0` and
   `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
-  none, end in `Traceback failed`).
+  none, end in `Traceback failed`). The batch's status is that of the last match the redo reaches: a
+  match whose subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps without
+  any of its lines) sets it back to 0, unless the redo skips that match by early termination: by
+  then every query of the batch already holds `-max_target_seqs` alignments whose worst e-value is
+  0.002 or less, and the match's preliminary e-value is above 0.01 (`blast_kappa.c:3525-3575`,
+  `redo_alignment.c:1560-1580`). A failure before such a match therefore neither fails the batch
+  nor crashes NCBI, and LOSAT reproduces that (rule 2; version 1.59; 2026-11-21, line RG item
+  X4-excl, rows `db.x4excl.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the
@@ -2102,9 +2113,9 @@ moves only that list (line RG `DECISIONS.md` D1a4-13).
     with that one value written as its digits). The writers' unit tests hold the value, as for
     `INT_MIN` (no fixture row kind holds NCBI's bytes with one value written otherwise).
 
-## Approved exception 18 (an imported strategy's subjects at more than one thread, version 1.59)
+## Approved exception 18 (an imported strategy's subjects at more than one thread, version 1.60)
 
-Version 1.59, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.60, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies

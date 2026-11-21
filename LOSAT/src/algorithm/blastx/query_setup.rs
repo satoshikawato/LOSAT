@@ -136,14 +136,15 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
 /// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
-    let mut message = String::new();
-    for record in records {
-        message.push_str("Error: Unknown error code -1 ");
-        if record.sequence.is_empty() {
-            message.push_str("Warning: Sequence contains no data ");
-        }
-    }
-    message
+    crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(records.iter().map(
+        |record| {
+            if record.sequence.is_empty() {
+                vec![crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string()]
+            } else {
+                Vec::new()
+            }
+        },
+    ))
 }
 
 pub fn prepare_queries(

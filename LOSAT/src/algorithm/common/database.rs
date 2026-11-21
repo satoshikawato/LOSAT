@@ -3640,6 +3640,9 @@ pub(crate) struct TaxdbRun {
     /// Whether a prefetch of the run can stop, so that the run keeps `loaded`
     /// ([`TaxdbRun::prefetch_can_stop`]), decided once.
     can_stop: std::sync::OnceLock<bool>,
+    /// Whether every load of a sequence with a positive taxid throws
+    /// ([`TaxdbRun::load_throws`]), decided once.
+    load_throws: std::sync::OnceLock<bool>,
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
@@ -3977,6 +3980,28 @@ impl TaxdbRun {
     /// looked through again for each batch.
     pub(crate) fn found(&self, db: &SeqDb) -> bool {
         *self.found.get_or_init(|| db.taxdb_found())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155 (cited
+    // at `taxdb_error`)
+    /// Whether a file of the run's taxonomy database does not open where NCBI's `CMemoryFile`
+    /// throws (`SeqDbError::TaxdbThrows`, `seqdb::taxdb`'s `throws_at_every_lookup`): every load
+    /// of a sequence with a positive taxid throws then, so psiblast's PSSM reads no letters of
+    /// such a subject (`Failed to retrieve sequence`, `ListedTitles::pssm_reads` of BLASTP), its
+    /// loads write no text ([`pssm_load_texts`]) and the organism report leaves its HSPs out
+    /// (`report::tax_report::SubjectTable::with_loads_that_throw`). Decided once, without
+    /// `taxdb.bti` on the search path as false; the files are opened apart from the run's handle,
+    /// whose texts of opening stay for its first lookup.
+    pub(crate) fn load_throws(&self, db: &SeqDb) -> bool {
+        *self.load_throws.get_or_init(|| {
+            self.found(db)
+                && db.search_path().is_some_and(|search_path| {
+                    matches!(
+                        crate::seqdb::taxdb::TaxDb::open(search_path),
+                        Err(SeqDbError::TaxdbThrows { .. })
+                    )
+                })
+        })
     }
 
     /// [`PrefetchTexts`] of the run, read once ([`PrefetchTexts::of`]): none without `taxdb.bti`
@@ -5068,7 +5093,8 @@ fn load_read_texts<'s>(
 /// sequence loaded before (the query's report, an earlier query or round) is loaded again or not,
 /// which LOSAT does not model, so such a read is refused where the two give other texts (the slot
 /// then holds another taxid) and else writes nothing. The lookups are the run's from then on. Empty
-/// without `taxdb.bti` on the search path.
+/// without `taxdb.bti` on the search path, and where every such load throws
+/// ([`TaxdbRun::load_throws`]).
 pub(crate) fn pssm_load_texts(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -5076,7 +5102,8 @@ pub(crate) fn pssm_load_texts(
     lookups: &[i32],
     program: &str,
 ) -> Result<Vec<u8>> {
-    if lookups.is_empty() || !run.found(db) {
+    // A load that throws at its first lookup writes nothing ([`TaxdbRun::load_throws`]).
+    if lookups.is_empty() || !run.found(db) || run.load_throws(db) {
         return Ok(Vec::new());
     }
     let Some(search_path) = db.search_path() else {

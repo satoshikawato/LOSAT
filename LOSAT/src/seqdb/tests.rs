@@ -1442,8 +1442,8 @@ fn header_records_are_decoded() {
     assert!(matches!(decode(&trailing), Err(SeqDbError::Format { .. })));
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139 (quoted
-// at `alias::gi_mask_list`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
+// (`alias::gi_mask_list`).
 /// `MASKLIST` in the alias file of a database given as one name makes its filtering algorithms
 /// the GI masks it names (ids 0 to N-1 in its order, no file read before one is asked for); over
 /// it in another alias file, or with the database named twice, it is passed over.

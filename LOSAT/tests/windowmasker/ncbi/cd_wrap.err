@@ -1,0 +1,8 @@
+Possible duplication of sequences:
+subject: lcl|1 and query: lcl|1
+at intervals
+subject: 18446744073709551601 --- 39985
+query  : 0 --- 40000
+
+pass 1
+pass 2

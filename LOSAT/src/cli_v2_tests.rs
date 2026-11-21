@@ -448,17 +448,14 @@ fn makedb_takes_makeblastdb_s_option_names() {
         assert!(err.to_string().contains(sentence), "{words:?}: {err}");
     }
 
-    // The options of makeblastdb that LOSAT does not implement are named (`-h` and
+    // The option of makeblastdb that LOSAT does not implement is named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-randomize"] {
-        let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
-        assert!(
-            err.to_string().contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's makeblastdb"
-            )),
-            "{option}: {err}"
-        );
-    }
+    let err = makedb(&["-in", "x.faa", "-dbtype", "prot", "-randomize"]).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb"),
+        "-randomize: {err}"
+    );
 
     // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
     for help in ["-help", "--help"] {

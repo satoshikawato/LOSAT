@@ -44,6 +44,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_exception::NcbiException;
 use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::{PrintedIds, SubjectFetch};
@@ -451,14 +452,25 @@ impl BlastnDatabase {
     /// The volumes that NCBI's loader of a new-style MegaBLAST index finds for the `-db` value
     /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths(vols, true)` of the database opened
     /// again by that name, as given, on the search path of this one), each with its number of
-    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). `None` where
-    /// that name does not open this database's volumes (a `-db` value with white space other
-    /// than spaces at its ends, which the search trims and the loader keeps).
-    pub(super) fn index_volumes(&self, indexname: &str) -> Option<Vec<(String, u32)>> {
-        let path = self.db.search_path()?;
+    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). Where that
+    /// name does not open (a `-db` value with white space other than spaces at its ends, which
+    /// the search trims and the loader keeps), the database reader's exception, or `None` where
+    /// LOSAT does not know its place or the name opens other volumes than this database's.
+    pub(super) fn index_volumes(
+        &self,
+        indexname: &str,
+    ) -> Result<Vec<(String, u32)>, Option<NcbiException>> {
+        let path = self.db.search_path().ok_or(None)?;
         let (paths, _) =
             crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
-                .ok()?;
+                .map_err(|error| {
+                    if let Some(exception) = error.ncbi_exception() {
+                        return Some(exception.clone());
+                    }
+                    let text = error.ncbi_message()?;
+                    let site = crate::seqdb::throw_site(&text)?;
+                    Some(NcbiException::new(site, text))
+                })?;
         paths
             .into_iter()
             .map(|vol_name| {
@@ -466,8 +478,9 @@ impl BlastnDatabase {
                     .db
                     .volumes()
                     .iter()
-                    .find(|volume| volume.base() == Path::new(&vol_name))?;
-                Some((vol_name, volume.num_oids()))
+                    .find(|volume| volume.base() == Path::new(&vol_name))
+                    .ok_or(None)?;
+                Ok((vol_name, volume.num_oids()))
             })
             .collect()
     }

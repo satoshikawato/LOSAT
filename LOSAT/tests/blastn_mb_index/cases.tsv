@@ -2,7 +2,7 @@
 # (" ; "-separated: makembindex ARGS with LOSAT's makembindex, put FILE OFFSET VALUE, cut FILE SIZE, cp FROM TO, rm FILE),
 # then blastn. ncbi/<name>.{out,err,rc}: NCBI BLAST+ 2.17.0 (the official Linux x64 release, local oracle), 2026-11-21,
 # ad-RG-D5-4, frozen by remaining-gaps-20261112/D/d5/fixture/freeze_d5b1.py with NCBI's makembindex for the setup.
-# A row with a refusal is one where NCBI searches with an index (or reads one in an undefined way): LOSAT refuses with
+# A row with a refusal is one where NCBI searches with an index (or reads one in an undefined way, or crashes): LOSAT refuses with
 # "-use_index true with <refusal> is not supported by LOSAT's BLASTN"; NCBI's output stays for line D5b-2.
 noidx	-	-query q.fa -outfmt 6 -use_index true -db v1
 noidx_al	-	-query q.fa -outfmt 6 -use_index true -db al
@@ -42,6 +42,11 @@ idx_short30_al	makembindex -input v1 -nmer 8 ; cut v1.00.idx 30	-query q.fa -out
 shd_short_al	makembindex -input v1 -nmer 8 ; cut v1.shd 8	-query q.fa -outfmt 6 -use_index true -db al
 shd_version_al	makembindex -input v1 -nmer 8 ; put v1.shd 4 2	-query q.fa -outfmt 6 -use_index true -db al
 mv_badshd	makembindex -input mv -nmer 8 ; put mv.00.shd 8 99 ; put mv.01.shd 8 99 ; put mv.02.shd 8 99	-query q.fa -outfmt 6 -use_index true -db mv
+failread_mv_firstvol	makembindex -input mv -nmer 8 ; rm mv.00.shd	-query q.fa -outfmt 6 -use_index true -db mv
+failread_old_nmer	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; put oidx.00.idx 16 16	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx
+failread_new_nmer	makembindex -input v1 -nmer 8 ; put v1.00.idx 16 16	-query q.fa -outfmt 0 -use_index true -db v1
+oldempty_archive	-	-query q.fa -outfmt 11 -use_index true -db v1 -index_name ''
+db_vt	-	-query q.fa -outfmt 6 -use_index true -db "v1"
 used_new	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1	a MegaBLAST database index (@CWD@/v1.00.idx)
 used_new_ws8	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -word_size 8	a MegaBLAST database index (@CWD@/v1.00.idx)
 used_al	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST database index (@CWD@/v1.00.idx)
@@ -51,7 +56,6 @@ used_noshd	makembindex -input v1 -nmer 8 ; rm v1.shd	-query q.fa -outfmt 6 -use_
 used_badshd	makembindex -input v1 -nmer 8 ; put v1.shd 8 7	-query q.fa -outfmt 6 -use_index true -db v1	a MegaBLAST database index (@CWD@/v1.00.idx)
 used_mv	makembindex -input mv -nmer 8	-query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index (@CWD@/mv.00.00.idx)
 used_mv_mixed	makembindex -input mv -nmer 8 ; rm mv.01.shd	-query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index (@CWD@/mv.00.00.idx)
-used_mv_firstvol	makembindex -input mv -nmer 8 ; rm mv.00.shd	-query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index (@CWD@/mv.00)
-used_old_empty	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cut oidx.00.idx 0	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx	a MegaBLAST database index (@CWD@/oidx.00.idx)
+used_old_empty	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cut oidx.00.idx 0	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx	an empty MegaBLAST index volume (@CWD@/oidx.00.idx)
 undefined_idx38	makembindex -input v1 -nmer 8 ; cut v1.00.idx 38	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST index volume whose header NCBI does not read whole (@CWD@/v1.00.idx)
 old_endless	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,0,-1	an -index_name range of volumes that NCBI's loader does not finish ('oidx,,0,-1')

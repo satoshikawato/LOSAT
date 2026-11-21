@@ -163,19 +163,15 @@ fn rows_that_differ() -> Vec<String> {
                     .trim()
                     .parse()
                     .unwrap();
-                let want_out = text(file("out"));
+                // An archive's messages are LOSAT's words, wrapped by their length with the
+                // row's directory in them.
+                let want_out = String::from_utf8(
+                    losat::wording::losat_output_bytes(text(file("out")).as_bytes()).into_owned(),
+                )
+                .unwrap();
                 let want_err = text(err);
-                // An archive breaks its long strings into lines by their length, which the
-                // row's directory in a message changes: its lines are compared joined.
-                let layout = |out: &str| {
-                    if case.words.iter().any(|word| word == "11") {
-                        out.replace('\n', "")
-                    } else {
-                        out.to_string()
-                    }
-                };
                 let same = output.status.code() == Some(rc)
-                    && layout(&String::from_utf8_lossy(&output.stdout)) == layout(&want_out)
+                    && String::from_utf8_lossy(&output.stdout) == want_out
                     && stderr == want_err;
                 if !same {
                     eprintln!(

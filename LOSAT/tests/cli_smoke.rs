@@ -1439,8 +1439,8 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
     assert_eq!(output.stdout, plain_megablast.stdout);
     assert_eq!(String::from_utf8_lossy(&output.stderr), warning);
     fs::remove_file(dir.join("db/plain.shd")).unwrap();
-    // An old-style index volume of the database's name: NCBI's loader finds it and searches
-    // with it (an empty one crashes NCBI), which LOSAT refuses.
+    // An empty old-style index volume of the database's name: NCBI's loader finds it and
+    // crashes reading its header, which LOSAT refuses.
     for file in ["db/plain.00.idx", "db/plain.42.idx"] {
         fs::write(dir.join(file), b"").unwrap();
         let output = run(&[&megablast[..], &["-use_index", "true"]].concat());
@@ -1448,7 +1448,7 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
         assert_eq!(output.status.code(), Some(1), "{file}: {error}");
         assert!(output.stdout.is_empty(), "{file}");
         assert!(
-            error.contains("-use_index true with a MegaBLAST database index (")
+            error.contains("-use_index true with an empty MegaBLAST index volume (")
                 && error.contains(file)
                 && error.contains("is not supported by LOSAT's BLASTN"),
             "{file}: {error}"

@@ -68,7 +68,7 @@ mod db_masked;
 mod prelim_kernel;
 // The preliminary stage of a call after its kernel (`run_call`): the choice of the pool and the
 // call's branch (RPS-BLAST, PSSM, query blocks, a database's blocks, a subject set); the close of
-// its stream and the sort of its lists for the redo.
+// its stream and the sort of its preliminary lists.
 mod prelim_run;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
@@ -8970,7 +8970,7 @@ impl PrelimOnly<'_> {
             }
             // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's lists leave compact, to the search of all
             // queries, which moves them to their queries (`x_blocks`); the block's table and
-            // scratch are freed here.
+            // scratch are freed when `run_call` returns right after this.
             PrelimOnly::Block { lists, .. } => *lists = x_compact_hit_lists,
         }
     }
@@ -9641,7 +9641,7 @@ fn run_call(
     )?;
     prelim_run::close_stream(&args, &mut preliminary_hit_lists, &mut x_compact_hit_lists);
     let t_search = crate::utils::xtiming::clock();
-    prelim_run::sort_for_redo(
+    prelim_run::sort_preliminary_lists(
         &args,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,

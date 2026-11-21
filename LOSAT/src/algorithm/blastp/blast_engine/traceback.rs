@@ -681,10 +681,11 @@ fn get_offsets_for_gapped_alignment(
     ))
 }
 
-/// The steps after the traceback on each query's final hit list, in NCBI's order (`run_call`,
-/// after the redo or the ordinary traceback): `-culling_limit`'s or `-best_hit_*`'s pipe,
-/// `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit`, then the e-value sort and the cut to the
-/// traceback's hit list size.
+/// The steps after the traceback on each query's final hit list (`run_call`, after the redo or
+/// the ordinary traceback), in the order that the comments below cite: `-culling_limit`'s or
+/// `-best_hit_*`'s pipe, `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit`, then the e-value
+/// sort (not when `sorts_results` is false) and the cut to the traceback's hit list size (neither
+/// for rpsblast over several volumes, `rps_multi_volume`).
 pub(super) fn finish_hit_lists(
     args: &ResolvedBlastpArgs,
     hit_lists: &mut [Option<BlastpHitList>],

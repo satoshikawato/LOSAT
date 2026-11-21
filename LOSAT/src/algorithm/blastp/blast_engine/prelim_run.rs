@@ -6,7 +6,9 @@
 //! set on the pool (in LOSAT_X_BPSUBJRUN's runs or one task per subject), or the one-thread loop,
 //! with the writer of `-culling_limit` or `-best_hit_*` or with the collector (`run_preliminary`). The
 //! function is the statements of `run_call` at its place, in their order: `run_call` calls it
-//! once, with the kernels and the hit lists, and its `?` passes the stage's errors on.
+//! once, with the kernels and the hit lists, and its `?` passes the stage's errors on. The close
+//! of the call's stream (`close_stream`) and the sort of its lists (`sort_preliminary_lists`),
+//! which `run_call` calls after the stage, are here too.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1336
 //!
@@ -316,8 +318,8 @@ where
     // outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
     let mut rps_unlisted: Vec<usize> = Vec::new();
-    // A database of several volumes: its merged lists are not sorted or cut in `run_call` after
-    // this stage, and it prints no query warnings; so even when no batch is searched (every query
+    // A database of several volumes: its merged lists are not sorted or cut after this stage
+    // (`traceback::finish_hit_lists`), and it prints no query warnings; so even when no batch is searched (every query
     // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
     let mut rps_multi_volume = args.rps_search.is_some()
         && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
@@ -751,11 +753,12 @@ pub(super) fn close_stream(
     }
 }
 
-/// The lists in the order in which the redo reads them, before a database's subjects are
-/// listed: the lists that its fetch excludes keep their place in that order as marks
+/// The e-value sort of the preliminary lists, but rpsblast's (`run_call`, after `close_stream`):
+/// the lists in the order in which the redo or the traceback reads them, before a database's
+/// subjects are listed: the lists that its fetch excludes keep their place in that order as marks
 /// (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
 /// the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
-pub(super) fn sort_for_redo(
+pub(super) fn sort_preliminary_lists(
     args: &ResolvedBlastpArgs,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],

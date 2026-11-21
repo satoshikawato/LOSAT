@@ -274,12 +274,12 @@
   and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
   PR #1440 ready for review, as the PR asked; numbered after 1.63);
   1.65 2026-11-21 (approved exception 19, hit list sizes past `Int4`, NCBI parity line O1c, PR
-  #O1C_PR: the preliminary hit list size, and the best-hit writer's twice that size, computed without
+  #1448: the preliminary hit list size, and the best-hit writer's twice that size, computed without
   NCBI's `Int4` overflow, which ends the rule-2
   reproduction of its wrapped sizes and the rule-3 rejection of the sizes on which NCBI crashes;
   proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of
   2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
-  maintainer's decision, the question of PR #O1C_PR; numbered after 1.64)
+  maintainer's decision, the question of PR #1448; numbered after 1.64)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2239,7 +2239,7 @@ accepted by the maintainer on 2026-11-21 by marking PR #1440 ready for review, a
 
 Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), under the Owner's rules
 of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
-pending the maintainer's decision (the question of PR #O1C_PR).
+pending the maintainer's decision (the question of PR #1448).
 
 19. **A hit list size whose preliminary size, or twice it with `-best_hit_*`, passes `Int4`.** `GetPrelimHitlistSize`
     (`core/blast_hits.c:44-70`) computes the preliminary hit list size in `Int4`:

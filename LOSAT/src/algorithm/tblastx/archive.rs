@@ -403,23 +403,17 @@ fn carried(args: TblastxArgs) -> crate::report::archive::read::import::Carried {
 }
 
 /// tblastx's arguments for a TBLASTX strategy that another program runs (`import::RunAs`): its
-/// defaults with the arguments the running program keeps. tblastx has no `-strand` (LOSAT
-/// refuses it) and no `-mt_mode` (whose output is that of one thread).
+/// defaults with the arguments the running program keeps. tblastx has no `-mt_mode` (whose
+/// output is that of one thread).
 pub(crate) fn from_carried(
     carried: crate::report::archive::read::import::Carried,
 ) -> Result<TblastxArgs> {
-    use crate::report::archive::read::import::Start;
-    if carried.strand != "both" {
-        return Err(Start::unported(
-            "-strand with a search strategy of tblastx",
-            Program::Tblastx.name(),
-        ));
-    }
     let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastx"])?;
     let crate::cli::Commands::Tblastx(mut out) = cli.command else {
         unreachable!("the arguments of tblastx")
     };
     out.import = carried.import_app();
+    out.strand = carried.strand;
     out.max_target_seqs = carried
         .max_target_seqs
         .map(|n| usize::try_from(n).unwrap_or(0));
@@ -495,6 +489,7 @@ pub(crate) fn apply_strategy(
     out.max_target_seqs = args.max_target_seqs;
     out.formatting = args.formatting;
     out.num_threads = args.num_threads;
+    out.strand = args.strand;
     out.matrix_file = args.matrix_file;
     out.import_search_strategy = Some(path);
     // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the

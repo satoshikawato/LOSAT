@@ -55,7 +55,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-best_hit_overhang`, `-best_hit_score_edge` with `blastp`, `blastx`, `tblastn` or `tblastx` | Refused: not yet supported. `blastn` runs them. |
 | `-import_search_strategy` with a strategy file in binary or XML form | Refused: not yet supported. Strategy files in text form, the form that `-export_search_strategy` writes, work. |
 | `-import_search_strategy` with queries given as a list of locations, a GI list, a PHI-BLAST pattern, or a PSI-BLAST, RPS-BLAST or PSSM search | Refused: not yet supported. |
-| `-import_search_strategy` with an option that the program refuses on its command line | Refused, as on the command line (for example `-ungapped` in `blastp`). |
+| `-import_search_strategy` with an option that the program refuses on its command line | Refused, as on the command line (for example `-html`). |
 | `-import_search_strategy` with the strategy of another program | Refused, except `blastn` and `blastx` running a `tblastx` strategy and `tblastx` running a `blastn` or `blastx` one, which run as NCBI runs them. Between the other programs NCBI stops with an error or reads the query as the wrong molecule. |
 | `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn` | Refused. |
 | `-export_search_strategy -` (standard output) | Refused. A file name works. |

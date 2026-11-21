@@ -4383,11 +4383,15 @@ fn open_search_database(
                 )?;
             }
             // rpsblast: what the application and each batch's RPS set-up set in the options
-            // handle, which the search strategy's requests hold.
-            if let (Some(rps), Some(strategy)) =
-                (resolved.rps_search.as_deref(), args.strategy.as_ref())
-            {
-                rps_hooks::note_strategy_sets(strategy, rps, resolved, &database)?;
+            // handle, which the requests of the archive and of the search strategy hold.
+            if let (Some(rps), Some(handle)) = (
+                resolved.rps_search.as_deref(),
+                args.archive
+                    .as_ref()
+                    .map(crate::report::archive::ArchiveHandle::options)
+                    .or_else(|| args.strategy.as_ref().map(|strategy| strategy.options())),
+            ) {
+                rps_hooks::note_handle_sets(handle, rps, resolved, &database)?;
             }
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
@@ -7360,6 +7364,93 @@ fn context0_searched(
     }
 }
 
+/// What the blocks and statistics of a batch's first query are made of (`FirstContexts::first_context`).
+struct FirstContexts<'a> {
+    contexts: &'a [QueryContext],
+    query_valid: &'a [bool],
+    searchsp: Option<i64>,
+    exact_search_spaces: &'a [Option<i64>],
+    search_spaces: &'a [SearchSpace],
+    /// RPS-BLAST's `EffectiveSearchSpace` option of each batch, by its first query
+    /// (`rps_request_spaces`); `None` otherwise.
+    request_spaces: Option<&'a [Option<i64>]>,
+    /// rpsblast's gapped K per query (`rps_search::engine::batch_gapped_k`); `None` otherwise.
+    rps_gapped_k: Option<&'a [f64]>,
+    gapped_params: crate::stats::KarlinParams,
+    ungapped: bool,
+}
+
+impl FirstContexts<'_> {
+    /// The blocks and statistics of the batch whose first query is `first` (BLASTP has one
+    /// context per query): `-1` triples for a query without a valid context, and for the gapped
+    /// block of an ungapped search.
+    fn first_context(&self, first: usize) -> super::archive::FirstContext {
+        let context0 = context0_searched(
+            self.contexts,
+            self.query_valid,
+            self.searchsp,
+            self.exact_search_spaces,
+            self.search_spaces,
+            first,
+        );
+        // rpsblast's option is the space its last search unit leaves in the options handle.
+        let option_space = self
+            .request_spaces
+            .and_then(|spaces| spaces[first])
+            .unwrap_or(context0.space);
+        if !self.query_valid[first] {
+            return super::archive::FirstContext {
+                karlin: None,
+                search_space: 0,
+                length_adjustment: 0,
+                context0_space: option_space,
+                context0_length: context0.query_length,
+            };
+        }
+        // rpsblast's first query of a batch has its profile's K (`RPS_K_MULT` times the `.aux`
+        // value, `rps_search::engine::batch_gapped_k`), the others the table's.
+        let mut gapped = self.gapped_params;
+        if let Some(k) = self.rps_gapped_k {
+            gapped.k = k[first];
+        }
+        super::archive::FirstContext {
+            karlin: Some((
+                self.contexts[first].karlin_params,
+                (!self.ungapped).then_some(gapped),
+            )),
+            search_space: context0.space,
+            length_adjustment: self.search_spaces[first].length_adjustment,
+            context0_space: option_space,
+            context0_length: context0.query_length,
+        }
+    }
+}
+
+/// rpsblast's `EffectiveSearchSpace` option of each batch (by its first query `first` of
+/// `firsts`), the space its last search unit leaves in the options handle
+/// (`rps_hooks::request_space`); `None` for another search.
+fn rps_request_spaces(
+    firsts: impl Iterator<Item = usize>,
+    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    gapped_params: &KarlinParams,
+) -> Result<Option<Vec<Option<i64>>>> {
+    let Some(units) = rps_units else {
+        return Ok(None);
+    };
+    let mut spaces = vec![None; contexts.len()];
+    for first in firsts {
+        spaces[first] = Some(rps_hooks::request_space(
+            units,
+            args,
+            &contexts[first],
+            gapped_params,
+        )?);
+    }
+    Ok(Some(spaces))
+}
+
 /// The searched space of each batch of `call` (`CallRequests::set_searched`): its context 0
 /// (`context0_searched`) where NCBI searches the batch (not `query_batch_skipped`), with
 /// rpsblast's the space its last search unit leaves in the options handle
@@ -7373,21 +7464,13 @@ fn set_call_searched(
     (query_valid, query_batch_skipped): (&[bool], &[bool]),
     (exact_search_spaces, search_spaces): (&[Option<i64>], &[SearchSpace]),
 ) -> Result<()> {
-    let rps_request_spaces = match rps_units {
-        Some(units) => {
-            let mut spaces = vec![None; contexts.len()];
-            for first in call.batch_firsts() {
-                spaces[first] = Some(rps_hooks::request_space(
-                    units,
-                    args,
-                    &contexts[first],
-                    gapped_params,
-                )?);
-            }
-            Some(spaces)
-        }
-        None => None,
-    };
+    let rps_request_spaces = rps_request_spaces(
+        call.batch_firsts(),
+        rps_units,
+        args,
+        contexts,
+        gapped_params,
+    )?;
     call.set_searched(|first| {
         (!query_batch_skipped[first]).then(|| {
             let mut context0 = context0_searched(
@@ -9173,28 +9256,11 @@ fn run_call(
         }
     }
 
-    // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
-    // and stand for the subject set in the redo; the hit lists name them by their rank
-    // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
-    // definition lines are read after the redo (`ListedSubjects::read_titles`).
-    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
-    // reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let mut listed_subjects = match database {
-        Some(database) => Some(database::ListedSubjects::x_list(
-            database,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-        )?),
-        None => None,
-    };
-    // The subject set of a `-subject` search, which the reports read after the redo.
-    let subject_set: &[EncodedProtein] = subjects;
-    let subjects = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => listed.redo_subjects(database),
-        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
-    };
-
+    // The lists in the order in which the redo reads them, before a database's subjects are
+    // listed: the lists that its fetch excludes keep their place in that order as marks
+    // (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
+    // the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
     let merge_sort_start = blastp_timing_start(timing_enabled);
     // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
     // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
@@ -9216,6 +9282,27 @@ fn run_call(
             merge_sort_start,
         );
     }
+
+    // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
+    // and stand for the subject set in the redo; the hit lists name them by their rank
+    // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
+    // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
+    // reads each match's subject from the database.
+    let mut listed_subjects = match database {
+        Some(database) => Some(database::ListedSubjects::x_list(
+            database,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+        )?),
+        None => None,
+    };
+    // The subject set of a `-subject` search, which the reports read after the redo.
+    let subject_set: &[EncodedProtein] = subjects;
+    let subjects = match (listed_subjects.as_ref(), database) {
+        (Some(listed), Some(database)) => listed.redo_subjects(database),
+        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
+    };
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
     // lists of all queries, so all are expanded here (but for the windows of the redo below); the
     // one-thread loop (`redo_run::one_thread_redo`) expands each query's list when it reaches it.
@@ -9350,6 +9437,9 @@ fn run_call(
         kappa_query_batches: &kappa_query_batches,
         evalue_adjust_contexts: &evalue_adjust_contexts,
         build_redo_align_params: &build_redo_align_params,
+        fetch_excluded: listed_subjects
+            .as_ref()
+            .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
         x_win_expand,
         ordinary_traceback,
         #[cfg(all(
@@ -9931,7 +10021,9 @@ fn run_call(
                     hsp_len: search_spaces[q_idx].length_adjustment as i32,
                     eff_space: exact_search_spaces[q_idx]
                         .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
-                    kappa: gapped.k,
+                    // rpsblast: the footer's K, 1.2 times the profile's of the batch's first
+                    // query (`rps_hooks::rps_search`); the table's for every other.
+                    kappa: rps_gapped_k.as_ref().map_or(gapped.k, |k| k[q_idx]),
                     lambda: gapped.lambda,
                     entropy: gapped.h,
                 }
@@ -9947,38 +10039,25 @@ fn run_call(
             observer.query_stats(q_idx, stats);
         }
     }
-    // The blocks and statistics of a batch's first query (BLASTP has one context
-    // per query): `-1` triples for a query without a valid context, and for the
-    // gapped block of an ungapped search.
-    let first_context = |first: usize| -> super::archive::FirstContext {
-        let context0 = context0_searched(
-            &contexts,
-            &query_valid,
-            args.searchsp,
-            &exact_search_spaces,
-            &search_spaces,
-            first,
-        );
-        if !query_valid[first] {
-            return super::archive::FirstContext {
-                karlin: None,
-                search_space: 0,
-                length_adjustment: 0,
-                context0_space: context0.space,
-                context0_length: context0.query_length,
-            };
-        }
-        super::archive::FirstContext {
-            karlin: Some((
-                contexts[first].karlin_params,
-                (!args.ungapped).then_some(gapped_params),
-            )),
-            search_space: context0.space,
-            length_adjustment: search_spaces[first].length_adjustment,
-            context0_space: context0.space,
-            context0_length: context0.query_length,
-        }
+    let rps_request_spaces = rps_request_spaces(
+        query_batches.iter().map(|batch| batch.searched.start),
+        rps_units,
+        &args,
+        &contexts,
+        &gapped_params,
+    )?;
+    let first_contexts = FirstContexts {
+        contexts: &contexts,
+        query_valid: &query_valid,
+        searchsp: args.searchsp,
+        exact_search_spaces: &exact_search_spaces,
+        search_spaces: &search_spaces,
+        request_spaces: rps_request_spaces.as_deref(),
+        rps_gapped_k: rps_gapped_k.as_deref(),
+        gapped_params,
+        ungapped: args.ungapped,
     };
+    let first_context = |first: usize| first_contexts.first_context(first);
     // The queries of the call's batches, as the archive and the search strategy take them.
     let batch_spans = || -> Vec<std::ops::Range<usize>> {
         query_batches
@@ -10073,6 +10152,7 @@ fn run_call(
         context: &context,
         call_batches: &call_batches,
         filtered_empty,
+        rps_multi_volume,
         xml_matrix_failure,
         xml_only_xml2,
         x_rows_pool,

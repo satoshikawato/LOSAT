@@ -26,6 +26,8 @@
 # agreed on every run (`-max_target_seqs` 1, 2, 5, 10, 11, 30, `-searchsp`, `OLD_FSC`, CBS 0/1/3); the unit test
 # `a_full_prelim_list_of_equal_e_values_keeps_the_best_ten_of_the_total_order` (rps_search/prelim.rs) holds the order.
 #
+# rps_cdd (series PR, item PS15a-1): the profiles of rps_mini under three real CDD PSSM ids, for the pipeline test (below).
+#
 # rps_wide and the .loo rps_wide_ug.loo (series PR, item PS12m): one profile of 133,000 columns (f101 tiled 700 times by
 #   build_wide.py, version 5, gnl|CDD|901) with makeprofiledb -threshold 20 -force, so that its table holds the nine words that
 #   match exactly (700 hits each, one per tile): 65 buckets of 2,048 rows, a cell's hits in all of them, in both groups of
@@ -131,6 +133,18 @@ assert struct.unpack("<i", loo[:4])[0] == 0x1e17
 loo[:4] = struct.pack("<i", 0x1e16)
 open(base + ".loo", "wb").write(bytes(loo))
 PY
+# rps_cdd (series PR, item PS15a-1; the pipeline test `tests/rps_pipeline.rs`): the three profiles of rps_mini under the
+# PSSM ids of three rows of CDD v3.22 that the data files of tests/fixtures/rpsbproc hold (177038 CHL00113, 439874 COG0104,
+# 440288 COG0522), so that NCBI's and LOSAT's rpsbproc find them in cddid.tbl.
+n=0
+: > listcdd.txt
+for tag in 177038 439874 440288; do
+  n=$((n + 1))
+  sed "s/tag id 10$n\$/tag id $tag/" f10$n.smp > c$tag.smp
+  grep -q "tag id $tag\$" c$tag.smp
+  echo c$tag.smp >> listcdd.txt
+done
+"$N/makeprofiledb" -in listcdd.txt -out "$O/rps_cdd" -title rps_cdd -dbtype rps
 # rps_wide and its table with ungrouped cells.
 python3 "$HERE/build_wide.py" tile f101.smp 700 wide.smp
 echo wide.smp > wide.txt

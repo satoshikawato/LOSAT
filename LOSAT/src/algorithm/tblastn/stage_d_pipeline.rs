@@ -2,6 +2,7 @@
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
 use crate::utils::glibc_fma_libm::GlibcLibm;
+use crate::wording::ENGINE_ERROR;
 use std::collections::HashMap;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1026,7 +1027,7 @@ impl SetupEngineError {
 
 impl std::fmt::Display for SetupEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", self.0)
     }
 }
 

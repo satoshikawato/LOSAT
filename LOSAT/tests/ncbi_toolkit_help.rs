@@ -118,12 +118,13 @@ fn help_full_writes_the_help_in_every_place() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// NCBI BLAST+ 2.17.0's `-xmlhelp` of `program`, frozen (`src/ncbi_xmlhelp/`).
+/// NCBI BLAST+ 2.17.0's `-xmlhelp` of `program`, frozen (`src/ncbi_xmlhelp/`), in LOSAT's words
+/// (the version after the description: `losat::wording`).
 fn ncbi_xml(program: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src/ncbi_xmlhelp")
         .join(format!("{program}.xml"));
-    fs::read(path).unwrap()
+    losat::wording::losat_output_bytes(&fs::read(path).unwrap()).into_owned()
 }
 
 /// The names of the arguments (`<key name="NAME" ...>`, `<flag name="NAME" ...>`) of `xml`.

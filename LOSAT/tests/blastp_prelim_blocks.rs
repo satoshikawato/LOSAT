@@ -401,7 +401,7 @@ fn split_and_unsearched_batches_with_blocks() {
         assert_eq!(run.code, Some(3), "threads {threads}: {}", run.stderr);
         assert!(
             run.stderr
-                .ends_with("BLAST engine error: Database memory map file error\n"),
+                .ends_with("LOSAT engine error: Database memory map file error\n"),
             "threads {threads}: {}",
             run.stderr
         );
@@ -710,7 +710,7 @@ fn a_database_that_cannot_be_read_fails_as_with_one_table() {
             );
             assert!(
                 run.stderr
-                    .ends_with("BLAST engine error: Database memory map file error\n"),
+                    .ends_with("LOSAT engine error: Database memory map file error\n"),
                 "{db} {extra:?} threads {threads}: {}",
                 run.stderr
             );

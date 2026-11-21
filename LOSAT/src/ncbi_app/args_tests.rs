@@ -10,7 +10,6 @@ use crate::ncbi_app::no_dependencies;
 static TOOL: Tool = Tool {
     program: "t",
     refusal_name: "T",
-    version: "0",
     help: "",
     descs: &[
         key("n", Kind::Integer, Some("7"), None),

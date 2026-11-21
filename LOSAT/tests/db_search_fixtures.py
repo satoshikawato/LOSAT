@@ -467,21 +467,28 @@ def is_sam_outfmt(outfmt: str) -> bool:
     return outfmt.split()[:1] == ["17"]
 
 
-_SAM_PG = b"\n@PG\tID:0\tVN:2.17.0+"
+# The @PG line's start before its CL tag: NCBI's version (frozen bytes) or LOSAT's (LOSAT's output and
+# NCBI's bytes in LOSAT's words, `losat_wording`).
+_SAM_PGS = tuple(b"\n@PG\tID:0\tVN:" + version for version in (losat_wording.NCBI_VERSION, losat_wording.LOSAT_VERSION))
 
 
 def strip_sam_cl(data: bytes) -> bytes:
     """The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
-    `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`.
+    `\n@PG\tID:0\tVN:2.17.0+` (NCBI's) or `\n@PG\tID:0\tVN:LOSAT 0.2.0` (LOSAT's) up to, not including,
+    the first following `\tPN:blastn\n`.
 
-    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes and on
-    LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command line (its program path, the `blastn`
-    sub-command word and the arguments a harness adds, such as `-num_threads N`) where NCBI writes its argv.
-    Every other byte must be equal. A document without the tag (no command line) is returned as it is."""
-    head = data.find(_SAM_PG + b"\tCL:")
-    if head < 0:
+    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes (as
+    frozen, or in LOSAT's words) and on LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command
+    line (its program path, the `blastn` sub-command word and the arguments a harness adds, such as
+    `-num_threads N`) where NCBI writes its argv. Every other byte must be equal. A document without the tag
+    (no command line) is returned as it is."""
+    for pg in _SAM_PGS:
+        head = data.find(pg + b"\tCL:")
+        if head >= 0:
+            break
+    else:
         return data
-    start = head + len(_SAM_PG)
+    start = head + len(pg)
     end = data.find(b"\tPN:blastn\n", start + len(b"\tCL:"))
     return data if end < 0 else data[:start] + data[end:]
 
@@ -1108,6 +1115,17 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
+
+    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
+        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
+        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
+        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
+        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
+        if db_dir is None or not rps_dir_token(row):
+            return words(ncbi)
+        path = str(db_dir).encode()
+        return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+
     if db_dir is not None:
         try:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
@@ -1130,8 +1148,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
-        if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
-                and expected_text(row).encode() not in run.stderr:
+        if library and run.returncode != 0 and run.stdout == b"" \
+                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row).encode() not in run.stderr:
             return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
@@ -1144,8 +1162,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != out:
-                problems.append("stdout " + first_difference(out, run.stdout))
+            if run.stdout != in_losat_words(out):
+                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
@@ -1156,13 +1174,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
-    # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
-    expected_out_losat = losat_wording.losat_output_bytes(out)
-    expected_err_losat = losat_wording.losat_bytes(err)
+    expected_out_losat = in_losat_words(out)
+    expected_err_losat = in_losat_words(err, output=False)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
-            and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
+            and run.stderr.startswith(losat_wording.QUERY_ERROR) and run.stderr in expected_err_losat:
         return "library-input-error", ""
     # A copy row's expectation is the cut of its frozen whole NCBI output (`copy_row_problems`).
     problems = copy_row_problems(row) if copies_cell(row) is not None else []

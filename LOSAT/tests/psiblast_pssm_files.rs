@@ -149,11 +149,14 @@ fn an_unwritable_pssm_file_stops_after_the_querys_report() {
         &["-out_pssm", "/dev/full", "-outfmt", "7"],
         &home,
     );
-    let ncbi = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/db_search/db.ps.asn.rej.nodir.7.out"),
+    let ncbi = losat::wording::losat_output_bytes(
+        &std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/db_search/db.ps.asn.rej.nodir.7.out"),
+        )
+        .unwrap(),
     )
-    .unwrap();
+    .into_owned();
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stdout, ncbi);
     assert!(String::from_utf8_lossy(&output.stderr)
@@ -228,13 +231,13 @@ fn in_pssm_dash_reads_the_standard_input() {
     assert_eq!(cut.status.code(), Some(1));
     assert_eq!(
         cut.stderr,
-        b"BLAST query/options error: Unrecognized format for PSSM in - (must be PssmWithParameters)\nPlease refer to the LOSAT user manual.\n"
+        b"LOSAT query/options error: Unrecognized format for PSSM in - (must be PssmWithParameters)\nPlease refer to the LOSAT user manual.\n"
     );
     let empty = run("-", std::process::Stdio::null());
     assert_eq!(empty.status.code(), Some(1));
     assert_eq!(
         empty.stderr,
-        b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the LOSAT user manual.\n"
+        b"LOSAT query/options error: Unsupported format for PSSM\nPlease refer to the LOSAT user manual.\n"
     );
 }
 
@@ -353,12 +356,12 @@ fn a_missing_sequence_file_is_the_readers_database_error() {
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             psq.display()
         )
     );
     assert!(
-        stdout.starts_with("PSIBLAST 2.17.0+")
+        stdout.starts_with(concat!("PSIBLAST (LOSAT ", env!("CARGO_PKG_VERSION"), ")"))
             && stdout
                 .ends_with("Database: arch_sprot\n           2 sequences; 279 total letters\n\n"),
         "{stdout}"

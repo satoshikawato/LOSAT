@@ -309,12 +309,12 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
     for (program, title, prolog_end) in [
         (
             "blastp",
-            "BLASTP 2.17.0+",
+            concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")"),
             " 3 sequences; 1 total letters\n\n",
         ),
         (
             "psiblast",
-            "PSIBLAST 2.17.0+",
+            concat!("PSIBLAST (LOSAT ", env!("CARGO_PKG_VERSION"), ")"),
             "Database: User specified sequence set.\n           3 sequences; 1 total letters\n\n",
         ),
     ] {
@@ -349,7 +349,7 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
                 format!(
                     "Warning: [{program}] Subject_2 s2 empty: Subject sequence contains no data\n\
                      Warning: [{program}] Subject_3 s3 empty: Subject sequence contains no data\n\
-                     BLAST engine error: The average subject length is too short\n"
+                     LOSAT engine error: The average subject length is too short\n"
                 ),
                 "{program} {args:?}"
             );
@@ -399,12 +399,12 @@ fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
              Warning: [blastp] Query_1 qx all X: Could not calculate ungapped Karlin-Altschul \
              parameters due to an invalid query sequence or its translation. Please verify the \
              query sequence(s) and/or filtering options \n\
-             BLAST engine error: The average subject length is too short\n",
+             LOSAT engine error: The average subject length is too short\n",
             "outfmt {outfmt}"
         );
         if outfmt == "0" {
             assert!(
-                stdout.starts_with("BLASTP 2.17.0+")
+                stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")"))
                     && stdout.ends_with(
                         " 3 sequences; 2 total letters\n\n\n\nQuery= qx all X\n\nLength=30\n\n\n\
                          ***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    \
@@ -415,8 +415,11 @@ fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
             );
         } else {
             assert!(
-                stdout.starts_with("# BLASTP 2.17.0+\n# Query: qx all X\n# Database: ")
-                    && stdout.lines().count() == 3,
+                stdout.starts_with(concat!(
+                    "# BLASTP (LOSAT ",
+                    env!("CARGO_PKG_VERSION"),
+                    ")\n# Query: qx all X\n# Database: "
+                )) && stdout.lines().count() == 3,
                 "{stdout}"
             );
         }
@@ -450,12 +453,13 @@ fn a_batch_of_queries_without_residues_stops() {
     assert!(matches!(error, Error::Search(_)), "{error:?}");
     assert_eq!(
         error.message(),
-        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTP 2.17.0+\n") && prolog.ends_with(" total letters\n\n"),
+        prolog.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+            && prolog.ends_with(" total letters\n\n"),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());
@@ -489,7 +493,7 @@ fn a_batch_of_queries_without_residues_stops() {
     );
     assert_eq!(
         stderr,
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
 }
 
@@ -530,7 +534,7 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
         "{report}"
     );
     assert!(
-        stderr.starts_with("BLAST query error: CFastaReader: "),
+        stderr.starts_with("LOSAT query error: CFastaReader: "),
         "{stderr}"
     );
     let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "7"], &[]);
@@ -544,7 +548,7 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
     assert!(
         error
             .message()
-            .starts_with(b"BLAST query error: CFastaReader: ")
+            .starts_with(b"LOSAT query error: CFastaReader: ")
             && stderr.as_bytes().starts_with(error.message()),
         "{error}"
     );

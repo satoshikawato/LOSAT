@@ -8,7 +8,7 @@
 //! `qpre20` (the first 20 letters of X4's qok1) has one window of one HSP against `sok1_nt` (X4's
 //! sok1 in frame +1), whose redo succeeds; `qpre40` (its first 40 letters) also fails against
 //! `sfail_rc`. NCBI's one-thread redo keeps the status of the batch's last redone match: a failed
-//! last one fails the batch's traceback (`BLAST engine error: Traceback failed`, exit status 3)
+//! last one fails the batch's traceback (`LOSAT engine error: Traceback failed`, exit status 3)
 //! after the reports of the batches before, unless the batch's first query holds a redone match:
 //! NCBI's clean-up then reads that query's freed heap and crashes, and LOSAT refuses the batch
 //! after the same reports (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.68). That the bytes equal NCBI's
@@ -105,7 +105,7 @@ fn row_queries(stdout: &str) -> Vec<&str> {
         .collect()
 }
 
-const TRACEBACK_FAILED: &str = "BLAST engine error: Traceback failed\n";
+const TRACEBACK_FAILED: &str = "LOSAT engine error: Traceback failed\n";
 /// The part of LOSAT's refusal of a failed batch whose first query holds a redone match.
 const NCBI_CRASHES: &str = "with which NCBI BLAST+ 2.17.0's tblastn crashes";
 /// The part of LOSAT's refusal of a redo that NCBI never ends.
@@ -257,7 +257,11 @@ fn a_pssm_query_is_refused_at_its_first_match() {
             assert_eq!(run.stdout, "");
         } else {
             assert!(
-                run.stdout.starts_with("PSITBLASTN 2.17.0+"),
+                run.stdout.starts_with(concat!(
+                    "PSITBLASTN (LOSAT ",
+                    env!("CARGO_PKG_VERSION"),
+                    ")"
+                )),
                 "{}",
                 run.stdout
             );
@@ -286,7 +290,7 @@ fn a_pssm_query_is_refused_at_its_first_match() {
 
 // IDENTITY, which NCBI searches without composition-based statistics, has no frequency ratios for
 // the redo's set-up: every batch's traceback fails before the redo reads a match, a query without
-// hits too (`BLAST engine error: Traceback failed`, exit status 3; NCBI 2.17.0: rows
+// hits too (`LOSAT engine error: Traceback failed`, exit status 3; NCBI 2.17.0: rows
 // db.x4b.ident.*). With one query per batch the first batch fails: nothing is reported.
 #[test]
 fn identity_fails_every_batch_at_the_redo_set_up() {

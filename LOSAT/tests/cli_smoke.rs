@@ -59,10 +59,14 @@ fn losat_binary() -> PathBuf {
     path
 }
 
+/// The binary with no `LOSAT_*` variable that chooses a code path. `LOSAT_BLASTX_WORKER_LOG`
+/// stays: a binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as
+/// in CI) needs that file name as soon as a search has more than one thread, and it selects
+/// nothing.
 fn clean_losat_command() -> Command {
     let mut command = Command::new(losat_binary());
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
         }
     }
@@ -201,6 +205,116 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         "unsupported error should name program, option, and reason: {stderr}"
     );
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (cited at the
+// refusal in `blastp::blast_engine`)
+// NCBI BLAST+ 2.17.0's `blastp -ungapped -comp_based_stats 0 -use_sw_tback` reads the gapped
+// Karlin blocks that an ungapped search does not have and ends with a segmentation fault: LOSAT
+// refuses the combination by name, before (and apart from) the refusal of `-use_sw_tback` without
+// composition-based statistics above, and writes nothing.
+#[test]
+fn blastp_ungapped_smith_waterman_traceback_is_refused_by_name() {
+    let query = temp_path("ungapped_swtback_query", "faa");
+    let subject = temp_path("ungapped_swtback_subject", "faa");
+    std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    let output = clean_losat_command()
+        .args(["blastp", "-query"])
+        .arg(&query)
+        .arg("-subject")
+        .arg(&subject)
+        .args(["-ungapped", "-comp_based_stats", "0", "-use_sw_tback"])
+        .output()
+        .expect("run blastp -ungapped -use_sw_tback");
+    let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&subject);
+    assert!(!output.status.success(), "the combination is refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
+        ),
+        "the refusal names both options and NCBI's crash: {stderr}"
+    );
+    assert!(
+        !stderr.contains("without composition-based statistics"),
+        "this refusal comes first: {stderr}"
+    );
+    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1285-1294
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+// A `-subject` search whose shown hits hold an ungapped HSP of length 0 at the subject's first
+// letter (`-ungapped -window_size 0` with a low `-threshold`): the official NCBI BLAST+ 2.17.0
+// binary throws its Seq-loc mapper's exception before any query's report and exits 255, with
+// nothing on stdout for outfmt 6. LOSAT ends the same way, its message being NCBI's in LOSAT's
+// words (`losat::wording`). The inputs are case `edge_l0166/qs0` of line NP's item O4b.
+#[test]
+fn blastp_ungapped_length_zero_hsp_at_subject_start_ends_with_ncbi_exception() {
+    let query = temp_path("ungapped_len0_qs0_query", "faa");
+    let subject = temp_path("ungapped_len0_qs0_subject", "faa");
+    std::fs::write(
+        &query,
+        ">q1\nNNYYFHDQPAKTWDMITVPYRPVIRQYEFCFLETFCAQWWAASFSGSHEYFIRCNKFWVP\nHTVFVADAGGSMRWCLEAWLNDSKNLECVEGDMETSDGF\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &subject,
+        ">s1\nTLFYTYTTNWAVREVYEGEKANDINDQPATYRSVNSFCQLDGSTNFARNLMCHMTEFWCC\nYKKTSQRKEVGQQNLQVMCGPPVVKIDIWYNTEGCMIWCNFCPNPMRNCLHMHYNVSNFS\nTCLDVVKERDELPQ\n",
+    )
+    .unwrap();
+    let root = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
+    let expected = losat::wording::losat_text(&format!(
+        "Error: NCBI C++ Exception:\n    T0 \"{root}/src/objects/seq/seq_align_mapper_base.cpp\", line 1292: Error: (CAnnotMapperException::eBadAlignment) Mapped alignment contains gaps and can not be converted to dense-diag.\n\n"
+    ))
+    .into_owned();
+    let mut outputs = Vec::new();
+    for threads in ["1", "4"] {
+        let output = clean_losat_command()
+            .args(["blastp", "-query"])
+            .arg(&query)
+            .arg("-subject")
+            .arg(&subject)
+            .args([
+                "-window_size",
+                "0",
+                "-word_size",
+                "3",
+                "-threshold",
+                "1",
+                "-matrix",
+                "BLOSUM62",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "no",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                threads,
+            ])
+            .output()
+            .expect("run blastp -ungapped -window_size 0");
+        outputs.push((threads, output));
+    }
+    let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&subject);
+    for (threads, output) in outputs {
+        assert_eq!(
+            output.status.code(),
+            Some(255),
+            "threads {threads}: {output:?}"
+        );
+        assert!(output.stdout.is_empty(), "threads {threads}: {output:?}");
+        if threads == "1" {
+            assert_eq!(String::from_utf8_lossy(&output.stderr), expected);
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246

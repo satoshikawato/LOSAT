@@ -158,6 +158,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "convert2blastmask" => {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
+        "makembindex" => "Create a BLAST database index.",
         _ => "",
     }
 }
@@ -747,11 +748,9 @@ fn render_rpsbproc_text(text: &str) -> String {
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
-// (DI-6), `-min_raw_gapped_score` (DI-6b) and the database masks (`blastinput::db_mask`, series
-// NP M4a-2).
+// (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
+// NP M4a-2) and `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "filtering_db",
     "gilist",
@@ -853,13 +852,12 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
 // blastp's check, `validate_requested_blastp_support`)
 /// NCBI's arguments that a program's parser reads, so that NCBI's own errors about them and the
-/// other arguments come first (blastp's `-ungapped` with composition-based statistics:
+/// other arguments come first (tblastn's `-ungapped` with composition-based statistics:
 /// `Composition-adjusted searched are not supported with an ungapped search`), and whose run LOSAT
 /// refuses whatever their value, by name, where NCBI starts the search: the program, the name and
 /// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
-    ("blastp", "ungapped", "an ungapped search"),
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
     ("tblastn", "ungapped", "an ungapped search"),
     (

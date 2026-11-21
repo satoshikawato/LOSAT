@@ -248,6 +248,7 @@ impl RpsblastArgs {
             request_inputs,
             app: BlastpApp::Rpsblast,
             taxdb_setting: None,
+            matrix_search: None,
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

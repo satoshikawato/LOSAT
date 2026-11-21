@@ -339,7 +339,7 @@ pub(super) fn prepare(
         //         if (seg_options->hicut > 0.0)
         //             sparamsp->hicut = seg_options->hicut;
         // ```
-        filter: filter::filter_string(None, seg_filter, None, values.soft_masking),
+        filter: filter::filter_string(None, seg_filter, None, None, values.soft_masking),
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,

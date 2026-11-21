@@ -479,6 +479,21 @@ pub struct BlastnArgs {
     // Read by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: true]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:350-352
+    // Read by the filtering handler after `-dust` and before the WindowMasker options, which
+    // count it (`resolve_window_masker`); the repeat search runs where the masks of each query
+    // batch are made (`repeat_filter`).
+    #[arg(
+        long = "filtering_db",
+        value_name = "filtering_database",
+        help = "BLAST database containing filtering elements (i.e.: repeats)"
+    )]
+    pub filtering_db: Option<String>,
+    /// The repeat search of `-filtering_db` (`repeat_filter::RepeatFilter`): the database's name
+    /// and the settings that look it up, given by the caller that has them (`resolve_repeat_filter`);
+    /// `None` without the option.
+    #[arg(skip)]
+    pub repeat_filter: Option<std::sync::Arc<super::repeat_filter::RepeatFilter>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:354-356
     // ```c++
     //         arg_desc.AddOptionalKey(kArgWindowMaskerTaxId, "window_masker_taxid",
@@ -1010,9 +1025,9 @@ impl BlastnArgs {
     /// ```
     /// `-window_masker_taxid` counts also with the taxid 0, which uses no WindowMasker
     /// (`Blast_FindWindowMaskerLoc_Fwd` reads a taxid only when it is not 0); its file is
-    /// looked for in the set-up of the query batches (`window_masker::open_taxid`). `-filtering_db`
-    /// is refused when the arguments are parsed (`cli::is_unported_blastn_arg`), so it is never
-    /// counted here.
+    /// looked for in the set-up of the query batches (`window_masker::open_taxid`).
+    /// `-filtering_db` counts with any value, an empty one too (its database is opened by the
+    /// repeat search of each query batch, `repeat_filter`).
     pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
         if self.window_masker_db.is_none() && self.window_masker_taxid.is_none() {
             return Ok(());
@@ -1022,7 +1037,10 @@ impl BlastnArgs {
             Some(name) => Some(super::window_masker::open(name, &*source)?),
             None => None,
         };
-        if self.window_masker_taxid.is_some() && database.is_some() {
+        let filter_dbs = usize::from(self.filtering_db.is_some())
+            + usize::from(self.window_masker_taxid.is_some())
+            + usize::from(database.is_some());
+        if filter_dbs > 1 {
             // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             return Err(crate::cli::NativeError {
                 exit: 1,

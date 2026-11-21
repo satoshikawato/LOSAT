@@ -29,11 +29,13 @@ pub enum WindowMasker<'a> {
 }
 
 /// The filter string of a search: `dust` and `seg` are the options' (level, window, linker)
-/// and (window, locut, hicut) when the filter is on, `window_masker` the window masker option,
-/// `mask_at_hash` whether the filtering is applied at hashing (soft masking).
+/// and (window, locut, hicut) when the filter is on, `repeats` the database of blastn's
+/// `-filtering_db`, `window_masker` the window masker option, `mask_at_hash` whether the
+/// filtering is applied at hashing (soft masking).
 pub fn filter_string(
     dust: Option<(i32, i32, i32)>,
     seg: Option<(i32, f64, f64)>,
+    repeats: Option<&str>,
     window_masker: Option<WindowMasker<'_>>,
     mask_at_hash: bool,
 ) -> Vec<u8> {
@@ -57,6 +59,13 @@ pub fn filter_string(
                 glibc_fixed1(seg.2)
             )));
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:371-388 (the command
+    // line always gives the database: `R -d <name>;`, never the plain `R;`.)
+    if let Some(database) = repeats {
+        text.push_str("R -d ");
+        text.push_str(database);
+        text.push(';');
     }
     match window_masker {
         Some(WindowMasker::Taxid(taxid)) if taxid != 0 => {
@@ -107,25 +116,25 @@ mod tests {
     fn strings_observed_from_ncbi() {
         // blastn megablast / blastn / dc-megablast: DUST at its defaults, mask at hash.
         assert_eq!(
-            s(filter_string(Some((20, 64, 1)), None, None, true)),
+            s(filter_string(Some((20, 64, 1)), None, None, None, true)),
             "L;m;"
         );
         // blastn-short and `-dust no`: only mask at hash.
-        assert_eq!(s(filter_string(None, None, None, true)), "m;");
+        assert_eq!(s(filter_string(None, None, None, None, true)), "m;");
         // `-dust no -soft_masking false` and blastp without SEG: empty.
-        assert_eq!(s(filter_string(None, None, None, false)), "F");
+        assert_eq!(s(filter_string(None, None, None, None, false)), "F");
         // blastp `-seg yes -soft_masking true`; blastx / tblastn / tblastx default SEG.
         assert_eq!(
-            s(filter_string(None, Some((12, 2.2, 2.5)), None, true)),
+            s(filter_string(None, Some((12, 2.2, 2.5)), None, None, true)),
             "L;m;"
         );
         assert_eq!(
-            s(filter_string(None, Some((12, 2.2, 2.5)), None, false)),
+            s(filter_string(None, Some((12, 2.2, 2.5)), None, None, false)),
             "L;"
         );
         // `-seg '10 1.8 2.1'`
         assert_eq!(
-            s(filter_string(None, Some((10, 1.8, 2.1)), None, false)),
+            s(filter_string(None, Some((10, 1.8, 2.1)), None, None, false)),
             "S 10 1.8 2.1;"
         );
     }
@@ -133,7 +142,7 @@ mod tests {
     #[test]
     fn custom_dust_and_seg_and_masker() {
         assert_eq!(
-            s(filter_string(Some((25, 64, 1)), None, None, true)),
+            s(filter_string(Some((25, 64, 1)), None, None, None, true)),
             "D 25 64 1;m;"
         );
         assert_eq!(
@@ -141,12 +150,14 @@ mod tests {
                 Some((20, 64, 1)),
                 Some((12, 2.2, 2.5)),
                 None,
+                None,
                 false
             )),
             "L;L;"
         );
         assert_eq!(
             s(filter_string(
+                None,
                 None,
                 None,
                 Some(WindowMasker::Taxid(9606)),
@@ -158,6 +169,7 @@ mod tests {
             s(filter_string(
                 None,
                 None,
+                None,
                 Some(WindowMasker::Database("db.wm")),
                 false
             )),
@@ -165,6 +177,7 @@ mod tests {
         );
         assert_eq!(
             s(filter_string(
+                None,
                 None,
                 None,
                 Some(WindowMasker::Taxid(0)),
@@ -179,11 +192,11 @@ mod tests {
         // %1.1f of an exact tie goes to the even digit: 2.25 -> 2.2, 0.35 (below the tie in
         // binary) -> 0.3, 0.45 (above) -> 0.5.
         assert_eq!(
-            s(filter_string(None, Some((10, 2.25, 0.35)), None, false)),
+            s(filter_string(None, Some((10, 2.25, 0.35)), None, None, false)),
             "S 10 2.2 0.3;"
         );
         assert_eq!(
-            s(filter_string(None, Some((10, 0.45, 0.125)), None, false)),
+            s(filter_string(None, Some((10, 0.45, 0.125)), None, None, false)),
             "S 10 0.5 0.1;"
         );
     }
@@ -192,7 +205,7 @@ mod tests {
     #[test]
     fn infinite_and_nan_seg_cutoffs_are_printed_as_glibc_prints_them() {
         let seg =
-            |locut: f64, hicut: f64| s(filter_string(None, Some((12, locut, hicut)), None, false));
+            |locut: f64, hicut: f64| s(filter_string(None, Some((12, locut, hicut)), None, None, false));
         assert_eq!(seg(f64::INFINITY, 2.5), "S 12 inf 2.5;");
         assert_eq!(seg(2.2, -f64::NAN), "S 12 2.2 -nan;");
         assert_eq!(
@@ -207,6 +220,7 @@ mod tests {
     fn a_long_custom_string_is_cut_like_the_24_byte_buffer() {
         let text = s(filter_string(
             Some((2147483647, 2147483647, 2147483647)),
+            None,
             None,
             None,
             false,

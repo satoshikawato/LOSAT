@@ -343,6 +343,7 @@ pub(super) fn write_structured_xml(
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,
+        report.repeat_filter,
         report.window_masker,
         report.soft_masking,
     );

@@ -1429,14 +1429,24 @@ pub(crate) fn build_lookup_tables<R: InputRecord>(
     )
 }
 
+/// Why the masks of queries could not be made (`query_masks`, `chunk_query_masks`).
+#[derive(Debug)]
+pub(crate) enum MaskError {
+    /// The counts file's or WindowMasker's error (`window_masker`).
+    WindowMasker(crate::utils::winmask::WinMaskError),
+    /// The repeat search's error (`-filtering_db`, `repeat_filter`).
+    Repeats(super::repeat_filter::RepeatError),
+}
+
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
-/// letters; with `-window_masker_db` the masks of WindowMasker, which replace both
-/// (`window_masker`). The error is that of the counts file or of the masker.
+/// letters, then with `-filtering_db` the hits of the repeat search (`repeat_filter`); with
+/// `-window_masker_db` the masks of WindowMasker, which replace DUST's and the lower case
+/// (`window_masker`; the options exclude `-filtering_db`).
 pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
     queries: &L,
     pool: &SearchPool<'_>,
-) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
+) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
     // ```c
     //         if (NULL != m_Options->GetWindowMaskerDatabase() ||
@@ -1451,7 +1461,8 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
         let minus = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
         return (0..queries.count())
             .map(|index| queries.read(index, |letters| window_masker.masks(letters, minus)))
-            .collect();
+            .collect::<Result<_, _>>()
+            .map_err(MaskError::WindowMasker);
     }
     let mut query_masks = apply_dust_masking(args, queries, pool);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
@@ -1473,6 +1484,12 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
                 *dust_masks = merged;
             }
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:206-214
+    if let Some(filter) = &args.repeat_filter {
+        filter
+            .add_masks(&args.strand, queries, &mut query_masks, pool)
+            .map_err(MaskError::Repeats)?;
     }
     Ok(query_masks)
 }
@@ -1504,15 +1521,16 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
 ///     }
 /// ```
 /// The part's own masks are only merged when DUST finds a region; the lookup table and the
-/// search use the masked residues, which merging does not change. With `-window_masker_db`
-/// the chunk's `x_CalculateMasks` ends with WindowMasker on the part's letters, which
-/// replaces every mask the part had (`query_masks`).
-pub fn chunk_query_masks<R: InputRecord + Sync>(
+/// search use the masked residues, which merging does not change. With `-filtering_db` the
+/// chunk's query source searches the repeats of the parts' letters again and adds their hits
+/// (`repeat_filter`). With `-window_masker_db` the chunk's `x_CalculateMasks` ends with
+/// WindowMasker on the part's letters, which replaces every mask the part had (`query_masks`).
+pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
     pool: &SearchPool<'_>,
-) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
+) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
     // ```c++
     //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
@@ -1526,14 +1544,20 @@ pub fn chunk_query_masks<R: InputRecord + Sync>(
     if args.window_masker.is_some() {
         return query_masks(args, parts, pool);
     }
-    Ok(apply_dust_masking(args, parts, pool)
+    let mut masks: Vec<Vec<MaskedInterval>> = apply_dust_masking(args, parts, pool)
         .into_iter()
         .zip(restricted)
         .map(|(mut masks, restricted)| {
             masks.extend(restricted);
             merge_mask_intervals(masks)
         })
-        .collect())
+        .collect();
+    if let Some(filter) = &args.repeat_filter {
+        filter
+            .add_masks(&args.strand, parts, &mut masks, pool)
+            .map_err(MaskError::Repeats)?;
+    }
+    Ok(masks)
 }
 
 /// Prepare all sequence data and configuration

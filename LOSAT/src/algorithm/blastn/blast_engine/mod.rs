@@ -21,6 +21,7 @@ pub use run::run;
 pub use run::run_local;
 pub use run::run_local_database;
 pub(crate) use run::QueryBatchSizes;
+pub(crate) use run::repeat_search_hits;
 // LOSAT_X_BNLUTDROP (graduated), EXPERIMENT (LOSAT_X_QGROUPPAR, LOSAT_X_BNQPACK, LOSAT_X_QPREPPAR,
 // LOSAT_X_BNTBRANGELOG): the summary lines `main` prints at exit (no NCBI counterpart).
 pub use run::x_lut_drop_print_summary;

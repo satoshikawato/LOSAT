@@ -27,7 +27,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -44,6 +44,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_exception::NcbiException;
 use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::{PrintedIds, SubjectFetch};
@@ -446,42 +447,53 @@ impl BlastnDatabase {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:665-675,792-797
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:950-1005
-    /// A file of a MegaBLAST index of this database that NCBI's index loader would find for the
-    /// `-db` value `index_name` (`DbIndexInit`): a new-style superheader `<volume>.shd` of one of
-    /// its volumes, or an old-style volume `<name>.NN.idx` (00 to 99, NCBI's range without the
-    /// commas that name others) of one of the space-separated names, on the search path. `None`:
-    /// NCBI finds no index and searches without one.
-    pub(super) fn megablast_index_file(&self, index_name: &str) -> Option<PathBuf> {
-        for volume in self.db.volumes() {
-            let mut superheader = volume.base().as_os_str().to_os_string();
-            superheader.push(".shd");
-            let superheader = PathBuf::from(superheader);
-            if superheader.is_file() {
-                return Some(superheader);
-            }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:643-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:664-668
+    /// The volumes that NCBI's loader of a new-style MegaBLAST index finds for the `-db` value
+    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths(vols, true)` of the database opened
+    /// again by that name, as given, on the search path of this one), each with its number of
+    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). Where that
+    /// name does not open (a `-db` value with white space other than spaces at its ends, which
+    /// the search trims and the loader keeps), the database reader's exception, or `None` where
+    /// LOSAT does not know its place or the name opens other volumes than this database's.
+    pub(super) fn index_volumes(
+        &self,
+        indexname: &str,
+    ) -> Result<Vec<(String, u32)>, Option<NcbiException>> {
+        let path = self.db.search_path().ok_or(None)?;
+        let (paths, _) =
+            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
+                .map_err(|error| {
+                    if let Some(exception) = error.ncbi_exception() {
+                        return Some(exception.clone());
+                    }
+                    let text = error.ncbi_message()?;
+                    let site = crate::seqdb::throw_site(&text)?;
+                    Some(NcbiException::new(site, text))
+                })?;
+        paths
+            .into_iter()
+            .map(|vol_name| {
+                let volume = self
+                    .db
+                    .volumes()
+                    .iter()
+                    .find(|volume| volume.base() == Path::new(&vol_name))
+                    .ok_or(None)?;
+                Ok((vol_name, volume.num_oids()))
+            })
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
+    /// `SeqDB_ResolveDbPath(file)` on this database's search path: the path of the first
+    /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
+    /// NCBI's empty string.
+    pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {
+        match self.db.search_path() {
+            Some(search) => search.resolve_file(file),
+            None => Some(file.to_string()).filter(|path| Path::new(path).is_file()),
         }
-        let resolve = |file: &str| match self.db.search_path() {
-            Some(search) => search.resolve_file(file).map(PathBuf::from),
-            None => Some(PathBuf::from(file)).filter(|path| path.is_file()),
-        };
-        let mut start = Some(0);
-        while let Some(at) = start {
-            let end = index_name[at..].find(' ').map(|offset| at + offset);
-            let base = &index_name[at..end.unwrap_or(index_name.len())];
-            for volume in 0..=99 {
-                if let Some(file) = resolve(&format!("{base}.{volume:02}.idx")) {
-                    return Some(file);
-                }
-            }
-            start = end.and_then(|end| {
-                index_name[end..]
-                    .find(|c| c != ' ')
-                    .map(|offset| end + offset)
-            });
-        }
-        None
     }
 
     /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed
@@ -844,7 +856,11 @@ impl BlastnDatabase {
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
     /// whose scan reads words of `scanned_word` letters.
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
-        mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Nucleotide { scanned_word },
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218 and

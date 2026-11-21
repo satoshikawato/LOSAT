@@ -216,6 +216,7 @@ fn masks_of_input(
         let mask = dust_masks_skip_ns(&record.iupac, level, window, linker);
         let seq = MaskedBioseq {
             ids: &record.ids,
+            handle_seq_id: None,
             title: record.title.as_deref(),
             taxname: record.taxname.as_ref(),
             has_source: record.has_source,

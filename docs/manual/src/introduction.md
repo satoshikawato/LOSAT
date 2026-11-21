@@ -22,8 +22,10 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database (version 5 by default, or 4) from FASTA, also from a `.gz`, `.bz2` or `.zst` file. |
 | Databases and masks | [`blastdbcmd`](programs/blastdbcmd.md) | Reads a BLAST database: information, sequences, masks. |
 | Databases and masks | [`dustmasker`](programs/dustmasker.md) | Finds low-complexity regions in nucleotide sequences. |
+| Databases and masks | [`windowmasker`](programs/windowmasker.md) | Masks the repeats of nucleotide sequences from a file of unit counts. |
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
+| Databases and masks | [`makembindex`](programs/makembindex.md) | Builds the MegaBLAST index of a nucleotide database. |
 | Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
@@ -40,13 +42,13 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`;
-- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format;
+- the programs `deltablast`, `makeprofiledb` and `blast_formatter`, and the making and the conversion of counts files by `windowmasker` (`-mk_counts`, `-convert`);
+- `psiblast -phi_pattern`;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - the `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`;
 - `-html`.
 
-LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
+LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
 Options that need NCBI's servers or its GI and IPG databases are not available: `-remote` and `-entrez_query` (all programs), `-gilist` and `-negative_gilist`, `-ipglist` and `-negative_ipglist`. `-import_search_strategy` is refused.
 

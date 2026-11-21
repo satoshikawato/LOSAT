@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 4, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 10, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 7 |
+| 0.2.0 | 0.2.0 | 10 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -87,8 +87,8 @@ each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stre
 the place of its error, each a little-endian unsigned integer (`discardSignal` reads them), and the
 host drops everything that arrived of that stream, which then stays empty. The place is where the
 run wrote the error, as the command line writes the error of that output. A BLAST+ error goes to
-stream 3, or nowhere (`PLACE_NOWHERE`) where the run's messages go nowhere (TBLASTX's `-logfile ""`
-or `-logfile /dev/null`). In TBLASTX with `-logfile NAME` it goes to stream 3 too: the file holds
+stream 3, or nowhere (`PLACE_NOWHERE`) where the run's messages go nowhere (TBLASTX's `-logfile` of
+a name whose messages go nowhere: `""`, `/dev/null`, `/dev/fd/2`, `/dev/full`...). In TBLASTX with `-logfile NAME` it goes to stream 3 too: the file holds
 what the command line's file holds for the run's own `-outfmt`, which does not write that output.
 LOSAT's own refusal goes to stream 3 whatever `-logfile` is, as the command line writes it to its
 standard error. The signal comes for each output that fails on its own,
@@ -109,12 +109,25 @@ file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
 run fails, `runFilesOf(error)` returns it. A run that the engine failed after it began to write ends
 its output with `fail` in place of `end` (`runOutputFailedOf(error)` is then true): the stream 3 that
-arrived holds the warnings that the command line writes to its standard error before the error.
+arrived holds the warnings that the command line writes to its standard error before the error. The engine reads a `-logfile` name as the command line on
+Linux reads it where the name's directories exist: the file's name is the whole name, which may
+contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`, `logs/`, which the command line makes as
+the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`), a
+directory (`.`, `logs/.`) and a name where a user's command line cannot make or open a file give
+no file: their messages are on stream 3. A user makes files in the working directory, in a home
+(`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`,
+`/var/lock`, `/var/crash`); every other directory is root's (`/etc/run.log`, `/data/run.log`,
+`/dev/run.log`, `//run.log`), and the system refuses a component of more than 255 bytes. A name
+may climb out of a directory of root's (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), but not out of one
+that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2` and
+`/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
+does: the command line writes nothing to a log on a file system without free space, which these
+are.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
-`-logfile`, where TBLASTX with `-logfile NAME` writes them) or `'nowhere'` (TBLASTX's `-logfile ""`
-or `-logfile /dev/null`). The engine sends it once per run, before the outputs, on stream 10
+`-logfile`, where TBLASTX with `-logfile NAME` writes them) or `'nowhere'` (TBLASTX's `-logfile` of
+a name whose messages go nowhere: `""`, `/dev/null`, `/dev/fd/2`, `/dev/full`...). The engine sends it once per run, before the outputs, on stream 10
 (`MESSAGES_STREAM`): 4 bytes, the place as a little-endian unsigned integer (`messagesSignal` reads
 it). An empty stream 3 means no warnings only where it is `'diagnostics'`; where it is `'logfile'`,
 an empty file means none. These are the warnings that the command line writes for the run's own
@@ -129,11 +142,15 @@ import { compileReactor, discardedStream, DISCARD_STREAM, instantiateSerial, ROL
 
 const { module } = await compileReactor(serialBytes);
 const { abi } = await instantiateSerial(module);
-const query = abi.register('blastp', ROLE_QUERY, queryFasta);
-const subject = abi.register('blastp', ROLE_SUBJECT, subjectFasta);
+const argv = ['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'];
+// The verdict on the argv says whether its run reads the inputs with NCBI's data loaders on.
+const validation = abi.validate(argv);
+if (!validation.ok) throw new Error(validation.message);
+const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, queryFasta);
+const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, subjectFasta);
 let outfmt6: Uint8Array[] = [];
 // -query and -subject name the inputs in the outputs; the sequences come from the handles.
-abi.run(['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'], query.handle, subject.handle, (stream, bytes) => {
+abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
   if (stream === 6) outfmt6.push(bytes.slice());
   // Stream 9: the engine could not write the output that it names; if it is outfmt 6, drop what arrived.
   else if (stream === DISCARD_STREAM && discardedStream(bytes) === 6) outfmt6 = [];

@@ -696,7 +696,8 @@ impl SeqDb {
     /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
     /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
     /// `test` gets the masks (never empty), the bounds of the sequence's length that the index
-    /// gives (`Volume::nucleotide_length_bounds`, read once per block at its first sequence with
+    /// gives (`Volume::nucleotide_length_bounds`, or a protein's exact length,
+    /// `Volume::x_protein_lengths`, read once per block at its first sequence with
     /// masks; `None` where they give none or cannot be read) and a function that reads the
     /// sequence's length (the sequence's index and its last byte; `None` when they cannot be
     /// read, and `test` then gives `Err(())`), which `test` calls only where the bounds do not
@@ -716,6 +717,7 @@ impl SeqDb {
         ) -> Result<Option<T>, ()>,
     ) -> Option<(u32, PathBuf, T)> {
         const WALK_BLOCK: u32 = 4096;
+        let protein = self.seqtype() == super::SeqType::Protein;
         let mut block = MaskBlock::default();
         let mut ordinal = 0u32;
         let end_ordinal = self.num_seqs();
@@ -737,16 +739,38 @@ impl SeqDb {
                 if masks.is_empty() {
                     continue;
                 }
+                let volume = &self.volumes[run.volume];
                 let length_bounds = bounds
                     .get_or_insert_with(|| {
-                        self.volumes[run.volume]
-                            .nucleotide_length_bounds(run.first, run.end)
-                            .unwrap_or_default()
+                        if protein {
+                            // A protein's length is exact in its index (series NP, M4b).
+                            volume
+                                .x_protein_lengths(run.first, run.end)
+                                .map(|lengths| {
+                                    lengths
+                                        .into_iter()
+                                        .map(|length| Some((length as usize, length as usize)))
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            volume
+                                .nucleotide_length_bounds(run.first, run.end)
+                                .unwrap_or_default()
+                        }
                     })
                     .get((vol_oid - run.first) as usize)
                     .copied()
                     .flatten();
-                let length = || self.nucleotide_length(seq_ordinal).ok();
+                let length = || {
+                    if protein {
+                        self.protein_length(seq_ordinal)
+                            .ok()
+                            .map(|length| length as usize)
+                    } else {
+                        self.nucleotide_length(seq_ordinal).ok()
+                    }
+                };
                 match test(masks, length_bounds, &length) {
                     Ok(None) => {}
                     Ok(Some(found)) => {
@@ -869,7 +893,7 @@ impl MaskBlock {
     }
 
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.
-    fn into_read_error(self, vol_oid: u32) -> SeqDbError {
+    pub(crate) fn into_read_error(self, vol_oid: u32) -> SeqDbError {
         match self.error {
             Some(error) => error,
             None => self.blobs.into_error(vol_oid),

@@ -238,31 +238,37 @@ impl HitList {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:44-70
-/// The size in NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`, with `ADAPTIVE_CBS`):
-/// a `-max_target_seqs` from 2^31 - 24 wraps to 2..48 with composition-based statistics, from
-/// 2^30 to 10 without; a size that is not positive (NCBI crashes) was refused with the options
-/// (`args.rs`).
+/// The size of `blastn/hsp.rs` `get_prelim_hitlist_size` (with `ADAPTIVE_CBS`), computed
+/// without NCBI's `int` overflow.
 pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
-    let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         o.hitlist_size as usize,
         o.composition > 0,
         o.gapped,
-    );
-    usize::try_from(size).unwrap_or(0)
+    )
 }
 
 /// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):
 /// the contexts are the query frames, and the offsets those of the HSP in its frame.
 pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) {
-    crate::core::blast_hits::subject_besthit(hsps, false, |h| {
-        crate::core::blast_hits::BestHitExtent {
-            context: h.hsp.context as i64,
-            query_frame: i32::from(h.hsp.frame),
-            offset: i64::from(h.hsp.q_start),
-            end: i64::from(h.hsp.q_end),
-            query_length: 0,
-        }
-    });
+    crate::core::blast_hits::subject_besthit(hsps, false, |h| best_hit_extent(&h.hsp));
+}
+
+/// `subject_besthit` of a list of preliminary HSPs sorted by score: the list of a sequence with
+/// `-db_hard_mask` after each of its chunks joins it (`search_db_masked.rs`; series NP, M4b).
+pub(crate) fn subject_besthit_preliminary(hsps: &mut Vec<PreliminaryHsp>) {
+    crate::core::blast_hits::subject_besthit(hsps, false, best_hit_extent);
+}
+
+/// What `-subject_besthit` reads of a BLASTX HSP.
+fn best_hit_extent(hsp: &PreliminaryHsp) -> crate::core::blast_hits::BestHitExtent {
+    crate::core::blast_hits::BestHitExtent {
+        context: hsp.context as i64,
+        query_frame: i32::from(hsp.frame),
+        offset: i64::from(hsp.q_start),
+        end: i64::from(hsp.q_end),
+        query_length: 0,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421

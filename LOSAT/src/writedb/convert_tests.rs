@@ -175,3 +175,24 @@ fn sequence_hashes_are_makeblastdb_s() {
     assert_eq!(sequence_hash(&na2, 10), Some(4_241_009_515));
     assert_eq!(sequence_hash(&SeqData::Other, 3), None);
 }
+
+/// `x_ComputeHash` of a sequence in the form of the sequence file: a nucleotide of no base hashes
+/// nothing before its ambiguity data are read (even malformed ones), as `SeqDB_UnpackAmbiguities`
+/// returns there; one with bases and ambiguity data shorter than their count is the error that
+/// the writer refuses.
+#[test]
+fn a_raw_nucleotide_of_no_base_hashes_before_its_ambiguities() {
+    let malformed = 5u32.to_be_bytes();
+    assert_eq!(raw_sequence_hash(false, &[0x00], &malformed), Ok(0));
+    assert_eq!(raw_sequence_hash(false, &[0x00], &[]), Ok(0));
+    assert_eq!(
+        raw_sequence_hash(false, &[0x1b, 0x02], &malformed),
+        Err("the ambiguity data are shorter than their count")
+    );
+    // ACGTAC: two bases in the last byte.
+    let na2 = SeqData::Ncbi2na(vec![0x1b, 0x10]);
+    assert_eq!(
+        raw_sequence_hash(false, &[0x1b, 0x12], &[]).ok(),
+        sequence_hash(&na2, 6)
+    );
+}

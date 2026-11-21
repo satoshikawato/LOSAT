@@ -1,32 +1,39 @@
-//! Parser kinds 1 and 2 of the index scan (docs/web/abi_v2.md §9): the records that NCBI
-//! BLAST+'s FASTA input source reads, as the engine reads them
-//! (the engine's `fasta_reader`, the port of `CBlastFastaInputSource`, `CFastaReader` and
-//! `CStreamLineReader`), from the bytes of a file
-//! (`losat::web_adapter::FastaInputSource::from_bytes`), with the data loaders on (the CLI's
-//! default).
+//! The index scan (docs/web/abi_v2.md §9): the records that NCBI BLAST+'s FASTA input source reads,
+//! as the engine reads them (the engine's `fasta_reader`, the port of `CBlastFastaInputSource`,
+//! `CFastaReader` and `CStreamLineReader`), from the bytes of a file
+//! (`losat::web_adapter::FastaInputSource::from_bytes`), with the reader of a program's input
+//! (`ReaderConfig`: the program, the role, its flags and whether NCBI's data loaders are on).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-345
 //! Kind 1 has the flags of nucleotide input (`fAssumeNuc`: BLASTN, TBLASTX, the TBLASTN
-//! subject), kind 2 those of protein input (`fAssumeProt`: BLASTP, the TBLASTN query).
+//! subject, the BLASTX query), kind 2 those of protein input (`fAssumeProt`: BLASTP, the TBLASTN
+//! query, the BLASTX subject).
 //!
-//! The scan takes the input in chunks of any size and holds only a header's first word,
-//! the first line of an input whose first line may be a Seq-id, at most 70 bytes of a
-//! record's first data line and at most 257 bytes whose loss is not yet decided. It writes
-//! no messages. Each record is reported with every record that the reader returns
-//! (records without residues too): the ID is the title up to its first space (empty without
-//! a title), the length is the number of stored residues, and `residue_counts` counts the
-//! stored residues upper-cased (`U` is `T` for kind 1, as the reader stores it).
+//! The scan takes the input in chunks of any size and holds only a header's first word, the
+//! first line of an input whose first line may be a Seq-id (with the data loaders on), the line
+//! of a `>?` gap line, at most 70 bytes of a record's first data line and at most 257 bytes whose
+//! loss is not yet decided. It writes no messages. Each record is reported with every record that
+//! the reader returns (records without residues too): the ID is the title up to its first space
+//! (empty without a title), the length is the number of letters that the reader stores (a gap
+//! line's letters too, counted by the reader's own parser of gap lines,
+//! `losat::web_adapter::gap_line_letters`), and `residue_counts` counts them upper-cased (`U` is
+//! `T` for kind 1, as the reader stores it; a gap's letters are `N` for kind 1, `X` for kind 2).
 //!
-//! The scan fails with the reader's error (`CheckDataLine`) and rejects explicitly, with
-//! `not supported in the browser`:
-//! - a first line that NCBI's data loaders would read as a Seq-id (the engine's test);
-//! - a `>?` gap line (maintainer decision 3: gap residues have no bytes to index);
-//! - a record longer than 2147483647 letters (the engine's limit);
-//! - a record whose residues neither follow the uniform layout nor the read-forward rules
-//!   (`Forward`), which happens only where NCBI's line reader joins two lines of the file
-//!   (a CR line end inside a file of LF line ends, or the reverse).
+//! The scan fails with the reader's errors, in the reader's order and words: `CheckDataLine`, and
+//! the refusals of the reader of the program's input, which the command line makes too: a first
+//! line that NCBI's data loaders would read as a Seq-id (with the data loaders on), and a record
+//! longer than 2147483647 letters (`losat::web_adapter::record_too_long`, which the scan gives
+//! because such a record does not fit in the reader's memory in the browser). Until line WQA's
+//! D13 (2026-11-20) the scan also reported where each residue was (`line_layout`), which no
+//! application read, and refused a `>?` gap line and lines that NCBI's line reader joins for it:
+//! inputs that the command line reads.
 
-use super::{LineLayout, ScanRecord, CHECKPOINT_EVERY};
+use losat::web_adapter::{
+    gap_line_letters, record_too_long, FastaInputSource, ReadError, ReaderConfig,
+    MAX_RECORD_LETTERS,
+};
+
+use super::{ScanError, ScanRecord};
 
 /// Bytes of a regular file that an `ifstream` buffers at once (`FastaStream::new` in
 /// `LOSAT/src/blastinput/fasta_reader/stream.rs`, checked against an independent C++ oracle).
@@ -37,9 +44,6 @@ const MIN_BUF_SIZE: u64 = 4096;
 
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:413-417
 const STEP_BACK_MAX: usize = (MIN_BUF_SIZE >> 4) as usize;
-
-/// The longest record (`check_length` of the engine's reader).
-const MAX_LETTERS: u64 = i32::MAX as u64;
 
 /// `CheckDataLine`'s window.
 const CHECK_WINDOW: usize = 70;
@@ -351,24 +355,29 @@ fn last_refill(resume: u64, pushed: u64, total: u64) -> u64 {
     }
 }
 
-/// How a line that starts with `>` begins (at most 4 bytes, with their offsets).
+/// How a line that starts with `>` begins (at most 4 bytes).
 #[derive(Clone, Copy)]
 struct Prefix {
-    bytes: [(u8, u64); 4],
+    bytes: [u8; 4],
     len: usize,
 }
 
 impl Prefix {
-    fn new(byte: u8, offset: u64) -> Self {
+    fn new(byte: u8) -> Self {
         Self {
-            bytes: [(byte, offset); 4],
+            bytes: [byte; 4],
             len: 1,
         }
     }
 
-    fn push(&mut self, byte: u8, offset: u64) {
-        self.bytes[self.len] = (byte, offset);
+    fn push(&mut self, byte: u8) {
+        self.bytes[self.len] = byte;
         self.len += 1;
+    }
+
+    /// The bytes after the `>` and its `?_` (`skip` 3), or after the `>` alone (`skip` 1).
+    fn after(&self, skip: usize) -> &[u8] {
+        &self.bytes[skip..self.len]
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-374
@@ -378,7 +387,7 @@ impl Prefix {
     /// `Some(None)` a gap line, `Some(Some(skip))` not a gap line whose `>?_` (when
     /// `skip` is 3) becomes `>`, `None` not known yet.
     fn kind(&self, at_end: bool) -> Option<Option<usize>> {
-        let byte = |index: usize| (index < self.len).then(|| self.bytes[index].0);
+        let byte = |index: usize| (index < self.len).then(|| self.bytes[index]);
         match (byte(1), byte(2), byte(3)) {
             (None, ..) => at_end.then_some(Some(1)),
             (Some(b'?'), None, _) => at_end.then_some(None),
@@ -501,93 +510,11 @@ enum LineState {
         semicolon: bool,
         check: Option<Check>,
     },
+    /// A `>?` gap line: the line as `ParseGapLine` reads it (after `>?_` became `>`), whose
+    /// letters are counted at its end.
+    Gap(Vec<u8>),
     /// A comment line.
     Skip,
-}
-
-/// The rules by which an application reads the residues of a record forward from a
-/// checkpoint (docs/web/abi_v2.md §9, kinds 1 and 2), applied to every byte of the input
-/// from the record's first residue (checkpoint 0) on. The byte at a checkpoint is a
-/// residue. Lines end at every CR and every LF. A line whose first byte other than space,
-/// tab, VT and FF is `!`, `#` or `;` is skipped; in other lines, a `;` skips the rest of
-/// the line, and every byte that the kind stores is a residue (kind 1: `ABCDGHKMNRSTUVWY`
-/// in either case; kind 2: every ASCII letter and `*`); every other byte (white space,
-/// `-`, `>`, digits, other bytes) is skipped.
-///
-/// The scan checks that these rules find the reader's residues: from the first residue,
-/// the residues they find must begin with the reader's residues, at the same offsets
-/// (then reading from any checkpoint finds them too: the rules are in the same state at
-/// every residue that they find). They differ only where the line reader joins two lines
-/// (`Role::Dropped`): the joined line's comment or `;` covers the second line, or the
-/// second line's comment mark is read as data.
-#[derive(Default)]
-struct Forward {
-    active: bool,
-    state: ForwardState,
-    /// The rules found a residue that the reader did not store.
-    ahead: bool,
-    /// The rules have found every residue that the reader stored, at its offset.
-    readable: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ForwardState {
-    #[default]
-    LineStart,
-    Data,
-    Skip,
-}
-
-impl Forward {
-    /// The rules from the record's first residue (a checkpoint: in a data line).
-    fn started() -> Self {
-        Self {
-            active: true,
-            state: ForwardState::Data,
-            ahead: false,
-            readable: true,
-        }
-    }
-
-    /// Whether `byte` is a residue under the rules.
-    fn step(&mut self, byte: u8, types: &[CharType; 256]) -> bool {
-        if byte == b'\r' || byte == b'\n' {
-            self.state = ForwardState::LineStart;
-            return false;
-        }
-        if self.state == ForwardState::LineStart {
-            if matches!(byte, b' ' | b'\t' | 0x0b | 0x0c) {
-                return false;
-            }
-            if matches!(byte, b'!' | b'#' | b';') {
-                self.state = ForwardState::Skip;
-                return false;
-            }
-            self.state = ForwardState::Data;
-        }
-        if self.state == ForwardState::Skip {
-            return false;
-        }
-        match types[byte as usize] {
-            CharType::Residue => true,
-            CharType::Comment => {
-                self.state = ForwardState::Skip;
-                false
-            }
-            CharType::Other => false,
-        }
-    }
-
-    /// Compares the reader (`stored`) and the rules (`found`) at one byte.
-    fn compare(&mut self, stored: bool, found: bool) {
-        if stored {
-            if self.ahead || !found {
-                self.readable = false;
-            }
-        } else if found {
-            self.ahead = true;
-        }
-    }
 }
 
 /// A record being read.
@@ -595,13 +522,12 @@ struct Builder {
     id: Vec<u8>,
     header_offset: u64,
     sequence_offset: u64,
+    /// The letters that the reader stores, a gap line's letters too.
     length: u64,
+    /// The residues of the data lines (the reader's `m_SeqData`, without the gaps): while there
+    /// is none, a data line gets `CheckDataLine`.
+    residues: u64,
     residue_counts: Box<[u64; 256]>,
-    checkpoints: Vec<u64>,
-    uniform: bool,
-    width: u64,
-    eol: u64,
-    previous: u64,
 }
 
 impl Builder {
@@ -611,94 +537,42 @@ impl Builder {
             header_offset,
             sequence_offset,
             length: 0,
+            residues: 0,
             residue_counts: Box::new([0; 256]),
-            checkpoints: Vec::new(),
-            uniform: true,
-            width: 0,
-            eol: 1,
-            previous: 0,
         }
     }
 
-    /// Stores a residue at `offset` (upper-cased; a nucleotide `U` as `T`). The layout is
-    /// uniform while every residue is where the formula of the first line's width and the
-    /// gap after it puts it.
-    fn store(&mut self, residue: u8, offset: u64) -> Result<(), String> {
-        let index = self.length;
-        if index.is_multiple_of(CHECKPOINT_EVERY) {
-            self.checkpoints.push(offset);
-        }
-        if index == 0 {
-            self.uniform = offset == self.sequence_offset;
-        } else if self.uniform {
-            if self.width == 0 {
-                if offset != self.previous + 1 {
-                    self.width = index;
-                    self.eol = offset - self.previous - 1;
-                }
-            } else if offset
-                != self.sequence_offset
-                    + index / self.width * (self.width + self.eol)
-                    + index % self.width
-            {
-                self.uniform = false;
-            }
-        }
-        self.previous = offset;
+    /// Stores a residue of a data line (upper-cased; a nucleotide `U` as `T`).
+    fn store(&mut self, residue: u8) {
         self.residue_counts[residue as usize] += 1;
+        self.residues += 1;
         self.length += 1;
-        // NCBI reference (598d8ae6): c++/include/corelib/ncbimisc.hpp:879
-        if self.length > MAX_LETTERS {
-            return Err(format!(
-                "a record longer than {MAX_LETTERS} letters is not supported in the browser"
-            ));
-        }
-        Ok(())
     }
 
-    fn finish(
-        self,
-        end_offset: u64,
-        forward: &Forward,
-        index: usize,
-    ) -> Result<ScanRecord, String> {
-        let id = String::from_utf8_lossy(&self.id).into_owned();
-        let layout = if self.uniform {
-            let width = if self.width == 0 {
-                self.length
-            } else {
-                self.width
-            };
-            LineLayout::Uniform {
-                width,
-                eol: self.eol,
-            }
-        } else if forward.readable {
-            LineLayout::Checkpoints {
-                offsets: self.checkpoints,
-            }
-        } else {
-            return Err(format!(
-                "record {} ({id:?}): NCBI BLAST+ reads two of its lines as one (a CR line end in a file of LF line ends, or an LF in a file of CR line ends), so LOSAT's index cannot locate its residues; such input is not supported in the browser (use one kind of line end)",
-                index + 1
-            ));
-        };
-        Ok(ScanRecord {
-            id,
+    /// Stores the `letters` of a gap line: the run of `gap` (`N` or `X`) that `AssembleSeq` puts
+    /// in the record's place of the line.
+    fn gap(&mut self, gap: u8, letters: u32) {
+        self.residue_counts[gap as usize] += u64::from(letters);
+        self.length += u64::from(letters);
+    }
+
+    fn finish(self, end_offset: u64) -> ScanRecord {
+        ScanRecord {
+            id: String::from_utf8_lossy(&self.id).into_owned(),
             header_offset: self.header_offset,
             sequence_offset: self.sequence_offset,
             end_offset,
             length: self.length,
-            layout,
             residue_counts: self.residue_counts,
-        })
+        }
     }
 }
 
 /// The record reader (`CFastaReader::ReadOneSeq` as `CBlastInputReader` calls it), fed
 /// with the line reader's bytes.
 struct Records {
-    protein: bool,
+    /// The reader of the program's input whose records these are.
+    config: ReaderConfig,
     types: &'static [CharType; 256],
     line_number: u64,
     in_line: bool,
@@ -713,16 +587,15 @@ struct Records {
     /// The current record's `sequence_offset` is the next byte that the line reader
     /// reads after its defline.
     awaiting_sequence: bool,
-    forward: Forward,
     records: Vec<ScanRecord>,
-    error: Option<String>,
+    error: Option<ScanError>,
 }
 
 impl Records {
-    fn new(protein: bool) -> Self {
+    fn new(config: ReaderConfig) -> Self {
         Self {
-            protein,
-            types: if protein {
+            config,
+            types: if config.protein {
                 &PROTEIN_TYPES
             } else {
                 &NUCLEOTIDE_TYPES
@@ -735,15 +608,14 @@ impl Records {
             need_defline: true,
             current: None,
             awaiting_sequence: false,
-            forward: Forward::default(),
             records: Vec::new(),
             error: None,
         }
     }
 
-    fn fail(&mut self, message: String) {
+    fn fail(&mut self, error: ScanError) {
         if self.error.is_none() {
-            self.error = Some(message);
+            self.error = Some(error);
         }
     }
 
@@ -766,44 +638,34 @@ impl Records {
                 self.state = LineState::Fresh;
             }
         }
-        let stored = role == Role::Content && self.content(byte, offset);
-        if self.forward.active {
-            let found = self.forward.step(byte, self.types);
-            self.forward.compare(stored, found);
-        } else if stored {
-            // The record's first residue.
-            self.forward = Forward::started();
+        if role == Role::Content {
+            self.content(byte);
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:339-340
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:376-389
-    /// A byte of the current line; whether it is a stored residue.
-    fn content(&mut self, byte: u8, offset: u64) -> bool {
+    /// A byte of the current line.
+    fn content(&mut self, byte: u8) {
         if let Some(line) = self.first_line.as_mut() {
             line.push(byte);
         }
         match std::mem::replace(&mut self.state, LineState::Skip) {
-            LineState::Fresh if byte == b'>' => {
-                self.state = LineState::Angle(Prefix::new(byte, offset));
-                false
-            }
-            LineState::Fresh | LineState::Leading => self.leading(byte, offset),
+            LineState::Fresh if byte == b'>' => self.state = LineState::Angle(Prefix::new(byte)),
+            LineState::Fresh | LineState::Leading => self.leading(byte),
             LineState::Angle(mut prefix) => {
-                prefix.push(byte, offset);
+                prefix.push(byte);
                 self.angle(prefix, false);
-                false
             }
             LineState::Title(mut title) => {
                 if let Some(current) = self.current.as_mut() {
                     title.byte(byte, &mut current.id);
                 }
                 self.state = LineState::Title(title);
-                false
             }
             LineState::DataAngle(mut prefix, check) => {
-                prefix.push(byte, offset);
-                self.data_angle(prefix, check, false)
+                prefix.push(byte);
+                self.data_angle(prefix, check, false);
             }
             LineState::Data { semicolon, check } => {
                 self.state = LineState::Data { semicolon, check };
@@ -813,39 +675,39 @@ impl Records {
                 {
                     check.byte(byte);
                 }
-                self.residue(byte, offset)
+                self.residue(byte);
             }
-            LineState::Skip => false,
+            LineState::Gap(mut line) => {
+                line.push(byte);
+                self.state = LineState::Gap(line);
+            }
+            LineState::Skip => {}
         }
     }
 
     /// The first byte other than white space of a line that does not start with `>`.
-    fn leading(&mut self, byte: u8, offset: u64) -> bool {
+    fn leading(&mut self, byte: u8) {
         if space(byte) {
             self.state = LineState::Leading;
-            return false;
+            return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:132-133
-        if self.line_number == 1 && byte.is_ascii_alphanumeric() {
+        if self.config.data_loaders && self.line_number == 1 && byte.is_ascii_alphanumeric() {
             self.first_line = Some(vec![byte]);
         }
         if matches!(byte, b'!' | b'#' | b';') {
-            return false;
+            return;
         }
-        if self.need_defline {
-            // `ParseDefLine(">")`: the input's first record, without a title.
-            self.need_defline = false;
-            self.current = Some(Builder::new(0, 0));
-        }
+        self.start_headerless();
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:715-717
         let check = self
             .current
             .as_ref()
-            .is_some_and(|current| current.length == 0)
+            .is_some_and(|current| current.residues == 0)
             .then(Check::new);
         if byte == b'>' {
-            self.state = LineState::DataAngle(Prefix::new(byte, offset), check);
-            return false;
+            self.state = LineState::DataAngle(Prefix::new(byte), check);
+            return;
         }
         let mut check = check;
         if let Some(check) = check.as_mut() {
@@ -855,15 +717,28 @@ impl Records {
             semicolon: false,
             check,
         };
-        self.residue(byte, offset)
+        self.residue(byte);
     }
 
-    /// A line that starts with `>`, once its kind is known: a defline starts a record
-    /// (and ends the current one), a gap line is rejected.
+    /// A data line that comes before any defline: the reader parses an empty defline there
+    /// (`ParseDefLine`), so the input's first record has no title (`fDLOptional`). Every later
+    /// record starts at the defline that ended the one before.
+    fn start_headerless(&mut self) {
+        if self.need_defline {
+            self.need_defline = false;
+            self.current = Some(Builder::new(0, 0));
+        }
+    }
+
+    /// A line that starts with `>`, once its kind is known: a defline starts a record (and ends
+    /// the current one), a gap line is a data line.
     fn angle(&mut self, prefix: Prefix, at_end: bool) {
         match prefix.kind(at_end) {
             None => self.state = LineState::Angle(prefix),
-            Some(None) => self.gap(),
+            Some(None) => {
+                self.start_headerless();
+                self.state = LineState::Gap(gap_line(&prefix));
+            }
             Some(Some(skip)) => {
                 if let Some(current) = self.current.take() {
                     self.close(current, self.line_start);
@@ -871,32 +746,25 @@ impl Records {
                 self.need_defline = false;
                 let mut current = Builder::new(self.line_start, self.line_start);
                 let mut title = Title::default();
-                for &(byte, _) in &prefix.bytes[skip..prefix.len] {
+                for &byte in prefix.after(skip) {
                     title.byte(byte, &mut current.id);
                 }
                 self.current = Some(current);
-                self.forward = Forward::default();
                 self.state = LineState::Title(title);
             }
         }
     }
 
     /// A data line whose first byte other than white space is `>`, once its kind is known.
-    fn data_angle(&mut self, prefix: Prefix, check: Option<Check>, at_end: bool) -> bool {
+    fn data_angle(&mut self, prefix: Prefix, check: Option<Check>, at_end: bool) {
         match prefix.kind(at_end) {
-            None => {
-                self.state = LineState::DataAngle(prefix, check);
-                false
-            }
-            Some(None) => {
-                self.gap();
-                false
-            }
+            None => self.state = LineState::DataAngle(prefix, check),
+            Some(None) => self.state = LineState::Gap(gap_line(&prefix)),
             Some(Some(skip)) => {
                 let mut check = check;
                 if let Some(check) = check.as_mut() {
-                    check.byte(prefix.bytes[0].0);
-                    for &(byte, _) in &prefix.bytes[skip..prefix.len] {
+                    check.byte(prefix.bytes[0]);
+                    for &byte in prefix.after(skip) {
                         check.byte(byte);
                     }
                 }
@@ -907,11 +775,8 @@ impl Records {
                 // `>`, `?` and `_` are not residues: only the line's last byte, when this
                 // byte decided the kind, can be one.
                 match (at_end, prefix.len) {
-                    (false, len) if len > 1 => {
-                        let (byte, offset) = prefix.bytes[len - 1];
-                        self.residue(byte, offset)
-                    }
-                    _ => false,
+                    (false, len) if len > 1 => self.residue(prefix.bytes[len - 1]),
+                    _ => {}
                 }
             }
         }
@@ -922,41 +787,46 @@ impl Records {
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
     /// A byte of a data line's data: a residue is stored upper-cased (the engine stores a
     /// nucleotide `U` as `T`; the lowercase mask only changes case); `;` ends the data.
-    fn residue(&mut self, byte: u8, offset: u64) -> bool {
+    fn residue(&mut self, byte: u8) {
         let LineState::Data { semicolon, .. } = &mut self.state else {
-            return false;
+            return;
         };
         if *semicolon {
-            return false;
+            return;
         }
         match self.types[byte as usize] {
             CharType::Residue => {}
             CharType::Comment => {
                 *semicolon = true;
-                return false;
+                return;
             }
-            CharType::Other => return false,
+            CharType::Other => return,
         }
         let mut residue = byte.to_ascii_uppercase();
-        if !self.protein && residue == b'U' {
+        if !self.config.protein && residue == b'U' {
             residue = b'T';
         }
-        if let Some(Err(error)) = self
-            .current
-            .as_mut()
-            .map(|current| current.store(residue, offset))
-        {
-            self.fail(error);
+        if let Some(current) = self.current.as_mut() {
+            current.store(residue);
         }
-        true
     }
 
-    /// A `>?` gap line (maintainer decision 3: `register` and `scan` reject them).
-    fn gap(&mut self) {
-        let line = self.line_number;
-        self.fail(format!(
-            "line {line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser"
-        ));
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-779
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1386-1389
+    // `ParseDataLine` hands a line that starts with `>?` to the parser of gap lines before any
+    // check of data; without `fParseGaps` (BLAST's reader) the record's gaps are then stored as
+    // runs of `X` in protein and `N` in nucleotide data (line WQA's D13 round 3, L2; license
+    // rule 1 of 2026-11-20).
+    /// The end of a gap line: its letters, as the reader's parser of gap lines counts them
+    /// (`gap_line_letters`), are a run of `N` (kind 1) or `X` (kind 2) in the record. A gap line
+    /// gets no `CheckDataLine` and stores no residue in `m_SeqData`, so the next data line is
+    /// checked as the record's first.
+    fn gap(&mut self, line: &[u8]) {
+        let letters = gap_line_letters(line).expect("a gap line starts with >?");
+        let gap = if self.config.protein { b'X' } else { b'N' };
+        if let Some(current) = self.current.as_mut() {
+            current.gap(gap, letters);
+        }
     }
 
     /// The end of the current line, if one is open.
@@ -965,23 +835,18 @@ impl Records {
             return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
-        // Every later record starts at the `>` line that ended the one before, so only the
+        // `CBlastInputReader` reads only with the data loaders on (`first_line` is held only
+        // then). Every later record starts at the `>` line that ended the one before, so only the
         // input's first line is tried.
         if let Some(line) = self.first_line.take() {
-            if seq_id_line(&line, self.protein) {
-                let line = String::from_utf8_lossy(&line);
-                self.fail(format!(
-                    "the first line ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)",
-                    line.trim_end()
-                ));
+            if let Some(message) = seq_id_refusal(&line, self.config) {
+                self.fail(ScanError::Refused { message, record: 0 });
                 return;
             }
         }
         match std::mem::replace(&mut self.state, LineState::Fresh) {
             LineState::Angle(prefix) => self.angle(prefix, true),
-            LineState::DataAngle(prefix, check) => {
-                self.data_angle(prefix, check, true);
-            }
+            LineState::DataAngle(prefix, check) => self.data_angle(prefix, check, true),
             state => self.state = state,
         }
         match std::mem::replace(&mut self.state, LineState::Fresh) {
@@ -990,26 +855,38 @@ impl Records {
                 check: Some(check), ..
             } if !check.plausible() => {
                 let line = self.line_number;
-                self.fail(format!(
+                self.fail(ScanError::Reader(format!(
                     "CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
-                ));
+                )));
+                return;
             }
+            LineState::Gap(line) => self.gap(&line),
             _ => {}
+        }
+        // The reader checks the record's length after each data line and gap line, after
+        // `CheckDataLine` (`FastaReader::check_length`).
+        if let Some(current) = self
+            .current
+            .as_ref()
+            .filter(|current| current.length > MAX_RECORD_LETTERS)
+        {
+            let record = current.header_offset;
+            self.fail(ScanError::Refused {
+                message: reader_error(record_too_long(&self.config)),
+                record,
+            });
         }
     }
 
     fn close(&mut self, current: Builder, end_offset: u64) {
-        match current.finish(end_offset, &self.forward, self.records.len()) {
-            Ok(record) => self.records.push(record),
-            Err(error) => self.fail(error),
-        }
+        self.records.push(current.finish(end_offset));
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:428-432
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:203-208
     /// The end of the input (`total` bytes): the current record ends there; an input with
     /// only white space and comment lines has no record.
-    fn finish(mut self, total: u64) -> Result<Vec<ScanRecord>, String> {
+    fn finish(mut self, total: u64) -> Result<Vec<ScanRecord>, ScanError> {
         if self.error.is_none() {
             if let Some(mut current) = self.current.take() {
                 if self.awaiting_sequence {
@@ -1025,33 +902,52 @@ impl Records {
     }
 }
 
-/// Whether NCBI BLAST+, with its data loaders on, reads `line` (the first line of an input,
-/// without its white space at the start) as a Seq-id: the engine's reader decides
-/// (`ReadError::Unsupported` for such a line, `seq_id.rs`).
-fn seq_id_line(line: &[u8], protein: bool) -> bool {
-    use losat::web_adapter::{FastaInputSource, ReadError, ReaderConfig};
+/// The line of a gap line that starts with `prefix`, as `ParseGapLine` reads it: `>?_` (at the
+/// start of a line, after its white space) becomes `>`.
+fn gap_line(prefix: &Prefix) -> Vec<u8> {
+    let skip = if prefix.after(1).starts_with(b"?_") {
+        3
+    } else {
+        1
+    };
+    let mut line = vec![b'>'];
+    line.extend_from_slice(prefix.after(skip));
+    line
+}
+
+/// An error of the engine's reader as the command line reports it, without its line end
+/// (`store::reader_error`).
+fn reader_error(error: ReadError) -> String {
+    crate::store::reader_error(error)
+}
+
+/// The refusal of the reader of `config` (with NCBI's data loaders on) of an input whose first
+/// line is `line` (from its first byte other than white space), when NCBI would read that line as
+/// a Seq-id: the engine's reader decides and words it (`ReadError::Unsupported` for such a line,
+/// `seq_id.rs`), as `register` and the command line refuse the input.
+fn seq_id_refusal(line: &[u8], config: ReaderConfig) -> Option<String> {
     let mut bytes = Vec::with_capacity(line.len() + 1);
     bytes.extend_from_slice(line);
     bytes.push(b'\n');
-    let mut source =
-        FastaInputSource::from_bytes(&bytes, ReaderConfig::query("LOSAT", protein, true));
-    matches!(
-        source.next_sequence(&mut |_| Ok(())),
-        Err(ReadError::Unsupported(_))
-    )
+    let mut source = FastaInputSource::from_bytes(&bytes, config);
+    match source.next_sequence(&mut |_| Ok(())) {
+        Err(error @ ReadError::Unsupported(_)) => Some(reader_error(error)),
+        _ => None,
+    }
 }
 
-/// A streaming scan with parser kind 1 (`protein` false) or 2 (`protein` true).
+/// A streaming scan with the reader of a program's input (`config`: kind 1 for nucleotide
+/// input, 2 for protein input, NCBI's data loaders on or off).
 pub struct NcbiScanner {
     lines: Lines,
     records: Records,
 }
 
 impl NcbiScanner {
-    pub fn new(protein: bool) -> Self {
+    pub fn new(config: ReaderConfig) -> Self {
         Self {
             lines: Lines::new(),
-            records: Records::new(protein),
+            records: Records::new(config),
         }
     }
 
@@ -1066,7 +962,7 @@ impl NcbiScanner {
     }
 
     /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(mut self) -> Result<Vec<ScanRecord>, String> {
+    pub fn finish(mut self) -> Result<Vec<ScanRecord>, ScanError> {
         if self.records.error.is_none() {
             self.lines.finish(&mut self.records);
         }

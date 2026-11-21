@@ -253,6 +253,59 @@ pub enum Value {
     /// A Seq-id, in the Seq-id model that owns every Seq-id of LOSAT (`seqid::model`), boxed so
     /// that a `Value` stays small (the model's largest alternatives are several strings).
     SeqId(Box<crate::seqid::ParsedSeqId>),
+    /// A SEQUENCE OF VisibleString, or of Seq-id (each written from its text, as the Seq-id of
+    /// `seq_id_from_text` with any raw accession), kept as runs of numbered accessions: the ids of
+    /// a `secondary-accession` range of millions are written as they are made, never held (NCBI
+    /// holds a tree of about 350 bytes for each). Only the modifiers of `-in_msa` make one; the
+    /// reader does not.
+    Texts(Vec<TextRun>),
+}
+
+/// A run of the texts of a [`Value::Texts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextRun {
+    /// One text.
+    One(Vec<u8>),
+    /// `count` texts: `prefix`, then the number `first`, `first + 1`, ..., each with at least
+    /// `digits` digits (zero-padded).
+    Numbered {
+        prefix: Vec<u8>,
+        first: i64,
+        count: i64,
+        digits: usize,
+    },
+}
+
+impl TextRun {
+    /// The number of texts.
+    pub fn len(&self) -> u64 {
+        match self {
+            TextRun::One(_) => 1,
+            TextRun::Numbered { count, .. } => u64::try_from(*count).unwrap_or(0),
+        }
+    }
+
+    /// Calls `each` with the texts of the run, in order (one buffer, reused).
+    pub fn for_each(&self, each: &mut dyn FnMut(&[u8])) {
+        match self {
+            TextRun::One(text) => each(text),
+            TextRun::Numbered {
+                prefix,
+                first,
+                count,
+                digits,
+            } => {
+                use std::io::Write;
+                let mut text = Vec::with_capacity(prefix.len() + (*digits).max(20));
+                for number in *first..first.saturating_add(*count) {
+                    text.clear();
+                    text.extend_from_slice(prefix);
+                    write!(text, "{number:0digits$}").expect("a write to a Vec");
+                    each(&text);
+                }
+            }
+        }
+    }
 }
 
 /// A value is dropped with the values nested in it from a list on the heap: the drop of each one
@@ -309,6 +362,7 @@ impl Clone for Value {
                 Value::Reals(numbers) => Some(Value::Reals(numbers.clone())),
                 Value::Delayed(text) => Some(Value::Delayed(text.clone())),
                 Value::SeqId(id) => Some(Value::SeqId(id.clone())),
+                Value::Texts(runs) => Some(Value::Texts(runs.clone())),
             };
             // The clone made goes to the value that holds it, until one has a value left to clone.
             loop {
@@ -382,6 +436,7 @@ impl PartialEq for Value {
                 (Value::Reals(a), Value::Reals(b)) => a == b,
                 (Value::Delayed(a), Value::Delayed(b)) => a == b,
                 (Value::SeqId(a), Value::SeqId(b)) => a == b,
+                (Value::Texts(a), Value::Texts(b)) => a == b,
                 _ => false,
             };
             if !same {
@@ -453,6 +508,7 @@ impl std::fmt::Debug for Value {
                 Value::Reals(numbers) => write!(f, "Reals({numbers:?})")?,
                 Value::Delayed(text) => write!(f, "Delayed({text:?})")?,
                 Value::SeqId(id) => write!(f, "SeqId({id:?})")?,
+                Value::Texts(runs) => write!(f, "Texts({runs:?})")?,
             }
         }
         Ok(())

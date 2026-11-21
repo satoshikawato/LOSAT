@@ -48,6 +48,9 @@ pub struct TblastnArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b PR 2).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`
     // (`stage_d_pipeline::SubjectSetNumbers`).
@@ -291,8 +294,6 @@ pub struct ResolvedTblastnArgs {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
     /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     /// The -max_hsps value, or 0 (every HSP).
     pub max_hsps: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
@@ -309,6 +310,9 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// The database masking as the formatter resolved it (`tblastn_app::resolve_db_mask`; series
+    /// NP, M4b PR 2); `None` before, and for a search without it.
+    pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
 }
 
 impl TblastnArgs {
@@ -548,7 +552,6 @@ impl TblastnArgs {
             num_descriptions: counts.num_descriptions,
             formatting: self.formatting,
             num_alignments: counts.num_alignments,
-            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
@@ -559,6 +562,7 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            db_mask: None,
         })
     }
 }
@@ -603,7 +607,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
                 || args.matrix_name.eq_ignore_ascii_case("identity"),
         )?;
     }
-    let (compo_adjust_mode, _) = composition(args);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
     // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
     // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
@@ -617,16 +620,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
             args.evalue
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.hitlist_size,
-        args.max_target_seqs_given,
-        compo_adjust_mode.is_enabled(),
-        true,
-        "TBLASTN",
-    )?;
     Ok(())
 }
 

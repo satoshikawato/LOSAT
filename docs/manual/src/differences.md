@@ -66,6 +66,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sum without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### Hit list sizes from 2^30
+
+- **What you see.** A hit list size (`-max_target_seqs`, `-num_alignments`, or `-num_descriptions` in `-outfmt` 0 to 4) of 2^30 or more, or 2^30 - 25 or more with composition-based statistics, keeps every hit, as 2^30 - 26 does. NCBI computes the preliminary hit list size in a signed 32-bit integer, which overflows there: NCBI keeps 10 hits per query (without composition-based statistics, up to 2^31 - 51) or 2 to 48 (with them, from 2147483624), and crashes at the other sizes. With `-best_hit_overhang` or `-best_hit_score_edge` NCBI's best-hit filter counts twice that size in the same integer, which overflows from 2^30 - 50 (2^29 - 25 with composition-based statistics, 2^30 in ungapped searches): there NCBI keeps some alignments that the filter removes at smaller sizes, and LOSAT gives the result of the size just below.
+- **When.** Gapped `blastn`, `blastp`, `psiblast`, `rpsblast`, `blastx`, `rpstblastn` and `tblastn` searches with such a size, and searches with `-best_hit_overhang` or `-best_hit_score_edge`. Ungapped searches and `tblastx` otherwise keep the size itself, as NCBI does. Every smaller size matches NCBI.
+- **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sizes without overflow.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.
@@ -161,7 +168,7 @@ These cases are about what the program prints around the search, not the search 
 - **Tabular output (6, 7) cannot be written** (`-out /dev/full`, a full disk): NCBI aborts. LOSAT reports the write error and exits with a non-zero status. For outfmt 0 LOSAT gives NCBI's message and exit status (`BLAST failed to write output`, 6).
 - **A side file of outfmt 13 or 14 cannot be written**: NCBI reports it on the standard error and goes on, exit status 0. LOSAT stops with `BLAST failed to write output` (exit status 6).
 - **A search program runs out of memory**: NCBI catches it and writes `BLAST ran out of memory` (exit status 4). LOSAT aborts.
-- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
+- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex -show_filters` and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
 - **Standard output closed at the start** (`>&-`): NCBI fails on its first write. LOSAT writes the report to `/dev/null` and exits as the search ends.
 - **`rpsbproc` cannot write its report**: NCBI's `rpsbproc` drops the writes and exits with 0. LOSAT stops with `rpsbproc failed to write output` (exit status 4).
 

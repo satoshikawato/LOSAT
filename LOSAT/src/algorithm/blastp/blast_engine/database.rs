@@ -145,21 +145,24 @@ impl BlastpDatabase {
         settings: &ApplicationSettings,
         program: &'static str,
     ) -> Result<Self> {
-        Self::open_restricted(name, settings, program, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, program, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
+    /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
+    /// `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         program: &'static str,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
-        shared::restrict_database(&mut db, name, list, None, diagnostics, settings, program)?;
+        shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -257,6 +260,15 @@ impl BlastpDatabase {
     /// for an empty title), the date and the real totals, also with `-dbsize`.
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
+    }
+
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(super) fn pairwise_database_masked(
+        &self,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
     }
 
     /// The names of the taxonomy database that the rows of the custom tabular report `spec`

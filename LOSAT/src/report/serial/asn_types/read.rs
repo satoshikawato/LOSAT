@@ -26,8 +26,8 @@
 use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
-    real_of_parts, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource, BAD_NUMBER,
-    NUMBER_OVERFLOW,
+    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
+    BAD_NUMBER, NUMBER_OVERFLOW,
 };
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::report::serial::object_frame::{frame_info, text_frame_site, FrameKind};
@@ -598,17 +598,6 @@ impl TypedReader<'_> {
         Ok(values)
     }
 
-    /// `CIStreamBuffer::SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
-    fn get_after_ws(&mut self) -> R<u8> {
-        loop {
-            let c = self.r.peek_char(0)?;
-            self.r.pos += 1;
-            if !crate::ncbi_str::is_space(c) {
-                return Ok(c);
-            }
-        }
-    }
-
     fn util_error(&self, site: ThrowSite, what: &str) -> ReadError {
         ReadError::Exception(NcbiException::new(
             site,
@@ -621,35 +610,47 @@ impl TypedReader<'_> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
     // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
     fn get_number(&mut self, max: u64, signed: bool) -> R<i64> {
-        self.r.skip_white_space()?;
-        let mut c = self.get_after_ws()?;
+        // The position is kept in a local and written once (`Reader::white_space_at`).
+        let r = &mut self.r;
+        let (pos, c) = r.white_space_at(r.pos)?;
+        // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
+        let (pos, mut c) = r.ws_at(pos, c)?;
+        let mut pos = pos + 1;
         let mut negative = false;
         if signed && c == b'-' {
             negative = true;
-            c = self.r.peek_char(0)?;
-            self.r.pos += 1;
+            c = r.char_at(pos)?;
+            pos += 1;
         } else if c == b'+' {
-            c = self.r.peek_char(0)?;
-            self.r.pos += 1;
+            c = r.char_at(pos)?;
+            pos += 1;
         }
         if !c.is_ascii_digit() {
+            r.pos = pos;
             return Err(self.util_error(BAD_NUMBER, "bad number"));
         }
         let mut n = u64::from(c - b'0');
         let before_mul = max / 10;
         let limit_add = max % 10 + u64::from(negative);
-        loop {
-            let d = self.r.peek_at(0);
+        let mut overflow = false;
+        let (end, _) = r.src.scan(pos, |d| {
             if !d.is_ascii_digit() {
-                break;
+                return false;
             }
-            self.r.pos += 1;
             let d = u64::from(d - b'0');
             if n > before_mul || (n == before_mul && d > limit_add) {
-                return Err(self.util_error(NUMBER_OVERFLOW, "number overflow"));
+                overflow = true;
+                return false;
             }
             n = n * 10 + d;
+            true
+        });
+        if overflow {
+            // `GetInt4` takes the digit before it checks the overflow.
+            r.pos = end + 1;
+            return Err(self.util_error(NUMBER_OVERFLOW, "number overflow"));
         }
+        r.pos = end;
         // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
         Ok(if negative {
             (n as i64).wrapping_neg()
@@ -703,32 +704,40 @@ impl TypedReader<'_> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1024-1048
     // (`SkipUNumber`, 1050-1074, takes only `+` and peeks past the digits with `PeekCharNoEOF`.)
     fn skip_number(&mut self, signed: bool) -> R<()> {
-        let mut c = self.r.skip_white_space()?;
+        // The position is kept in a local and written once (`Reader::white_space_at`).
+        let r = &mut self.r;
+        let (start, mut c) = r.white_space_at(r.pos)?;
         let mut i = 1;
         if c == b'+' || (signed && c == b'-') {
-            c = self.r.peek_char(1)?;
+            c = match r.src.byte_at(start + 1) {
+                Some(c) => c,
+                None => return Err(Self::end_of_number(r, start)),
+            };
             i = 2;
         }
         if !c.is_ascii_digit() {
+            r.pos = start;
             return Err(ReadError::Serial(format!(
                 "bad {} integer in line {}",
                 if signed { "signed" } else { "unsigned" },
-                self.r.line
+                r.line
             )));
         }
-        loop {
-            let c = if signed {
-                self.r.peek_char(i)?
-            } else {
-                self.r.peek_at(i)
-            };
-            if !c.is_ascii_digit() {
-                break;
-            }
-            i += 1;
+        let (end, c) = r.src.scan(start + i, |c| c.is_ascii_digit());
+        // `SkipSNumber` peeks past the digits with `PeekChar`, which fails at the end of the
+        // text; `SkipUNumber` with `PeekCharNoEOF`.
+        if signed && c.is_none() {
+            return Err(Self::end_of_number(r, start));
         }
-        self.r.pos += i;
+        r.pos = end;
         Ok(())
+    }
+
+    /// The end of the text inside a number that starts at `start`: `PeekChar`'s, at `start`.
+    #[cold]
+    fn end_of_number(r: &mut Reader<SliceSource<'_>>, start: usize) -> ReadError {
+        r.pos = start;
+        r.end_of_text().into()
     }
 
     /// `CEnumeratedTypeInfo::ReadEnum` / `SkipEnum` over `ReadEnum` of the stream: a lower-case

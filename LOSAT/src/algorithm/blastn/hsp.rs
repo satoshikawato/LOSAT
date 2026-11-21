@@ -50,14 +50,18 @@ impl BlastnOutputFormat {
     ///
     /// `choice` is the format choice: SAM reads its custom specification (`SQ`, `SR`), and the
     /// tabular formats with a field list or a delimiter, and outfmt 10 and 20, are the custom
-    /// tabular report (`report::tabular::TabularSpec::of`).
+    /// tabular report (`report::tabular::TabularSpec::of_app`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
     pub(crate) fn of(
         format: ReportFormat,
         choice: &crate::blastinput::app::FormatChoice,
     ) -> anyhow::Result<Self> {
-        if let Some(spec) = crate::report::tabular::TabularSpec::of(format, choice) {
+        if let Some(spec) = crate::report::tabular::TabularSpec::of_app(
+            format,
+            choice,
+            crate::report::archive::options::RequestKind::Blastn,
+        ) {
             return Ok(BlastnOutputFormat::CustomTabular(spec.intern()));
         }
         if let Some(view) = crate::report::pairwise::PairwiseView::of(format) {
@@ -470,61 +474,42 @@ impl BlastnHsp {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
-/// NCBI computes the size in `Int4` (c++/src/algo/blast/core/blast_hits.c:44-46), whose sums the compiled NCBI
-/// wraps: a hit list size from 2^30 to 2^31 - 51 gives 10 with gapped search, and a larger
-/// one a negative size, with which NCBI crashes (LOSAT rejects it before the search,
-/// `scoring.rs` `check_losat_limits`).
+/// The preliminary hit list size, computed without overflow. NCBI computes it in `Int4`
+/// (c++/src/algo/blast/core/blast_hits.c:46-68), a signed overflow (undefined in C) from a hit
+/// list size of 2^30 on with gapped search and of 2^30 - 25 on with composition-based
+/// statistics, where NCBI BLAST+ 2.17.0's build gives 10, a size of 0 or less (NCBI crashes) or
+/// 2 to 48. LOSAT does not reproduce a signed `Int4` overflow (PD-LOSAT-NCBI-DEFECTS, the
+/// approved exception for hit list sizes past `Int4`): such a size keeps every hit, as NCBI's
+/// 2^30 - 26 does. On a 32-bit target a size past `usize` is `usize::MAX`, which no hit list
+/// reaches (NCBI's OIDs are `Int4`).
 pub fn get_prelim_hitlist_size(
     hitlist_size: usize,
     composition_based_stats: bool,
     gapped_calculation: bool,
-) -> i32 {
-    // The argument is an `int` (`CArg_Integer`); the default is 500.
-    let hitlist_size = i32::try_from(hitlist_size).unwrap_or(i32::MAX);
-    let mut prelim_hitlist_size = hitlist_size;
-    if composition_based_stats {
+) -> usize {
+    // The argument is an `int` (`CArg_Integer`, at most 2^31 - 1); the default is 500.
+    let hitlist_size = hitlist_size as u64;
+    let prelim_hitlist_size = if composition_based_stats {
         if crate::core::blast_hspstream::adaptive_cbs_environment() {
             if hitlist_size < 1000 {
-                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size.wrapping_add(1000), 1500);
+                std::cmp::max(hitlist_size + 1000, 1500)
             } else {
-                prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
+                hitlist_size.saturating_mul(2).saturating_add(50)
             }
         } else if hitlist_size <= 500 {
-            prelim_hitlist_size = 1050;
+            1050
         } else {
-            prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
+            hitlist_size.saturating_mul(2).saturating_add(50)
         }
     } else if gapped_calculation {
-        prelim_hitlist_size = std::cmp::min(
-            std::cmp::max(prelim_hitlist_size.wrapping_mul(2), 10),
-            prelim_hitlist_size.wrapping_add(50),
-        );
-    }
-    prelim_hitlist_size
-}
-
-/// LOSAT's refusal of a hit list size whose preliminary size (`get_prelim_hitlist_size`, NCBI's
-/// `int`) is not positive, with which NCBI crashes (BLASTN, BLASTP, PSIBLAST, RPSBLAST, BLASTX
-/// and TBLASTN check it where NCBI would start the search). `max_target_seqs_given`: the size
-/// is `-max_target_seqs`, otherwise `-num_descriptions` / `-num_alignments` gave it.
-pub(crate) fn check_prelim_hitlist_size(
-    hitlist_size: usize,
-    max_target_seqs_given: bool,
-    composition_based_stats: bool,
-    gapped_calculation: bool,
-    program: &str,
-) -> anyhow::Result<()> {
-    if get_prelim_hitlist_size(hitlist_size, composition_based_stats, gapped_calculation) >= 1 {
-        return Ok(());
-    }
-    let what = if max_target_seqs_given {
-        format!("a -max_target_seqs of {hitlist_size}")
+        std::cmp::min(
+            std::cmp::max(hitlist_size.saturating_mul(2), 10),
+            hitlist_size.saturating_add(50),
+        )
     } else {
-        format!("a hit list size of {hitlist_size} (-num_descriptions / -num_alignments)")
+        hitlist_size
     };
-    anyhow::bail!(
-        "{what}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}"
-    )
+    usize::try_from(prelim_hitlist_size).unwrap_or(usize::MAX)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1389-1403

@@ -1187,18 +1187,11 @@ fn write_seq_align_dendiag<E: Encoder>(
     enc.variant("Seq-align_segs", "dendiag", 0);
     enc.begin_list(false);
     for hsp in hsps {
-        let q_strand = Strand::of_frame(hsp.q_frame);
-        let s_strand = Strand::of_frame(hsp.s_frame);
-        let q_start = if hsp.q_frame >= 0 {
-            hsp.q_offset
-        } else {
-            query.searched_length - hsp.q_end
-        };
-        let s_start = if hsp.s_frame >= 0 {
-            hsp.s_offset
-        } else {
-            subject.searched_length - hsp.s_end
-        };
+        let DendiagSegment {
+            starts: [q_start, s_start],
+            len,
+            strands,
+        } = dendiag_segment(query, subject, hsp);
         enc.element();
         enc.begin_sequence("Dense-diag");
         enc.member("dim", 0);
@@ -1221,11 +1214,11 @@ fn write_seq_align_dendiag<E: Encoder>(
         enc.end_list();
         enc.end_member();
         enc.member("len", 3);
-        enc.int(hsp.q_end - hsp.q_offset);
+        enc.int(len);
         enc.end_member();
         enc.member("strands", 4);
         enc.begin_list(false);
-        for strand in [q_strand, s_strand] {
+        for strand in strands {
             enc.element();
             enc.begin_named("Na-strand");
             enc.enumerated(strand.name(), strand.value());
@@ -1247,6 +1240,69 @@ fn write_seq_align_dendiag<E: Encoder>(
     enc.end_member();
     write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The Dense-diag of an ungapped HSP of an untranslated search, without its ids and scores.
+struct DendiagSegment {
+    /// Query, subject: in the searched letters, minus the range starts that the caller adds
+    /// (`QueryRecord::offset`, `SubjectRecord::offset`).
+    starts: [i32; 2],
+    len: i32,
+    /// Query, subject.
+    strands: [Strand; 2],
+}
+
+/// The Dense-diag of an ungapped HSP (`x_UngappedHSPToDenseDiag`): a row of a plus frame (or of
+/// no frame) starts at its offset, a row of a minus frame at `searched_length - end`; the length
+/// is the query row's; each row's strand is its frame's. The one source of the Dense-diags that
+/// outfmt 8, 9, 11 and 12 write (`write_seq_align_dendiag`) and of the segments that SAM joins
+/// (`ungapped_segments`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1289-1306
+fn dendiag_segment(
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+) -> DendiagSegment {
+    let q_start = if hsp.q_frame >= 0 {
+        hsp.q_offset
+    } else {
+        query.searched_length - hsp.q_end
+    };
+    let s_start = if hsp.s_frame >= 0 {
+        hsp.s_offset
+    } else {
+        subject.searched_length - hsp.s_end
+    };
+    DendiagSegment {
+        starts: [q_start, s_start],
+        len: hsp.q_end - hsp.q_offset,
+        strands: [Strand::of_frame(hsp.q_frame), Strand::of_frame(hsp.s_frame)],
+    }
+}
+
+/// The Dense-seg that NCBI's SAM formatter makes of the Seq-align of an ungapped search's
+/// subject (`CreateDensegFromDendiag`): one segment per HSP in the Seq-align's order, each the
+/// HSP's Dense-diag (`dendiag_segment`), minus the range starts that the caller adds. The SAM
+/// formatter reads them as it reads a gapped HSP's (`gapped_segments`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:67-82
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1149-1208
+pub(crate) fn ungapped_segments(
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsps: &[HspRecord<'_>],
+    segments: &mut Segments,
+) {
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    for hsp in hsps {
+        let segment = dendiag_segment(query, subject, hsp);
+        segments.starts.extend(segment.starts);
+        segments.lens.push(segment.len);
+        segments.strands.extend(segment.strands);
+    }
 }
 
 /// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
@@ -1480,6 +1536,23 @@ fn has_alignments(run: &RunRecord<'_>, hsps: &[HspRecord<'_>]) -> bool {
     }
 }
 
+/// A query's Seq-aligns as runs of its HSPs (`hsps` grouped by subject in the Seq-align order):
+/// in a gapped search each HSP of score other than 0 alone (`s_BlastHSP2SeqAlign` makes no
+/// Seq-align of an HSP of score 0), in an ungapped search a subject's HSPs together (one `diags`
+/// Seq-align per HSP list). The one grouping of the Seq-aligns that outfmt 8, 9, 11 and 12 write
+/// (`write_seq_aligns`) and that SAM formats (`report::sam`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1446
+pub(crate) fn seq_align_hsps<'h, 'a>(
+    run: &RunRecord<'_>,
+    hsps: &'h [HspRecord<'a>],
+) -> impl Iterator<Item = &'h [HspRecord<'a>]> {
+    let gapped = run.gapped;
+    hsps.chunk_by(move |a, b| !gapped && a.subject == b.subject)
+        .filter(move |align| !gapped || align[0].score != 0)
+}
+
 /// The Seq-aligns of one query's HSPs, as the elements of the list that the caller opened
 /// (`Seq-annot` `data align` of outfmt 8, `alignments` of the archive of outfmt 11).
 /// `after_each` is called after each Seq-align, and after each Std-seg of an ungapped search's
@@ -1495,13 +1568,14 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
     mut after_each: impl FnMut(&mut E),
 ) {
     if run.gapped {
-        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
+        for align in seq_align_hsps(run, hsps) {
+            let hsp = &align[0];
             let subject = &subjects[hsp.subject as usize];
             write_seq_align_gapped(enc, run, query, subject, hsp, segments);
             after_each(enc);
         }
     } else if untranslated(run.program) {
-        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
+        for list in seq_align_hsps(run, hsps) {
             write_seq_align_dendiag(
                 enc,
                 query,
@@ -1512,7 +1586,7 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
             after_each(enc);
         }
     } else {
-        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
+        for list in seq_align_hsps(run, hsps) {
             write_seq_align_diags(
                 enc,
                 query,

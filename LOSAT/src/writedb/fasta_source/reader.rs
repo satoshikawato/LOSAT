@@ -1,12 +1,14 @@
-//! NCBI's `CFastaReader` with the flags of `CFastaBioseqSource` (makeblastdb) or of
-//! `CMaskFastaReader` (dustmasker, segmasker, windowmasker): [`ReaderFlags`].
+//! NCBI's `CFastaReader` with the flags of `CFastaBioseqSource` (makeblastdb), of
+//! `CMaskFastaReader` (dustmasker, segmasker, windowmasker), of convert2blastmask's
+//! `CMaskFromFasta` or of makembindex's `CSequenceIStreamFasta`: [`ReaderFlags`].
 //!
 //! What differs from the reader of the BLAST programs (`blastinput::fasta_reader`, with
 //! `fDLOptional | fNoSplit | fHyphensIgnoreAndWarn`): a definition line is required; a
 //! hyphen is a residue, or a gap in a nucleotide sequence with `fParseGaps`; the residues
 //! are split and packed into a delta sequence (`pack`); the definition line is kept in a
-//! user object for the database's title (`title`); no lowercase mask is recorded
-//! (`m_CurrentMask` is empty: `SaveMask` is never called).
+//! user object for the database's title (`title`); lowercase masks are recorded only for
+//! convert2blastmask and makembindex (`ReaderFlags::lower_case_masks`: the others never call
+//! `SaveMask`, so `m_CurrentMask` stays empty).
 
 use std::io::Read;
 
@@ -77,10 +79,13 @@ pub(crate) struct ReaderFlags {
     /// `fParseRawID`: an id without a `|` is parsed as an accession (`fParse_RawText`), not as
     /// a local id.
     pub(crate) parse_raw_id: bool,
-    /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass): it keeps the masked
-    /// intervals of each record (`SaveMask` before each record makes `m_CurrentMask`, so lower
-    /// case letters open intervals) and reads a data line that starts with a digit as an
-    /// interval (`FastaReader::take_masks`).
+    /// `SaveMask` before each record (`m_CurrentMask` is set, so lower case letters open
+    /// intervals): the reader keeps the masked intervals of each record
+    /// (`FastaReader::take_masks`). convert2blastmask's reader and makembindex's FASTA input
+    /// (`dbindex::stream`).
+    pub(crate) lower_case_masks: bool,
+    /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass, with
+    /// `lower_case_masks`): it also reads a data line that starts with a digit as an interval.
     pub(crate) mask_from_fasta: bool,
     /// `fParseGaps`: a hyphen of a nucleotide sequence is a gap, and `>?` lines stay gaps.
     pub(crate) parse_gaps: bool,
@@ -111,6 +116,7 @@ impl ReaderFlags {
             },
             parse_ids,
             parse_raw_id: parse_ids,
+            lower_case_masks: false,
             mask_from_fasta: false,
             parse_gaps: !protein,
             require_id: parse_ids,
@@ -137,6 +143,7 @@ impl ReaderFlags {
             },
             parse_ids: parse_seqids,
             parse_raw_id: parse_seqids,
+            lower_case_masks: false,
             mask_from_fasta: false,
             parse_gaps: false,
             require_id: false,
@@ -157,6 +164,7 @@ impl ReaderFlags {
             molecule: Molecule::Guessed,
             parse_ids: parse_seqids,
             parse_raw_id: false,
+            lower_case_masks: true,
             mask_from_fasta: true,
             parse_gaps: false,
             require_id: false,
@@ -164,6 +172,21 @@ impl ReaderFlags {
             disable_no_residues: false,
             ignored_problems: &[],
             build_db_length_limit: false,
+        }
+    }
+
+    /// The flags of makembindex's FASTA input (`CSequenceIStreamFasta`): `fForceType`,
+    /// `fAssumeNuc`, `fNoParseID` and `fAllSeqIds` (no longer used by `CFastaReader`), with
+    /// `SaveMask` before each record (`lower_case_masks`). They read as dustmasker's
+    /// nucleotide reader without `-parse_seqids` (`mask_fasta_reader`: its `fOneSeq` acts on
+    /// `ReadSet` only, and `fParseRawID` on ids that are not parsed).
+    // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:90-93
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:47-52
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:107-113
+    pub(crate) const fn dbindex_fasta() -> Self {
+        Self {
+            lower_case_masks: true,
+            ..Self::mask_fasta_reader(false, false)
         }
     }
 }
@@ -311,11 +334,15 @@ impl From<ParseError> for ReadError {
 /// length; length 0 is a gap of unknown length (a lone hyphen at the end of a line).
 /// The gap type and the linkage evidence of a `>?` line only decide whether the delta
 /// literal of the gap gets a `Seq-data.gap`, which the database is built from like a
-/// literal without data (`SeqInst`), so they are not kept; nor is the size's fuzz.
+/// literal without data (`SeqInst`), and whether a gap that becomes N's or X's warns
+/// (`mods`), so only that is kept; nor is the size's fuzz.
 #[derive(Clone, Copy)]
 struct Gap {
     position: usize,
     length: u64,
+    /// A gap type other than `unknown`, or a linkage evidence other than `unspecified`
+    /// alone (`gap_mod_warnings`): `AssembleSeq` warns of it when the gap becomes N's or X's.
+    mods: bool,
 }
 
 /// One piece of a delta sequence (`CDelta_seq`).
@@ -561,13 +588,26 @@ impl<R: Read> FastaReader<R> {
         self.state.flags.parse_ids
     }
 
-    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
-    /// `read_one_seq` read last (after an error, what it had read of that record): the
-    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
-    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
-    /// records of the other programs, which never have any, are not made larger.
+    /// With `ReaderFlags::lower_case_masks`, the masks of the record that `read_one_seq` read
+    /// last (after an error, what it had read of that record): the intervals of its lower case
+    /// letters and, with `ReaderFlags::mask_from_fasta`, of its interval lines (0-based,
+    /// inclusive), in the order in which they were closed or read (convert2blastmask's
+    /// `CMaskFromFasta::GetMask()`, makembindex's `SaveMask` location); empty otherwise. The
+    /// intervals stay with the reader (not in `Record`) so that the records of the other
+    /// programs, which never have any, are not made larger.
     pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.state.masks)
+    }
+
+    /// The residues (IUPACna, upper case) that the record `read_one_seq` returned last was
+    /// packed from when it is a `SeqInst::Raw` of NCBI2na or NCBI4na data, which the reader
+    /// keeps until it reads the next record (a delta takes them along as its `residues`).
+    /// They are handed over with their buffer, so that a masking program holds its letters
+    /// without a second copy of the sequence; the next record is read into a buffer of the
+    /// same capacity, as before.
+    pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
+        let capacity = self.state.seq_data.len();
+        std::mem::replace(&mut self.state.seq_data, Vec::with_capacity(capacity))
     }
 
     /// `GetLineReader().AtEOF()`.
@@ -589,17 +629,25 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
-        if self.state.flags.mask_from_fasta {
-            self.read_one_seq_of::<true>(warn)
-        } else {
-            self.read_one_seq_of::<false>(warn)
+        debug_assert!(
+            self.state.flags.lower_case_masks || !self.state.flags.mask_from_fasta,
+            "convert2blastmask's reader keeps the lower case masks"
+        );
+        match (
+            self.state.flags.lower_case_masks,
+            self.state.flags.mask_from_fasta,
+        ) {
+            (false, _) => self.read_one_seq_of::<false, false>(warn),
+            (true, false) => self.read_one_seq_of::<true, false>(warn),
+            (true, true) => self.read_one_seq_of::<true, true>(warn),
         }
     }
 
-    /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
-    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
-    /// nothing open to close for them (one choice per record).
-    fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
+    /// `read_one_seq` with `ReaderFlags::lower_case_masks` as `MASKS` and
+    /// `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of the other readers
+    /// take no step of the masks but `close_mask`, which has nothing open to close for them (one
+    /// choice per record).
+    fn read_one_seq_of<const MASKS: bool, const MASK_FROM_FASTA: bool>(
         &mut self,
         warn: ReaderWarn<'_>,
     ) -> Result<Record, ReadError> {
@@ -667,15 +715,18 @@ impl<R: Read> FastaReader<R> {
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
-                Some(rest) => state.parse_data_line::<MASK_FROM_FASTA>(
+                Some(rest) => state.parse_data_line::<MASKS, MASK_FROM_FASTA>(
                     &[b">".as_slice(), rest].concat(),
                     raw_length,
                     line_number,
                     warn,
                 )?,
-                None => {
-                    state.parse_data_line::<MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
-                }
+                None => state.parse_data_line::<MASKS, MASK_FROM_FASTA>(
+                    line,
+                    raw_length,
+                    line_number,
+                    warn,
+                )?,
             }
         }
 
@@ -896,7 +947,7 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    fn parse_data_line<const MASK_FROM_FASTA: bool>(
+    fn parse_data_line<const MASKS: bool, const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],
         raw_length: usize,
@@ -933,7 +984,7 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    if MASK_FROM_FASTA {
+                    if MASKS {
                         self.close_mask();
                     }
                     let run = 1 + s[pos + 1..]
@@ -953,7 +1004,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if MASK_FROM_FASTA {
+                    if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data
@@ -1002,8 +1053,9 @@ impl RecordState {
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:939-955
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-500
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
-    /// cited at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
-    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
+    /// cited at `close_mask`). Only `parse_data_line` with `MASKS` (convert2blastmask,
+    /// makembindex) calls it, once for each run of residues, so it is not cold: the other
+    /// readers' instance has no call.
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {
@@ -1023,8 +1075,10 @@ impl RecordState {
     /// `CloseMask()`: the open interval ends before the current position.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:94-105
-    /// (`CFastaReader::x_CloseMask` adds the same interval to `m_CurrentMask`, which
-    /// convert2blastmask does not read.)
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1092
+    /// (convert2blastmask keeps its own copy of the interval; `CFastaReader::x_CloseMask` adds
+    /// the same interval to `m_CurrentMask`, the location of `SaveMask` that makembindex
+    /// reads.)
     fn close_mask(&mut self) {
         if let Some(start) = self.mask_start.take() {
             let end = self.current_pos_with_gaps().wrapping_sub(1);
@@ -1111,6 +1165,7 @@ impl RecordState {
         self.gaps.push(Gap {
             position: pos,
             length: len,
+            mods: false,
         });
         self.total_gap_length += len;
         self.current_gap_length = 0;
@@ -1179,11 +1234,12 @@ impl RecordState {
         }
         // `multimap` iterates in key order (the order of insertion for equal keys).
         mods.sort_by(|left, right| left.0.cmp(&right.0));
-        gap_mod_warnings(&mods, line_number, self.flags.ignored_problems, warn);
+        let specified = gap_mod_warnings(&mods, line_number, self.flags.ignored_problems, warn);
 
         self.gaps.push(Gap {
             position,
             length: u64::from(gap_size),
+            mods: specified,
         });
         self.total_gap_length += u64::from(gap_size);
     }
@@ -1283,6 +1339,15 @@ impl RecordState {
                 .map_err(|_| ReadError::OutOfMemory)?;
             let mut pos = 0;
             for gap in &self.gaps {
+                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
+                if gap.mods {
+                    post_warning(
+                        self.flags.ignored_problems,
+                        Problem::ModifierFoundButNoneExpected,
+                        b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
+                        warn,
+                    );
+                }
                 if gap.position > pos {
                     new_data.extend_from_slice(&self.seq_data[pos..gap.position]);
                     pos = gap.position;
@@ -1397,7 +1462,7 @@ impl RecordState {
             };
             post_warning(ignored, problem, message, warn);
         }
-        if title_has_mods(text) {
+        if crate::blastinput::title_parser::has_mods(text) {
             post_warning(
                 ignored,
                 Problem::ModifierFoundButNoneExpected,
@@ -1475,30 +1540,6 @@ pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
     }
 }
 
-/// `CTitleParser::HasMods(title)`: whether the title has a modifier, `[name=value]`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_reader.cpp:793-850
-/// `x_FindBrackets` returns true only with `eq_pos < stop`, so `HasMods` is true at the
-/// first bracket pair that it finds: the first `]` that closes the outermost `[`, with an
-/// `=` after that `[`.
-fn title_has_mods(title: &[u8]) -> bool {
-    let mut eq_pos = None;
-    let mut unmatched = 0u32;
-    for (i, &c) in title.iter().enumerate() {
-        match c {
-            b'[' => unmatched += 1,
-            b'=' if unmatched > 0 && eq_pos.is_none() => eq_pos = Some(i),
-            b']' => match unmatched {
-                0 => return false,
-                1 => return eq_pos.is_some_and(|eq| eq < i),
-                _ => unmatched -= 1,
-            },
-            _ => {}
-        }
-    }
-    false
-}
-
 /// `CDelta_ext::AddAndSplit` of the IUPACna residues `residues[start..end]`: one literal
 /// for each segment of `CSeqConvert::Pack`.
 ///
@@ -1522,12 +1563,17 @@ fn add_and_split(pieces: &mut Vec<DeltaSeq>, residues: &[u8], start: usize, end:
 /// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces. The
 /// names are looked up by `fasta_reader`'s tables (`gap_type_info`,
 /// `linkage_evidence_value`).
+///
+/// Whether the gap has a specified gap type or linkage evidence, as `AssembleSeq` asks of
+/// the `SGap` (quoted at its use): the first known gap type (`unknown` when only evidence is
+/// given), and the evidence the switch leaves (cleared to `unspecified` for a type that allows
+/// only that, cleared for one that forbids any).
 fn gap_mod_warnings(
     mods: &[(Vec<u8>, Vec<u8>)],
     line_number: u64,
     ignored: &[Problem],
     warn: ReaderWarn<'_>,
-) {
+) -> bool {
     let mut conflicting = false;
     let mut gap_type: Option<GapType> = None;
     let mut link_evid = LinkEvid::UnspecifiedOnly;
@@ -1619,4 +1665,8 @@ fn gap_mod_warnings(
             }
         }
     }
+    let specified_type = gap_type.is_some_and(|value_type| value_type != GapType::Unknown);
+    let specified_evidence = matches!(link_evid, LinkEvid::Required)
+        && !(evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED));
+    specified_type || specified_evidence
 }

@@ -681,6 +681,7 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
 /// `value` in ASN.1 text (`MSerial_AsnText`), as one document; `Err` when the encoder refuses a
 /// value (a byte outside the visible ASCII range in a VisibleString: `asn_text_posting` writes it
 /// as NCBI does).
+#[cfg(test)]
 pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::SerialError> {
     asn_text_with_karlin(value, None)
 }
@@ -697,8 +698,17 @@ pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::S
 pub fn asn_text_posting(
     value: &PssmWithParameters,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
-    match asn_text(value) {
-        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value),
+    asn_text_posting_with_karlin(value, None)
+}
+
+/// `asn_text_posting` of `value` with `karlin`, when given, in place of the six values of its
+/// `finalData` (`asn_text_with_karlin`).
+pub fn asn_text_posting_with_karlin(
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
+    match asn_text_with_karlin(value, karlin) {
+        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value, karlin),
         written => written.map(|bytes| (bytes, Vec::new())),
     }
 }
@@ -708,10 +718,11 @@ pub fn asn_text_posting(
 #[inline(never)]
 fn asn_text_traced(
     value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
     let mut out = Vec::new();
     let mut enc = super::encoder::Traced::new(super::asn_text::AsnTextEncoder::new(&mut out), 0);
-    write_document(&mut enc, value, None);
+    write_document(&mut enc, value, karlin);
     if let Some(error) = enc.error() {
         return Err(error);
     }

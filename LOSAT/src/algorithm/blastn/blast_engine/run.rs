@@ -160,6 +160,13 @@ mod database;
 #[path = "culling.rs"]
 mod culling;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c (whole file)
+// BLASTN `-best_hit_overhang` and `-best_hit_score_edge`: the best hit writer of the
+// preliminary stage and the best hit pipe of the traceback (a child module, so that it uses the
+// kernel's private types).
+#[path = "besthit.rs"]
+mod besthit;
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
 // of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
@@ -4801,6 +4808,9 @@ struct BlastnReportInputs<'a> {
     formatting: crate::blastinput::report_counts::FormattingArgs,
     /// `-culling_limit` (0: no culling), read when the hit lists are finished.
     culling_limit: i32,
+    /// `-best_hit_overhang` and `-best_hit_score_edge` (`None`: neither given), read when the
+    /// hit lists are finished.
+    best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     db_num_seqs: i32,
     /// NCBI's `Int8` (`SubjectMetadata::db_len_total`).
     db_len_total: i64,
@@ -5234,6 +5244,7 @@ fn finish_query_hit_list(
     query_cov_hsp_perc: f64,
     subject_besthit: bool,
     culling_limit: i32,
+    best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     ungapped: bool,
     sorts_results: bool,
 ) {
@@ -5249,6 +5260,17 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
+            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+        );
+    }
+    // NCBI's best hit pipe is there in its place (`-best_hit_overhang`, `-best_hit_score_edge`;
+    // the two exclude `-culling_limit`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:377-385
+    if let Some(params) = best_hit {
+        besthit::best_hit_traceback(
+            hit_list,
+            query_len,
+            params,
             usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
         );
     }
@@ -5369,6 +5391,7 @@ fn post_process_hits_and_write(
                 query_cov_hsp_perc,
                 subject_besthit,
                 report.culling_limit,
+                report.best_hit,
                 report.ungapped,
                 // A FASTA subject set (NCBI's `dbscan` source totals its records): a set
                 // without letters finds no hit.
@@ -8649,6 +8672,7 @@ fn run_in_pool(
                         args.qcov_hsp_perc.unwrap_or(0.0),
                         args.subject_besthit,
                         args.culling_limit_value(),
+                        args.best_hit(),
                         args.ungapped,
                         database.sorts_results(),
                     );
@@ -9699,6 +9723,7 @@ fn write_reports_untimed(
         num_alignments: args.report_counts.num_alignments,
         formatting: args.formatting,
         culling_limit: args.culling_limit_value(),
+        best_hit: args.best_hit(),
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,
         database: subjects.shown.database.as_ref(),
@@ -9931,7 +9956,9 @@ fn read_db_seq_ranges(
     // Every hard chunk carries its range inline, so the full range is not written.
     let mut none = std::mem::take(&mut subject_scratch.db_soft_ranges);
     none.clear();
-    subject_scratch.db_hard_split.start(s_len_full, ranges);
+    subject_scratch
+        .db_hard_split
+        .start(s_len_full, ranges, true);
     Some(none)
 }
 

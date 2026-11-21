@@ -1,0 +1,150 @@
+USAGE
+  windowmasker [-h] [-help] [-xmlhelp] [-ustat unit_counts]
+    [-in input_file_name] [-out output_file_name] [-checkdup check_duplicates]
+    [-fa_list input_is_a_list] [-mem available_memory] [-meta info_string]
+    [-unit unit_length] [-genome_size genome_size] [-window window_size]
+    [-t_extend T_extend] [-t_thres T_threshold] [-set_t_high score_value]
+    [-set_t_low score_value] [-parse_seqids] [-outfmt output_format]
+    [-t_high T_high] [-t_high_pct T_high_pct] [-t_thres_pct T_threshold_pct]
+    [-t_extend_pct T_extend_pct] [-t_low T_low] [-t_low_pct T_low_pct]
+    [-infmt input_format] [-exclude_ids exclude_id_list] [-ids id_list]
+    [-text_match text_match_ids] [-sformat unit_counts_format]
+    [-smem available_memory] [-dust use_dust] [-dust_level dust_level]
+    [-mk_counts] [-convert] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Window based sequence masker
+
+OPTIONAL ARGUMENTS
+ -h
+   Print USAGE and DESCRIPTION;  ignore all other parameters
+ -help
+   Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters
+ -xmlhelp
+   Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other
+   parameters
+ -version-full
+   Print extended version data;  ignore other arguments
+ -version-full-xml
+   Print extended version data in XML format;  ignore other arguments
+ -version-full-json
+   Print extended version data in JSON format;  ignore other arguments
+
+ *** WindowMasker options
+ -ustat <String>
+   file with unit counts
+    * Incompatible with:  mk_counts, checkdup, fa_list, mem, unit,
+   genome_size, sformat, smem, convert
+ -in <File_In>
+   input file name (not optional if used with -mk_counts or -convert options)
+   Default = `-'
+ -out <File_Out>
+   output file name
+   Default = `-'
+ -checkdup <Boolean>
+   check for duplicate sequences
+   Default = `false'
+    * Incompatible with:  ustat, convert
+ -fa_list <Boolean>
+   indicates that -input represents a file containing a list of names of fasta
+   files to process, one name  per line
+   Default = `false'
+    * Incompatible with:  ustat, convert
+ -mem <Integer, greater or equal to 1>
+   memory available for mk_counts option in megabytes
+   Default = `1536'
+    * Incompatible with:  ustat, convert
+ -meta <String>
+   add metadata to the counts file
+   Default = `'
+ -unit <Integer, 1..16>
+   number of bases in a unit
+    * Incompatible with:  ustat, convert
+ -genome_size <Integer>
+   total size of the genome
+    * Incompatible with:  ustat, convert
+ -window <Integer, greater or equal to 1>
+   window size
+    * Incompatible with:  mk_counts, convert
+ -t_extend <Integer, greater or equal to 0>
+   window score above which it is allowed to extend masking
+    * Incompatible with:  mk_counts, convert
+ -t_thres <Integer, greater or equal to 1>
+   window score threshold used to trigger masking
+    * Incompatible with:  mk_counts, convert
+ -set_t_high <Integer, greater or equal to 1>
+   alternative high score for a unit if theoriginal unit score is more than
+   highscore
+    * Incompatible with:  mk_counts, convert
+ -set_t_low <Integer, greater or equal to 1>
+   alternative low score for a unit if theoriginal unit score is lower than
+   lowscore
+    * Incompatible with:  mk_counts, convert
+ -parse_seqids
+   Parse Seq-ids in FASTA input
+    * Incompatible with:  convert
+ -outfmt <String, `fasta', `interval', `maskinfo_asn1_bin',
+                  `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin',
+                  `seqloc_asn1_text', `seqloc_xml'>
+   controls the format of the masker output (for masking stage only)
+   Default = `interval'
+    * Incompatible with:  mk_counts, convert
+ -t_high <Integer, greater or equal to 1>
+   maximum useful unit score
+    * Incompatible with:  convert
+ -t_high_pct <Real, 0..100>
+   maximum useful unit score as percentage
+ -t_thres_pct <Real, 0..100>
+   window score threshold used to trigger masking as percentage
+ -t_extend_pct <Real, 0..100>
+   window score above which it is allowed to extend masking as percentage
+ -t_low <Integer, greater or equal to 1>
+   minimum useful unit score
+    * Incompatible with:  convert
+ -t_low_pct <Real, 0..100>
+   minimum useful unit score as percentage
+ -infmt <String, `blastdb', `fasta', `seqids'>
+   controls the format of the masker input
+   Default = `fasta'
+    * Incompatible with:  convert
+ -exclude_ids <String>
+   file containing the list of ids to exclude from processing
+   Default = `'
+    * Incompatible with:  convert
+ -ids <String>
+   file containing the list of ids to process
+   Default = `'
+    * Incompatible with:  convert
+ -text_match <Boolean>
+   match ids as strings
+   Default = `T'
+    * Incompatible with:  convert
+ -sformat <String, `ascii', `binary', `oascii', `obinary'>
+   controls the format of the output file containing the unit counts (for
+   counts generation and conversion only)
+   Default = `ascii'
+    * Incompatible with:  ustat
+ -smem <Integer>
+   target size of the output file containing the unit counts
+   Default = `512'
+    * Incompatible with:  ustat
+ -dust <Boolean>
+   combine window masking with dusting
+   Default = `F'
+    * Incompatible with:  mk_counts, convert
+ -dust_level <Integer>
+   dust minimum level
+   Default = `20'
+    * Incompatible with:  mk_counts, convert
+ -mk_counts
+   generate frequency counts for a database
+    * Incompatible with:  outfmt, ustat, window, t_thres, t_extend, set_t_low,
+   set_t_high, dust, dust_level, convert
+ -convert
+   convert counts between different formats
+    * Incompatible with:  mk_counts, ustat, checkdup, window, t_extend,
+   t_thres, t_high, t_low, set_t_low, set_t_high, infmt, outfmt, parse_seqids,
+   fa_list, mem, unit, genome_size, dust, dust_level, exclude_ids, ids,
+   text_match
+

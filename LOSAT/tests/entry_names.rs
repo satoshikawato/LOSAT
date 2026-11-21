@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 14] = [
+const PROGRAMS: [&str; 16] = [
     "blastn",
     "blastp",
     "blastx",
@@ -59,7 +59,9 @@ const PROGRAMS: [&str; 14] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
+    "windowmasker",
     "convert2blastmask",
+    "makembindex",
     "rpsbproc",
 ];
 
@@ -93,14 +95,17 @@ fn a_shim_prints_what_the_subcommand_prints() {
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
-        // which is not part of BLAST+, dustmasker and segmasker have their own: `rpsbproc: 0.5.1`,
-        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`).
+        // which is not part of BLAST+, and the maskers have their own: `rpsbproc: 0.5.1`,
+        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`; makembindex prints the
+        // release without the `+`: `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
         let first_line = match name {
             "rpsbproc" => "rpsbproc: 0.5.1\n".to_string(),
             "dustmasker" => "dustmasker: 1.0.0\n".to_string(),
             "segmasker" => "segmasker: 1.0.0\n".to_string(),
+            "windowmasker" => "windowmasker: 1.0.0\n".to_string(),
+            "makembindex" => "makembindex: 2.17.0\n".to_string(),
             _ => format!("{name}: 2.17.0+\n"),
         };
         assert!(
@@ -281,7 +286,14 @@ fn top_level_help_names_every_program() {
         assert!(text.contains("\nDESCRIPTION\n"), "{text}");
         assert!(text.contains("losat -install-shims [DIR]"), "{text}");
         // An "Other programs" line has a description.
-        for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+        for program in [
+            "blastdbcmd",
+            "dustmasker",
+            "segmasker",
+            "windowmasker",
+            "convert2blastmask",
+            "makembindex",
+        ] {
             let line = text
                 .lines()
                 .find(|line| line.split_whitespace().next() == Some(program))
@@ -562,4 +574,34 @@ fn blastx_refuses_a_subject_over_5_000_000_residues_in_one_form() {
     );
     assert!(fs::read(&out).map_or(true, |bytes| bytes.is_empty()));
     fs::remove_dir_all(&dir).unwrap();
+}
+
+// The bioconda recipe's tests run `<program> -version` for every program the package links, and
+// its description names them: a program added to `PROGRAMS` goes into the recipe too (makembindex
+// had been left out of it). Not in a crate built from its package, which has no recipe.
+#[test]
+fn the_bioconda_recipe_tests_every_program() {
+    let recipe =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../packaging/bioconda/meta.yaml.template");
+    let Ok(recipe) = fs::read_to_string(&recipe) else {
+        assert!(
+            !Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../.git")
+                .exists(),
+            "{} is missing",
+            recipe.display()
+        );
+        return;
+    };
+    let description = recipe.split("description:").nth(1).unwrap_or_default();
+    for name in PROGRAMS {
+        assert!(
+            recipe.contains(&format!("    - {name} -version\n")),
+            "the recipe's tests have no `{name} -version`"
+        );
+        assert!(
+            description.contains(name),
+            "the recipe's description does not name {name}"
+        );
+    }
 }

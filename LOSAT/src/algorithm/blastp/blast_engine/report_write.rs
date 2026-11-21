@@ -127,6 +127,9 @@ pub(super) struct ReportView<'a> {
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
+    /// The call ends with an exception before any query's report: the pairwise report writes its
+    /// prolog alone (`empty_alignments::write_exception_prolog`).
+    pub(super) prolog_only: bool,
 }
 
 /// Outfmt 8, 9 and 12: the Seq-annot of each query with alignments
@@ -653,6 +656,7 @@ pub(super) fn write_pairwise(
         psi_found_before,
         rps_gapped_k,
         blastp_parallel_pool,
+        prolog_only,
         ..
     } = *report_view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68,71,90-92
@@ -748,6 +752,7 @@ pub(super) fn write_pairwise(
     // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
     let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let mut windows = match pairwise_hits {
+        _ if prolog_only => Vec::new(),
         Some(_) => vec![0..pairwise_queries.len()],
         None => query_rows::row_windows(
             hit_lists,
@@ -763,6 +768,37 @@ pub(super) fn write_pairwise(
         let mut rows: std::borrow::Cow<'_, [PairwiseHit]> = match pairwise_hits.as_deref() {
             Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
             None => std::borrow::Cow::Owned(rows_of(window.clone())?),
+        };
+        // `-db_soft_mask` and `-db_hard_mask`: the subjects' stored masks that meet the
+        // query's HSPs with them, by NCBI's Seq-id, shown in lower case as `-lcase_masking`
+        // shows a FASTA subject's (`db_mask_search::shown_db_subject_masks`).
+        let db_subject_masks = match (
+            args.db_mask_resolved.as_ref(),
+            database,
+            listed_subjects.as_ref(),
+        ) {
+            (Some(mask), Some(database), Some(listed)) => {
+                use crate::algorithm::common::db_mask_search as db_mask;
+                let ordinal = |rank: u32| listed.ordinals.get(rank as usize).copied();
+                let stored = db_mask::read_shown_stored(
+                    &rows,
+                    database.seqdb(),
+                    mask.id,
+                    args.app.name(),
+                    ordinal,
+                )?;
+                Some(db_mask::shown_db_subject_masks(
+                    &rows,
+                    |rank| stored.get(&rank).map(Vec::as_slice),
+                    |rank| {
+                        db_mask::subject_id_keys(
+                            listed_parsed.get(rank as usize).and_then(Option::as_deref),
+                            database.oid_map().oid(listed.ordinals[rank as usize]),
+                        )
+                    },
+                ))
+            }
+            _ => None,
         };
         // Outfmt 1 to 4: the sections read the sequences and their masks
         // (`anchored`), not the rows' letters.
@@ -790,7 +826,7 @@ pub(super) fn write_pairwise(
                             ranges.subject_placements,
                         )
                     } else {
-                        Default::default()
+                        db_subject_masks.clone().unwrap_or_default()
                     },
                 }
             });
@@ -805,6 +841,10 @@ pub(super) fn write_pairwise(
                     subject_records,
                     ranges.subject_placements,
                 ));
+            }
+            if let Some(masks) = db_subject_masks.as_ref() {
+                rows =
+                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
             }
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
@@ -851,7 +891,7 @@ pub(super) fn write_pairwise(
             probe.as_mut(),
             warnings.as_mut(),
             reports.x_prolog,
-            reports.epilog,
+            reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences
                 .as_ref()

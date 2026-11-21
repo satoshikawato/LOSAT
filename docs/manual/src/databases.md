@@ -95,10 +95,10 @@ Without `taxdb`, name fields print `N/A` and LOSAT writes NCBI's warning (`Taxon
 
 A database can hold masks that mark low-complexity or repeat regions, made by `dustmasker`, `segmasker`, `windowmasker` or `convert2blastmask` and added with `makeblastdb -mask_data`. Masks are used in these ways:
 
-- `blastn -db_soft_mask ID` and `-db_hard_mask ID` search with the masks of one algorithm: words inside a soft mask do not start hits, and a hard mask cuts the masked letters out of the search. `ID` is the numeric id or the name shown by `blastdbcmd -info` under "Available filtering algorithms". Other programs refuse these options (see [What LOSAT refuses](refusals.md)).
+- `blastn`, `blastp` and `blastx` `-db_soft_mask ID` and `-db_hard_mask ID` search with the masks of one algorithm: words inside a soft mask do not start hits, and a hard mask cuts the masked letters out of the search. `ID` is the numeric id or the name shown by `blastdbcmd -info` under "Available filtering algorithms". The alignments in format 0 to 4 show the masked letters of the database sequence in lower case. `tblastn` and `tblastx` refuse these options (see [What LOSAT refuses](refusals.md)).
 - `blastdbcmd -mask_sequence_with ID` writes masked letters in lower case, and `-outfmt "%m<ID>"` prints the mask ranges.
 
-See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [convert2blastmask](programs/convert2blastmask.md) and [makeblastdb](programs/makeblastdb.md).
+See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [windowmasker](programs/windowmasker.md), [convert2blastmask](programs/convert2blastmask.md) and [makeblastdb](programs/makeblastdb.md).
 
 ## Which programs read which databases
 
@@ -109,6 +109,7 @@ See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [c
 | [`rpsblast`](programs/rpsblast.md), [`rpstblastn`](programs/rpstblastn.md) | A profile database, such as NCBI's CDD (files `.rps`, `.loo`, `.aux`; one or several volumes). LOSAT does not provide `makeprofiledb`: use NCBI's databases. |
 | [`blastdbcmd`](programs/blastdbcmd.md) | Either; `-dbtype` chooses when a name exists for both. |
 | [`dustmasker`](programs/dustmasker.md) (`-infmt blastdb`) | Nucleotide |
+| [`windowmasker`](programs/windowmasker.md) (`-infmt blastdb`) | Nucleotide |
 | [`segmasker`](programs/segmasker.md) (`-infmt blastdb`) | Protein |
 | [`rpsbproc`](programs/rpsbproc.md) | None: it reads the archives that `rpsblast` and `rpstblastn` write, and the CDD data files. |
 

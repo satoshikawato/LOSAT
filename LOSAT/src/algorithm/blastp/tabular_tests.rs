@@ -148,3 +148,31 @@ fn rows_and_comment_lines_are_ncbis() {
     let (out, _) = report(20, "qseqid evalue", BlastpApp::Blastp, &lists);
     assert_eq!(out, "qseqid,evalue\nq1,1.00e-10\nq1,1.00e-10\n");
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (an ungapped HSP's
+// `align_length` is the length of its query range): an HSP of length 0 is one row whose
+// `qend` is `qstart - 1`, with 0.000 identity and no coverage; `qcovs` leaves it out.
+#[test]
+fn an_hsp_of_length_zero_is_a_row_that_covers_nothing() {
+    let mut empty = hit((3, 4), (24, 25), 0);
+    empty.length = 0;
+    empty.q_end = 2;
+    empty.s_end = 23;
+    empty.num_ident = 0;
+    empty.mismatch = 0;
+    empty.identity = 0.0;
+    let lists = [
+        Some(hit_list(vec![vec![hit((31, 60), (101, 130), 0), empty]], 1)),
+        None,
+    ];
+    let (out, _) = report(
+        6,
+        "qseqid sseqid pident length qstart qend sstart send qcovs qcovhsp",
+        BlastpApp::Blastp,
+        &lists,
+    );
+    assert_eq!(
+        out,
+        "q1\ts1\t93.333\t30\t31\t60\t101\t130\t30\t30\nq1\ts1\t0.000\t0\t3\t2\t24\t23\t30\t0\n"
+    );
+}

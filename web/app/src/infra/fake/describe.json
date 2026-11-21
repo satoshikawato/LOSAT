@@ -267,6 +267,16 @@
     "takes_value": true
    },
    {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
     "flag": "-ungapped",
     "help": "Perform ungapped alignment only",
     "takes_value": false,
@@ -508,6 +518,16 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
    },
    {
     "flag": "-dbsize",
@@ -1121,6 +1141,16 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
    },
    {
     "flag": "-dbsize",

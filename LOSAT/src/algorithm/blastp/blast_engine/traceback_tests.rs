@@ -133,40 +133,6 @@ fn ungapped_finish_keeps_the_evalue_and_scores_with_the_contexts_block() {
     assert_eq!(second.identity, 0.0);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (an ungapped HSP's
-// `align_length` is the length of its query range): the search of a list whose shown HSPs hold
-// one of length 0 stops, with the refusal's text; lists without one pass.
-#[test]
-fn a_shown_hsp_of_length_zero_is_refused() {
-    let contexts = [context_of(&[W, A, C, A, W])];
-    let subjects = [encoded(&[C, W, A, C, A, W])];
-    let finish = UngappedFinish {
-        contexts: &contexts,
-        subjects: XRedoSubjects::Encoded(&subjects),
-        matrix: ScoringMatrix::Blosum62,
-        hitlist_size: 10,
-        sorts_results: true,
-    };
-    let lists = |hsps: &[(BlastpPreliminaryHsp, f64)]| {
-        let list = finish.finish_list(0, 0, 0, hsps).unwrap().unwrap();
-        let mut hit_list = BlastpHitList::new(10);
-        hit_list.update(list);
-        vec![None, Some(hit_list)]
-    };
-    let mut ordinary = hsp((0, 5), (1, 6));
-    ordinary.raw_score = 28;
-    let mut empty = hsp((2, 2), (3, 3));
-    empty.raw_score = 4;
-    refuse_empty_alignments(&lists(&[(ordinary, 0.1)])).expect("no HSP of length 0");
-    refuse_empty_alignments(&[]).expect("no list");
-    let error = refuse_empty_alignments(&lists(&[(ordinary, 0.1), (empty, 0.2)]))
-        .expect_err("a shown HSP of length 0");
-    assert_eq!(
-        error.to_string(),
-        "the report of an ungapped alignment of length 0 is not ported yet; this is not supported by LOSAT's BLASTP"
-    );
-}
-
 #[test]
 fn short_hsp_starts_at_its_middle() {
     let seq = [W; 20];

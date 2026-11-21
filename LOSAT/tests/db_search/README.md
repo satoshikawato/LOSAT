@@ -25,6 +25,9 @@ FASTA files:
   it is a neighbour of `AOA` and both subjects are found; with words of 6 (`db.oseed.w6.6`) the compressed alphabet
   has no letter for O or X. `oseed_bx_q.fna` is `q_x` as DNA (ATT for I, GCT for A, NNN for X), the BLASTX query of
   `db.oseed.bx.6`.
+- `len0_l0015` (rows `db.ung.len0.*`, line NP item O4b, PR (c)): the subject of `tests/fasta/outfmt0/len0_l0015_s.faa`
+  (one protein of 189 letters), searched by the 3 proteins of `len0_l0015_q.faa` with `-ungapped -window_size 0
+  -word_size 7 -threshold 9 -matrix PAM30 -seg yes`: query `q1` shows an ungapped HSP of length 0 at subject offset 23.
 - `oreal.faa` / `oreal_q.faa` (row `db.oreal.psi.6`, line NP item DBO): four proteins of `LOSAT/tests/fasta/AP027132.faa`
   (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
   `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
@@ -193,6 +196,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "stored O against the query's X" -blastdb_version 4
     makeblastdb -in tests/db_search/oseed.faa -dbtype prot -out tests/db_search/oseed \
         -title "stored O and X in words under the threshold" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/len0_l0015_s.faa -dbtype prot -out tests/db_search/len0_l0015 \
+        -title "len0 l0015 subject" -blastdb_version 4
     makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
         -title "four proteins with stored O, X and U" -blastdb_version 4
     makeblastdb -in tests/db_search/opssm.faa -dbtype prot -out tests/db_search/opssm \
@@ -2146,6 +2151,66 @@ crashes at words of 11 and more. The rows of their algorithm 11 expect NCBI's ou
 makeblastdb -in tc.fna -dbtype nucl -out edge9 -title "edge masks 9" -blastdb_version 4 -mask_data edge_tc.asnt,edge_tcn.asnt
 makeblastdb -in tr.fna -dbtype nucl -out edge10 -title "edge masks 10" -blastdb_version 4 -mask_data edge_tr.asnt,edge_trn.asnt
 ```
+
+## `dbmaskp/`: database masks of BLASTP and BLASTX searches (line NP, series M, M4b)
+
+Rows `db.pmask.*` (`blastp.pmask.tsv`, `blastx.pmask.tsv`: `-db_soft_mask`, `-db_hard_mask`). The inputs are the probe
+inputs of the M4b survey (`ncbi-parity-20261019/M/m4b/probe/in`, written by its `scripts/gen.py`, seed 20261120):
+`prot.faa` (seven proteins: `p1` with a Q block and an SG block, `p2` random, `p3` with an EK head and a K tail, `p4`
+all GS, `p5` random for the hand masks, `p6` a homolog of `p1`, `p7` with a PA block), `proth.faa` (the same without
+`p4`, whose seg mask covers it whole), the protein queries `qp.faa` (`qp_all.fa`) and the nucleotide queries `qx.fna`
+(`bx_all.fa`), and the hand masks of `p5` `edge_*.asnt` (`pedge_*.asnt`, ASN.1 text, `local id 5`, algorithm seg).
+Made with NCBI BLAST+ 2.17.0 from `dbmaskp/` (`BLAST_USAGE_REPORT=false`; the script is
+`ncbi-parity-20261019/M/m4b/ws/fixtures.sh`):
+
+```
+segmasker -in prot.faa -infmt fasta -outfmt maskinfo_asn1_bin -out seg.asnb
+segmasker -in prot.faa -infmt fasta -outfmt maskinfo_asn1_bin -window 8 -locut 1.8 -hicut 2.1 -out seg8.asnb
+segmasker -in proth.faa -infmt fasta -outfmt maskinfo_asn1_bin -out segh.asnb
+segmasker -in proth.faa -infmt fasta -outfmt maskinfo_asn1_bin -window 8 -locut 1.8 -hicut 2.1 -out segh8.asnb
+makeblastdb -in prot.faa -dbtype prot -out ps5 -title "seg masks v5" -mask_data seg.asnb,seg8.asnb
+makeblastdb -in proth.faa -dbtype prot -out ph5 -title "seg masks v5 without p4" -mask_data segh.asnb,segh8.asnb
+makeblastdb -in proth.faa -dbtype prot -out ph4 -title "seg masks v4 without p4" -blastdb_version 4 -mask_data segh.asnb,segh8.asnb
+makeblastdb -in proth.faa -dbtype prot -out phmv -title "seg masks, volumes" -max_file_sz 600B -mask_data segh.asnb
+for c in mid head adjacent gap2 tiny neartail two_tail tail unsorted; do
+  makeblastdb -in prot.faa -dbtype prot -out pe_$c -title "edge $c" -mask_data edge_$c.asnt
+done
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3a -title "parsed ids, p5 masked in the middle" -mask_data l3_mid.asnt
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids, p5 masked at the head" -mask_data l3_head.asnt
+blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
+python3 ../make_dbmaskp_pbh.py --ncbi-only WORK $NCBI_BIN .   # pbh.faa, edge_pbh.asnt, qbh.fna, qbh.faa, pbh
+makeblastdb -in pshort.faa -dbtype prot -out pshort -title "short pieces between masks" -mask_data edge_short.asnt
+rm -f *.pjs
+```
+
+The review of PR 1 added `pl3a` and `pl3b` (parsed Seq-ids; `l3_mid.asnt` and `l3_head.asnt` are `edge_mid.asnt` and
+`edge_head.asnt` with `local str "p5"` and one algorithm text, so that the two databases share the Seq-id `p5` under
+different masks), the alias file `pal`, and `pbh` with the blastx query `qbh.fna` and the blastp query `qbh.faa` (the
+protein that `qbh.fna` back-translates): subjects that hold a weaker copy of a query stretch, a still weaker one starting
+a little before it, a hard-masked stretch, and a close copy of the stretch, on which `-subject_besthit` after every
+chunk (NCBI) and once after the merge differ. `make_dbmaskp_pbh.py` (seed 20261121) draws rounds of 400 such subjects.
+With `--ncbi-only` (resume 2 of PR 1, run with NCBI 2.17.0 alone) it keeps the first three of a round where NCBI's rows
+with `-subject_besthit` hold fewer alignments than its rows without the option filtered once, and the first three where
+blastp's do (round 0: blastx s1, s2, s4, s6 and blastp s4, s6 of the six differ so); with OLD and NEW (LOSAT before
+and after the fix) it keeps the first three where those two builds differ.
+
+`ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
+(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's
+refusal of a mask that runs to the end (the Owner's question Q1 of M4b); `ph5`, `ph4` and `phmv` are the hard-mask
+databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too.
+
+`pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
+`ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for
+a run of six `W` at 60-65, under hand masks (algorithm 21, local ids 1 to 4): `s1` [30, 60) and [62, 90), which leave the
+piece `WW` before a masked `W`; `s2` [30, 60) and [63, 90), the piece `WWW`; `s3` [30, 60) and [60, 90), touching masks;
+`s4` [1, 10), a first piece of one letter. The query `qshort.faa` (and its back-translation `qshort.fna`) holds one
+`WWW`. NCBI's one-hit scan (`-window_size 0`) aligns that `WWW` with `s2`'s piece only: it reads no word of a hard piece
+shorter than the word (aa_ungapped.c:762-766, no raise of the range's end), where a word read at the piece's start
+would have given `s1` the same alignment; with `-db_soft_mask` it reads no word of `s4` at all, whose first scan range
+is shorter than the word. The rows `*.w0.*` of `pe_tiny`, `pe_gap2` and `pe_adjacent` search the hand masks of `p5`
+with pieces of two and no letters the same way. The rows `*.ungapped.*` of BLASTP (restored after dev's BLASTP
+`-ungapped`, #1420, and `ps5`/`ph5` with seg masks) search each hard piece's ungapped hits and merge them as the
+gapped pieces are merged.
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

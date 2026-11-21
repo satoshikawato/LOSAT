@@ -266,6 +266,8 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size`,
         // `-off_diagonal_range` or `-min_raw_gapped_score` (they are refused below as unknown
         // flags).
@@ -502,6 +504,8 @@ fn parse_blastp_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4b).
+        db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,

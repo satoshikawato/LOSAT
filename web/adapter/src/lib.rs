@@ -442,7 +442,7 @@ pub unsafe extern "C" fn losat_web2_run(
         // A run that prints a text in place of a search reads no input, as the command line reads
         // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
         if run::prints(&argv).is_some() {
-            run::run(&argv, &[], &[])?;
+            run::run(&argv, &[], &losat::api::QueryEnd::Input, &[])?;
             return Ok(0);
         }
         store::with_inputs(

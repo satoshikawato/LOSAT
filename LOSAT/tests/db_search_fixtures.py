@@ -96,7 +96,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
   own (line RG item X4: the failed batch of a Smith-Waterman redo), the query batches before the batch that
   LOSAT refuses and NCBI searches on (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; X5: a copy
   row whose query file holds the batches that LOSAT writes before it refuses, where NCBI's own run of the
-  row reads past its array there), the rounds before the one that LOSAT refuses (psiblast with
+  row reads past its array there; line WQA D10: two queries of one ID under `-parse_deflines`, the refused
+  one's letters in the near input a line that NCBI's reader refuses), the rounds before the one that LOSAT
+  refuses (psiblast with
   `-num_iterations 1`), or a search of the same database and
   output format whose first N bytes are the prolog that LOSAT writes before it refuses the report (line RG
   item T3c: the same search with a description table, which NCBI ends with an exception at an HSP of length
@@ -1157,7 +1159,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # A refusal follows no byte in either path (the library holds its output where the command
         # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
         # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
-        # library skips.
+        # library skips, and the refusals at a later query batch (`ncbi-near:`), which the library
+        # writes as the command line does.
         if row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):

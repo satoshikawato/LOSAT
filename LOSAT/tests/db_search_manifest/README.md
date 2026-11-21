@@ -70,7 +70,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
   cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
   outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
-  refuses), and with `ncbi-near: ROW_ID first N bytes` its first N bytes. Where NCBI crashes on the row's own command,
+  refuses, or line WQA D10's near input, whose refused batch NCBI's reader stops at), and with
+  `ncbi-near: ROW_ID first N bytes` its first N bytes. Where NCBI crashes on the row's own command,
   its stdout depends on where the crash cuts it: `freeze` stops on such a run, and the row takes a near row (or has
   empty stdout cells where LOSAT writes nothing before it refuses).
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a

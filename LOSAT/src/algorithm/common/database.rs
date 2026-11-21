@@ -289,6 +289,20 @@ fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
         .find_map(|volume| volume.open_sequence_file().err())
 }
 
+/// The error of the first read of the sequences of `db` in the preliminary search of a query batch
+/// with a valid context, through `CLocalBlast` (a FASTA query of blastp, blastx, blastn,
+/// tblastn and tblastx), after the batch's set-up checks: a sequence file that cannot be opened
+/// (`unopenable_sequence_file`, the open of a volume's sequence file that the search's first read
+/// of the volume makes, `seqdb::Volume::open_sequence_file`), as the search's read reports it
+/// (`search_read_error`: `PreliminaryReadError`, NCBI's `Database memory map file error`; LOSAT's
+/// refusal of an error that is not NCBI's). The set-up of a query batch that LOSAT refuses asks it
+/// where the search would read (`query_batch::refused_batch_error`; line WQA D10 round 6,
+/// 2026-11-20, review 4 M2: `-db` of a database without its `.psq` or `.nsq` file, NCBI BLAST+
+/// 2.17.0 exits 3 with that error, and at outfmt 11 writes its archive first).
+pub(crate) fn sequence_file_read_error(db: &SeqDb, program: &str) -> Option<anyhow::Error> {
+    unopenable_sequence_file(db).map(|error| search_read_error(error, program))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
 // search's preliminary stage has not)

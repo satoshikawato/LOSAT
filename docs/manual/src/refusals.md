@@ -95,7 +95,12 @@ Output formats:
 
 Two queries or two subjects with one id (`-parse_deflines`):
 
-- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there.
+- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there. LOSAT first writes the results of the query batches before the second query's batch, as NCBI writes them when it stops at a batch, then stops with the error. An error that NCBI gives for an earlier batch comes first.
+- With `-outfmt 11` LOSAT's output differs from NCBI's stop: NCBI ends the BLAST archive with an error record that holds its message (`request-id "Error"`). LOSAT's archive has the earlier batches' records without that record, because the refusal is LOSAT's message, not NCBI's.
+- The query batches are NCBI's: like NCBI, LOSAT counts the second query into its batch by the first one's letters, so the second query's batch holds the queries of NCBI's batch, and an error of NCBI's reader comes in the batch where NCBI's reader meets it.
+- In the second query's batch, NCBI's errors that do not depend on that query's letters come instead of the refusal, as NCBI gives them. Examples are subjects too short for `-searchsp` ("The average subject length is too short") and a database whose sequence file cannot be read ("Database memory map file error"). This holds where a query of that batch whose id is new in it has letters that NCBI can search. Otherwise the refusal comes.
+- The refusal comes also where the second query's ids meet two earlier queries or only some of an earlier query's ids, and in `blastn` where the second query is longer than the first.
+- With `-export_search_strategy`, LOSAT writes no search strategy for the refused batch. With one query batch, the file stays empty.
 - A query and a subject with one id are refused unless they are one record: the same definition line and the same letters.
 - `blastx` and `tblastn` refuse even one record that is both query and subject.
 - With `-outfmt 0`, `blastn`, `blastp` and `tblastx` refuse such a record when it has masks.

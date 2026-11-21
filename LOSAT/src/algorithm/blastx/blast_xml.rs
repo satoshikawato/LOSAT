@@ -919,9 +919,8 @@ pub(super) struct QueryScan {
 /// after the reports of the batches before it), and so does a record it refuses for every format
 /// (a title that is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and
 /// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
-/// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
-/// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
-/// search then reads them from `QueryScan::query_scopes`. `checks_titles`: as `scan_queries`.
+/// batch yet) the read adds the batches to the scopes of the queries, `checks_titles` as
+/// `scan_queries` does.
 ///
 /// `file` is the query file the search reads (`-query`, a regular file, named `query` in NCBI's
 /// error when its position cannot be read or set): the read takes it and gives it back with the
@@ -981,42 +980,26 @@ fn scan_query_stream<R: std::io::Read>(
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
     checks_titles: bool,
-    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
-    let mut delivered = 0usize;
-    let mut refusal = None;
-    let mut scan = scan_queries(options, holds_back, checks_titles, &mut |deliver| {
-        super::input::read_fasta_stream_batches(
-            stream,
-            false,
-            lowercase,
-            batch_size,
-            false,
-            range,
-            &mut |batch| {
-                // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
-                deliver(batch)?;
-                if let Some(scopes) = query_scopes.as_mut() {
-                    let added = scopes.add_batch_ids(
-                        batch.iter().filter_map(|record| record.believed()),
-                        delivered,
-                    );
-                    if let Err(error) = added {
-                        refusal = Some(error);
-                        anyhow::bail!("LOSAT refuses this batch");
-                    }
-                }
-                delivered += batch.len();
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-    })?;
-    if let Some(refusal) = refusal {
-        return Err(refusal);
-    }
-    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
-    Ok(scan)
+    scan_queries(
+        options,
+        holds_back,
+        checks_titles,
+        query_scopes,
+        &mut |deliver| {
+            super::input::read_fasta_stream_batches(
+                stream,
+                false,
+                lowercase,
+                batch_size,
+                false,
+                range,
+                deliver,
+                &mut |_| Ok(()),
+            )
+        },
+    )
 }
 
 /// Refuses the first query the writer would refuse (a title NCBI crashes on, `names::Refusal`)
@@ -1032,10 +1015,20 @@ fn scan_query_stream<R: std::io::Read>(
 /// the last query of the batches before such a stop: that query is checked only when the next
 /// batch is written or `read` ends without an error. Without `checks_titles` (a run whose XML
 /// format fails for its matrix name before any report, `xml_matrix_failure`) no title is checked.
+///
+/// Under `-parse_deflines` (`query_scopes`, without a batch yet) the read adds each batch that NCBI
+/// does not fail to the scopes of the queries (`QueryScopes::add_batch_ids`; a batch that NCBI fails
+/// reports nothing of its scope, review M3, 2026-11-20), which the search reads from
+/// `QueryScan::query_scopes`. LOSAT's refusal of two queries of one scope with one id stops the run
+/// at its batch, after the reports of the batches before, as a batch that NCBI fails does: the read
+/// ends there, and the search gives the refusal where it adds that batch (`QueryScopes::read_ahead`;
+/// line WQA D10 round 4, 2026-11-20). The batches are the reader's (`read`), as NCBI counts them
+/// (`query_batch::BatchCount`).
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
     holds_back: bool,
     checks_titles: bool,
+    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
@@ -1043,9 +1036,25 @@ pub(super) fn scan_queries(
     // the document holds its report back.
     let mut written = 0usize;
     let mut held: Option<Result<()>> = None;
+    // The batches added to the scopes, and the refusal of the batch after them.
+    let mut batches = 0usize;
+    let mut refusal = None;
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
+        }
+        if let Some(scopes) = query_scopes.as_mut() {
+            let added = scopes.add_batch_ids(
+                super::input::scope_records(batch)
+                    .into_iter()
+                    .map(|(believed, length, _)| (believed, length)),
+                written,
+            );
+            if let Err(error) = added {
+                refusal = Some((batches, error));
+                anyhow::bail!("LOSAT refuses this batch");
+            }
+            batches += 1;
         }
         // A run whose XML format fails for its matrix name writes no report, and no title
         // (`xml_matrix_failure`): its batches are read for their scopes alone.
@@ -1076,6 +1085,7 @@ pub(super) fn scan_queries(
         written += batch.len();
         Ok(())
     });
+    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusal));
     match scanned {
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.

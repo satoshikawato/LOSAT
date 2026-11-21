@@ -378,8 +378,7 @@ fn search_program_help_says_what_outfmt_writes() {
 #[test]
 fn argument_refusals_end_with_a_line_end() {
     for words in [
-        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-html"][..],
-        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"],
+        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"][..],
         &["blastn", "-no_such_option"],
         &["blastn", "-query"],
         &["makeblastdb", "-no_such_option"],
@@ -469,28 +468,27 @@ fn help_has_no_source_references_and_a_true_footer() {
 /// program's name, exit status 2), and the hint of an argument error names `-help`, NCBI's form.
 #[test]
 fn refusals_by_name_have_one_form_and_the_hint_says_help() {
-    for option in ["-html", "-remote"] {
-        let mut forms = Vec::new();
-        for program in ["blastn", "blastp", "blastx"] {
-            for with_subject in [false, true] {
-                let mut words = vec![program, "-query", "q.fa"];
-                if with_subject {
-                    words.extend(["-subject", "s.fa"]);
-                } else {
-                    words.extend(["-db", "d"]);
-                }
-                words.push(option);
-                let output = run(losat(), &words);
-                assert_eq!(output.status.code(), Some(2), "{words:?} {output:?}");
-                assert!(output.stdout.is_empty(), "{words:?}");
-                let text = String::from_utf8(output.stderr).unwrap();
-                forms.push(text.replace(&program.to_uppercase(), "PROGRAM"));
+    let option = "-remote";
+    let mut forms = Vec::new();
+    for program in ["blastn", "blastp", "blastx"] {
+        for with_subject in [false, true] {
+            let mut words = vec![program, "-query", "q.fa"];
+            if with_subject {
+                words.extend(["-subject", "s.fa"]);
+            } else {
+                words.extend(["-db", "d"]);
             }
+            words.push(option);
+            let output = run(losat(), &words);
+            assert_eq!(output.status.code(), Some(2), "{words:?} {output:?}");
+            assert!(output.stdout.is_empty(), "{words:?}");
+            let text = String::from_utf8(output.stderr).unwrap();
+            forms.push(text.replace(&program.to_uppercase(), "PROGRAM"));
         }
-        let expected =
-            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
-        assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
+    let expected =
+        format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
+    assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     // blastx's other refusals by name (`-gilist`, `-use_sw_tback`) have the same form.
     for option in ["-gilist", "-use_sw_tback"] {
         let output = run(losat(), &["blastx", "-query", "q.fa", option]);

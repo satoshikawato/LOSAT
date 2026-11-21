@@ -472,7 +472,8 @@ impl GiMasks {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.hpp:169-178
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:115-122
     /// `x_Open(id)`: the files of the algorithm `id`. An id outside 0 to N-1 is NCBI's text in
-    /// [`SeqDbError::Range`] (a search reports it as `BLAST Database error`).
+    /// [`SeqDbError::Range`] (a search reports it as a database error,
+    /// [`SeqDbError::ncbi_message`]).
     pub(super) fn open(&self, id: i32) -> Result<Arc<GiMaskFiles>, SeqDbError> {
         let Some(at) = usize::try_from(id).ok().filter(|&at| at < self.names.len()) else {
             return Err(SeqDbError::Range(format!(

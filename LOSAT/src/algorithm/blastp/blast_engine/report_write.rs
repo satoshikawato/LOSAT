@@ -675,6 +675,24 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
+        unreadable_query: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding)
+            .map(|_| crate::report::pairwise::UnreadableQuery {
+                oids: listed_subjects
+                    .as_ref()
+                    .zip(database)
+                    .map(|(listed, database)| {
+                        let oids = database.oid_map();
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(|&ordinal| oids.oid(ordinal).get())
+                            .collect()
+                    }),
+            }),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
@@ -1038,6 +1056,10 @@ pub(super) fn write_custom_tabular(
         },
         names: names.as_ref(),
         engine_counts,
+        query_other_coding: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's
     // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
@@ -1134,6 +1156,9 @@ pub(super) fn write_text(
         // psiblast's round (`psi_round`), 1 outside the rounds.
         (args.app == BlastpApp::Psiblast)
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
+        args.psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

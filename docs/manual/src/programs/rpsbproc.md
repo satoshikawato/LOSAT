@@ -68,6 +68,7 @@ Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the
 ## Differences from NCBI BLAST+
 
 - Where NCBI's `rpsbproc` reads memory it should not, or its result depends on the machine, LOSAT refuses the input or computes the value without the undefined step ([the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md)).
+- Hits of one query with equal E-value and bit score keep their input order, where NCBI's order can differ, and so can which of them is `Specific` ([Differences from NCBI BLAST+](../differences.md#rpsbproc-hits-that-tie)).
 
 ## What LOSAT refuses
 

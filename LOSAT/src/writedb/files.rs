@@ -15,7 +15,7 @@ pub(crate) struct WriteDbFile {
     /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
     stream: OfStream,
     base_name: String,
-    extension: &'static str,
+    extension: String,
     index: u32,
     use_index: bool,
     fname: String,
@@ -40,7 +40,7 @@ impl WriteDbFile {
     // NCBI does not test the stream: a file that cannot be opened (a directory of its name
     // that the removal of the old database could not delete) is written to nowhere and the
     // build goes on, as makeblastdb's (`super::ofstream`).
-    fn create(base_name: &str, extension: &'static str, index: u32, max_file_size: u64) -> Self {
+    fn create(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
         file.create_now();
         file
@@ -50,7 +50,7 @@ impl WriteDbFile {
     /// `create_now` (`CWriteDB_File::Create`).
     pub(crate) fn lazy(
         base_name: &str,
-        extension: &'static str,
+        extension: &str,
         index: u32,
         max_file_size: u64,
     ) -> Self {
@@ -61,22 +61,25 @@ impl WriteDbFile {
     /// volume number (the offset and index files of a GI mask, `super::gi_mask`).
     pub(crate) fn lazy_unindexed(
         base_name: &str,
-        extension: &'static str,
+        extension: &str,
         max_file_size: u64,
     ) -> Self {
         Self::named(base_name, extension, None, max_file_size)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:158-195
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:247-257
+    // A negative index turns the volume number off; a limit of 0 takes the default one.
     fn named(
         base_name: &str,
-        extension: &'static str,
+        extension: &str,
         index: Option<u32>,
         max_file_size: u64,
     ) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),
-            extension,
+            extension: extension.to_string(),
             index: index.unwrap_or(0),
             use_index: index.is_some(),
             fname: match index {
@@ -130,6 +133,7 @@ impl WriteDbFile {
         Ok(self.offset)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:204-222
     /// `Write` for a file whose stream position nothing reads (the files of a GI mask, which
     /// keep their own lengths, `super::gi_mask`): every byte is written and `m_Offset` wraps
     /// as NCBI's `unsigned int` does.

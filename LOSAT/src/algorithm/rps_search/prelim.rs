@@ -387,7 +387,7 @@ impl RpsPrelim<'_> {
                 query_start,
             ) {
                 bail!(
-                    "an RPS-BLAST volume searched as {} concatenated positions, below the {} rows of its profiles (an alias file's LENGTH and NSEQ over one volume), where two gapped alignments of a query start past position {} (NCBI BLAST+ 2.17.0's interval tree then splits a node without end), is not supported by LOSAT's {}",
+                    "an RPS-BLAST volume searched as {} concatenated positions, below the {} rows of its profiles (an alias file's LENGTH and NSEQ, or NCBI's totals of the OIDs its OIDLIST keeps, over one volume), where two gapped alignments of a query start past position {} (NCBI BLAST+ 2.17.0's interval tree then splits a node without end), is not supported by LOSAT's {}",
                     self.concat_length,
                     self.rows.len(),
                     i64::from(self.concat_length) + 1,

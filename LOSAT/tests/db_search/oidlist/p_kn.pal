@@ -1,0 +1,4 @@
+TITLE oidlist k nseq
+DBLIST ../taxfilter/tfp
+OIDLIST k.msk
+NSEQ 99

@@ -1,0 +1,110 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: oidlist union
+           2 sequences; 283 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P01923.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  282     2e-104
+Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  281     4e-104
+
+
+>P01923.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Gorilla gorilla gorilla]
+ P01979.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Ornithorhynchus anatinus]
+Length=141
+
+ Score = 282 bits (721),  Expect = 2e-104, Method: Compositional matrix adjust.
+ Identities = 140/141 (99%), Positives = 141/141 (100%), Gaps = 0/141 (0%)
+
+Query  2    VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  61
+            VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK
+Sbjct  1    VLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  60
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA
+Sbjct  61   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  120
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+            VHASLDKFLASVSTVLTSKYR
+Sbjct  121  VHASLDKFLASVSTVLTSKYR  141
+
+
+>Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; Contains: 
+RecName: Full=Hemopressin [Hylobates lar]
+ Q7LZC3.1 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Streptopelia 
+orientalis]
+Length=142
+
+ Score = 281 bits (719),  Expect = 4e-104, Method: Compositional matrix adjust.
+ Identities = 140/142 (99%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29646
+
+
+  Database: oidlist union
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 283
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

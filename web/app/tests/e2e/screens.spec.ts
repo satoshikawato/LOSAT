@@ -112,8 +112,8 @@ for (const size of SIZES) {
     }
 
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
-    // accept it, and the run ends with NCBI's `BLAST engine error: The average subject length
-    // is too short`, as the CLI does.
+    // accept it, and the run ends with `LOSAT engine error: The average subject length is too
+    // short`, as the CLI does.
     let sequence = '';
     let state = 7;
     for (let i = 0; i < 300; i++) {

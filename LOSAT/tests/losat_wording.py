@@ -478,11 +478,20 @@ check_output_samples()
 
 
 def _main(argv: list[str]) -> int:
-    usage = "usage: losat_wording.py map-output|map-message <ncbi-file>|-  (LOSAT's bytes of NCBI's, to standard output)"
-    if len(argv) != 2 or argv[0] not in ("map-output", "map-message"):
+    usage = ("usage: losat_wording.py map-output|map-message <ncbi-file>|-  (LOSAT's bytes of NCBI's, to standard output)\n"
+             "       losat_wording.py hash-form <losat-file>|-  (LOSAT's output read back in NCBI's words, `ncbi_hash_form`;\n"
+             "       exit 1, with nothing written, when it still writes NCBI's words, `names_ncbi`)")
+    if len(argv) != 2 or argv[0] not in ("map-output", "map-message", "hash-form"):
         print(usage, file=sys.stderr)
         return 2
     data = sys.stdin.buffer.read() if argv[1] == "-" else Path(argv[1]).read_bytes()
+    if argv[0] == "hash-form":
+        found = names_ncbi(data)
+        if found is not None:
+            print(f"the output still writes NCBI's {found.decode()!r}", file=sys.stderr)
+            return 1
+        sys.stdout.buffer.write(ncbi_hash_form(data))
+        return 0
     mapped = losat_output_bytes(data) if argv[0] == "map-output" else losat_bytes(data)
     sys.stdout.buffer.write(mapped)
     return 0

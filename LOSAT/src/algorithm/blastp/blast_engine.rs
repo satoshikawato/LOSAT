@@ -7457,6 +7457,7 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
+                    unreadable_query: None,
                 };
                 write_blastp_pairwise_report(
                     &[],

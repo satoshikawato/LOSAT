@@ -1,0 +1,102 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          79.0    1e-22
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       17.7    8.5  
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       17.4    9.6  
+
+
+Sequence with id BL_ORD_ID:52 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:18 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:51 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.317    0.129    0.364    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0396    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1659164
+Results from round 2
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          87.8    5e-26
+
+Sequences not found previously or not previously below threshold:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       18.8    2.5  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       18.5    4.0  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       17.7    7.8  
+
+
+Sequence with id BL_ORD_ID:52 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:7 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:82 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:82 no longer exists in database...alignment skipped
+Sequence with id BL_ORD_ID:81 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.317    0.134    0.394    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0411    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1659164
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -8,24 +8,6 @@
 //! tables (`x_disc_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1033,1043-1045,1081-1091
-//! ```c
-//!       for (index = from; index <= last_offset; index++) {
-//!          val = *++seq;
-//! ...
-//!          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-//!          if (seq < pos)
-//!             continue;
-//! ...
-//!          if (mb_lt->hashtable[ecode] == 0) {
-//! ...
-//!             PV_SET(pv_array, ecode, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//!          mb_lt->hashtable[ecode] = index;
-//! ```
 //!
 //! The plan. The cells are cut into blocks of `2^block_shift` cells dealt round robin to P owners
 //! (`x_mb_lookup_par::plan`, the same plan as the fill there); P is the size of the search pool.
@@ -301,12 +283,6 @@ struct Segment<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1019-1022
-/// ```c
-///       /* case of unmasked region >= kLutWordLength but < full_word_size,
-///          so no hits should be generated. */
-///       if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-///          continue;
-/// ```
 /// The ranges the loop of `build_mb_lookup` reads, in its order (the same `build_unmasked_ranges`
 /// per query; the queries shorter than `lut_word_length` and the ranges shorter than `word_length`
 /// skipped as there), and the number of positions it reads. In debug builds it checks the premise
@@ -524,22 +500,6 @@ struct Fill<'a, 'w, 'c> {
 
 impl Fill<'_, '_, '_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1045
-    /// ```c
-    ///       for (index = from; index <= last_offset; index++) {
-    ///          val = *++seq;
-    ///          /* if an ambiguity is encountered, do not add
-    ///             any words that would contain it */
-    ///          if ((val & BLAST2NA_MASK) != 0) {
-    ///             ecode = 0;
-    ///             pos = seq + kLutWordLength;
-    ///             continue;
-    ///          }
-    ///
-    ///          /* get next base */
-    ///          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-    ///          if (seq < pos)
-    ///             continue;
-    /// ```
     /// Phase A, reader `a`: the words that end at the stream positions `[s0, s1)`, read with the
     /// statements of `build_mb_lookup`'s loop (the same resets, k-mer and offsets), into its
     /// scratch region in reading order, then copied stably into its sorted region grouped by the
@@ -776,16 +736,6 @@ impl Fill<'_, '_, '_> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-/// ```c
-///          if (mb_lt->hashtable[ecode] == 0) {
-///             PV_SET(pv_array, ecode, pv_array_bts);
-///          }
-///          else {
-///             helper_array[ecode/kCompressionFactor]++;
-///          }
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-///          mb_lt->hashtable[ecode] = index;
-/// ```
 /// The update of one word, as in the loop of `build_mb_lookup`, with the counter and the presence
 /// bit in the owner's private copies; `next_pos[index]` is written in phase C from the head kept in
 /// the entry. `H24` (LOSAT_X_MB24): on a 3-byte cell, read and written as exactly its 3 bytes (the
@@ -988,13 +938,6 @@ pub(super) struct OnceStats {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1033,1081-1091
-/// ```c
-///       for (index = from; index <= last_offset; index++) {
-///          val = *++seq;
-/// ...
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-///          mb_lt->hashtable[ecode] = index;
-/// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does (with its re-threading for
 /// `ascending_cells`), each query position read once, with `parts` workers on the search pool (or
 /// one after another, `in_pool == false`, where the unit tests run it without a pool); the module

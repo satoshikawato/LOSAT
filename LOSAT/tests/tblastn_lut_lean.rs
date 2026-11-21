@@ -2,15 +2,6 @@
 //! `src/algorithm/tblastx/lookup/x_lut_direct.rs` `x_build_lean`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-//! ```c
-//!     for (i = 0; i < lookup->backbone_size; i++) {
-//!         if (exact_backbone[i] != NULL) {
-//!             s_AddWordHits(lookup, matrix, query->sequence,
-//!                           exact_backbone[i], query_bias, row_max);
-//!             sfree(exact_backbone[i]);
-//!         }
-//!     }
-//! ```
 //! The switch builds each query batch's table with the count, layout and fill passes of the other
 //! protein programs' in-place builder, every temporary freed by the build; the table is the chain
 //! builder's (the unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`

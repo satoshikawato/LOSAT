@@ -4,23 +4,7 @@
 //! pairs straight from that array:
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1040-1041
-//! ```c
-//!     aux_struct->offset_pairs =
-//!       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-511
-//! ```c
-//!     while (scan_range[1] <= scan_range[2]) {
-//!         /* scan the subject sequence for hits */
-//!         hits = scansub(lookup_wrap, subject,
-//!                                   offset_pairs, array_size, scan_range);
-//!
-//!         totalhits += hits;
-//!         /* for each hit, */
-//!         for (i = 0; i < hits; ++i) {
-//!             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ```
 //!
 //! The reference (`Lookup::scan` + `word_finder`, which the tests compare with) allocates and
 //! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
@@ -51,22 +35,6 @@
 //! LOSAT_X_TBXHITBF do the same in their loops):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
-//! ```c
-//!                 if (diff >= window) {
-//!                     /* We are beyond the window for this diagonal; start a
-//!                        new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//!                 }
-//!
-//!                 /* If the difference is less than the wordsize (i.e. last
-//!                    hit and this hit overlap), give up */
-//!
-//!                 if (diff < wordsize) {
-//!                     continue;
-//!                 }
-//! ```
 //! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without a cell
 //! test of batches across the cells' borders: `LOSAT_X_BXCROSS=0`, aarch64, x86-64 without SSSE3,
 //! SSE4.1 or POPCNT, and `LOSAT_X_BXCROSS128=0` on x86-64 without AVX2 and in WebAssembly)
@@ -235,19 +203,6 @@ thread_local! {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607
-// ```c
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ...
-//                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-// ...
-//                 if (score >= cutoffs->cutoff_score)
-//                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-// ...
-//                 if (right_extend) {
-//                     diag_array[diag_coord].flag = 1;
-//                     diag_array[diag_coord].last_hit =
-//                         s_last_off - (wordsize - 1) + diag_offset;
-// ```
 /// `word_finder` without the per-call buffer and the batch copy (the seed loop of a search that
 /// traces nothing).
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
@@ -563,26 +518,6 @@ fn x_word_finder_direct_bf(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
-// ```c
-//         wordsize = lookup->word_length;
-//     }
-//
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-// ...
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ```
 // `Lookup::scan` (its range set-up and loop) and `word_finder` (the statements per pair)
 // in one function; the pairs are read from the scanner's buffer. The standard table is scanned
 // with `x_scan_one_range_bf` (module header).
@@ -658,7 +593,7 @@ where
         let array_size = capacity as i32;
         while range[1] <= range[2] {
             let n = match (lookup, presence) {
-                // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
                 // (`s_BlastAaScanSubject`; tblastx/x_scan_byte.rs gives the loop): the same pairs
                 // and `scan_range` on every call.
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
@@ -677,9 +612,6 @@ where
                 // without a branch; a flag-1 cell or a candidate goes on to the statements below.
                 if HIT_BF {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
-                    // ```c
-                    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-                    // ```
                     let index = ((q - s) & mask) as usize;
                     debug_assert!(index < diagonals.entries.len());
                     // SAFETY: 0 <= index <= mask = entries.len() - 1 (a power of two less one,
@@ -691,12 +623,6 @@ where
                 }
                 // From here to the end of the loop body: the statements of word_finder.
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
-                // ```c
-                //                 curr_context = BSearchContextInfo(query_offset, query_info);
-                // ...
-                //                 Int4 curr_context = BSearchContextInfo(query_offset,
-                //                                                        query_info);
-                // ```
                 let context_of = |q: i32| {
                     batch
                         .contexts
@@ -705,11 +631,6 @@ where
                 };
                 let context;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516,776
-                // ```c
-                //             diag_coord = (query_offset - subject_offset) & diag_mask;
-                // ...
-                //             diag_coord = (subject_offset - query_offset) & diag_mask;
-                // ```
                 let index = if options.window_size == 0 {
                     (s - q) & mask
                 } else {
@@ -718,25 +639,12 @@ where
                 let entry = &mut diagonals.entries[index];
                 let (u, end, extended) = if options.window_size == 0 {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-781
-                    // ```c
-                    //             diff = subject_offset -
-                    //                 (diag_array[diag_coord].last_hit - diag_offset);
-                    //
-                    //             /* do an extension, but only if we have not already extended this
-                    //                far */
-                    // ```
                     if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
                     context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:787-790
-                    // ```c
-                    //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-                    //                                               subject_offset, query_offset,
-                    //                                               cutoffs->x_dropoff,
-                    //                                               &hsp_q, &hsp_s, &hsp_len,
-                    // ```
                     let Some(result) = extend_one(
                         query,
                         subject,
@@ -750,41 +658,6 @@ where
                     (result.ungapped_data, result.s_last_off, true)
                 } else {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551
-                    // ```c
-                    //             if (diag_array[diag_coord].flag) {
-                    //                 /* If we've already extended past this hit, skip it. */
-                    //                 if ((Int4) (subject_offset + diag_offset) <
-                    //                     diag_array[diag_coord].last_hit) {
-                    //                     continue;
-                    //                 }
-                    //                 /* Otherwise, start a new hit. */
-                    //                 else {
-                    //                     diag_array[diag_coord].last_hit =
-                    //                         subject_offset + diag_offset;
-                    //                     diag_array[diag_coord].flag = 0;
-                    //                 }
-                    //             }
-                    //             /* If the reset bit is cleared, try to start an extension. */
-                    //             else {
-                    //                 /* find the distance to the last hit on this diagonal */
-                    //                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                    //                 diff = subject_offset - last_hit;
-                    //
-                    //                 if (diff >= window) {
-                    //                     /* We are beyond the window for this diagonal; start a
-                    //                        new hit */
-                    //                     diag_array[diag_coord].last_hit =
-                    //                         subject_offset + diag_offset;
-                    //                     continue;
-                    //                 }
-                    //
-                    //                 /* If the difference is less than the wordsize (i.e. last
-                    //                    hit and this hit overlap), give up */
-                    //
-                    //                 if (diff < wordsize) {
-                    //                     continue;
-                    //                 }
-                    // ```
                     if entry.flag() != 0 {
                         if s.wrapping_add(diagonals.offset) < entry.last_hit() {
                             continue;
@@ -805,30 +678,11 @@ where
                     context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-                    // ```c
-                    //                 if (query_offset - diff <
-                    //                     query_info->contexts[curr_context].query_offset) {
-                    //
-                    //                     /* there was no last hit for this diagnol; start a new hit */
-                    //                     diag_array[diag_coord].last_hit =
-                    //                         subject_offset + diag_offset;
-                    //                     continue;
-                    //                 }
-                    // ```
                     if q - diff < batch.contexts[context].offset as i32 {
                         entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
-                    // ```c
-                    //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                    //                                               last_hit + wordsize,
-                    //                                               subject_offset, query_offset,
-                    //                                               cutoffs->x_dropoff,
-                    //                                               &hsp_q, &hsp_s,
-                    //                                               &hsp_len, use_pssm,
-                    //                                               wordsize, &right_extend,
-                    // ```
                     let Some(result) = extend(
                         query,
                         subject,
@@ -844,27 +698,6 @@ where
                 };
                 let p = &parameters[context];
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
-                // ```c
-                //                 if (score >= cutoffs->cutoff_score)
-                //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                //                                      query_offset, subject_offset, hsp_len,
-                //                                      score);
-                //
-                //                 /* If an extension to the right happened, reset the last hit
-                //                    so that future hits to this diagonal must start over. */
-                //
-                //                 if (right_extend) {
-                //                     diag_array[diag_coord].flag = 1;
-                //                     diag_array[diag_coord].last_hit =
-                //                         s_last_off - (wordsize - 1) + diag_offset;
-                //                 }
-                //                 /* Otherwise, make the present hit into the previous hit for
-                //                    this diagonal */
-                //                 else {
-                //                     diag_array[diag_coord].last_hit =
-                //                         subject_offset + diag_offset;
-                //                 }
-                // ```
                 if u.score >= p.word_cutoff {
                     hits.push(InitHsp {
                         q_seed: q,
@@ -904,16 +737,6 @@ mod tests {
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-174
-    // ```c++
-    //     if (ewp->diag_table) {
-    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //             ewp->diag_table->offset = ewp->diag_table->window;
-    //             s_BlastDiagClear(ewp->diag_table);
-    //         } else {
-    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    //         }
-    //     } else if (ewp->hash_table) {
-    // ```
     // The frozen pinned-NCBI INIT rows of the session F fixture (one-hit and two-hit windows,
     // fresh, retained and reset diagonal tables): the direct loop gives the NCBI hits and the
     // same diagonal table as the reference loop.
@@ -1207,12 +1030,6 @@ mod tests {
                 }
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
-            // ```c
-            // typedef struct DiagStruct {
-            //    signed int last_hit   : 31; /**< Offset of the last hit */
-            //    unsigned int flag      : 1 ; /**< Reset the next extension? */
-            // } DiagStruct;
-            // ```
             // An offset just below 2^30 (NCBI reaches such offsets at a -window_size near 2^29,
             // from the second subject on): the stores past 2^30 wrap in the 31-bit field, and the
             // loops read the wrapped values back alike. tests/blastx_diag_bitfield.rs compares the
@@ -1468,7 +1285,7 @@ mod tests {
         out
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
     // against, as `s_blast_aa_scan_subject_one_range`). EXPERIMENT (LOSAT_X_BXSCANBYTE): on
     // blastx's tables (`Lookup::new`: six frames of a nucleotide query, threshold 12) and the
     // direct loop's subjects (residues, then the sentinel) and offset array (`Lookup::capacity`,

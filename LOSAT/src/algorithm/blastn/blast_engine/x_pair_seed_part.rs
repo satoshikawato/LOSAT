@@ -6,55 +6,10 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:361-381
 //! (`s_BlastDiagHashRetrieve`)
-//! ```c
-//!     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-//!     Uint4 index = table->backbone[bucket];
-//!
-//!     while (index) {
-//!         if (table->chain[index].diag == diag) {
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:396-449
 //! (`s_BlastDiagHashInsert`)
-//! ```c
-//!     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-//!     Uint4 index = table->backbone[bucket];
-//! ...
-//!         if (table->chain[index].diag == diag) {
-//! ...
-//!             if (s_off - table->chain[index].level > window_size) {
-//! ...
-//!     if (table->occupancy == table->capacity) {
-//!         table->capacity *= 2;
-//!         table->chain =
-//!             realloc(table->chain, table->capacity * sizeof(DiagHashCell));
-//! ...
-//!     cell = table->chain + table->occupancy;
-//! ...
-//!     cell->next = table->backbone[bucket];
-//!     table->backbone[bucket] = table->occupancy;
-//!     table->occupancy++;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-841,853-858,939-941
 //! (`s_BlastnDiagHashExtendInitialHit`)
-//! ```c
-//!     Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
-//! ...
-//!     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-//! ...
-//!     if (s_off_pos < last_hit) return 0;
-//!
-//!     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-//! ...
-//!         if (word_type == 1) {
-//!             /* try off-diagonal */
-//! ...
-//!             if (Delta < 0) Delta = 0;
-//!             for (delta = 1; delta <= Delta; ++delta) {
-//! ...
-//!     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-//!                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-//!                           hit_ready, s_off_pos, window_size + Delta + 1);
-//! ```
 //!
 //! How the stage runs (`seed_stage_part`): the participants are the owner (the thread that
 //! searches the chunk) and `threads - 1` jobs of an `in_place_scope`. Each participant claims
@@ -182,9 +137,6 @@ fn merge_on() -> bool {
 const MERGE_RANGES_PER_THREAD: usize = 2;
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368
-/// ```c
-///     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-/// ```
 #[inline(always)]
 fn bucket_of_diag(diag: i32) -> usize {
     ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize
@@ -228,11 +180,6 @@ impl PartOut {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
-/// ```c
-///     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-///                           hit_ready, s_off_pos, window_size + Delta + 1);
-/// ```
 /// A fold's insert (`DiagHashTable::insert_memo`; with `LEAN`, LOSAT_X_FOLDLEAN, the same statements
 /// inlined, `insert_inl`). Without `MEMO` the table has no memo (LOSAT_X_DIAGLV2) and the insert
 /// does not test for one: `insert_plain`, the statements before that switch (with `LEAN` inlined,
@@ -632,16 +579,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-///                                 lookup_wrap, query, subject, matrix,
-///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-///     }
-/// ```
 /// The seed stage of `n` strips on `threads` threads (this one and `threads - 1` jobs of an
 /// `in_place_scope`) with the fold cut into `parts` partitions (module comment): `scan` makes
 /// the seeds of a strip, `fold` folds a partition's seeds of one strip (`PartOut::strip` set)
@@ -1676,21 +1613,6 @@ fn hits_of_strips(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:428-447
-/// ```c
-///     if (table->occupancy == table->capacity) {
-///         table->capacity *= 2;
-///         table->chain =
-///             realloc(table->chain, table->capacity * sizeof(DiagHashCell));
-/// ...
-///     cell = table->chain + table->occupancy;
-///     cell->diag = diag;
-///     cell->level = level;
-///     cell->hit_len = len;
-///     cell->hit_saved = hit_saved;
-///     cell->next = table->backbone[bucket];
-///     table->backbone[bucket] = table->occupancy;
-///     table->occupancy++;
-/// ```
 /// The end of a partitioned stage of `strips` strips (module comment): the hits in key order
 /// after `hits`; the appended cells numbered `occ0 + rank` of their keys; the chains of the
 /// changed buckets of every partition (of all its buckets where its folds did not record them,
@@ -2532,15 +2454,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:396-449
-    // ```c
-    //     while (index) {
-    //         if (table->chain[index].diag == diag) {
-    // ...
-    //             if (s_off - table->chain[index].level > window_size) {
-    // ...
-    //     if (table->occupancy == table->capacity) {
-    //         table->capacity *= 2;
-    // ```
     // `seed_stage_part` (and LOSAT_X_DCSEEDLEAN's `seed_stage_part_lists`, alternating with it
     // and with LOSAT_X_PAIRPARHOME's two ways) against the reference on random op streams, for 2,
     // 3, 7 and 16 partitions on 1..8 threads, with and without level bounds, all stages of a case

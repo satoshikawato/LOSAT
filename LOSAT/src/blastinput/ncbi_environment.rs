@@ -21,13 +21,7 @@ use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
 /// the WindowMasker files of blastn's `-window_masker_taxid` (`window_masker_path_of`), and
 /// `[NCBI] DONT_USE_NCBIRC`, which only decides whether `.ncbirc` is read.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1436-1439
-/// ```c
-///     if (app) {
-///         const CNcbiRegistry& registry = app->GetConfig();
-///         if (registry.HasEntry("BLAST", "BLASTDB"))
-///             CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"), eFollowLinks);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1436-1439
 const HARMLESS_ENTRIES: &[(&str, &str)] = &[
     ("BLAST", "BLASTDB"),
     ("BLAST", "BLASTMAT"),
@@ -44,23 +38,7 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI
 /// C++ Toolkit reads for every application and that change its error output or exit status.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
-/// ```c
-///     // Setup some debugging features from environment variables.
-///     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-///         SetDiagTrace(eDT_Enable, eDT_Enable);
-///     }
-///     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-///     if ( !post_level.empty() ) {
-///         EDiagSev sev;
-///         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
-///             SetDiagFixedPostLevel(sev);
-///         }
-///     }
-///     if ( !m_Environ->Get(ABORT_ON_THROW).empty() ) {
-///         SetThrowTraceAbort(true);
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 const REJECTED_VARIABLES: &[&str] = &[
     "ABORT_ON_THROW",
     "DEBUG_STACK_TRACE_LEVEL",
@@ -75,16 +53,8 @@ const REJECTED_VARIABLES: &[&str] = &[
     // sequence a mask of `makeblastdb -mask_data` reaches (`seqid::mask_handle`); LOSAT
     // implements the default (both on) and has its own message for them (`rejected_variable`).
     //
-    // NCBI reference: ncbi-blast/c++/src/objects/seqloc/seq_id_tree.cpp:692-707
-    // ```c
-    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_TEXTID);
-    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_TEXTID, true,
-    //                   eParam_NoThread, OBJECTS_PACK_TEXTID);
-    // ...
-    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_GENERAL);
-    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_GENERAL, true,
-    //                   eParam_NoThread, OBJECTS_PACK_GENERAL);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:692-707
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:692-703
     // With `OBJECTS_PACK_TEXTID=0` a GenBank, EMBL or DDBJ accession no longer matches the same
     // accession of another of the three; with `OBJECTS_PACK_GENERAL=0` the order of the ranges of
     // two `general` ids changes (and both change the order of the messages of a PSSM query's
@@ -97,12 +67,7 @@ const REJECTED_VARIABLES: &[&str] = &[
 ];
 
 fn is_harmless_entry(section: &str, name: &str) -> bool {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_usage_report.cpp:209-211
-    // ```c
-    // 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
-    // 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
-    // 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:209-211
     // A Boolean only decides whether the usage is reported. Only the usage report's registry
     // reads the entry, and another value aborts NCBI there, which `application_start` refuses
     // (`usage_report_entry_refusal`); the application's registry never reads it (NCBI BLAST+
@@ -118,30 +83,7 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
 
 /// Why LOSAT rejects an environment variable, or `None`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/env_reg.cpp:418-469
-/// ```c
-/// bool CNcbiEnvRegMapper::EnvToReg(const string& env_in, string& section,
-///                                  string& name) const
-/// {
-///     if (env_in.size() <= kPrefixLen  ||  !NStr::StartsWith(env_in, kPrefix) ) {
-///         return false;
-///     }
-///     ...
-///     SIZE_TYPE uu_pos = env.find("__", section_start_pos + 1);
-///     if (uu_pos == NPOS  ||  uu_pos == env.size() - 2) {
-///         return false;
-///     }
-///     /* Parse section and entry names from the variable */
-///     if (env[kPrefixLen] == '_') { // regular entry
-///         section = env.substr(kPrefixLen + 1, uu_pos - kPrefixLen - 1);
-///         name    = env.substr(uu_pos + 2);
-///     } else {
-///         name    = env.substr(kPrefixLen - 1, uu_pos - kPrefixLen + 1);
-///         _ASSERT(name[0] == '_');
-///         name[0] = '.';
-///         section = env.substr(uu_pos + 2);
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:418-469
 /// `kPrefix` is "NCBI_CONFIG_" (env_reg.cpp:362): `NCBI_CONFIG__<SECTION>__<NAME>` sets a
 /// registry entry, `NCBI_CONFIG_<NAME>__<SECTION>` a special one, and
 /// `NCBI_CONFIG_OVERRIDES` names a file of entries (ncbireg.cpp:1585-1602), while
@@ -186,60 +128,7 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
 
 /// The directories where NCBI looks for its registry files, in order.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/metareg.cpp:331-396
-/// ```c
-/// void CMetaRegistry::GetDefaultSearchPath(CMetaRegistry::TSearchPath& path)
-/// {
-///     path.clear();
-///
-///     const TXChar* cfg_path = NcbiSys_getenv(_TX("NCBI_CONFIG_PATH"));
-///     TSearchPath   path_tail;
-///     if (cfg_path) {
-///         NStr::Split(_T_STDSTRING(cfg_path), kConfigPathDelim, path);
-///         TSearchPath::iterator it = find(path.begin(), path.end(), kEmptyStr);
-///         if (it == path.end()) {
-///             return;
-///         } else {
-///             path_tail.assign(it + 1, path.end());
-///             path.erase(it, path.end());
-///         }
-///     }
-///
-///     if (NcbiSys_getenv(_TX("NCBI_DONT_USE_LOCAL_CONFIG")) == NULL) {
-///         path.push_back(".");
-///         string home = CDir::GetHome();
-///         if ( !home.empty() ) {
-///             path.push_back(home);
-///         }
-///     }
-///
-///     {{
-///         const TXChar* ncbi = NcbiSys_getenv(_TX("NCBI"));
-///         if (ncbi  &&  *ncbi) {
-///             path.push_back(_T_STDSTRING(ncbi));
-///         }
-///     }}
-///     ...
-///     path.push_back("/etc");
-///     ...
-///             string                dir  = args.GetProgramDirname(eIgnoreLinks);
-///             string                dir2 = args.GetProgramDirname(eFollowLinks);
-///             if (dir.size()) {
-///                 path.push_back(dir);
-///             }
-///             if (dir2.size() && dir2 != dir) {
-///                 path.push_back(dir2);
-///             }
-///     ...
-///     if ( !path_tail.empty() ) {
-///         ITERATE (TSearchPath, it, path_tail) {
-///             if ( !it->empty() ) {
-///                 path.push_back(*it);
-///             }
-///         }
-///     }
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:331-396
 /// `kConfigPathDelim` is ":;" outside Windows (metareg.cpp:54-56). An empty `NCBI_CONFIG_PATH`
 /// splits into no directory (`NStr::Split` of an empty string adds nothing,
 /// include/corelib/ncbistr_util.hpp:271-272), so it has no empty element and the search path
@@ -254,25 +143,6 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86, 195-209
 /// (`CBlastUsageReport`, a member of every BLAST+ application, e.g. blastn_app.cpp)
-/// ```c++
-/// CBlastUsageReport::CBlastUsageReport()
-/// {
-/// 	x_CheckBlastUsageEnv();
-/// ...
-/// void CBlastUsageReport::x_CheckBlastUsageEnv()
-/// {
-/// 	char * blast_usage_env = getenv("BLAST_USAGE_REPORT");
-/// 	if(blast_usage_env != NULL){
-/// 		bool enable = NStr::StringToBool(blast_usage_env);
-/// 		if (!enable) {
-/// ...
-/// 			return ;
-/// 		}
-/// 	}
-///
-/// 	CNcbiIstrstream empty_stream(kEmptyStr);
-/// 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
-/// ```
 /// NCBI BLAST+ 2.17.0 (`blastn` run by a link on `PATH`, a malformed `.ncbirc` or
 /// `blastn.ini`): one in the link's directory is read only with `BLAST_USAGE_REPORT=false` or
 /// `=0`, or (`blastn.ini`) with `NCBI_DONT_USE_NCBIRC` or `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`;
@@ -401,67 +271,7 @@ impl ProcessFacts<'static> {
 /// `CDir::GetHome()`, the directory that `registry_search_path` adds after ".".
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3624-3657
-/// ```c++
-/// string CDir::GetHome(void)
-/// {
-///     string home;
-///
-/// #if defined(NCBI_OS_MSWIN)
-///     // Get home dir from environment variables
-///     // like - C:\Documents and Settings\user\Application Data
-///     const TXChar* str = NcbiSys_getenv(_TX("APPDATA"));
-///     if ( str ) {
-///         home = _T_CSTRING(str);
-///     } else {
-///         // like - C:\Documents and Settings\user
-///         str = NcbiSys_getenv(_TX("USERPROFILE"));
-///         if ( str ) {
-///             home = _T_CSTRING(str);
-///         }
-///     }
-/// #elif defined(NCBI_OS_UNIX)
-///     // Try get home dir from environment variable
-///     char* str = NcbiSys_getenv(_TX("HOME"));
-///     if ( str ) {
-///         home = str;
-///     } else {
-///         // Try to retrieve the home dir -- first use user's ID,
-///         // and if failed, then use user's login name.
-///         if ( !s_GetHomeByUID(home) ) {
-///             s_GetHomeByLOGIN(home);
-///         }
-///     }
-/// #endif
-///
-///     // Add trailing separator if needed
-///     return AddTrailingPathSeparator(home);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3586-3618
-/// ```c++
-/// static bool s_GetHomeByUID(string& home)
-/// {
-///     // Get the info using user ID
-///     struct passwd* pwd;
-///
-///     if ((pwd = getpwuid(getuid())) == 0) {
-///         LOG_ERROR_ERRNO(48, "s_GetHomeByUID(): getpwuid() failed");
-///         return false;
-///     }
-///     home = pwd->pw_dir;
-///     return true;
-/// }
-///
-/// static bool s_GetHomeByLOGIN(string& home)
-/// {
-///     const TXChar* ptr = 0;
-///     // Get user name
-///     if ( !(ptr = NcbiSys_getenv(_TX("USER"))) ) {
-///         if ( !(ptr = NcbiSys_getenv(_TX("LOGNAME"))) ) {
-///             if ( !(ptr = getlogin()) ) {
-/// ...
-///     struct passwd* pwd = getpwnam(ptr);
-/// ```
 /// A variable that is set is the home directory, an empty one too (the search path skips an
 /// empty home, and `AddTrailingPathSeparator` changes no file name that LOSAT joins to it).
 /// The login name's entry (`getpwnam`, `getlogin`) is not reachable from Rust's standard
@@ -493,51 +303,7 @@ fn ncbi_home(
 /// as they are before the program's arguments are set or after (`arguments_set`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:378-385
-/// ```c++
-///             string                dir  = args.GetProgramDirname(eIgnoreLinks);
-///             string                dir2 = args.GetProgramDirname(eFollowLinks);
-///             if (dir.size()) {
-///                 path.push_back(dir);
-///             }
-///             if (dir2.size() && dir2 != dir) {
-///                 path.push_back(dir2);
-///             }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:373-415
-/// ```c++
-/// const string& CNcbiArguments::GetProgramName(EFollowLinks follow_links) const
-/// {
-///     if (follow_links) {
-///         CFastMutexGuard LOCK(m_ResolvedNameMutex);
-///         if ( !m_ResolvedName.size() ) {
-/// #ifdef NCBI_OS_LINUX
-///             string proc_link = "/proc/" + NStr::IntToString(getpid()) + "/exe";
-///             m_ResolvedName = CDirEntry::NormalizePath(proc_link, follow_links);
-/// #else
-///             m_ResolvedName = CDirEntry::NormalizePath(GetProgramName(eIgnoreLinks), follow_links);
-/// #endif
-///         }
-///         return m_ResolvedName;
-///     } else if ( !m_ProgramName.empty() ) {
-///         return m_ProgramName;
-///     } else if ( m_Args.size() ) {
-///         return m_Args[0];
-///     } else {
-///         static CSafeStatic<string> kDefProgramName;
-///         kDefProgramName->assign("ncbi");
-///         return kDefProgramName.Get();
-///     }
-/// }
-/// ...
-/// string CNcbiArguments::GetProgramDirname(EFollowLinks follow_links) const
-/// {
-///     const string& name = GetProgramName(follow_links);
-///     SIZE_TYPE base_pos = name.find_last_of("/\\:");
-///     if (base_pos == NPOS)
-///         return NcbiEmptyString;
-///     return name.substr(0, base_pos + 1);
-/// }
-/// ```
 /// Before the arguments are set (`CNcbiArguments(0, 0)`, ncbiapp.cpp:190) the name is "ncbi",
 /// which has no directory, and the resolved name is on Linux the target of `/proc/<pid>/exe`
 /// (Rust's `current_exe`, the same `readlink` of `/proc/self/exe`: a path the system made, with
@@ -648,48 +414,7 @@ fn program_dirs_of(name: &[u8], resolved: Option<&[u8]>) -> Vec<Vec<u8>> {
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1452-1457 (`argv[0]`, else the
 /// application's arguments' name, which before they are set is "ncbi", ncbienv.cpp:384-394)
-/// ```c++
-///     if (argc > 0  &&  argv[0] != NULL  &&  argv[0][0] != '\0') {
-///         ret_val = argv[0];
-///     } else if (instance) {
-///         ret_val = instance->GetArguments().GetProgramName();
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1549-1595
-/// ```c++
-///     string app_path = ret_val;
-///
-///     if ( !CDirEntry::IsAbsolutePath(app_path) ) {
-/// ...
-///         if ( CFile(app_path).Exists() ) {
-///             // Relative path from the the current directory
-///             app_path = CDir::GetCwd() + CDirEntry::GetPathSeparator() + app_path;
-///             if ( !CFile(app_path).Exists() ) {
-///                 app_path = kEmptyStr;
-///             }
-///         } else {
-///             // Running from some path from PATH environment variable.
-///             // Try to determine that path.
-///             string env_path;
-///             if (instance) {
-///                 env_path = instance->GetEnvironment().Get("PATH");
-/// ...
-///             NStr::Split(env_path, ":", split_path,
-///                 NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-/// #  endif
-///             string base_name = CDirEntry(app_path).GetBase();
-///             ITERATE(list<string>, it, split_path) {
-///                 app_path = CDirEntry::MakePath(*it, base_name);
-///                 if ( CFile(app_path).Exists() ) {
-///                     break;
-///                 }
-///                 app_path = kEmptyStr;
-///             }
-///         }
-///     }
-///     ret_val = CDirEntry::NormalizePath(
-///         (app_path.empty() && argv != NULL && argv[0] != NULL) ? argv[0] : app_path);
-/// ```
 /// `CDir::GetCwd` is "" when `getcwd` fails (ncbifile.cpp:3708-3716). `GetBase` is the file
 /// name after the last '/' without the part from its last '.' (`SplitPath`,
 /// ncbifile.cpp:358-377), of the name without its trailing '/'s (`CDirEntry::Reset`, a lone
@@ -762,97 +487,6 @@ fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
 /// restarts from the root when absolute.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
-/// ```c++
-///     if ( path.empty() ) {
-///         return path;
-///     }
-/// ...
-///     current = DeleteTrailingPathSeparator(path);
-/// #  endif
-///
-///     if ( current.empty() ) {
-///         // root dir
-///         return string(1, DIR_SEPARATOR);
-///     }
-/// ...
-///     while ( !current.empty()  ||  !tail.empty() ) {
-///         std::list<string> pretail;
-///         if ( !current.empty() ) {
-///             NStr::Split(current, kSep, pretail);
-///             current.erase();
-///             if (pretail.front().empty()
-/// ...
-///                 ) {
-///                 // Absolute path
-///                 head.clear();
-/// ...
-///             tail.splice(tail.begin(), pretail);
-///         }
-///
-///         string next;
-///         if (!tail.empty()) {
-///             next = tail.front();
-///             tail.pop_front();
-///         }
-///         if ( !head.empty() ) { // empty heads should accept anything
-///             string& last = head.back();
-///             if (last == DIR_CURRENT) {
-///                 if (!next.empty()) {
-///                     head.pop_back();
-///                 }
-/// ...
-///             } else if (next == DIR_CURRENT) {
-///                 // Leave out, since we already have content
-///                 continue;
-///             } else if (next.empty()) {
-///                 continue; // leave out empty components in most cases
-///             } else if (next == DIR_PARENT) {
-/// ...
-///                 // Back up if possible, assuming existing path to be "physical"
-///                 if (last.empty()) {
-///                     // Already at the root; .. is a no-op
-///                     continue;
-/// ...
-///                 } else if (last != DIR_PARENT) {
-///                     head.pop_back();
-///                     continue;
-///                 }
-///             }
-///         }
-/// #ifdef NCBI_OS_UNIX
-///         // Is there a Windows equivalent for readlink?
-///         if ( follow_links ) {
-///             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
-///             char buf[PATH_MAX];
-///             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
-///             if (length > 0) {
-///                 current.assign(buf, length);
-///                 if (++link_depth >= 1024) {
-/// ...
-///                     follow_links = eIgnoreLinks;
-///                 }
-///                 continue;
-///             }
-///         }
-/// #endif
-///         // Normal case: just append the next element to head
-///         head.push_back(next);
-///     }
-///
-///     // Special cases
-///     if ( (head.size() == 0)  ||
-///          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
-///         // current dir
-///         return DIR_CURRENT;
-///     }
-///     if (head.size() == 1  &&  head.front().empty()) {
-///         // root dir
-///         return string(1, DIR_SEPARATOR);
-///     }
-/// ...
-///     // Compose path
-///     return NStr::Join(head, string(1, DIR_SEPARATOR));
-/// ```
 /// `NStr::Split` with no flag keeps the empty parts. At a depth of 1024 links NCBI posts a
 /// warning and stops following them: `None` then (a loop of links; the path that the system
 /// resolved to run the program, within its own limit of 40 links on Linux, never reaches it,
@@ -936,18 +570,6 @@ pub(crate) fn normalize_path(
 /// is a file, `CFile::Exists`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:256-265
-/// ```c++
-///     string dir;
-///     CDirEntry::SplitPath(name, &dir, 0, 0);
-///     if ( dir.empty() ) {
-///         ITERATE (TSearchPath, it, m_SearchPath) {
-///             const string& result
-///                 = x_FindRegistry(CDirEntry::MakePath(*it, name), style);
-///             if ( !result.empty() ) {
-///                 return result;
-///             }
-///         }
-/// ```
 fn find_registry(
     search_path: &[PathBuf],
     file_name: &str,
@@ -972,41 +594,11 @@ enum ConfFile {
     Refused(String),
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (after the words before the
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1014-1022 (after the words before the
 // arguments are read; `-version` there ends the program first)
-// ```c++
-//         if (conf_arg) {
-//             if (CFile(conf_arg).Exists()) {
-//                 conf = conf_arg;
-//             }
-//             else {
-//                 ERR_POST_X(23, Critical << "Registry file \"" << conf_arg << "\" not found, aborting.");
-//                 Abort();
-//             }
-//         }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1267-1270 (`LoadConfig` with that file)
-// ```c++
-//     } else {
-//         entry = CMetaRegistry::Load(*conf, CMetaRegistry::eName_AsIs, 0,
-//                                     reg_flags, &reg);
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:x_FindRegistry (a name without a
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1262-1264,1267-1270 (`LoadConfig` with that file)
+// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:256-269:x_FindRegistry (a name without a
 // directory is looked for in the search path; a name with one is that file)
-// ```c++
-//     string dir;
-//     CDirEntry::SplitPath(name, &dir, 0, 0);
-//     if ( dir.empty() ) {
-//         ITERATE (TSearchPath, it, m_SearchPath) {
-//             const string& result
-//                 = x_FindRegistry(CDirEntry::MakePath(*it, name), style);
-//     ...
-//     } else {
-//         switch (style) {
-//         case eName_AsIs:
-//             if (CFile(name).Exists()) {
-// ```
 /// The registry file that the application loads in place of `<program>.ini` for `-conffile
 /// name` (`Ok(None)`: none, the load goes on without one), or why it does not load one. `name`
 /// must be a file where the program runs (`CFile::Exists`: a directory, an empty name or a
@@ -1036,22 +628,8 @@ fn conf_file_path(
         .parent()
         .is_some_and(|parent| !parent.as_os_str().is_empty());
     if has_directory {
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1271-1281 (`LoadConfig`: a
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1266-1281 (`LoadConfig`: a
         // name with a directory that gives no registry throws; one without is an `Info` post)
-        // ```c++
-        //     if ( !entry.registry ) {
-        //         // failed; complain as appropriate
-        //         string dir;
-        //         CDirEntry::SplitPath(*conf, &dir, 0, 0);
-        //         if (dir.empty()) {
-        //             ERR_POST_X(11, Info <<
-        //                            "Registry file of application \"" << basename
-        //                            << "\" is not found");
-        //         } else {
-        //             NCBI_THROW(CAppException, eNoRegistry,
-        //                        "Registry file \"" + *conf + "\" cannot be opened");
-        //         }
-        // ```
         // NCBI BLAST+ 2.17.0 (probes `conf_unread_dot`, `conf_unread_bare`, mode 000): `./c.ini`
         // ends the program with this report (exit status 2), `c.ini` loads no file.
         if !files.opens(path) {
@@ -1069,27 +647,8 @@ fn conf_file_path(
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:64-69
-// ```c++
-//         /// C Toolkit style; mostly useful with name = "ncbi"
-// #ifdef NCBI_OS_MSWIN
-//         eName_RcOrIni = eName_Ini
-// #else
-//         eName_RcOrIni = eName_DotRc
-// #endif
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (`eName_Ini` adds `.ini`,
 // `eName_DotRc` makes `.<name>rc`)
-// ```c++
-//         case eName_Ini:
-//             for (string name2(name); ; ) {
-//                 string result = x_FindRegistry(name2 + ".ini", eName_AsIs);
-//         ...
-//         case eName_DotRc: {
-//             string base, ext;
-//             CDirEntry::SplitPath(name, 0, &base, &ext);
-//             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
-//                                   + "rc", eName_AsIs);
-// ```
 /// The name of NCBI's system-wide registry file, which `CMetaRegistry::Load("ncbi",
 /// eName_RcOrIni)` looks for: `.ncbirc`, and `ncbi.ini` on Windows.
 const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
@@ -1100,24 +659,6 @@ const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbi
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:60-90 (`SEntry::Reload`, which
 /// `x_Load` calls for the file found)
-/// ```c++
-/// bool CMetaRegistry::SEntry::Reload(CMetaRegistry::TFlags reload_flags)
-/// {
-///     CFile file(actual_name);
-///     if ( !file.Exists() ) {
-///         _TRACE("No such registry file " << actual_name);
-///         return false;
-///     }
-///     ...
-///     CNcbiIfstream ifs(actual_name.c_str(), IOS_BASE::in | IOS_BASE::binary);
-///     if ( !ifs.good() ) {
-///         _TRACE("Unable to (re)open registry file " << actual_name);
-///         return false;
-///     }
-///     ...
-///         if ((reload_flags & fKeepContents)  ||  registry->Empty(rflags)) {
-///             dest = registry->Read(ifs, reg_flags | IRegistry::fJustCore);
-/// ```
 /// NCBI BLAST+ 2.17.0 (g_reg probes `unr`, `unr2`, 2026-11-11): a malformed `.ncbirc` that it
 /// cannot open (mode 000) is not reported, and a `.ncbirc` in the home directory is then not
 /// read either; a `blastn.ini` that it cannot open is no file. The file is opened in binary mode:
@@ -1180,18 +721,7 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
 /// a value that is not UTF-8, and `[NCBI] .Inherits`, whose files NCBI loads into the same layer.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1662
-/// ```c++
-///     try {
-///         CMetaRegistry::SEntry entry
-///             = CMetaRegistry::Load("ncbi", CMetaRegistry::eName_RcOrIni,
-///                                   0, flags, m_SysRegistry.GetPointer());
-///     ...
-///     } catch (CRegistryException& e) {
-///         ERR_POST_X(6, Critical << "CNcbiRegistry: "
-///                       "Syntax error in system-wide configuration file: "
-///                       << e.what());
-/// ```
-/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (quoted at
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (cited at
 /// `application_start`: a read kept for the same name, style and flags is not read again)
 fn window_masker_ncbirc(
     ncbirc: Option<&(Result<Option<RegistryRead>, String>, PathBuf)>,
@@ -1311,23 +841,6 @@ pub struct ApplicationSettings {
 /// `SEQ_ID_AVOID_GI` (PLAN of line DBID §9.2, DECISIONS 3 Q8: LOSAT follows their defaults).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3393-3413
-/// ```c++
-/// NCBI_PARAM_DECL(bool, SeqId, PreferAccessionOverGi);
-/// NCBI_PARAM_DEF_EX(bool, SeqId, PreferAccessionOverGi, false, eParam_NoThread,
-///     SEQ_ID_PREFER_ACCESSION_OVER_GI);
-/// typedef NCBI_PARAM_TYPE(SeqId, PreferAccessionOverGi) TPreferAccessionOverGi;
-///
-/// NCBI_PARAM_DECL(bool, SeqId, AvoidGi);
-/// NCBI_PARAM_DEF_EX(bool, SeqId, AvoidGi, false, eParam_NoThread,
-///     SEQ_ID_AVOID_GI);
-/// typedef NCBI_PARAM_TYPE(SeqId, AvoidGi) TAvoidGi;
-///
-///
-/// bool CSeq_id::PreferAccessionOverGi(void)
-/// {
-///     return TPreferAccessionOverGi::GetDefault() || AvoidGi();
-/// }
-/// ```
 /// (The registry entries `[SeqId] PreferAccessionOverGi` and `AvoidGi` and the variables
 /// `NCBI_CONFIG__SEQID__...` set the same parameters; LOSAT rejects both as entries it does not
 /// read.)
@@ -1337,11 +850,6 @@ impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
     ///
     /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_scope_src.hpp:73,81
-    /// ```c++
-    ///         eDefault = (eUseBlastDbDataLoader | eUseGenbankDataLoader)
-    /// ...
-    ///     SDataLoaderConfig(bool load_proteins, EConfigOpts options = eDefault)
-    /// ```
     fn default() -> Self {
         Self {
             data_loaders: true,
@@ -1389,82 +897,16 @@ impl ApplicationSettings {
     /// reader's error code on another file; LOSAT reads no matrix file, and a program refuses
     /// the run in both cases (`matrix_file_refusal`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:381-385 (the score
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:381-387 (the score
     /// block's name of a protein matrix is upper-cased)
-    /// ```c
-    ///         sbp->read_in_matrix = TRUE;
-    ///         BLAST_ScoreSetAmbigRes(sbp, 'X');
-    ///         sbp->name = BLAST_StrToUpper(scoring_options->matrix);
-    ///     }
-    ///     status = Blast_ScoreBlkMatrixFill(sbp, get_path);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1631-1652
-    /// ```c
-    ///     if (matrix_found == FALSE && sbp->read_in_matrix && get_path) {
-    ///             // -RMH- Changed to FALSE
-    ///             char* matrix_path = get_path(sbp->name, FALSE);
-    ///             if (matrix_path) {
-    /// ...
-    ///                 if ( (fp=fopen(full_matrix_path, "r")) == NULL) {
-    ///                    return -1;
-    ///                 }
-    /// ```
     /// (`full_matrix_path` is the path found: `s_GetCStringOfMatrixPath` cuts the name off it,
     /// blast_setup_cxx.cpp:1288-1298.)
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1381
     /// (`BlastFindMatrixPath`, `get_path` above: the name and its upper case, which are the
     /// same here; `is_prot` is FALSE, so the subdirectory is "nt")
-    /// ```c++
-    ///        string mtx(matrix_name);
-    ///        mtx = NStr::ToUpper(mtx);
-    ///
-    ///        // Try all the default directories
-    ///        string full_path = g_FindDataFile(mtx);
-    /// ...
-    ///        const string& blastmat_env = app->GetEnvironment().Get("BLASTMAT");
-    ///        if (CDir(blastmat_env).Exists()) {
-    ///            full_path = blastmat_env;
-    ///            full_path += CFile::GetPathSeparator();
-    ///            full_path += mtx;
-    ///            if (CFile(full_path).Exists()) {
-    /// ...
-    ///            full_path = blastmat_env;
-    ///            full_path += CFile::GetPathSeparator();
-    ///            full_path += is_prot ? "aa" : "nt";
-    ///            full_path += CFile::GetPathSeparator();
-    ///            full_path += mtx;
-    /// ...
-    ///        // Try local "data" directory
-    ///        full_path = "data";
-    ///        full_path += CFile::GetPathSeparator();
-    ///        full_path += mtx;
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:131-179 (`g_FindDataFile`; a
+    /// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:129-179 (`g_FindDataFile`; a
     /// parameter's variable, when set, is its value, an empty one too, ncbi_param.cpp:400-437)
-    /// ```c++
-    /// NCBI_PARAM_DEF_EX(string, NCBI, DataPath, "", 0, NCBI_DATA_PATH);
-    /// ...
-    /// NCBI_PARAM_DEF (string, NCBI, Data, "");
-    /// ...
-    ///     if (CDirEntry::IsAbsolutePath(name)) {
-    ///         dirs.push_back(kEmptyStr);
-    ///     } else {
-    ///         TNCBIDataPath path;
-    ///         TNCBIDataDir dir;
-    ///
-    ///         if ( !path.Get().empty() ) {
-    ///             NStr::Split(path.Get(), kDelim, dirs,
-    ///                     NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-    ///         }
-    ///         if ( !dir.Get().empty() ) {
-    ///             dirs.push_back(dir.Get());
-    ///         }
-    ///     }
-    /// ...
-    ///         candidate.Reset(CDirEntry::MakePath(*dir, name));
-    ///         if (candidate.Exists() &&  candidate.GetType(fl) == type) {
-    ///             return candidate.GetPath();
-    /// ```
     pub fn matrix_file(&self, name: &str) -> Result<Option<PathBuf>, String> {
         self.matrix_search.file(name)
     }
@@ -1608,98 +1050,13 @@ fn contains_no_case(value: &[u8], word: &[u8]) -> bool {
 /// session SFb), so the next layer decides.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:157-167
-/// ```c++
-/// bool CEnvironmentRegistry::x_HasEntry(const string& section,
-///                                       const string& name,
-///                                       TFlags flags) const
-/// {
-///     if (name.empty()) {
-///         return x_HasSection(section, flags);
-///     }
-///     bool found = false;
-///     x_Get(section, name, flags, found);
-///     return found;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:97-104,117-124
-/// ```c++
-///     for ( ;  *envp;  envp++) {
-///         const char* s = *envp;
-///         const char* eq = strchr(s, '=');
-///         ...
-///         m_Cache[string(s, (size_t)(eq - s))] = SEnvValue(eq + 1, kEmptyXCStr);
-/// ...
-///     if ( i != m_Cache.end() ) {
-///         if (i->second.ptr == NULL  &&  i->second.value.empty()) {
-///             *found = false;
-///             return kEmptyStr;
-///         } else {
-///             *found = true;
-///             return i->second.value;
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:984-991
-/// ```c++
-///     TEntries::const_iterator eit = entries.find(name);
-///     if (eit == entries.end()) {
-///         return false;
-///     } else if ((flags & fCountCleared) != 0) {
-///         return true;
-///     } else {
-///         return !eit->second.value.empty();
-///     }
-/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
-/// ```c++
-/// void
-/// SDataLoaderConfig::x_LoadDataLoadersConfig(const CNcbiRegistry& registry)
-/// {
-///     static const string kDataLoadersConfig("DATA_LOADERS");
-///
-///     if (registry.HasEntry("BLAST", kDataLoadersConfig)) {
-///         const string& kLoaders = registry.Get("BLAST", kDataLoadersConfig);
-///         if (NStr::FindNoCase(kLoaders, "blastdb") == NPOS) {
-///             m_UseBlastDbs = false;
-///         }
-///         if (NStr::FindNoCase(kLoaders, "genbank") == NPOS) {
-///             m_UseGenbank = false;
-///         }
-///         if (NStr::FindNoCase(kLoaders, "none") != NPOS) {
-///             m_UseBlastDbs = false;
-///             m_UseGenbank = false;
-///         }
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_scope_src.hpp:111
-/// ```c++
-///     bool UseDataLoaders() const { return m_UseBlastDbs || m_UseGenbank; }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1577-1583
-/// ```c++
-///     x_Add(*m_EnvRegistry, ePriority_Environment, sm_EnvRegName);
-///
-///     m_FileRegistry.Reset(new CTwoLayerRegistry(NULL, cf));
-///     x_Add(*m_FileRegistry, ePriority_File, sm_FileRegName);
-///
-///     m_SysRegistry.Reset(new CCompoundRWRegistry(cf));
-///     x_Add(*m_SysRegistry, ePriority_Default - 1, sm_SysRegName);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1235-1246
-/// ```c++
-/// CConstRef<IRegistry> CCompoundRegistry::FindByContents(const string& section,
-///                                                        const string& entry,
-///                                                        TFlags flags) const
-/// {
-///     TFlags has_entry_flags = (flags | fCountCleared) & ~fJustCore;
-///     REVERSE_ITERATE(TPriorityMap, it, m_PriorityMap) {
-///         if (it->second->HasEntry(section, entry, has_entry_flags)) {
-///             return it->second;
-///         }
-///     }
-///     return null;
-/// }
-/// ```
 fn data_loaders_of(env: Option<&[u8]>, files: [Option<&[u8]>; 2]) -> bool {
     let Some(value) = env.or_else(|| files.into_iter().flatten().find(|value| !value.is_empty()))
     else {
@@ -1744,17 +1101,6 @@ fn file_text_entry(
 /// too; `Err` for a value LOSAT cannot read, `file_text_entry`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747
-/// ```c++
-///     CNcbiApplication* app = CNcbiApplication::Instance();
-///     if (app) {
-///         const CNcbiRegistry& registry = app->GetConfig();
-///         const string& value = registry.Get("BLAST", "MAX_SEQID_LENGTH");
-///         if (!value.empty()) {
-///             try { m_FastaReader->SetMaxIDLength(NStr::StringToUInt(value)); }
-///             catch (const exception&) {}  // Ignore errors
-///         }
-///     }
-/// ```
 fn max_seqid_length_entry(
     path: &Path,
     entries: &[RegistryEntry],
@@ -1771,43 +1117,11 @@ fn max_seqid_length_entry(
 /// search only when no layer above it has the entry.
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:527-533
-/// ```c++
-///             const CNcbiRegistry& registry = app->GetConfig();
-///             if (registry.HasEntry("BLAST", "BLASTDB")) {
-///                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
-///                 path += splitter;
-///             }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1290-1304
-/// ```c++
-/// const string& CCompoundRegistry::x_Get(const string& section,
-///                                        const string& name,
-///                                        TFlags flags) const
-/// {
-///     CConstRef<IRegistry> reg = FindByContents(section, name,
-///                                               flags & ~fJustCore);
-///     return reg ? reg->Get(section, name, flags & ~fJustCore) : kEmptyStr;
-/// }
-///
-///
-/// bool CCompoundRegistry::x_HasEntry(const string& section, const string& name,
-///                                    TFlags flags) const
-/// {
-///     return FindByContents(section, name, flags).NotEmpty();
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1239-1244
-/// ```c++
-///     TFlags has_entry_flags = (flags | fCountCleared) & ~fJustCore;
-///     REVERSE_ITERATE(TPriorityMap, it, m_PriorityMap) {
-///         if (it->second->HasEntry(section, entry, has_entry_flags)) {
-///             return it->second;
-///         }
-///     }
-/// ```
 /// `FindByContents` asks every layer with `fCountCleared`, under which a registry file's
 /// entry with an empty value counts (`CMemoryRegistry::x_HasEntry`, ncbireg.cpp:984-991,
-/// quoted at `data_loaders_of`); the file reader stores such an entry
+/// cited at `data_loaders_of`); the file reader stores such an entry
 /// (`CMemoryRegistry::x_Set`, ncbireg.cpp:1066-1070: removing it is "historic behavior;
 /// could inappropriately expose entries in lower layers").
 fn blastdb_of(
@@ -1898,26 +1212,11 @@ impl DiagTarget {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (likewise
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:91-95 (likewise
 // rpsblast_app.cpp:112-114: the handler is made in `Run`, from the handler that `-logfile` set up)
-// ```c++
-// int CTblastxApp::Run(void)
-// {
-//     int status = BLAST_EXIT_SUCCESS;
-//     CBlastAppDiagHandler bah;
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:111-114 (and :241-244 for
 // `x_RunMTBySplitQuery`; both are called from `Run`)
-// ```c++
-// int CRPSTBlastnApp::x_RunMTBySplitDB(void)
-// {
-//     int status = BLAST_EXIT_SUCCESS;
-//     CBlastAppDiagHandler bah;
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_aux.hpp:252
-// ```c++
-// 	CBlastAppDiagHandler():m_handler(GetDiagHandler(true)), m_save (true) {}
-// ```
 /// Whether the messages of `program`'s run go where its diagnostics go (the file of
 /// `-logfile`): tblastx, rpsblast and rpstblastn, whose application makes its
 /// `CBlastAppDiagHandler` in `Run`, after `-logfile` set up the diagnostics. blastn, blastp, blastx, tblastn and psiblast
@@ -2034,32 +1333,6 @@ impl Write for DiagStream<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608
-// ```c++
-//     // Check if a non-existing dir is specified
-//     if ( !s_IsSpecialLogName(file_name) ) {
-//         string dir = CFile(file_name).GetDir();
-//         if ( !dir.empty()  &&  !CDir(dir).Exists() ) {
-//             return false;
-//         }
-//     }
-//     ...
-//         // Check special filenames
-//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
-//             // no output
-//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
-//         }
-//         else if (file_name == "-") {
-//             // output to stderr
-//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
-//         }
-//         else {
-//             // output to file
-//             unique_ptr<CFileDiagHandler> fhandler(new CFileDiagHandler());
-//             if ( !fhandler->SetLogFile(file_name, eDiagFile_All, quick_flush) ) {
-//                 ERR_POST_X(9, Info << "Failed to initialize log: " << file_name);
-//                 return false;
-//             }
-// ```
 /// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`). The file
 /// is opened (made when it does not exist) at once, as NCBI's first `SetupDiag` does, before
 /// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
@@ -2079,7 +1352,7 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
     }
 }
 
-/// The target of NCBI's special `-logfile` names (quoted at `diag_target`): `cerr` without a name
+/// The target of NCBI's special `-logfile` names (cited at `diag_target`): `cerr` without a name
 /// and for `-`, no output for `""` and `/dev/null`; `None` for the name of a file. The one reading
 /// of these names: `diag_target` (the file system) and `report::run_files::RunFiles::log_target`
 /// (LOSAT Web).
@@ -2093,31 +1366,6 @@ pub fn special_log_target(name: Option<&OsStr>) -> Option<DiagTarget> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866
-// ```c++
-//     // Check if logfile is set in the args.
-//     m_LogFile = 0;
-//     if (!m_DisableArgDesc && argc > 1  &&  argv  &&  diag != eDS_User) {
-//         for (int i = 1;  i < argc;  i++) {
-//             if ( !argv[i] ) {
-//                 continue;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
-//                 break;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 m_LogFile = argv[i];
-//             } else if (NStr::StartsWith(argv[i], s_ArgLogFile)) {
-//                 const char *a = argv[i] + strlen(s_ArgLogFile);
-//                 if (*a == '=') {
-//                     m_LogFile = ++a;
-//                 }
-//             }
-//         }
-//     }
-// ```
 /// The file of `-logfile` (`m_LogFile`) in the arguments `words` (after the program's name):
 /// the value of its last `-logfile FILE` or `-logfile=FILE` before `--`.
 pub fn log_file<S: AsRef<OsStr>>(words: &[S]) -> Option<&OsStr> {
@@ -2164,64 +1412,6 @@ pub enum Preparsed<S> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015
-// ```c++
-//         for (int i = 1;  i < argc;  i++) {
-//             if ( !argv[i] ) {
-//                 continue;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
-//                 skip = true;
-//             }
-//             if (skip) {
-//                 v[real_arg_index++] = argv[i];
-//                 continue;
-//             }
-//             // Log file - ignore if diag is eDS_User - the user wants to
-//             // take care about logging.
-//             if ( diag != eDS_User  &&
-//                 NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 // Configuration file
-//             } else if ( NStr::strcmp(argv[i], s_ArgCfgFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 conf_arg = argv[i];
-//
-//             }
-//             else if (NStr::StartsWith(argv[i], s_ArgCfgFile)) {
-//                 v[real_arg_index++] = argv[i];
-//                 const char* a = argv[i] + strlen(s_ArgCfgFile);
-//                 if (*a == '=') {
-//                     conf_arg = ++a;
-//                 }
-//
-//                 // Version
-//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print VERSION
-//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//
-//                 // Full version
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//                 ...
-//             } else if ( NStr::strcmp(argv[i], s_ArgDryRun) == 0 ) {
-//                 m_DryRun = true;
-//
-//                 // Save real argument
-//             } else {
-//                 v[real_arg_index++] = argv[i];
-//             }
-//         }
-// ```
 /// The words NCBI's application takes before its argument reader: `-version` and the full
 /// versions anywhere before `--` (but not as the value of `-logfile` or `-conffile`; the first
 /// one is printed, line RG item E3), `-dryrun` and `-conffile`. A `-logfile` or `-conffile`
@@ -2299,51 +1489,11 @@ fn conffile_of<S: AsRef<OsStr> + Clone>(words: &[S]) -> Option<OsString> {
 /// before the program's arguments; `config`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:208-210
-/// ```c++
-/// 	CNcbiIstrstream empty_stream(kEmptyStr);
-/// 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
-/// 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`, which the
 /// `-version` word ends before, ncbiapp.cpp:972-977)
-/// ```c++
-/// void CNcbiApplicationAPI::x_TryInit(EAppDiagStream diag, const char* conf)
-/// {
-///     // Load registry from the config file
-///     if ( conf ) {
-///         string x_conf(conf);
-///         LoadConfig(*m_Config, &x_conf);
-///     } else {
-///         LoadConfig(*m_Config, NULL);
-///     }
-///     m_ConfigLoaded = true;
-///
-///     CDiagContext::SetupDiag(diag, m_Config, eDCM_Flush, m_LogFile);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 (`IncludeNcbircIfAllowed`)
-/// ```c++
-///     try {
-///         CMetaRegistry::SEntry entry
-///             = CMetaRegistry::Load("ncbi", CMetaRegistry::eName_RcOrIni,
-///                                   0, flags, m_SysRegistry.GetPointer());
-///         ...
-///     } catch (CRegistryException& e) {
-///         ERR_POST_X(6, Critical << "CNcbiRegistry: "
-///                       "Syntax error in system-wide configuration file: "
-///                       << e.what());
-///         return false;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:669-674 (`x_TryMain`: an exception of
 /// the configuration load ends the application with exit status 2)
-/// ```c++
-///             catch (const CException& e) {
-///                 NCBI_REPORT_EXCEPTION_X(15,
-///                                         "Application's initialization failed", e);
-///                 *got_exception = true;
-///                 *exit_code = 2;
-///             }
-/// ```
 /// Where NCBI's messages go (NCBI BLAST+ 2.17.0, the official Linux x64 release and bioconda's;
 /// g_reg probes of 2026-11-11, env parity DECISIONS 13): the usage report's are written to
 /// `cerr` at once (`usage_report`). An application with a `-logfile` file writes the messages
@@ -2506,45 +1656,15 @@ impl ApplicationStart {
 /// U U P on stderr and U P in the file, with `-logfile /dev/null` U U P on stderr; tblastx,
 /// rpsblast, makeblastdb and blastdbcmd U on stderr and U P U P in the file.
 ///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:80 (likewise blastp_app.cpp:80,
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:80 (likewise c++/src/app/blast/blastp_app.cpp:80,
 /// blastx_app.cpp:80, tblastn_app.cpp:79, psiblast_app.cpp:122 `m_bah`)
-/// ```c++
-///     CBlastAppDiagHandler m_Bah;
-/// ```
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_aux.hpp:252
-/// ```c++
-/// 	CBlastAppDiagHandler():m_handler(GetDiagHandler(true)), m_save (true) {}
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1181-1187
-/// ```c++
-/// CBlastAppDiagHandler::~CBlastAppDiagHandler()
-/// {
-/// 	if(m_handler) {
-/// 		SetDiagHandler(m_handler);
-/// 		m_handler = NULL;
-/// 	}
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:94 (in `Run`; likewise
 /// rpsblast_app.cpp:113)
-/// ```c++
-///     CBlastAppDiagHandler bah;
-/// ```
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:258-261
-// ```c++
-// void SegMaskerApplication::Exit(void)
-// {
-//     SetDiagStream(0);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:750-753 (`x_TryMain`, after a failed
 // `x_TryInit` too)
-// ```c++
-//     // Close application
-//     if ( s_HandleExceptions() ) {
-//         try {
-//             Exit();
-// ```
 /// Whether `program`'s application posts again, when it ends after a failed configuration load,
 /// the messages it collected before its diagnostics were set up (the replay of
 /// `write_config_load`): not segmasker, whose `Exit` takes the diagnostic stream away before
@@ -2569,22 +1689,8 @@ fn replays_to_stderr(program: &str) -> bool {
 /// value too).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-206
-/// ```c++
-/// void CBlastUsageReport::x_CheckBlastUsageEnv()
-/// {
-/// 	char * blast_usage_env = getenv("BLAST_USAGE_REPORT");
-/// 	if(blast_usage_env != NULL){
-/// 		bool enable = NStr::StringToBool(blast_usage_env);
-/// 		if (!enable) {
-/// 			SetEnabled(false);
-/// 			CUsageReportAPI::SetEnabled(false);
-/// 			LOG_POST(Info <<"Phone home disabled");
-/// 			return ;
-/// 		}
-/// 	}
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1634-1648 (`IncludeNcbircIfAllowed`,
-/// quoted at `settings_of`)
+/// cited at `settings_of`)
 fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsString>) -> bool {
     has_usage_report(program)
         && usage_report_variable(env) != Some(Some(false))
@@ -2600,17 +1706,6 @@ fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsStrin
 /// application is a `CNcbiApplication` with no member of BLAST's.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.hpp:47-55
-/// ```c++
-/// class CDustMaskApplication : public CNcbiApplication
-/// {
-/// public:
-///     /// Application constructor
-///     CDustMaskApplication() {
-///         CRef<CVersion> version(new CVersion());
-///         version->SetVersionInfo(1, 0, 0);
-///         SetFullVersion(version);
-///     }
-/// ```
 fn has_usage_report(program: &str) -> bool {
     !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
 }
@@ -2622,7 +1717,7 @@ fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Optio
 }
 
 /// Whether the environment turns `.ncbirc` off for every registry (`IncludeNcbircIfAllowed`,
-/// quoted at `settings_of`): `NCBI_DONT_USE_NCBIRC`, or
+/// cited at `settings_of`): `NCBI_DONT_USE_NCBIRC`, or
 /// `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` (the environment's layer of `[NCBI] DONT_USE_NCBIRC`),
 /// set with any value.
 fn ncbirc_turned_off(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
@@ -2657,35 +1752,7 @@ fn system_wide_posts(read: &RegistryRead, program: &str) -> String {
 /// NCBI 2.17.0 on 2026-10-19).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:374-391
-/// ```c++
-///     string retval = WindowMaskerPathGet();
-///     if ( !retval.empty() ) {
-///         return retval;
-///     }
-///     const string kEnvVar("WINDOW_MASKER_PATH");
-///     const string kSection("WINDOW_MASKER");
-///     CNcbiIstrstream empty_stream(kEmptyStr);
-///     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
-///                                               IRegistry::fWithNcbirc));
-///     CRef<CSimpleEnvRegMapper> mapper(new CSimpleEnvRegMapper(kSection,
-///                                                              kEmptyStr));
-///     CRef<CEnvironmentRegistry> env_reg(new CEnvironmentRegistry);
-///     env_reg->AddMapper(*mapper, CEnvironmentRegistry::ePriority_Max);
-///     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
-///     retval = reg->Get(kSection, kEnvVar);
-///     if (retval == kEmptyStr) {
-///         retval = CDir::GetCwd();
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/include/corelib/ncbireg.hpp:808-811,978-981
-/// ```c++
-///         ePriority_MaxUser  = CCompoundRegistry::ePriority_Max - 0x10000,
-///         ePriority_Reserved ///< Everything greater is for internal use.
-/// ...
-///         ePriority_File = ePriority_Reserved,
-///         ePriority_Overrides,
-///         ePriority_Environment,
-/// ```
 /// `WindowMaskerPathGet()` is empty in blastn (only `WindowMaskerPathInit` sets it, and the
 /// applications do not call it).
 fn window_masker_path_of(
@@ -2738,35 +1805,13 @@ fn application_settings(
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (`x_Load`: a read kept for
 /// the same name, style and flags is not read again unless the file changed)
-/// ```c++
-///         TIndex::const_iterator iit
-///             = m_Index.find(SKey(name, style, flags, reg_flags));
-///         if (iit != m_Index.end()) {
-///             _TRACE("found in cache");
-///             _ASSERT(iit->second < m_Contents.size());
-///             SEntry& result = m_Contents[iit->second];
-///             result.Reload(flags);
-///             return result;
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1247-1252, 1278-1279
 /// (`LoadConfig`: `.ncbirc` without a `.ini`)
-/// ```c++
-///     if ( !conf ) {
-///         if (reg.IncludeNcbircIfAllowed(reg_flags)) {
-///     ...
-///         // still consider pulling in defaults from .ncbirc
-///         if (reg.IncludeNcbircIfAllowed(reg_flags)) {
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:210-211 (a
 /// `[BLAST] BLAST_USAGE_REPORT` of the usage report's registry that is not a Boolean throws
 /// in the constructor of the application, before `AppMain`: NCBI aborts)
-/// ```c++
-/// 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
-/// 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
-/// ```
 /// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
-/// quoted at `settings_of`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
+/// cited at `settings_of`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
 /// any value.
 fn application_start(
     program: &str,
@@ -2942,12 +1987,6 @@ fn application_start(
 /// `l1.env_ur0`, `l1.rc_inidont`, `l1.rc_dont`, `l1.env_ok`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:208-211
-/// ```c++
-/// 	CNcbiIstrstream empty_stream(kEmptyStr);
-/// 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
-/// 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
-/// 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
-/// ```
 fn usage_report_entry_refusal(
     env: &dyn Fn(&str) -> Option<OsString>,
     usage_read: Option<(&RegistryRead, &Path)>,
@@ -2999,36 +2038,9 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
 /// NCBI writes about the files: the command line's entry, and each call of LOSAT's library that
 /// reads NCBI's settings (`api::start`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
-/// ```c
-///     } else if (conf->empty()) {
-///         entry = CMetaRegistry::Load(basename, CMetaRegistry::eName_Ini, 0,
-///                                     reg_flags, &reg);
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbireg.cpp:1636-1648
-/// ```c
-///     if (flags & fWithNcbirc) {
-///         flags &= ~fWithNcbirc;
-///     } else {
-///         return false;
-///     }
-///
-///     if (getenv("NCBI_DONT_USE_NCBIRC")) {
-///         return false;
-///     }
-///
-///     if (HasEntry("NCBI", "DONT_USE_NCBIRC")) {
-///         return false;
-///     }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/metareg.cpp:299-303
-/// ```c
-///         case eName_DotRc: {
-///             string base, ext;
-///             CDirEntry::SplitPath(name, 0, &base, &ext);
-///             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
-///                                   + "rc", eName_AsIs);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1254-1259
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1648
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:299-303
 fn settings_of(
     env: &dyn Fn(&str) -> Option<OsString>,
     ini: Option<(&Path, &[RegistryEntry])>,
@@ -3114,7 +2126,7 @@ mod tests {
         assert!(reject("NCBI_CONFIG_LONG_SEQID__BLAST", "1").is_some());
         assert!(reject("NCBI_CONFIG_PATH", "/etc").is_none());
         assert!(reject("ABORT_ON_THROW", "1").is_some());
-        // NCBI's Seq-id matching parameters (seq_id_tree.cpp:692-707): their own message.
+        // NCBI's Seq-id matching parameters (c++/src/objects/seq/seq_id_tree.cpp:692-707): their own message.
         for name in ["OBJECTS_PACK_TEXTID", "OBJECTS_PACK_GENERAL"] {
             let message = reject(name, "0").unwrap();
             assert!(message.contains("Seq-ids are matched"), "{message}");
@@ -3181,7 +2193,7 @@ mod tests {
     };
 
     // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:54-56 (`kConfigPathDelim` is ";" on
-    // Windows and ":;" elsewhere) and :331-396 (`CMetaRegistry::GetDefaultSearchPath`, quoted at
+    // Windows and ":;" elsewhere) and :331-396 (`CMetaRegistry::GetDefaultSearchPath`, cited at
     // `registry_search_path`); the home directory comes from `CDir::GetHome` (`ncbi_home`). The
     // test uses the delimiter and the variable of the platform it runs on, so it checks the same
     // rule everywhere.
@@ -3264,7 +2276,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3586-3657 (`CDir::GetHome` and
-    // `s_GetHomeByUID`, quoted at `ncbi_home`).
+    // `s_GetHomeByUID`, cited at `ncbi_home`).
     #[test]
     fn the_home_directory_is_ncbis() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
@@ -3426,8 +2438,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1452-1457, 1549-1595
-    // (`FindProgramExecutablePath`, quoted at `unix_program_name`) and metareg.cpp:378-385,
-    // ncbienv.cpp:408-415 (`GetProgramDirname`, quoted at `program_directories`).
+    // (`FindProgramExecutablePath`, cited at `unix_program_name`) and metareg.cpp:378-385,
+    // ncbienv.cpp:408-415 (`GetProgramDirname`, cited at `program_directories`).
     #[test]
     fn the_program_directories_are_ncbis() {
         let files = [
@@ -3739,7 +2751,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:527-533
-    // (`registry.HasEntry("BLAST", "BLASTDB")` and `registry.Get`, quoted at `blastdb_of`) and
+    // (`registry.HasEntry("BLAST", "BLASTDB")` and `registry.Get`, cited at `blastdb_of`) and
     // c++/src/corelib/ncbireg.cpp:1235-1246, 1577-1583 (the environment, then the program's
     // `.ini`, then `.ncbirc`).
     /// `tests/seqdb/expected/search_path/registry.tsv`: the value of `[BLAST] BLASTDB` that
@@ -4103,7 +3115,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (cited at
     // `ncbi_registry::read_lines`): the escapes of a value are read, and a value that is not
     // UTF-8 is not a path LOSAT reads.
     /// A value of `[BLAST] BLASTDB` that LOSAT cannot read is no reason to reject a program
@@ -4157,7 +3169,7 @@ mod tests {
         std::fs::remove_dir(&dir).unwrap();
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866 (quoted at `log_file`).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866 (cited at `log_file`).
     #[test]
     fn the_log_file_is_the_last_one_before_the_delimiter() {
         let words = |line: &[&str]| line.iter().map(OsString::from).collect::<Vec<_>>();
@@ -4230,9 +3242,9 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:3863-3874 (quoted at
-    // `ApplicationStart::write_log_setup`), c++/src/corelib/ncbiapp.cpp:669-674 (quoted at
-    // `ApplicationStart`) and c++/src/algo/blast/api/blast_aux.cpp:1181-1187 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:3863-3874 (cited at
+    // `ApplicationStart::write_log_setup`), c++/src/corelib/ncbiapp.cpp:669-674 (cited at
+    // `ApplicationStart`) and c++/src/algo/blast/api/blast_aux.cpp:1181-1187 (cited at
     // `replays_to_stderr`). NCBI BLAST+ 2.17.0 (g_reg probes: x_blastp, x_ini, x_iniUR,
     // x_inibothbad, o1, o2, l, h_log, inibad_null, inibad_empty; probe_h of 2026-11-12 for every
     // program): where the messages go. tblastx, rpsblast, makeblastdb and blastdbcmd replay the
@@ -4313,7 +3325,7 @@ mod tests {
     }
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
-    // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
+    // 2026-11-12 on ws; cited at `has_usage_report`): no usage report, so neither its read of
     // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is posted once, at
     // the configuration load, naming the 2025-05-13 package's build tree, and the entries before
     // the bad line are kept (env parity probe I of 2026-11-14, `i_probe/`); a malformed
@@ -4376,7 +3388,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // dustmasker has no usage report (dust_mask_app.hpp:47-55, quoted at `has_usage_report`):
+    // dustmasker has no usage report (dust_mask_app.hpp:47-55, cited at `has_usage_report`):
     // `BLAST_USAGE_REPORT` is not read, and `.ncbirc` is read once, by the configuration load,
     // whose posts go to the diagnostics as blastdbcmd's do.
     #[test]
@@ -4418,7 +3430,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-211,
-    // c++/src/corelib/ncbiapp.cpp:1247-1279 and c++/src/corelib/metareg.cpp:200-209 (quoted at
+    // c++/src/corelib/ncbiapp.cpp:1247-1279 and c++/src/corelib/metareg.cpp:200-209 (cited at
     // `application_start`). NCBI BLAST+ 2.17.0 (g_reg probes of 2026-11-11: run.sh `partial`
     // default and BLAST_USAGE_REPORT=false, x_dontuse, x_inidont, x_ini, x_inibothbad, b1full,
     // b1ini, inib1r): what each read writes.
@@ -4599,7 +3611,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 and 1271-1281, and
-    // c++/src/corelib/metareg.cpp `x_FindRegistry` (quoted at `conf_file_path`).
+    // c++/src/corelib/metareg.cpp `x_FindRegistry` (cited at `conf_file_path`).
     #[test]
     fn the_conffile_is_found_as_ncbi_finds_it() {
         let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -4631,7 +3643,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015 (quoted at `preparse`).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015 (cited at `preparse`).
     // NCBI BLAST+ 2.17.0 (env parity review G, F4): `blastn -logfile -version` logs to a file
     // named `-version` and prints no version.
     #[test]

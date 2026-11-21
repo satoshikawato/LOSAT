@@ -2,11 +2,6 @@
 //! pass, as before): the HSPs of a subject are linked one query context at a time.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1048-1060
-//! ```c
-//!       /* Find the first HSP in the context of the head */
-//!       for (index = 0; index < hsp_list->hspcnt &&
-//!                       hsp_list->hsp_array[index]->context < head_hsp->context;
-//! ```
 //! NCBI links a subject's list in one pass over every query context: the heads come in sum-score
 //! order whatever their context, and a head's candidates and the set it joins are HSPs of its own
 //! context. Nothing a head does reads or changes another context's HSPs, so each context's HSPs

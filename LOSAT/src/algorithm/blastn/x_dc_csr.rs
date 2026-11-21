@@ -8,27 +8,7 @@
 //! per chain element on `next_pos` (indexed by query offset, so in no order).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:775-786
-//! ```c
-//!          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-//!          if (mb_lt->hashtable[ecode1] == 0) {
-//!             PV_SET(pv_array, ecode1, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode1/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-//!          mb_lt->hashtable[ecode1] = index;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-//! ```c
-//!     Int4 q_off = lookup->hashtable[index];
-//!
-//!     while (q_off) {
-//!         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-//!         offset_pairs[i++].qs_offsets.s_off = s_off;
-//!         q_off = lookup->next_pos[q_off];
-//!     }
-//! ```
 //!
 //! Why the runs are the chains. The fill puts each word at the head of its cell's chain, so a
 //! chain lists the cell's words newest first, each word (its `index`, unique) once. The CSR is

@@ -877,5 +877,5 @@ impl Write for DiagTee<'_> {
 }
 
 #[cfg(test)]
-#[path = "_inline_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

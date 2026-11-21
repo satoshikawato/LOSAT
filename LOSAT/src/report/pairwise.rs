@@ -5292,7 +5292,7 @@ fn percent_match_matches_independent_pinned_cpp_edges() {
 }
 
 #[cfg(test)]
-#[path = "pairwise_tblastx_inline_tests.rs"]
+#[path = "pairwise_tblastx_tests.rs"]
 mod tblastx_tests;
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424

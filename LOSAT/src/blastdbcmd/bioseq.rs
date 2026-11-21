@@ -46,9 +46,9 @@ impl DbBioseq {
     /// Bioseq that NCBI makes (one with definition lines and letters), before any byte of the
     /// sequence, then `write` of that Bioseq; nothing where NCBI gives no Bioseq (no definition
     /// line, or no letters). With `with_header` the user object's header is read too (`%b`).
-    /// The Bioseq is lent to `write`, not returned: each formatter's copy of this function
-    /// builds it in place (a returned one cost a copy and a call per sequence, +2 % of the
-    /// instructions of a protein FASTA run against dev, line RG-Dbc).
+    /// The Bioseq is lent to `write`, not returned, so each formatter's copy of this function
+    /// builds it in place: a returned one cost a copy of it and a call for each sequence of a
+    /// FASTA run (callgrind against dev, line RG-Dbc DECISIONS 10).
     #[inline]
     pub fn with<'a, 'b>(
         source: &Source,

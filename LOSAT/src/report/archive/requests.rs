@@ -4,16 +4,6 @@
 //! the `LCaseMask` parameters) as the run's `RequestPolicy`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:571-573,618-622
-//! ```c++
-//!     CRef<IRemoteQueryData> remote_query(query->MakeRemoteQueryData());
-//!     CRef<CBioseq_set> bioseq_set = remote_query->GetBioseqSet();
-//!     IRemoteQueryData::TSeqLocs seqloc_list = remote_query->GetSeqLocs();
-//!     ...
-//!     CObjMgr_QueryFactory* objmgrqf = dynamic_cast<CObjMgr_QueryFactory*>(&*query);
-//!     if ( NULL != objmgrqf )
-//!     {
-//!     	TSeqLocInfoVector user_specified_masks = objmgrqf->ExtractUserSpecifiedMasks();
-//! ```
 //! `CExportStrategy` makes the request of a batch from its query factory: the batch's Bioseqs and
 //! Seq-locs, the `-query_loc` interval of its first query, and the user's masks (the lower case of
 //! `-lcase_masking`), with the `-subject` sequences (`x_Process_SearchDb`).
@@ -77,42 +67,7 @@ impl RequestRecord for crate::blastinput::fasta_reader::FastaRecord {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1102-1134
-// ```c++
-//     ITERATE(TSeqLocInfoVector, query_masks, masking_locations) {
-//         CRef<CPacked_seqint> packed_seqint(new CPacked_seqint);
-//         ...
-//         int current_frame = query_masks->front()->GetFrame();
-//         ITERATE(TMaskedQueryRegions, mask_locs, *query_masks) {
-//               if  (Blast_QueryIsTranslated(program) && current_frame != (*mask_locs)->GetFrame())
-//               {
-//                   if (!packed_seqint.Empty())
-//                   {
-//                      CRef<CBlast4_mask> network_mask = s_CreateBlastMask(*packed_seqint, program);
-//                      network_mask->SetFrame(FrameNumber2NetworkFrame(current_frame, program));
-//                      retval.push_back(network_mask);
-//                   }
-//                   current_frame = (*mask_locs)->GetFrame();
-//                   packed_seqint.Reset(new CPacked_seqint);
-//               }
-//
-//               packed_seqint->AddInterval((*mask_locs)->GetSeqId(),
-//                              (*mask_locs)->GetInterval().GetFrom(),
-//                              (*mask_locs)->GetInterval().GetTo());
-//         }
-//
-//         if (!packed_seqint.Empty())
-//         {
-//              CRef<CBlast4_mask> network_mask = s_CreateBlastMask(*packed_seqint, program);
-//              if (Blast_QueryIsTranslated(program))
-//                   network_mask->SetFrame(FrameNumber2NetworkFrame(current_frame, program));
-//              retval.push_back(network_mask);
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1084-1085
-// ```c++
-//     /// The frame can only be notset for protein queries or plus1 for
-//     /// nucleotide queries
-// ```
 /// How the lower-case runs of a query (the user's mask of `-lcase_masking`) become the request's
 /// `LCaseMask` parameters: one `Blast4-mask` per query, or per frame change of a translated
 /// query, from the user's mask of the query, which holds each run once for a protein query and
@@ -197,25 +152,8 @@ impl<'a> RunRequests<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:338-340
-    // ```c++
-    //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
-    //
-    //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:307
-    // ```c++
-    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287
-    // ```c++
-    //         if (pssm.NotEmpty())
-    //         {
-    //             _ASSERT(queries.Empty());
-    //             if(num_iters != 0)
-    //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
-    //             else
-    //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id));
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-288
     /// The requests of a run whose query is a PSSM (psiblast's and tblastn's `-in_pssm`, `pssm`:
     /// the object as the application read it, `PsiSearch::request`): each request's queries are
     /// the PSSM (`queries pssm`), with no `-query_loc` range (the option excludes `-in_pssm`) and no
@@ -247,21 +185,6 @@ impl<'a> RunRequests<'a> {
             .map(|record| record.bioseq(self.policy.query_protein))
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:587-605
-        // ```c++
-        //         if (seqloc_list.front()->IsInt())
-        //         {
-        //             const int kStart((int)seqloc_list.front()->GetStart(eExtreme_Positional));
-        //             const int kStop((int)seqloc_list.front()->GetStop(eExtreme_Positional));
-        //             const int kRangeLength = kStop - kStart + 1;
-        //             ...
-        //             const int kFullLength =
-        //                 bioseq_set->GetSeq_set().front()->GetSeq().GetInst().GetLength();
-        //
-        //             if (kFullLength != kRangeLength)
-        //             {
-        //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredStart), kStart);
-        //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredEnd), kStop);
-        // ```
         // `RequiredStart` / `RequiredEnd`: the interval of the batch's first query when a range
         // cut it to less than its record.
         let required = queries

@@ -2,12 +2,6 @@
 //! first word is its Seq-ids, and the rest of its defline its title.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-322
-//! ```c++
-//!     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
-//!                                     CFastaReader::fParseRawID:
-//!                                     (CFastaReader::fNoParseID |
-//!                                      CFastaReader::fDLOptional);
-//! ```
 //! The ids are parsed by the reader of `makeblastdb -parse_seqids` (`process_ids`, with the same
 //! `fQuickIDCheck` and `fAssumeNuc` or `fAssumeProt`).
 //!
@@ -86,13 +80,6 @@ impl BelievedIds {
         let mut warning_id = Vec::new();
         label::content(&best, false, &mut warning_id);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1102-1106
-        // ```c++
-        //     CSeq_id::EAccessionInfo id_info = seqid->IdentifyAccession();
-        //     if (seqid->IsLocal() || id_info == CSeq_id::eAcc_local  ||
-        //     	id_info == CSeq_id::eAcc_general) {
-        //         retval = true;
-        //     }
-        // ```
         let info = identify_seq_id(
             &best,
             parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
@@ -114,18 +101,6 @@ impl BelievedIds {
     /// `CAlignFormatUtil::GetSeqIdString(ids, true)`: the id of `Query=` and of the XML query.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4944-4956
-    /// ```c++
-    /// string CAlignFormatUtil::GetBareId(const CSeq_id& id)
-    /// {
-    ///     string retval;
-    ///
-    ///     if (id.IsGi() || id.IsPrf() || id.IsPir()) {
-    ///         retval = id.AsFastaString();
-    ///     }
-    ///     else {
-    ///         retval = id.GetSeqIdString(true);
-    ///     }
-    /// ```
     /// The record as the Seq-loc of the archive's `seq-loc-list`, `None` for a local id.
     pub(crate) fn seq_loc(&self, from: i32, to: i32) -> Option<QuerySeqLoc<'_>> {
         (!self.local).then_some(QuerySeqLoc {
@@ -170,37 +145,6 @@ pub(crate) struct BelievedDefline {
 /// message of the `CObjReaderParseException`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:157-207
-/// ```c++
-///     const size_t len = defline.length();
-///     if (len <= 1 ||
-///         NStr::IsBlank(defline.substr(1))) {
-///         return;
-///     }
-///     ...
-///     // ignore spaces between '>' and the sequence ID
-///     size_t start;
-///     for(start = 1 ; start < len; ++start ) {
-///         if( ! isspace(defline[start]) ) {
-///             break;
-///         }
-///     }
-///     ...
-///         pos = start;
-///         while (pos < len && defline[pos] > ' ') {
-///             pos++;
-///         }
-///
-///         if ( ! (fFastaFlags & CFastaReader::fDisableParseRange) ) {
-///             range_len = ParseRange(defline.substr(start, pos - start),
-///                     data.range_start, data.range_end, pMessageListener);
-///         }
-///
-///         auto id_string = defline.substr(start, pos - start - range_len);
-///         if (NStr::IsBlank(id_string)) {
-///             NCBI_THROW2(CObjReaderParseException, eFormat,
-///                 "Unable to locate sequence id in definition line", 0);
-///         }
-/// ```
 /// `defline[pos]` is a signed `char` on the platforms compared: a byte from 0x80 up ends the id.
 pub(crate) fn parse_believed_defline(
     defline: &[u8],
@@ -367,10 +311,6 @@ pub(crate) fn duplicate_id(
 /// it draws the mask at the other row's places (`dropin-survey-20261029/DI7/DECISIONS.md` 19).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4292-4306
-/// ```c++
-/// void CDisplaySeqalign::x_FillLocList(TSAlnSeqlocInfoList& loc_list,
-///                                      const list< CRef<CSeqLocInfo> >*  masks) const
-/// ```
 pub(crate) fn refuse_shared_masks(
     queries: &[super::FastaRecord],
     masked: impl Fn(usize) -> bool,
@@ -426,24 +366,6 @@ pub(crate) fn refuse_shared_masks_in<'r>(
 /// protein, `None` when none does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562
-/// ```c++
-/// bool CFastaReader::xSetSeqMol(const list<CRef<CSeq_id>>& ids, CSeq_inst_Base::EMol& mol) {
-///
-///     for (auto pId : ids) {
-///         const CSeq_id::EAccessionInfo acc_info = pId->IdentifyAccession();
-///         if (acc_info & CSeq_id::fAcc_nuc) {
-///             mol = CSeq_inst::eMol_na;
-///             return true;
-///         }
-///
-///         if (acc_info & CSeq_id::fAcc_prot) {
-///             mol = CSeq_inst::eMol_aa;
-///             return true;
-///         }
-///     }
-///     return false;
-/// }
-/// ```
 pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
     use crate::seqid::accguide::{F_NUC, F_PROT};
     for id in ids {
@@ -466,18 +388,6 @@ pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
 /// accession named, nothing without one.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2117-2125
-/// ```c++
-/// std::string CFastaReader::x_NucOrProt(void) const
-/// {
-///     if( m_CurrentSeq && m_CurrentSeq->IsSetInst() &&
-///         m_CurrentSeq->GetInst().IsSetMol() )
-///     {
-///         return ( m_CurrentSeq->GetInst().IsAa() ? "protein " : "nucleotide " );
-///     } else {
-///         return kEmptyStr;
-///     }
-/// }
-/// ```
 pub(crate) fn nuc_or_prot(named: Option<bool>) -> &'static str {
     match named {
         Some(true) => "protein ",
@@ -525,16 +435,6 @@ pub(crate) fn refuse_range_in_archive(role: &str, program: &str) -> anyhow::Erro
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:633-640
-// ```c++
-//     if (has_range) {
-//         auto old_id = FindBestChoice(GetIDs(), CSeq_id::BestRank);
-//         // generate a new ID, and record its relation to the given one(s).
-//         SetIDs().clear();
-//         GenerateID();
-//
-//         CRef<CSeq_align> align = xCreateAlignment(old_id,
-//             GetIDs().front(), range_start, range_end);
-// ```
 /// Whether the defline `defline` read under `-parse_deflines` has a first word with a range:
 /// what `refuse_range_in_archive` refuses, for a caller whose reader did not (`archive_known`).
 pub(crate) fn defline_has_range(defline: &[u8], protein: bool, program: &'static str) -> bool {

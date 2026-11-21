@@ -54,7 +54,7 @@ pub enum VolumeHeader {
     Parsed(crate::seqid::DeflineSet),
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (cited at
 // `Volume::nucleotide_length_bounds`)
 /// `GetSeqLengthExact`'s length of a nucleotide whose packed bases start at `start` and whose
 /// ambiguity data start at `amb_start` (`start < amb_start`), the last byte of its bases being
@@ -65,14 +65,6 @@ fn packed_length(start: u64, amb_start: u64, last: u8) -> u64 {
 
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:104-109
-    // ```c++
-    //     m_Idx.Reset(new CSeqDBIdxFile(atlas, name, prot_nucl));
-    //
-    //     m_VolEnd = m_VolStart + m_Idx->GetNumOIDs();
-    //
-    //     // To allow for empty volumes, we must tolerate the absence of all
-    //     // files other than the index file.
-    // ```
     /// Opens the volume `base` (a path without extension) by reading its
     /// index file. The sequence and header files are opened on first use.
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): the index file stays open and its arrays
@@ -87,20 +79,7 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:90
-    // ```c++
-    //       m_HaveColumns  (false),
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3311-3318
-    // ```c++
-    // void CSeqDBVol::ListColumns(set<string>    & titles,
-    //                             CSeqDBLockHold & locked)
-    // {
-    //     //m_Atlas.Lock(locked);
-    //
-    //     if (! m_HaveColumns) {
-    //         x_OpenAllColumns(locked);
-    //     }
-    // ```
     // Opening a volume reads its index file only (seqdbvol.cpp:104-109, above `Volume::open`). Its
     // column files (`.?Xa` index, `.?Xb` / `.?Xc` data: the masks of `makeblastdb -mask_data`,
     // user columns) are opened by `x_OpenAllColumns`, which only `GetColumnBlob`,
@@ -170,25 +149,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:117-134
-    // ```c++
-    // void
-    // CSeqDBVol::x_OpenSeqFile(void) const {
-    //     CFastMutexGuard mtx_gurad(m_MtxSeq);
-    //     if (!m_SeqFileOpened && m_Idx->GetNumOIDs() != 0) {
-    //         m_Seq.Reset(new CSeqDBSeqFile(m_Atlas, m_VolName, (m_IsAA?'p':'n')));
-    //     }
-    //     m_SeqFileOpened = true;
-    // }
-    //
-    // void
-    // CSeqDBVol::x_OpenHdrFile(void) const {
-    //     CFastMutexGuard mtx_gurad(m_MtxHdr);
-    //     if (!m_HdrFileOpened && m_Idx->GetNumOIDs() != 0) {
-    //         m_Hdr.Reset(new CSeqDBHdrFile(m_Atlas, m_VolName, (m_IsAA?'p':'n')));
-    //     }
-    //     m_HdrFileOpened = true;
-    // }
-    // ```
     fn lazy_file<'a>(
         &self,
         slot: &'a OnceLock<DbFile>,
@@ -378,32 +338,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
-    // ```c++
-    //     if ('p' == seqtype) {
-    //         // Subtract one, for the inter-sequence null.
-    //
-    //         end_offset --;
-    //
-    //         length = int(end_offset - start_offset);
-    //
-    //         // Although we subtracted one above to get the correct length,
-    //         // we expand the range here by one byte in both directions.
-    //         // The normal consumer of this data relies on them, and can
-    //         // walk off memory if a sequence ends on a slice boundary.
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
-    //         ...
-    //     } else if ('n' == seqtype) {
-    //         ...
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset);
-    //         ...
-    //         int whole_bytes = int(end_offset - start_offset - 1);
-    //
-    //         char last_char = (*buffer)[whole_bytes];
-    //
-    //         int remainder = last_char & 3;
-    //         length = (whole_bytes * 4) + remainder;
-    //     }
-    // ```
     // NCBI points into the mapped file one sequence at a time; LOSAT copies
     // the bytes of a contiguous range of sequences with one positioned read.
     // The protein range starts one byte early, so every sequence of the block
@@ -567,23 +501,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
-    // ```c++
-    // CTempString
-    // CSeqDBVol::x_GetHdrAsn1Binary(int oid) const
-    // {
-    //     TIndx hdr_start = 0;
-    //     TIndx hdr_end   = 0;
-    //
-    //     //m_Atlas.Lock(locked);
-    //
-    //     if (!m_HdrFileOpened) x_OpenHdrFile();
-    //
-    //     m_Idx->GetHdrStartEnd(oid, hdr_start, hdr_end);
-    //     const char * asn_region = m_Hdr->GetFileDataPtr(hdr_start);
-    //
-    //     return CTempString(asn_region, hdr_end - hdr_start);
-    // }
-    // ```
     /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative).
     #[cfg(test)]
     pub fn header_bytes(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
@@ -638,14 +555,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1990-1995
-    // ```c++
-    //     bool asn_changed = false;
-    //
-    //     CRef<CBlast_def_line_set> BDLS =
-    //         x_GetHdrAsn1(oid, true, & asn_changed);
-    //
-    //     bool id_filter = x_HaveIdFilter();
-    // ```
     // This is the read of `GetBioseq` (seqdbvol.cpp:1324-1325); the overload with a stream, for
     // `GetSeqIDs`, does the same (2106-2111). The rule reads the Seq-ids of a volume whose first
     // OID is not 0 with the tags of `BL_ORD_ID` made OIDs in the database
@@ -783,13 +692,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
-    // ```c++
-    //     CTempString raw_data = x_GetHdrAsn1Binary(oid);
-    //     ...
-    //     CObjectIStreamAsnBinary inpstr(raw_data.data(), raw_data.size());
-    //
-    //     bdls.Reset(new objects::CBlast_def_line_set);
-    // ```
     // NCBI decodes every member of the header for each report (`x_GetFilteredHeader`); the
     // reports read the title and the taxid of a record without parsed Seq-ids (its source,
     // `algorithm::common::database::HeaderReader::stored_source`) from this one decode.
@@ -838,25 +740,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323
-    // ```c++
-    // int CSeqDBVol::GetSeqLengthExact(int oid) const
-    // {
-    //     ...
-    //     m_Idx->GetSeqStartEnd(oid, start_offset, end_offset);
-    //     ...
-    //     int whole_bytes = int(end_offset - start_offset - 1);
-    //
-    //     // The last byte is partially full; the last two bits of
-    //     // the last byte store the number of nucleotides in the
-    //     // last byte (0 to 3).
-    //
-    //     char amb_char = 0;
-    //     m_Seq->ReadBytes(& amb_char, end_offset - 1, end_offset);
-    //
-    //     int remainder = amb_char & 3;
-    //     return (whole_bytes * 4) + remainder;
-    // }
-    // ```
     /// The lengths that the index alone gives for the nucleotides `first..end` (volume-relative),
     /// one read of each offset array for the range: `GetSeqLengthExact`'s whole bytes times four
     /// plus 0 and plus 3 (the count that the last byte holds), so the length that
@@ -1379,26 +1262,6 @@ fn x_overlay_runs_in_ranges(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-607
-// ```c++
-// unsigned SeqDB_ncbina8_to_blastna8[] = {
-//     15, /* Gap, 0 */
-//     0,  /* A,   1 */
-//     1,  /* C,   2 */
-//     6,  /* M,   3 */
-//     2,  /* G,   4 */
-//     4,  /* R,   5 */
-//     9,  /* S,   6 */
-//     13, /* V,   7 */
-//     3,  /* T,   8 */
-//     8,  /* W,   9 */
-//     5,  /* Y,  10 */
-//     12, /* H,  11 */
-//     7,  /* K,  12 */
-//     11, /* D,  13 */
-//     10, /* B,  14 */
-//     14  /* N,  15 */
-// };
-// ```
 const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7, 11, 10, 14];
 
 /// No NCBI counterpart: each NCBI4na code as itself (`x_overlay_runs_in_ranges`'s letters for a
@@ -1406,7 +1269,7 @@ const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7,
 const X_NCBI4NA: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 /// EXPERIMENT (LOSAT_X_BNDECODE): the four bases of each stored 2-bit byte, from the high bits
-/// down, as the BLASTNA letters NCBI's decode makes of them: `s_SeqDBMapNA2ToNA8` (quoted above
+/// down, as the BLASTNA letters NCBI's decode makes of them: `s_SeqDBMapNA2ToNA8` (cited above
 /// `nucleotide_blastna`) turns code `p` into `1 << p`, `s_SeqDBMapNcbiNA8ToBlastNA8` that into
 /// `NCBINA8_TO_BLASTNA8[1 << p]` (which is `p`: BLASTNA's A, C, G and T are 0 to 3).
 const X_PACKED_TO_BLASTNA: [[u8; 4]; 256] = {
@@ -1688,21 +1551,6 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1803
-    // ```c++
-    //     if ('p' == seqtype) {
-    //         // Subtract one, for the inter-sequence null.
-    //
-    //         end_offset --;
-    //
-    //         length = int(end_offset - start_offset);
-    //
-    //         // Although we subtracted one above to get the correct length,
-    //         // we expand the range here by one byte in both directions.
-    //         // The normal consumer of this data relies on them, and can
-    //         // walk off memory if a sequence ends on a slice boundary.
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
-    //         if (! (*buffer - 1)) return -1;
-    // ```
     // NCBI's search reads these bytes in place, and so does LOSAT's (a block
     // is a private copy of them in the layout of the file).
     /// The bytes of a protein block as read: the sentinel byte before the
@@ -1737,18 +1585,7 @@ impl SequenceBlock {
         self.nucleotide_packed_len(i).map(|(_, length)| length)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1833-1840
-    // ```c++
-    //         int whole_bytes = int(end_offset - start_offset - 1);
-    //
-    //         char last_char = (*buffer)[whole_bytes];
-    //
-    //         int remainder = last_char & 3;
-    //         length = (whole_bytes * 4) + remainder;
-    //     }
-    //
-    //     return length;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1833-1841
     // NCBI's `x_GetSequence` returns the data (`*buffer`) and the length from one pair of
     // offsets; a database search reads both for every sequence (`blastn` `block_subject`).
     /// `nucleotide_packed(i)` and `nucleotide_len(i)`, from one read of the block's offsets.
@@ -1774,24 +1611,6 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2364-2384
-    // ```c++
-    //     int length = int(end_offset - start_offset);
-    //
-    //     if (length) {
-    //         int total = length / 4;
-    //         ...
-    //         // This is probably unnecessary
-    //         total &= 0x7FFFFFFF;
-    //
-    //         ambchars.resize(total);
-    //
-    //         for(int i = 0; i<total; i++) {
-    //             ambchars[i] = SeqDB_GetStdOrd((const int *)(& buffer[i]));
-    //         }
-    //     } else {
-    //         ambchars.clear();
-    //     }
-    // ```
     fn ambiguity_words(&self, i: usize) -> Vec<u32> {
         self.ambiguity_bytes(i)
             .chunks_exact(4)
@@ -1800,58 +1619,7 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:642-713
-    // ```c++
-    // inline Uint4 s_ResLenNew(const vector<Int4> & ambchars, Uint4 i)
-    // {
-    //     return (ambchars[i] >> 16) & 0xFFF;
-    // }
-    // ...
-    // inline Uint4 s_ResPosNew(const vector<Int4> & ambchars, Uint4 i)
-    // {
-    //     return ambchars[i+1];
-    // }
-    // ...
-    // inline Uint4 s_ResVal(const vector<Int4> & ambchars, Uint4 i)
-    // {
-    //     return (ambchars[i] >> 28) & 0xF;
-    // }
-    // ...
-    // inline Uint4 s_ResLenOld(const vector<Int4> & ambchars, Uint4 i)
-    // {
-    //     return (ambchars[i] >> 24) & 0xF;
-    // }
-    // ...
-    // inline Uint4 s_ResPosOld(const vector<Int4> & ambchars, Uint4 i)
-    // {
-    //     return ambchars[i] & 0xFFFFFF; // RES_OFFSET
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:810-832
-    // ```c++
-    //     Uint4 amb_num = amb_chars[0];
-    //
-    //     /* Check if highest order bit set. */
-    //     bool new_format = (amb_num & 0x80000000) != 0;
-    //
-    //     if (new_format)  amb_num &= 0x7FFFFFFF;
-    //
-    //     for(Uint4 i = 1; i < amb_num+1; i++) {
-    //         Int4  row_len  = 0;
-    //         Int4  position = 0;
-    //         Uint1 trans_ch = 0;
-    //
-    // 	if (new_format) {
-    //             trans_ch  = s_ResVal   (amb_chars, i);
-    //             row_len   = s_ResLenNew(amb_chars, i) + 1;
-    //             position  = s_ResPosNew(amb_chars, i);
-    // 	} else {
-    //             trans_ch  = s_ResVal   (amb_chars, i);
-    //             row_len   = s_ResLenOld(amb_chars, i) + 1;
-    //             position  = s_ResPosOld(amb_chars, i);
-    // 	}
-    //
-    //         if (new_format) ++i;
-    // ```
     // The entry count comes from the data; a count that passes the end of the
     // ambiguity data, where NCBI reads past its vector, is a format error.
     /// The ambiguity runs of nucleotide `i`, in stored order.
@@ -1860,48 +1628,8 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1707
-    // ```c++
-    //     int base_length = x_GetSequence(oid, &tmp);
-    //     ...
-    //     if (base_length < 1)
-    //         NCBI_THROW(CSeqDBException, eFileErr, "Error: could not get sequence or range.");
-    //     ...
-    //         bool sentinel = (nucl_code == kSeqDBNuclBlastNA8);
-    //         *buffer = x_AllocType(base_length + (sentinel ? 2 : 0), alloc_type);
-    //         char *seq = *buffer - range.begin + (sentinel ? 1 : 0);
-    //         ...
-    //             s_SeqDBMapNA2ToNA8(tmp, seq, range);
-    //             s_SeqDBRebuildDNA_NA8(seq, ambchars, range);
-    //             s_SeqDBMaskSequence(seq, masks, (char)14, range);
-    //             if (sentinel) s_SeqDBMapNcbiNA8ToBlastNA8(seq, range);
-    //         ...
-    //         if (sentinel) {
-    //             (*buffer)[0] = (char)15;
-    //             (*buffer)[base_length+1] = (char)15;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842
-    // ```c++
-    //         if (position + row_len <= region.begin)
-    //             continue;
-    //
-    //         if(position >= region.end)
-    //         	break;
-    //
-    //         for (int j = 0; j < row_len; ++j, ++position)
-    //             if ( position >= region.begin  && position < region.end)
-    //                 seq[position] = trans_ch;
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:619-625
-    // ```c++
-    // static void
-    // s_SeqDBMapNcbiNA8ToBlastNA8(char              * buf,
-    //                             const SSeqDBSlice & range)
-    // {
-    //     for(int i = range.begin; i < range.end; i++)
-    //         buf[i] = SeqDB_ncbina8_to_blastna8[ buf[i] & 0xF ];
-    // }
-    // ```
     // The whole sequence is the range; no mask is applied (LOSAT reads no
     // mask data). `s_SeqDBMapNA2ToNA8` (seqdbvol.cpp:455-471) turns each
     // 2-bit code `p` into the NCBI8na value `1 << p`.
@@ -1945,7 +1673,7 @@ impl SequenceBlock {
         Ok(letters)
     }
 
-    // NCBI reference: the checks of `x_GetSequence` quoted above `nucleotide_blastna`
+    // NCBI: the checks of `x_GetSequence` cited above `nucleotide_blastna`
     // (seqdbvol.cpp:1619-1707: `base_length < 1` is "Error: could not get sequence or range.").
     /// The length of nucleotide `i` and its ambiguity runs in stored order, as
     /// [`Self::nucleotide_iupac`] reads them before it makes the letters (the same errors in the
@@ -1967,29 +1695,6 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1565-1595
-    // ```c++
-    //     *buffer = x_AllocType(base_length + (sentinel ? 2 : 0), alloc_type);
-    //     char *seq = *buffer + (sentinel ? 1 : 0);
-    //
-    //     vector<Int4> ambchars;
-    // 	x_GetAmbChar(oid, ambchars);
-    //     ITERATE(CSeqDB::TSequenceRanges, riter, *(partial_ranges)) {
-    //     	int begin(riter->first);
-    //         int end(riter->second);
-    //
-    // 	    if (begin) seq[begin - 1] = (char) FENCE_SENTRY;
-    // 	    if (end < base_length) seq[end] = (char) FENCE_SENTRY;
-    // 	}
-    //     ITERATE(CSeqDB::TSequenceRanges, riter, *(partial_ranges)) {
-    //         SSeqDBSlice slice(max(0, (int)riter->first), min(base_length, (int)riter->second));
-    // 	    s_SeqDBMapNA2ToNA8(tmp, seq, slice);
-    // 	    s_SeqDBRebuildDNA_NA8(seq, ambchars, slice);
-    // 	    s_SeqDBMaskSequence(seq, masks, (char)14, slice);
-    // 	    if (sentinel){
-    // 	    	s_SeqDBMapNcbiNA8ToBlastNA8(seq, slice);
-    // 	    }
-    // 	}
-    // ```
     // The ambiguity runs are applied in stored order, each to the ranges it overlaps, with the
     // whole decode's tests (`nucleotide_blastna_in`), so every byte of a range is the whole
     // decode's (NCBI's slices stop at the first run past each slice).

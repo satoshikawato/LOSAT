@@ -1,5 +1,5 @@
 //! Tests of `xml_reader`: NCBI's XML object stream (`CObjectIStreamXml`) as rpsbproc's
-//! BlastOutput input reads it (objistrxml.cpp, strbuffer.cpp, quoted at the functions).
+//! BlastOutput input reads it (objistrxml.cpp, strbuffer.cpp, cited at the functions).
 
 use super::asn_text_reader::{SliceSource, StreamSource};
 use super::xml_reader::{member, optional, utf8_of, Member, XmlError, XmlReader};

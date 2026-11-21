@@ -6,11 +6,6 @@
 //! with ENOSPC) and `/dev/stdout`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
-//! ```c++
-//!        if (m_CmdLineArgs->GetSaveLastPssm()) {
-//!            SavePssmToFile(pssm, &itr);
-//!        }
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -283,7 +278,7 @@ fn an_unwritable_pssm_file_stops_the_rounds_after_the_round_before() {
     assert!(names(&dir).is_empty());
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
 // `algorithm::psiblast::in_pssm_files`): with `-in_pssm` the first `SavePssmToFile` writes the
 // input PSSM before round 1, after the prolog (NCBI 2.17.0, `-in_pssm tk.asn -num_iterations 2
 // -out_pssm nodir/f.asn -outfmt 0`: the prolog, then its serial-stream write error, status 0).
@@ -337,15 +332,6 @@ fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
-// ```c++
-//     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
-//         //m_Atlas.Unlock(locked);
-//
-//         string msg = string("Error: File (") + m_FileName + ") not found.";
-//
-//         NCBI_THROW(CSeqDBException, eFileErr, msg);
-//     }
-// ```
 // psiblast's preliminary search of a valid query reads a database whose sequence file is
 // missing: the reader's error reaches the application (no `CLocalBlast` catch), after the prolog,
 // exit 2, with the file's absolute path (NCBI 2.17.0 from `LOSAT/` with this relative `-db`;

@@ -14,10 +14,7 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 /// (`blastn::hsp::get_prelim_hitlist_size`) and closes the stream with
 /// `BlastHSPCBSStreamClose` (`adaptive_cbs_close`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:51
-/// ```c
-///     char * ADAPTIVE_CBS_ENV = getenv("ADAPTIVE_CBS");
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:47
 pub(crate) fn adaptive_cbs_environment() -> bool {
     std::env::var_os("ADAPTIVE_CBS").is_some()
 }
@@ -29,18 +26,6 @@ pub(crate) fn adaptive_cbs_environment() -> bool {
 /// trims.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1825,1839-1846
-/// ```c
-///     char * ADAPTIVE_CBS_ENV = getenv("ADAPTIVE_CBS");
-/// ...
-///     /* Prohibit any subsequent writing to the HSP stream. */
-///     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
-///     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
-///
-///     }
-///     else {
-///     	BlastHSPStreamClose(hsp_stream);
-///     }
-/// ```
 pub(crate) fn adaptive_cbs_close(composition_based_stats: bool, hitlist_size: usize) -> bool {
     composition_based_stats && hitlist_size < 1000 && adaptive_cbs_environment()
 }
@@ -49,18 +34,7 @@ pub(crate) fn adaptive_cbs_close(composition_based_stats: bool, hitlist_size: us
 /// list holds more than `REF_HIT_NUM + 700` HSP lists (`hitlist_size` is the traceback's hit
 /// list size, below 1000; `cbs_trim_count` follows).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-835
-/// ```c
-///       hit_list = results->hitlist_array[index];
-///       if (hit_list) {
-///     	  const int REF_HIT_NUM = MAX(500, hitlist_size);
-///     	  const int MIN_BUF_SZ = REF_HIT_NUM + 600;
-///     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
-///         	  int max_index = hit_list->hsplist_count -1;
-///         	  double best_evalue = 0, evalue_limit = 0;
-///         	  int mag = -180, pct = 90, i = 0;
-///         	  Blast_HitListSortByEvalue(hit_list);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-838
 pub(crate) fn cbs_trim_sorts(hsplist_count: usize, hitlist_size: usize) -> bool {
     hitlist_size.max(500) + 700 < hsplist_count
 }
@@ -72,50 +46,6 @@ pub(crate) fn cbs_trim_sorts(hsplist_count: usize, hitlist_size: usize) -> bool 
 /// HSP list in the sorted order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:806-864
-/// ```c
-/// void s_TrimHitList(BlastHitList* hitlist, int count)
-/// {
-/// 	int old_count = hitlist->hsplist_count;
-/// 	int index =0;
-/// 	for (index = count; index < old_count; index++) {
-/// 		hitlist->hsplist_array[index] = Blast_HSPListFree(hitlist->hsplist_array[index]);
-/// 	}
-/// 	hitlist->hsplist_count = count;
-/// }
-///
-/// void BlastHSPCBSStreamClose(BlastHSPStream* hsp_stream, int hitlist_size)
-/// {
-/// ...
-///         	  Blast_HitListSortByEvalue(hit_list);
-///         	  best_evalue = hit_list->hsplist_array[REF_HIT_NUM]->best_evalue;
-///         	  if (best_evalue != 0 ){
-///         		  mag = log10(hit_list->hsplist_array[REF_HIT_NUM]->best_evalue);
-///         	  }
-///         	  if (mag < -20){
-///         		  mag = MAX(mag*pct/100, mag +10);
-///         	  }
-///         	  else {
-///         		 mag = mag/2;
-///         	  }
-///         	  evalue_limit = (mag >= 0)? best_evalue*3: 9.9* pow(10, mag);
-///
-///         	  i = MIN_BUF_SZ;
-///         	  for(; i < max_index; i +=100) {
-///         		  if((hit_list->hsplist_array[i]->best_evalue != 0) &&
-///         		     (evalue_limit < hit_list->hsplist_array[i]->best_evalue)){
-///         			  s_TrimHitList(hit_list, i);
-///         			  break;
-///         		  }
-///         	  }
-///           }
-///       }
-///    }
-///
-///    BlastHSPStreamClose(hsp_stream);
-///    return;
-///
-/// }
-/// ```
 /// `mag = log10(...)` converts the `double` to `int` toward zero, and `mag*pct/100` and `mag/2`
 /// are C's `int` divisions (toward zero), as Rust's `as i32` and `/` are. `max_index` is taken
 /// before the sort, whose purge could only shorten a list that held empty HSP lists (the

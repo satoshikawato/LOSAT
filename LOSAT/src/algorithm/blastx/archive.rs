@@ -1,13 +1,7 @@
 //! BLASTX's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:284-286
-//! ```c++
-//!             if (fmt_args->ArchiveFormatRequested(args)) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//!                 m_Bah.ResetMessages();
-//!             } else {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-286
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters), written after the
 //! batch's search; `report::archive` writes the document, this module gathers what BLASTX holds
 //! for its other formats: the hit lists (the Seq-aligns of outfmt 8), the masks of the six
@@ -68,15 +62,6 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
@@ -118,20 +103,7 @@ pub(crate) fn handle_for(
 pub(crate) use crate::report::archive::error_lines;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-// ```c++
-// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-//     : m_QueryVector(& queries)
-// {
-//     if (queries.Empty()) {
-//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-652
-// ```c++
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
 /// Whether NCBI searches the reader batch `batch` and writes its archive: a batch without a
 /// query (every record skipped by `-query_loc`) is `Empty CBlastQueryVector`, and one without a
 /// valid context and with a query without letters fails its set-up
@@ -186,23 +158,7 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
-// ```c++
-// inline Int8
-// CBlastOptionsLocal::GetEffectiveSearchSpace() const
-// {
-//     if (m_EffLenOpts->num_searchspaces == 0)
-//         return 0;
-//
-//     return m_EffLenOpts->searchsp_eff[0];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 /// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
 /// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
 /// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
@@ -214,12 +170,6 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 /// and 0 for an invalid context 0).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:157-161
-/// ```c++
-///     // If the effective search options have been set, we don't need to
-///     // recompute those...
-///     if (options->GetEffectiveSearchSpace() != 0) {
-///         return;
-/// ```
 pub(crate) fn batch_searched_space(
     batches: &[BatchResults],
     options: &ResolvedOptions,

@@ -2,44 +2,6 @@
 //! with its two common outcomes, too far and overlap, taken without a branch.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-551
-//! ```c
-//!             diag_coord = (query_offset - subject_offset) & diag_mask;
-//!
-//!             /* If the reset bit is set, an extension just happened. */
-//!             if (diag_array[diag_coord].flag) {
-//!                 /* If we've already extended past this hit, skip it. */
-//!                 if ((Int4) (subject_offset + diag_offset) <
-//!                     diag_array[diag_coord].last_hit) {
-//!                     continue;
-//!                 }
-//!                 /* Otherwise, start a new hit. */
-//!                 else {
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     diag_array[diag_coord].flag = 0;
-//!                 }
-//!             }
-//!             /* If the reset bit is cleared, try to start an extension. */
-//!             else {
-//!                 /* find the distance to the last hit on this diagonal */
-//!                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!                 diff = subject_offset - last_hit;
-//!
-//!                 if (diff >= window) {
-//!                     /* We are beyond the window for this diagonal; start a
-//!                        new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//!                 }
-//!
-//!                 /* If the difference is less than the wordsize (i.e. last
-//!                    hit and this hit overlap), give up */
-//!
-//!                 if (diff < wordsize) {
-//!                     continue;
-//!                 }
-//! ```
 //! On a genome searched with proteins most hits end in one of the two `continue`s of a flag-0 cell:
 //! too far (83-87 % of the hits of the four ledger cases, v4-A10 probe 1) or overlap (12-15 %).
 //! Which one is hard to predict: taking both without a branch removed 0.12-0.17 mispredicted
@@ -74,21 +36,15 @@
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
-// ```c
-// typedef struct DiagStruct {
-//    Int4 last_hit : 31; /**< Offset of the last hit */
-//    Uint4 flag : 1; /**< Reset this hit? */
-// } DiagStruct;
-// ```
 /// A cell of the two-hit diagonal table (`search_init::XDiagCells`): `u32`, NCBI's `DiagStruct` in
 /// its four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit in bits 0-30, flag in bit 31; the table's
 /// values fit 31 bits without a sign, `search_init::x_packs`), or `(last_hit, flag)`.
 pub(super) trait XDiagCell: Copy {
     /// `(last_hit, flag)`.
     fn get(self) -> (i32, bool);
-    /// `last_hit = last_hit; flag = flag;`
+    /// Stores both `last_hit` and `flag`.
     fn set(&mut self, last_hit: i32, flag: bool);
-    /// `last_hit = last_hit;` on a cell whose flag is 0.
+    /// Stores `last_hit` on a cell whose flag is 0.
     fn set_last_hit(&mut self, last_hit: i32);
     /// `(value, flag)` for `x_hits_bf`: `value` is `last_hit` when `flag` is false.
     fn bf_read(self) -> (i32, bool);

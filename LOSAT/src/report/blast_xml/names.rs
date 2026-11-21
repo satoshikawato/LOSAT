@@ -119,29 +119,7 @@ pub fn xml_subject_names(
 /// them) and `has_hits` whether the query has Seq-aligns.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:156-169
-/// ```c++
-///                 string errors = results[i].GetErrorStrings();
-///                 if (results[i].HasWarnings()) {
-///                     if ( !errors.empty() ) {
-///                         errors += " ";
-///                     }
-///                     errors += results[i].GetWarningStrings();
-///                 }
-///                 if ( !results[i].HasAlignments() ) {
-///                     errors += (errors.empty() ? kEmptyStr : " ");
-///                     errors += CBlastFormatUtil::kNoHitsFound;
-///                 }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:258-293
-/// ```c++
-///     string retval(m_Errors.GetQueryId());
-///     if ( !retval.empty() ) {    // in case the query id is not known
-///         retval += ": ";
-///     }
-///     ITERATE(TQueryMessages, iter, m_Errors) {
-///         if ((**iter).GetSeverity() == eBlastSevWarning) {
-///             retval += (*iter)->GetMessage(false) + " ";
-/// ```
 /// (`GetErrorStrings` is the id and `: ` alone when the query has messages, all warnings in
 /// LOSAT.)
 pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Option<Vec<u8>> {
@@ -177,19 +155,7 @@ pub struct QueryText {
     /// record's (`kSeqId.AsFastaString()`, `fasta_id`), with no title (outfmt 5: `No
     /// definition line`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:552-563
-    /// ```c++
-    ///     try {
-    ///         CBioseq_Handle bh = scope->GetBioseqHandle(kSeqId);
-    ///         ...
-    ///         query_def = sequence::CDeflineGenerator().GenerateDefline(bh);
-    ///     } catch (const CException&) {
-    ///         one_query_iter->SetQuery_ID(kSeqId.AsFastaString());
-    ///     };
-    ///
-    ///     if (query_def == NcbiEmptyString)
-    ///         query_def = "No definition line";
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:552-565
     /// (The header, blastxml_format.cpp:700-711, and XML2's `Search`, blastxml2_format.cpp:
     /// 585-595, catch it the same way.)
     pub id: Option<Vec<u8>>,

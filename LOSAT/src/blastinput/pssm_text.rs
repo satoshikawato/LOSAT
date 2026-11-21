@@ -2,17 +2,7 @@
 //! and of `-in_pssm`): NCBI's ASN.1 text object stream (`CObjectIStreamAsn`) for the types of
 //! `report::serial::pssm`, whose writer gives the same bytes back for a PSSM that psiblast wrote.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1209-1216
-//! ```c++
-//!     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
-//!         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
-//!         _ASSERT(m_Pssm.Empty());
-//!         m_Pssm.Reset(new CPssmWithParameters);
-//!         try {
-//!             switch (CFormatGuess().Format(in)) {
-//!             case CFormatGuess::eBinaryASN:
-//!                 in >> MSerial_AsnBinary >> *m_Pssm;
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1345
 //!
 //! The whole document is read by the generic reader of NCBI's type information
 //! (`report::serial::asn_types`, line RG item D3-1): every member of every type it reaches, with

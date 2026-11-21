@@ -2,26 +2,6 @@
 //! (outfmt 11).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-//! ```c++
-//! void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-//! {
-//! 	if(m_handler != NULL) {
-//! 		m_handler->Post(mess);
-//! 	}
-//! 	if(m_save) {
-//! 		CRef<CBlast4_error> d(new CBlast4_error);
-//! 		string m;
-//! 		mess.Write(m);
-//! 		d->SetMessage(NStr::Sanitize(m));
-//! 		d->SetCode((int)mess.m_Severity);
-//! 		{
-//! 			DEFINE_STATIC_MUTEX(mx);
-//! 			CMutexGuard guard(mx);
-//! 			m_messages.push_back(d);
-//! 		}
-//! 	}
-//! }
-//! ```
 //! Every diagnostic that the application posts is printed (the handler it wraps) and, when
 //! the application writes an archive, saved with its severity (`eDiag_Warning` 1,
 //! `eDiag_Error` 2, `eDiag_Critical` 3) and its text with the white space cleaned. LOSAT prints the same lines
@@ -85,13 +65,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
     /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
     /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
@@ -122,21 +95,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       || m_FormatType == CFormattingArgs::eAsnBinary
-    //       || m_FormatType == CFormattingArgs::eXml
-    //     ...
-    //       || m_FormatType == CFormattingArgs::eSAM)
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    //     ...
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
     /// Adds `lines`, the query's result warnings, where the call's first format is a structured
     /// one, which returns before them, and the caller takes those of the formats after it
     /// (`ReportOutputs::later_warnings`): the command line's run of such a format posts them when
@@ -169,13 +127,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     /// Adds the texts of the loads of a batch's prefetch (`reads`, in the order of the loads;
     /// `common::database::batch_prefetch`), each line a warning. NCBI's prefetch loads the batch's
     /// subjects after the reports of the batches before, whose loads a BLAST XML stream that cut

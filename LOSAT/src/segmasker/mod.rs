@@ -17,60 +17,13 @@ use crate::ncbi_app::{no_dependencies, Tool};
 const PROGRAM: &str = "SEGMASKER";
 
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:96-104
-// ```c++
-// const char * const SegMaskerApplication::USAGE_LINE
-//     = "Low complexity region masker based on the SEG algorithm";
-//
-// void SegMaskerApplication::Init(void)
-// {
-//     HideStdArgs(fHideLogfile | fHideConffile | fHideVersion | fHideDryRun);
-// ```
 /// The text of `segmasker -help` (NCBI 2.17.0's, frozen): `-logfile`, `-conffile`, `-version`
 /// and `-dryrun` are hidden. Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:112-150
-// ```c++
-//     arg_desc->SetCurrentGroup("Input/output options");
-//     arg_desc->AddDefaultKey(kInput, "input_file_name",
-//                             "input file name",
-//                             CArgDescriptions::eInputFile, "-");
-//     arg_desc->AddDefaultKey(kOutput, "output_file_name",
-//                             "output file name",
-//                             CArgDescriptions::eOutputFile, "-");
-//     arg_desc->AddDefaultKey(kInputFormat, "input_format",
-//                             "controls the format of the masker input",
-//                             CArgDescriptions::eString, *kInputFormats);
-//     CArgAllow_Strings* strings_allowed = new CArgAllow_Strings();
-//     for (size_t i = 0; i < kNumInputFormats; i++) {
-//         strings_allowed->Allow(kInputFormats[i]);
-//     }
-//     arg_desc->SetConstraint(kInputFormat, strings_allowed);
-//     arg_desc->AddFlag      ( "parse_seqids",
-//                              "Parse Seq-ids in FASTA input", true );
-//
-//     arg_desc->AddDefaultKey(kOutputFormat, "output_format",
-//                             "controls the format of the masker output",
-//                             CArgDescriptions::eString, *kOutputFormats);
-//     strings_allowed = new CArgAllow_Strings();
-//     for (size_t i = 0; i < kNumOutputFormats; i++) {
-//         strings_allowed->Allow(kOutputFormats[i]);
-//     }
-//     arg_desc->SetConstraint(kOutputFormat, strings_allowed);
-//
-//     arg_desc->SetCurrentGroup("SEG algorithm options");
-//     arg_desc->AddDefaultKey("window", "integer_value", "SEG window",
-//                             CArgDescriptions::eInteger,
-//                             NStr::IntToString(kSegWindow));
-//     arg_desc->AddDefaultKey("locut", "float_value", "SEG locut",
-//                             CArgDescriptions::eDouble,
-//                             NStr::DoubleToString(kSegLocut));
-//     arg_desc->AddDefaultKey("hicut", "float_value", "SEG hicut",
-//                             CArgDescriptions::eDouble,
-//                             NStr::DoubleToString(kSegHicut));
-// ```
-// (`kInputFormats` and the eight `kOutputFormats`: mask_cmdline_args.cpp:40-51, quoted at
+// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:110-150
+// (`kInputFormats` and the eight `kOutputFormats`: mask_cmdline_args.cpp:40-51, cited at
 // dustmasker's descriptions; segmasker allows no `acclist`. The defaults `12`, `2.2`, `2.5` are
 // those of segmasker 2.17.0's `-help`.)
 /// The arguments of `SegMaskerApplication::Init` in the order it describes them; the values that
@@ -106,13 +59,6 @@ const DESCS: &[Desc] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:69-74
-// ```c++
-//     SegMaskerApplication() {
-//         CRef<CVersion> version(new CVersion());
-//         version->SetVersionInfo(1, 0, 0);
-//         SetFullVersion(version);
-//     }
-// ```
 /// segmasker as NCBI's application runs it (`ncbi_app`): its own version, no dependencies
 /// between its arguments and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
@@ -126,13 +72,6 @@ static TOOL: Tool = Tool {
 };
 
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
-// ```c++
-// int main(int argc, const char* argv[])
-// {
-//     // Execute main application function
-//     return SegMaskerApplication().AppMain(argc, argv);
-// }
-// ```
 /// Runs `segmasker` with `words` (the command line after `losat segmasker`), after its
 /// application start `start`, on the process's standard streams; the exit status.
 pub(crate) fn run(

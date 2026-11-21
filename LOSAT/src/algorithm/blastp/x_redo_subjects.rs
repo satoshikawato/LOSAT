@@ -41,7 +41,7 @@
 //! for a subject that the redo reads. Only a database changed after its preliminary read can fail
 //! there.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, cited above
 //! `ListedSubjects::read`: NCBI's redo fetches each match's sequence from the database in the
 //! encoding of the search.
 //!
@@ -160,7 +160,7 @@ impl<'a> XRedoSubjects<'a> {
 }
 
 impl XDbSubjects<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, cited above
     // `ListedSubjects::read`: the redo fetches each match's sequence from the database.
     /// Reads the subject of rank `rank`.
     #[inline(never)]

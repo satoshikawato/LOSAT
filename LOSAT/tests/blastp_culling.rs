@@ -5,7 +5,7 @@
 //! is the business of the parity probe (`O3b`); the unit tests of `culling.rs` pin the key, the
 //! length of the tree, the shape of the final hit list and the order of the pipe.
 //!
-//! NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c (the 300 subjects of
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c (the 300 subjects of
 //! `e2e_many_subject.faa` hold related proteins; NCBI 2.17.0 keeps 300 / 1 / 2 / 5 rows of
 //! them with no limit / 1 / 2 / 5, outfmt 6).
 
@@ -145,7 +145,7 @@ fn rows(run: &Run) -> usize {
     run.stdout.lines().count()
 }
 
-// NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333: `-culling_limit` is an integer
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333: `-culling_limit` is an integer
 // with the constraint `>= 0`; the parser reads hexadecimal values (blastn's fixture
 // `culling.hex_0x2`) and a negative or non-numeric value is an argument error.
 #[test]

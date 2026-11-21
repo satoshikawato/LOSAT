@@ -3,23 +3,6 @@
 //! pass over its diagonals.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509-537,680-686
-//! ```c
-//!     for (d = 1; d <= max_dist; d++) {
-//! ...
-//!         last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
-//! ...
-//!         xdrop_score = (Int4)ceil((double)xdrop_score / (match_cost / 2));
-//! ...
-//!         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-//! ...
-//!     }   /* end loop over distinct distances */
-//!
-//!     if (!converged)
-//!         return -1;
-//!
-//!     if (edit_block == NULL)
-//!         return best_dist;
-//! ```
 //!
 //! Where it runs. `blast_greedy_align` (the port of `BLAST_GreedyAlign`) calls
 //! `x_greedy_fused_dispatch` after its set-up: `max_score[0..xdrop_offset]` cleared, the first
@@ -93,16 +76,6 @@ thread_local! {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-387
-/// ```c
-/// Int4 BLAST_GreedyAlign(const Uint1* seq1, Int4 len1,
-///                        const Uint1* seq2, Int4 len2,
-///                        Boolean reverse, Int4 xdrop_threshold,
-///                        Int4 match_cost, Int4 mismatch_cost,
-///                        Int4* seq1_align_len, Int4* seq2_align_len,
-///                        SGreedyAlignMem* aux_data,
-///                        GapPrelimEditBlock *edit_block, Uint1 rem,
-///                        Boolean * fence_hit, SGreedySeed *seed)
-/// ```
 /// The parameters the distance loop reads, and the values of the set-up it starts from
 /// (`diag_lower`, `diag_upper`, `xdrop_offset`).
 #[derive(Clone, Copy)]
@@ -121,15 +94,6 @@ struct XFuseInput {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:88-99
-/// ```c
-/// typedef struct SGreedyAlignMem {
-///    Int4 max_dist;
-///    Int4 xdrop;
-///    Int4** last_seq2_off;
-///    Int4* max_score;
-/// ...
-/// } SGreedyAlignMem;
-/// ```
 /// The two rolling rows of `last_seq2_off` (origin 0) and `aux_data->max_score`.
 #[derive(Clone, Copy)]
 struct XFuseMem {
@@ -138,15 +102,6 @@ struct XFuseMem {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:463-470
-/// ```c
-///     *seq1_align_len = index;
-///     *seq2_align_len = index;
-///     seq1_index = index;
-///
-///     seed->start_q = 0;
-///     seed->start_s = 0;
-///     seed->match_length = longest_match_run = index;
-/// ```
 /// The outputs of `BLAST_GreedyAlign` besides its return value: what the call had set when the
 /// loop starts, and what the loop leaves. `seed_match_length` is `longest_match_run`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,16 +142,7 @@ impl XFuseOut {
     }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:396-404,537-541
-/// ```c
-///     Int4 diag_lower, diag_upper;
-/// ...
-///     Int4 longest_match_run;
-/// ...
-///         Int4 curr_extent = 0;
-///         Int4 curr_seq2_index = 0;
-///         Int4 curr_diag = 0;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:394-404,537-541
 /// The variables the C loop reads or changes on most diagonals. `x_fused_loop` keeps them in
 /// locals; `x_cell_cold` takes and returns them. `curr_seq2_index` is not among them: it is
 /// the cell of `curr_diag` (module doc).
@@ -210,15 +156,6 @@ struct XHot {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:578-582,607-614
-/// ```c
-///             if (index > longest_match_run) {
-///                 seed->start_q = seq1_index;
-///                 seed->start_s = seq2_index;
-/// ...
-///             if (seq2_index == len2) {
-///                 diag_lower = k + 1;
-///                 end2_reached = TRUE;
-/// ```
 /// The variables only rare diagonals change (`x_cell_cold`): the end flags, the seed start and
 /// the fence.
 struct XColdState {
@@ -230,41 +167,6 @@ struct XColdState {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-614
-/// ```c
-///             diag_upper = k;
-/// ...
-///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-///                                         seq1_index, seq2_index,
-///                                         fence_hit, reverse, rem);
-///             if(fence_hit && *fence_hit){
-///             	return 0;
-///             }
-///
-///             if (index > longest_match_run) {
-///                 seed->start_q = seq1_index;
-///                 seed->start_s = seq2_index;
-///                 seed->match_length = longest_match_run = index;
-///             }
-///             seq1_index += index;
-///             seq2_index += index;
-/// ...
-///             last_seq2_off[d][k] = seq2_index;
-/// ...
-///             if (seq1_index + seq2_index > curr_extent) {
-///                 curr_extent = seq1_index + seq2_index;
-///                 curr_seq2_index = seq2_index;
-///                 curr_diag = k;
-///             }
-/// ...
-///             if (seq2_index == len2) {
-///                 diag_lower = k + 1;
-///                 end2_reached = TRUE;
-///             }
-///             if (seq1_index == len1) {
-///                 diag_upper = k - 1;
-///                 end1_reached = TRUE;
-///             }
-/// ```
 /// A kept diagonal, as the C loop handles it after its X-drop test: the slide by
 /// `s_FindFirstMismatch` for `rem == 4` (`x_first_mismatch`: the same predicate, eight bytes at a
 /// time, then byte by byte), its fence test with its bound, and every update in the C order. The
@@ -333,24 +235,6 @@ unsafe fn x_cell_cold<const REVERSE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509-686
-/// ```c
-///     for (d = 1; d <= max_dist; d++) {
-///         Int4 xdrop_score;
-///         Int4 curr_score;
-///         Int4 curr_extent = 0;
-///         Int4 curr_seq2_index = 0;
-///         Int4 curr_diag = 0;
-///         Int4 tmp_diag_lower = diag_lower;
-///         Int4 tmp_diag_upper = diag_upper;
-/// ...
-///     }   /* end loop over distinct distances */
-///
-///     if (!converged)
-///         return -1;
-///
-///     if (edit_block == NULL)
-///         return best_dist;
-/// ```
 /// The distance loop of `BLAST_GreedyAlign` without an edit block, for `rem == 4`, from the
 /// state the set-up left (module doc). The parts below say which C lines they port. `WIDE`:
 /// both sequences have at least eight bytes, so the eight-byte comparison may run; without it
@@ -382,9 +266,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
     let diag_origin = max_dist + 2;
     let op_cost = match_cost + mismatch_cost;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496
-    // ```c
-    //     max_score = aux_data->max_score + xdrop_offset;
-    // ```
     // `max_score_raw[i]` is `aux_data->max_score[i]`, `max_score[d]` the C `max_score[d]`.
     let max_score_raw = mem.max_score;
     let max_score = mem.max_score.add(max_score_offset);
@@ -421,23 +302,12 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
         debug_assert!(hot.diag_lower >= diag_origin - d && hot.diag_upper <= diag_origin + d);
         debug_assert!(hot.diag_lower <= hot.diag_upper);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:523-526
-        // ```c
-        //         last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
-        //         last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
-        //         last_seq2_off[d - 1][diag_upper] = kInvalidOffset;
-        //         last_seq2_off[d - 1][diag_upper+1] = kInvalidOffset;
-        // ```
         *previous.add((hot.diag_lower - 1) as usize) = INVALID_OFFSET;
         *previous.add(hot.diag_lower as usize) = INVALID_OFFSET;
         *previous.add(hot.diag_upper as usize) = INVALID_OFFSET;
         *previous.add((hot.diag_upper + 1) as usize) = INVALID_OFFSET;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:531-533
-        // ```c
-        //         xdrop_score = max_score[d - xdrop_offset] +
-        //                       (match_cost + mismatch_cost) * d - xdrop_threshold;
-        //         xdrop_score = (Int4)ceil((double)xdrop_score / (match_cost / 2));
-        // ```
         let raw = *max_score_raw.add(d as usize) + op_cost * d - xdrop_threshold;
         let xdrop_score = if unit_divisor {
             raw
@@ -445,14 +315,7 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
             ((raw as f64) / divisor).ceil() as i32
         };
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:513-518
-        // ```c
-        //         Int4 curr_extent = 0;
-        //         Int4 curr_seq2_index = 0;
-        //         Int4 curr_diag = 0;
-        //         Int4 tmp_diag_lower = diag_lower;
-        //         Int4 tmp_diag_upper = diag_upper;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:512-518
         let tmp_diag_lower = hot.diag_lower;
         let tmp_diag_upper = hot.diag_upper;
         let mut diag_lower = hot.diag_lower;
@@ -462,14 +325,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
         let mut longest_match_run = hot.longest_match_run;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-553
-        // ```c
-        //         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-        // ...
-        //             seq2_index = MAX(last_seq2_off[d - 1][k + 1],
-        //                              last_seq2_off[d - 1][k    ]) + 1;
-        //             seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
-        //             seq1_index = seq2_index + k - diag_origin;
-        // ```
         // `left`, `middle` = cells k - 1, k of distance d - 1; cell k + 1 is read per diagonal.
         let mut left = *previous.add((tmp_diag_lower - 1) as usize);
         let mut middle = *previous.add(tmp_diag_lower as usize);
@@ -486,17 +341,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
             let seq1_index = seq2_index + k - diag_origin;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:553-565
-            // ```c
-            //             if (seq2_index < 0 || seq1_index + seq2_index < xdrop_score) {
-            // ...
-            //                 if (k == diag_lower)
-            //                     diag_lower++;
-            //                 else
-            //                     last_seq2_off[d][k] = kInvalidOffset;
-            //                 continue;
-            //             }
-            //             diag_upper = k;
-            // ```
             if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
                 if k == diag_lower {
                     diag_lower += 1;
@@ -508,15 +352,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
             }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-614
-            // ```c
-            //             diag_upper = k;
-            // ...
-            //             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-            // ...
-            //             last_seq2_off[d][k] = seq2_index;
-            // ...
-            //             if (seq1_index + seq2_index > curr_extent) {
-            // ```
             // One eight-byte comparison (module doc) settles the slide when both sequences have
             // eight positions left and it stops within them. The C code then runs, for this
             // diagonal: `diag_upper = k`; no fence (the stop byte of `seq2` is not the sentry);
@@ -572,7 +407,7 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
                 }
             }
             // A diagonal past the end of `seq1` (`x_past_seq1_end`).
-            // NCBI reference (598d8ae6): greedy_align.c:565-600
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
             if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
                 diag_upper = k;
                 *current.add(k as usize) = seq2_index;
@@ -623,27 +458,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
         };
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:596-600,619-634
-        // ```c
-        //             if (seq1_index + seq2_index > curr_extent) {
-        //                 curr_extent = seq1_index + seq2_index;
-        //                 curr_seq2_index = seq2_index;
-        //                 curr_diag = k;
-        //             }
-        // ...
-        //         curr_score = curr_extent * (match_cost / 2) -
-        //                         d * (match_cost + mismatch_cost);
-        // ...
-        //         if (curr_score >= max_score[d - 1]) {
-        //             max_score[d] = curr_score;
-        //             best_dist = d;
-        //             best_diag = curr_diag;
-        //             *seq2_align_len = curr_seq2_index;
-        //             *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
-        //         }
-        //         else {
-        //             max_score[d] = max_score[d - 1];
-        //         }
-        // ```
         // `curr_seq2_index` is the value stored in the cell of `curr_diag` when it raised
         // `curr_extent`; this distance writes each cell once, so the cell still holds it. No
         // diagonal raised it when `curr_diag` is still 0 (every diagonal is at least 1).
@@ -664,21 +478,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:639-662
-        // ```c
-        //         if (diag_lower > diag_upper) {
-        //             converged = TRUE;
-        //             break;
-        //         }
-        // ...
-        //         if (!end2_reached)
-        //             diag_lower--;
-        //         if (!end1_reached)
-        //             diag_upper++;
-        // ...
-        //         if (edit_block == NULL) {
-        // ...
-        //             last_seq2_off[d + 1] = last_seq2_off[d - 1];
-        // ```
         if hot.diag_lower > hot.diag_upper {
             converged = true;
             break;
@@ -699,17 +498,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
     out.seed_start_s = cold.seed_start_s;
     out.seed_match_length = hot.longest_match_run;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:574-576,682-686
-    // ```c
-    //             if(fence_hit && *fence_hit){
-    //             	return 0;
-    //             }
-    // ...
-    //     if (!converged)
-    //         return -1;
-    //
-    //     if (edit_block == NULL)
-    //         return best_dist;
-    // ```
     if cold.fence_hit {
         out.fence_hit = true;
         return 0;
@@ -721,9 +509,6 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509
-/// ```c
-///     for (d = 1; d <= max_dist; d++) {
-/// ```
 /// The same integer code as `x_fused_plain`, so the same result as the C loop; the compiler may
 /// only use other instructions (`tzcnt` / `lzcnt`).
 ///
@@ -745,9 +530,6 @@ unsafe fn x_fused_avx2(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509
-/// ```c
-///     for (d = 1; d <= max_dist; d++) {
-/// ```
 /// The build for any CPU; `reverse` chooses the instance (the C `reverse` argument).
 ///
 /// SAFETY: as `x_fused_loop`.
@@ -767,9 +549,6 @@ unsafe fn x_fused_plain(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509
-/// ```c
-///     for (d = 1; d <= max_dist; d++) {
-/// ```
 /// Picks the AVX2 or the plain build of the same loop (the CPU is checked once, the choice is
 /// made once per call). Both give the result of the C loop; this is a choice of machine code.
 ///
@@ -828,16 +607,6 @@ fn x_fused_on(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:498-509
-/// ```c
-///     last_seq2_off[0][diag_origin] = seq1_index;
-///     max_score[0] = seq1_index * match_cost;
-///     diag_lower = diag_origin - 1;
-///     diag_upper = diag_origin + 1;
-///     end1_reached = end2_reached = FALSE;
-///
-///     /* for each distance */
-///     for (d = 1; d <= max_dist; d++) {
-/// ```
 /// The fused loop in `blast_greedy_align`, after the lines above. `None`: the loop of
 /// `blast_greedy_align` runs (a case this module does not take, module doc). `Some(value)`: the call's return value; the
 /// outputs, rows and `max_score` hold what the ported loop leaves.
@@ -1121,17 +890,6 @@ mod tests {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509-537,682-686
-    /// ```c
-    ///     for (d = 1; d <= max_dist; d++) {
-    /// ...
-    ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-    /// ...
-    ///     if (!converged)
-    ///         return -1;
-    ///
-    ///     if (edit_block == NULL)
-    ///         return best_dist;
-    /// ```
     /// Sequences of calls on one scratch per path, so that the cells earlier calls left matter:
     /// `x_greedy_row` (a call with an edit block runs it), this module in the AVX2 build and in
     /// the plain build. After every call: the same return value, align lengths, seed and
@@ -1219,16 +977,6 @@ mod tests {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331-334,356-359,571-576
-    /// ```c
-    ///             if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
-    ///                 ASSERT(fence_hit);
-    ///                 *fence_hit = TRUE;
-    ///             }
-    /// ...
-    ///             if(fence_hit && *fence_hit){
-    ///             	return 0;
-    ///             }
-    /// ```
     /// A fence inside the loop, reached by a slide that stops within eight positions (the
     /// eight-byte test), by a slide of eight or more, and with fewer than eight positions left:
     /// 0 and `fence_hit` at once, with the `max_score`, align lengths and seed `x_greedy_row`

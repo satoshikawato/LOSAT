@@ -1,0 +1,82 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          132     3e-39
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       23.1    2.2  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.3    3.6  
+
+
+
+Query_1  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+52       4    .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN....ELTET...S.QT  63
+
+Query_1  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQ  129
+52       64   .RD.VAT.V---.SY.DTSNY.Y.F.......S..ATCKDW.I....VTV.....NYE..  121
+                                                 \                        
+                                                 |                        
+                                                 G
+
+Query_1  130  MFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACR  189
+52       122  L.PSVI..I.ICDK.E..SAV....SLTK.YL.YNNTGDD.HHKYDM....T.T.C.V.I  186
+                                       \                                  
+                                       |                                  
+                                   NKNEA
+2        374                                                 .P.LSDV.GQEFK  386
+
+Query_1  190  DCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKL  248
+52       187  G.                                                           188
+2        387  NL.E.YE.---E..VRI---------.IE.RK..H.LA.AKL.TPFI..K...N.      435
+                                                        \        \       
+                                                        |        |       
+                                                       ET     TINY
+68       273                                       H.KF.P..WIY..PSL.NLS..  294
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

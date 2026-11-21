@@ -90,6 +90,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    filtering_db: str
+    """BLAST database containing filtering elements (i.e.: repeats)"""
     window_masker_taxid: int
     """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
@@ -347,6 +349,10 @@ class TblastnOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -449,6 +455,10 @@ class TblastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool

@@ -155,6 +155,36 @@ fn the_reader_gives_the_stored_masks_of_each_sequence() {
     assert_eq!(SearchMask::of(None), None);
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1539, 1672
+// A nucleotide's copied fetch writes ncbi4na B over every masked base after its ambiguities, in
+// the order of the protein letters' masks (masks of no letter at 0 skipped, one past the end cut,
+// a later mask out of order applied, the masks from the first that starts at or past the end on
+// not read); the packed bases stay those the preliminary stage reads.
+#[test]
+fn hard_masked_bases_are_b_over_the_ambiguities() {
+    let store =
+        crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(b"ACGTNACGTRACGT")
+            .unwrap();
+    let letters = |store: &crate::sequence::packed_subject::PackedNucleotide| {
+        let mut out = Vec::new();
+        store.ascii_into(&mut out);
+        String::from_utf8(out).unwrap()
+    };
+    assert_eq!(letters(&store), "ACGTNACGTRACGT");
+    let masked = mask_nucleotide_store(&store, &[(0, 0), (1, 3), (4, 6), (12, 20), (0, 1)]);
+    assert_eq!(letters(&masked), "BBBTBBCGTRACBB");
+    assert_eq!(masked.packed(), store.packed());
+    assert_eq!(masked.len(), store.len());
+    // A mask that starts at the end stops the others; no masks change nothing.
+    let masked = mask_nucleotide_store(&store, &[(14, 15), (0, 2)]);
+    assert_eq!(letters(&masked), "ACGTNACGTRACGT");
+    assert_eq!(
+        letters(&mask_nucleotide_store(&store, &[])),
+        "ACGTNACGTRACGT"
+    );
+    assert_eq!(HARD_MASK_NUCLEOTIDE_CODE, 14);
+}
+
 /// A pairwise row of query `q_idx` with subject rank `s_idx` over the subject's letters
 /// `s_start..=s_end` (1-based).
 fn row(

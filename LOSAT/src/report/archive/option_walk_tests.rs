@@ -737,6 +737,11 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[],
         ),
         ("db", &[], &[]),
+        // The database masks (series NP, M4b PR 2) are program options of the database, written
+        // where the formatter resolves them (`common::database::note_archive_database_masking`),
+        // not from the command line's options.
+        ("db_soft_mask", &["-db_soft_mask", "11"], &[]),
+        ("db_hard_mask", &["-db_hard_mask", "11"], &[]),
         (
             "dbsize",
             &["-dbsize", "1000000"],

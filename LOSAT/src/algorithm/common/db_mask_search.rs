@@ -24,10 +24,11 @@ use anyhow::Result;
 use crate::blastinput::db_mask::{MaskKind, ResolvedMask};
 use crate::core::subject_split::{complement_masks, HardChunk, HardSplitState};
 use crate::report::pairwise::PairwiseHit;
-use crate::seqdb::{BlockMasks, BlockRange, MaskBlock, SeqDb, SeqDbError};
+use crate::seqdb::{AmbiguityRun, BlockMasks, BlockRange, MaskBlock, SeqDb, SeqDbError};
 use crate::seqid::defline_set::ordered_key;
 use crate::seqid::model::{Dbtag, ObjectId};
 use crate::seqid::ParsedSeqId;
+use crate::sequence::packed_subject::PackedNucleotide;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1631-1636
 // A protein's copied fetch writes the letter 21 over every masked residue of the slice it reads
@@ -229,6 +230,43 @@ pub(crate) fn mask_protein_letters(residues: &mut [u8], masks: &[(u32, u32)]) {
         }
         i += 1;
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1539, 1672
+// A nucleotide's copied fetch writes ncbi4na B (C, G or T) over every masked base after its
+// ambiguities.
+/// ncbi4na `B` (14): the code of every masked base in NCBI's fetches of a nucleotide database
+/// sequence after the preliminary stage of a search with `-db_hard_mask` (TBLASTN, TBLASTX).
+pub(crate) const HARD_MASK_NUCLEOTIDE_CODE: u8 = 14;
+
+/// The store `store` of a nucleotide database sequence as NCBI's fetches after the preliminary
+/// stage read it with `-db_hard_mask`: its ambiguity runs, then [`HARD_MASK_NUCLEOTIDE_CODE`] over
+/// the bases that the stored masks `masks` cover, taken in the order of
+/// [`mask_protein_letters`] (masks past the sequence are cut at its end). The packed bases are
+/// the store's: the preliminary stage reads them unmasked.
+pub(crate) fn mask_nucleotide_store(
+    store: &PackedNucleotide,
+    masks: &[(u32, u32)],
+) -> PackedNucleotide {
+    let end = store.len();
+    let mut runs = store.ambiguity_runs().to_vec();
+    let mut i = 0;
+    while i < masks.len() && masks[i].1 == 0 {
+        i += 1;
+    }
+    while i < masks.len() && (masks[i].0 as usize) < end {
+        let from = masks[i].0;
+        let to = (masks[i].1 as usize).min(end) as u32;
+        if from < to {
+            runs.push(AmbiguityRun {
+                offset: from,
+                length: to - from,
+                ncbi4na: HARD_MASK_NUCLEOTIDE_CODE,
+            });
+        }
+        i += 1;
+    }
+    PackedNucleotide::x_from_stored_buffer(store.packed().to_vec(), end, &runs)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1586-1601 and

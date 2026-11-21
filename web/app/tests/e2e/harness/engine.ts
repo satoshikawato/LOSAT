@@ -416,7 +416,7 @@ export async function retention(
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -504,7 +504,7 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();

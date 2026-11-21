@@ -266,6 +266,8 @@ pub struct OptionInputs {
     pub seg: Option<Filter>,
     /// `-dust` (BLASTN), only when given.
     pub dust: Option<Filter>,
+    /// `-filtering_db` (BLASTN) as given.
+    pub filtering_db: Option<String>,
     /// `-window_masker_db` (BLASTN) as given.
     pub window_masker_db: Option<String>,
     /// `-window_masker_taxid` (BLASTN) as given.
@@ -337,6 +339,7 @@ impl OptionInputs {
             soft_masking: None,
             seg: None,
             dust: None,
+            filtering_db: None,
             window_masker_db: None,
             window_masker_taxid: None,
             threshold: None,
@@ -762,6 +765,13 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         }
                         Filter::Seg { .. } => {}
                     }
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:432-435
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1332-1339
+                // (`SetRepeatFilteringDB`: the name as given, an empty one too; the handler sets
+                // no `RepeatFiltering` boolean.)
+                if let Some(database) = &inputs.filtering_db {
+                    list.set("RepeatFilteringDB", Str(database.clone()));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads

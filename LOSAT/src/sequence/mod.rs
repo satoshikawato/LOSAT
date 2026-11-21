@@ -6,6 +6,7 @@
 pub mod packed_letters;
 pub mod packed_subject;
 pub(crate) mod stdaa_letters;
+pub(crate) mod title;
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the

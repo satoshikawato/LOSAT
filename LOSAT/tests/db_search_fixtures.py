@@ -303,13 +303,41 @@ def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None
     return names.split("+"), dropped, replaced, (alias if at else None)
 
 
-def inflate_rps(cell: str) -> Path:
+DB_DIR_LEN_FILE = TESTS / "db_search" / "rps" / "db_dir_len.txt"
+
+
+def db_dir_len() -> int:
+    """The length of a `{db_dir}` directory's path in the rows that keep it (`inflate_rps`); the
+    file is read by `wording::tests::archive_messages_are_wrapped_again_as_ncbi_wraps_them` too."""
+    return int(DB_DIR_LEN_FILE.read_text())
+
+
+def temp_dir_of_length(prefix: str, length: int) -> Path:
+    """A fresh directory under the temporary directory (links resolved; `/tmp` or `/var/tmp` when that
+    path is too long) whose path is exactly `length` characters: the name's prefix is lengthened. The
+    wraps of an ASN.1 message that holds the path (NCBI's RPS errors in an archive) depend on its
+    length, so a frozen `{db_dir}` stands for one."""
+    random_part = 8  # `tempfile.mkdtemp` appends eight random characters.
+    parents = [Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve(), Path("/var/tmp").resolve()]
+    for parent in parents:
+        pad = length - len(str(parent)) - len(os.sep) - len(prefix) - random_part
+        if pad >= 0 and parent.is_dir():
+            target = Path(tempfile.mkdtemp(prefix=prefix + "p" * pad, dir=parent))
+            if len(str(target)) != length:
+                raise SystemExit(f"{target} has {len(str(target))} characters, not {length}")
+            return target
+    raise SystemExit(f"no temporary directory of {[str(p) for p in parents]} is short enough for a directory path "
+                     f"of {length} characters")
+
+
+def inflate_rps(cell: str, token: bool = False) -> Path:
     """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
     files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
-    leaves out or replaces, and the cell's alias file."""
+    leaves out or replaces, and the cell's alias file. With `token` (the row keeps the directory as
+    `{db_dir}`, `rps_dir_token`) its path has `db_dir_len()` characters."""
     names, dropped, replaced, alias = rps_cell(cell)
     rps_dir = TESTS / "db_search" / "rps"
-    target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
+    target = temp_dir_of_length("rps_db_", db_dir_len()) if token else Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
         sub, _, name = name.rpartition("/")
         into = target / sub
@@ -1022,7 +1050,7 @@ def freeze(args: argparse.Namespace) -> int:
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
     """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
     written as `{db_dir}` where the row says so."""
-    db_dir = inflate_rps(row["db"])
+    db_dir = inflate_rps(row["db"], rps_dir_token(row))
     try:
         run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
                          env={**row_env(row, env), "BLASTDB": str(db_dir)})
@@ -1070,7 +1098,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
-    db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
+    db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
     if db_dir is not None:
         try:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,

@@ -675,6 +675,24 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
+        unreadable_query: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding)
+            .map(|_| crate::report::pairwise::UnreadableQuery {
+                oids: listed_subjects
+                    .as_ref()
+                    .zip(database)
+                    .map(|(listed, database)| {
+                        let oids = database.oid_map();
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(|&ordinal| oids.oid(ordinal).get())
+                            .collect()
+                    }),
+            }),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).

@@ -76,9 +76,9 @@ pub(super) struct BlastpTabular<'a> {
     /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
     /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
     pub engine_counts: &'a super::seqalign::EngineCounts,
-    /// The query's molecule is `other` (`PsiSearch::query_mol_other`): the first row that reads
+    /// The query's molecule is `other` (`PsiSearch::query_other_coding`): the first row that reads
     /// the query's letters ends the run (`report::tabular::query_sequence_end`).
-    pub query_mol_other: bool,
+    pub query_other_coding: Option<i32>,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -747,8 +747,10 @@ fn write_tabular_rows<const RPS: bool>(
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
             for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
-                if tab.query_mol_other && spec.reads_sequences() {
-                    return Err(crate::report::tabular::query_sequence_end(writer, &buf));
+                if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer, &buf, coding,
+                    ));
                 }
                 // The Seq-align's `num_ident` (the engine's count where the reports' recount
                 // replaced it, `BlastpTabular::engine_counts`).

@@ -1124,3 +1124,16 @@ fn end_gaps_are_spaces_in_the_rows_and_btop() {
     write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
     assert_eq!(out, b"4K-");
 }
+
+/// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's
+/// object manager converts it to the coding 1).
+#[test]
+fn the_sequence_exception_names_the_codings_of_the_query() {
+    for coding in [2, 8, 10] {
+        let message = query_sequence_exception(coding).get_msg().to_vec();
+        assert_eq!(
+            message,
+            format!("Incompatible sequence codings: {coding} -> 1").into_bytes()
+        );
+    }
+}

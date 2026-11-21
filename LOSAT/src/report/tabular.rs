@@ -1586,11 +1586,12 @@ const NA: &[u8] = b"N/A";
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:548
 /// The exception that ends a tabular report at its first row when the query's Bioseq has the
 /// molecule `other` (psiblast's `-in_msa` with `[molecule=other]`, or `-in_pssm` of such a PSSM):
-/// the object manager reads the query's iupacaa letters as the coding of a nucleotide sequence
-/// (`Incompatible sequence codings: 2 -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
+/// the object manager reads the query's letters of the coding number `coding` (iupacaa 2, ncbieaa 8,
+/// ncbistdaa 10) as the coding of a nucleotide sequence
+/// (`Incompatible sequence codings: <coding> -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
 /// are read ([`TabularSpec::reads_sequences`]). The report's text before the row stays; the run
 /// ends with NCBI's exception (exit status 255).
-pub fn query_sequence_exception() -> crate::ncbi_exception::NcbiException {
+pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiException {
     crate::ncbi_exception::NcbiException::new(
         crate::ncbi_exception::ThrowSite {
             file: "src/objmgr/seq_vector_ci.cpp",
@@ -1598,18 +1599,18 @@ pub fn query_sequence_exception() -> crate::ncbi_exception::NcbiException {
             kind: "CSeqVectorException::eCodingError",
             function: Some("ncbi::objects::CSeqVector_CI::x_FillCache"),
         },
-        "Incompatible sequence codings: 2 -> 1",
+        format!("Incompatible sequence codings: {coding} -> 1"),
     )
 }
 
 /// The end of a report at a row that reads the letters of a query whose molecule is `other`
 /// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
 /// flushed, and the exception is the run's error.
-pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8]) -> anyhow::Error {
+pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
     if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
         return error.into();
     }
-    crate::cli::NativeError::exception(&query_sequence_exception()).into()
+    crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of

@@ -96,7 +96,7 @@ fn report(
         taxdb_found: false,
         names: None,
         engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
-        query_mol_other: false,
+        query_other_coding: None,
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let before = [crate::report::diag_log::Posts::of_lines(

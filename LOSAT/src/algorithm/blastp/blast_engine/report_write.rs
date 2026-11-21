@@ -993,10 +993,10 @@ pub(super) fn write_custom_tabular(
         },
         names: names.as_ref(),
         engine_counts,
-        query_mol_other: args
+        query_other_coding: args
             .psi_search
             .as_ref()
-            .is_some_and(|search| search.query_mol_other),
+            .and_then(|search| search.query_other_coding),
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's
     // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
@@ -1095,7 +1095,7 @@ pub(super) fn write_text(
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
         args.psi_search
             .as_ref()
-            .is_some_and(|search| search.query_mol_other),
+            .and_then(|search| search.query_other_coding),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

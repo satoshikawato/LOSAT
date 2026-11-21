@@ -110,8 +110,8 @@ pub(crate) fn check_in_pssm_options(
     // (`Sequence with id <id> no longer exists in database...alignment skipped`, as where its
     // heading throws, `report::pairwise::write_skipped_alignment`); LOSAT's alignments of outfmt 0
     // do not know that line's id for each subject yet (the tabular formats are ported,
-    // `BlastpTabular::query_mol_other`).
-    if psi.query_mol_other && outfmts.contains(&0) {
+    // `BlastpTabular::query_other_coding`).
+    if psi.query_other_coding.is_some() && outfmts.contains(&0) {
         bail!(
             "output format 0 with a PSSM query whose molecule type is other (NCBI BLAST+ writes a line in place of each alignment, which LOSAT does not yet) is not supported by LOSAT's PSIBLAST"
         );

@@ -13,6 +13,165 @@ Database: multidb na; multidb nnp
 
 
 
+Query= pfo_f the letters of multidb/na's ENST00000335295.4 (HBB)
+
+Length=628
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+ENST00000335295.4 Unknown                                             508     9e-148  1
+ENST00000396895.3 Unknown                                             283     2e-82   3
+ENST00000336906.6 Unknown                                             282     1e-79   1
+ENST00000292901.8 Unknown                                             277     4e-78   1
+ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-...  192     1e-52   1
+ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-...  173     8e-47   1
+ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:...  172     1e-46   1
+ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  102     1e-30   2
+ENSTTEST0001.1 copy of record 1                                       102     9e-30   3
+ENST00000251595.11 Unknown                                            102     9e-30   3
+ENST00000320868.9 Unknown                                             102     9e-30   3
+ENSDART00000113098.5 Unknown                                          90.9    4e-29   2
+ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  90.4    4e-28   2
+
+
+Sequence with id ENST00000335295.4 no longer exists in database...alignment skipped
+Sequence with id ENST00000396895.3 no longer exists in database...alignment skipped
+Sequence with id ENST00000336906.6 no longer exists in database...alignment skipped
+Sequence with id ENST00000292901.8 no longer exists in database...alignment skipped
+>ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-1 
+gene:ENSDARG00000069734.5 gene_biotype:protein_coding 
+transcript_biotype:protein_coding gene_symbol:hbba2 description:hemoglobin, 
+beta adult 2 [Source:ZFIN;Acc:ZDB-GENE-040801-164]
+Length=650
+
+ Score = 192 bits (414),  Expect = 1e-52
+ Identities = 74/147 (50%), Positives = 106/147 (72%), Gaps = 0/147 (0%)
+ Frame = +3/+3
+
+Query  48   TMVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNP  227
+            TMV  +  E+  + ++W K+NVDE+G + L R+LVVYPWTQR+F +FGDLS   A+MGNP
+Sbjct  129  TMVQWSDSERKTIASVWSKINVDEIGPQTLARVLVVYPWTQRYFGAFGDLSCASAIMGNP  308
+
+Query  228  KVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHF  407
+            KV  HGK VL A    + ++D++K T+A LS+LHC+KL+VDP+NF+LL + L  V+A +F
+Sbjct  309  KVSEHGKTVLKALEKAVKNVDDIKTTYAKLSQLHCEKLNVDPDNFKLLADCLSIVIATNF  488
+
+Query  408  GKEFTPPVQAAYQKVVAGVANALAHKY  488
+            G  F P VQ+ +QK+++ V  AL  +Y
+Sbjct  489  GPAFNPSVQSTWQKLLSVVVAALTSRY  569
+
+
+>ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-1 
+gene:ENSDARG00000089087.7 gene_biotype:protein_coding 
+transcript_biotype:protein_coding gene_symbol:hbba1 description:hemoglobin, 
+beta adult 1 [Source:ZFIN;Acc:ZDB-GENE-990415-18]
+Length=667
+
+ Score = 173 bits (372),  Expect = 8e-47
+ Identities = 64/121 (53%), Positives = 90/121 (74%), Gaps = 0/121 (0%)
+ Frame = +3/+3
+
+Query  51   MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPK  230
+            MV  T  E++A+  LWGK+N+DE+G +AL R L+VYPWTQR+F +FG+LS+P A+MGNPK
+Sbjct  108  MVEWTDAERTAILGLWGKLNIDEIGPQALSRCLIVYPWTQRYFATFGNLSSPAAIMGNPK  287
+
+Query  231  VKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFG  410
+            V AHG+ V+G     + ++DN+K T+A LS +H +KLHVDP+NFRLL + +    A  FG
+Sbjct  288  VAAHGRTVMGGLERAIKNMDNVKNTYAALSVMHSEKLHVDPDNFRLLADCITVCAAMKFG  467
+
+Query  411  K  413
+            +
+Sbjct  468  Q  470
+
+
+>ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:-1 
+gene:ENSDARG00000045143.5 gene_biotype:protein_coding 
+transcript_biotype:protein_coding gene_symbol:hbbe2 description:hemoglobin 
+beta embryonic-2 [Source:ZFIN;Acc:ZDB-GENE-040702-1]
+Length=590
+
+ Score = 172 bits (371),  Expect = 1e-46
+ Identities = 72/150 (48%), Positives = 102/150 (68%), Gaps = 0/150 (0%)
+ Frame = +3/+2
+
+Query  45   DTMVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGN  224
+            + MV  T EE++ +  ++ K+N +E G +AL R L+VYPWTQR+F SFG+L   +A++ N
+Sbjct  71   NNMVAWTAEERAFIQDIFSKLNYEEAGPKALQRALIVYPWTQRYFGSFGNLYNAEAIINN  250
+
+Query  225  PKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHH  404
+            PKV AHG  VL      + ++D++K T+A LS LH +KLHVDP+NFRLL + L  V+A  
+Sbjct  251  PKVAAHGTVVLHGLDRAMKNMDDIKNTYAELSVLHSEKLHVDPDNFRLLADCLTIVIAST  430
+
+Query  405  FGKEFTPPVQAAYQKVVAGVANALAHKYH*  494
+             G  FT  +QAA+QK +A V +AL  +YH*
+Sbjct  431  MGAAFTADMQAAWQKFLAVVVSALQRQYH*  520
+
+
+>ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 
+gene:ENSDARG00000069735.5 gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa2 description:hemoglobin, 
+alpha adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
+Length=564
+
+ Score = 102 bits (217),  Expect(2) = 1e-30
+ Identities = 43/99 (43%), Positives = 64/99 (65%), Gaps = 0/99 (0%)
+ Frame = +3/+3
+
+Query  204  PDAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVL  383
+            PD  +G+ +VK HGK V+GA +D +  +D+L G  ++LS+LH  KL VDP NF++L + +
+Sbjct  183  PDHSLGSAQVKKHGKIVMGAITDAVGKIDDLLGALSSLSDLHATKLRVDPGNFKILSHNI  362
+
+Query  384  VCVLAHHFGKEFTPPVQAAYQKVVAGVANALAHKYH*AR  500
+            +  LA HF  +FT  V  A  K +A ++ ALA KY * +
+Sbjct  363  LVTLAVHFPADFTAEVHVAVDKFLAALSAALADKYR*TQ  479
+
+
+>ENSTTEST0001.1 copy of record 1
+Length=577
+
+ Score = 102 bits (218),  Expect(3) = 9e-30
+ Identities = 44/97 (45%), Positives = 60/97 (62%), Gaps = 0/97 (0%)
+ Frame = +3/+2
+
+Query  207  DAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLV  386
+            D   G+ +VK HGKKV  A ++ +AH+D++    + LS+LH  KL VDP NF+LL + L+
+Sbjct  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
+
+Query  387  CVLAHHFGKEFTPPVQAAYQKVVAGVANALAHKYH*A  497
+              LA H   EFTP V A+  K +A V+  L  KY *A
+Sbjct  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*A  469
+
+
+Sequence with id ENST00000251595.11 no longer exists in database...alignment skipped
+Sequence with id ENST00000320868.9 no longer exists in database...alignment skipped
+Sequence with id ENSDART00000113098.5 no longer exists in database...alignment skipped
+>ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 
+gene:ENSDARG00000089475.6 gene_biotype:protein_coding 
+transcript_biotype:protein_coding gene_symbol:hbae1.1 description:hemoglobin, 
+alpha embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
+Length=633
+
+ Score = 90.4 bits (191),  Expect(2) = 4e-28
+ Identities = 40/108 (37%), Positives = 62/108 (57%), Gaps = 0/108 (0%)
+ Frame = +3/+2
+
+Query  207  DAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLV  386
+            D   G+  V+ HGK V+G  ++ ++ +D+L      LSELH  +L VDP NF++L + ++
+Sbjct  236  DLSPGSAPVRKHGKTVMGGVAEAVSKIDDLNAGLLNLSELHAFQLRVDPANFKILSHNIL  415
+
+Query  387  CVLAHHFGKEFTPPVQAAYQKVVAGVANALAHKYH*ARFLAVQFLLKV  530
+             VLA  F  +FTP    A  K ++ +A A++ KY *  F  +Q L  V
+Sbjct  416  VVLATLFPADFTPEAHVAMDKFLSALALAMSEKYR*THFTVLQTLCYV  559
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 627992
+
+
 Query= mix2_u glob1 of multidb/nnp (no accession table)
 
 Length=1043
@@ -63,163 +222,6 @@ Lambda      K        H
 
 
 Effective search space used: 1090116
-
-
-Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
-gene:ENSG00000206172.10 gene_biotype:protein_coding
-transcript_biotype:protein_coding gene_symbol:HBA1
-description:hemoglobin subunit alpha 1 [Source:HGNC
-Symbol;Acc:HGNC:4823]
-
-Length=577
-                                                                      Score     E
-Sequences producing significant alignments:                          (Bits)  Value   N
-
-ENSTTEST0001.1 copy of record 1                                       460     3e-133  1
-ENST00000320868.9 Unknown                                             460     3e-133  1
-ENST00000251595.11 Unknown                                            401     5e-116  2
-ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  141     1e-47   2
-ENSDART00000113098.5 Unknown                                          125     5e-45   2
-ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  121     6e-43   2
-ENST00000335295.4 Unknown                                             102     3e-28   2
-ENST00000336906.6 Unknown                                             107     5e-27   1
-ENST00000396895.3 Unknown                                             96.8    8e-24   1
-ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-...  91.8    3e-22   1
-ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:...  81.7    3e-19   1
-ENST00000292901.8 Unknown                                             64.3    7e-18   2
-ENST00000652335.1 Unknown                                             74.4    5e-17   1
-ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-...  63.4    1e-13   1
-
-
->ENSTTEST0001.1 copy of record 1
-Length=577
-
- Score = 460 bits (998),  Expect = 3e-133
- Identities = 192/192 (100%), Positives = 192/192 (100%), Gaps = 0/192 (0%)
- Frame = +2/+2
-
-Query  2    LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD  181
-            LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD
-Sbjct  2    LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD  181
-
-Query  182  LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV  361
-            LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV
-Sbjct  182  LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV  361
-
-Query  362  TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY  541
-            TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY
-Sbjct  362  TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY  541
-
-Query  542  PRGL*IKSEWAA  577
-            PRGL*IKSEWAA
-Sbjct  542  PRGL*IKSEWAA  577
-
-
-Sequence with id ENST00000320868.9 no longer exists in database...alignment skipped
-Sequence with id ENST00000251595.11 no longer exists in database...alignment skipped
->ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 
-gene:ENSDARG00000069735.5 gene_biotype:protein_coding transcript_biotype:protein_coding 
-gene_symbol:hbaa2 description:hemoglobin, 
-alpha adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
-Length=564
-
- Score = 141 bits (303),  Expect(2) = 1e-47
- Identities = 63/101 (62%), Positives = 76/101 (75%), Gaps = 0/101 (0%)
- Frame = +2/+3
-
-Query  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
-            D S GSAQVK HGK V  A+T+AV  +DD+  ALS+LSDLHA KLRVDP NFK+LSH +L
-Sbjct  186  DHSLGSAQVKKHGKIVMGAITDAVGKIDDLLGALSSLSDLHATKLRVDPGNFKILSHNIL  365
-
-Query  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASV  481
-            VTLA H PA+FT  VH ++DKFLA++S  L  KYR*   S+
-Sbjct  366  VTLAVHFPADFTAEVHVAVDKFLAALSAALADKYR*TQNSL  488
-
-
-Sequence with id ENSDART00000113098.5 no longer exists in database...alignment skipped
->ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 
-gene:ENSDARG00000089475.6 gene_biotype:protein_coding 
-transcript_biotype:protein_coding gene_symbol:hbae1.1 description:hemoglobin, 
-alpha embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
-Length=633
-
- Score = 121 bits (259),  Expect(2) = 6e-43
- Identities = 52/105 (50%), Positives = 71/105 (68%), Gaps = 0/105 (0%)
- Frame = +2/+2
-
-Query  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
-            DLS GSA V+ HGK V   +  AV+ +DD+   L  LS+LHA +LRVDP NFK+LSH +L
-Sbjct  236  DLSPGSAPVRKHGKTVMGGVAEAVSKIDDLNAGLLNLSELHAFQLRVDPANFKILSHNIL  415
-
-Query  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLL  493
-            V LA   PA+FTP  H ++DKFL++++  ++ KYR*   +V   L
-Sbjct  416  VVLATLFPADFTPEAHVAMDKFLSALALAMSEKYR*THFTVLQTL  550
-
-
-Sequence with id ENST00000335295.4 no longer exists in database...alignment skipped
-Sequence with id ENST00000336906.6 no longer exists in database...alignment skipped
-Sequence with id ENST00000396895.3 no longer exists in database...alignment skipped
->ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-1 
-gene:ENSDARG00000069734.5 gene_biotype:protein_coding 
-transcript_biotype:protein_coding gene_symbol:hbba2 description:hemoglobin, 
-beta adult 2 [Source:ZFIN;Acc:ZDB-GENE-040801-164]
-Length=650
-
- Score = 91.8 bits (194),  Expect = 3e-22
- Identities = 40/90 (44%), Positives = 54/90 (60%), Gaps = 0/90 (0%)
- Frame = +2/+3
-
-Query  191  GSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA  370
-            G+ +V  HGK V  AL  AV +VDD+    + LS LH  KL VDP NFKLL+ CL + +A
-Sbjct  300  GNPKVSEHGKTVLKALEKAVKNVDDIKTTYAKLSQLHCEKLNVDPDNFKLLADCLSIVIA  479
-
-Query  371  AHLPAEFTPAVHASLDKFLASVSTVLTSKY  460
-             +    F P+V ++  K L+ V   LTS+Y
-Sbjct  480  TNFGPAFNPSVQSTWQKLLSVVVAALTSRY  569
-
-
->ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:-1 
-gene:ENSDARG00000045143.5 gene_biotype:protein_coding 
-transcript_biotype:protein_coding gene_symbol:hbbe2 description:hemoglobin 
-beta embryonic-2 [Source:ZFIN;Acc:ZDB-GENE-040702-1]
-Length=590
-
- Score = 81.7 bits (172),  Expect = 3e-19
- Identities = 37/89 (42%), Positives = 54/89 (61%), Gaps = 0/89 (0%)
- Frame = +2/+2
-
-Query  200  QVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHL  379
-            +V  HG  V   L  A+ ++DD+ N  + LS LH+ KL VDP NF+LL+ CL + +A+ +
-Sbjct  254  KVAAHGTVVLHGLDRAMKNMDDIKNTYAELSVLHSEKLHVDPDNFRLLADCLTIVIASTM  433
-
-Query  380  PAEFTPAVHASLDKFLASVSTVLTSKYR*  466
-             A FT  + A+  KFLA V + L  +Y *
-Sbjct  434  GAAFTADMQAAWQKFLAVVVSALQRQYH*  520
-
-
-Sequence with id ENST00000292901.8 no longer exists in database...alignment skipped
-Sequence with id ENST00000652335.1 no longer exists in database...alignment skipped
->ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-1 
-gene:ENSDARG00000089087.7 gene_biotype:protein_coding 
-transcript_biotype:protein_coding gene_symbol:hbba1 description:hemoglobin, 
-beta adult 1 [Source:ZFIN;Acc:ZDB-GENE-990415-18]
-Length=667
-
- Score = 63.4 bits (132),  Expect = 1e-13
- Identities = 25/60 (42%), Positives = 39/60 (65%), Gaps = 0/60 (0%)
- Frame = +2/+3
-
-Query  191  GSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA  370
-            G+ +V  HG+ V   L  A+ ++D++ N  +ALS +H+ KL VDP NF+LL+ C+ V  A
-Sbjct  276  GNPKVAAHGRTVMGGLERAIKNMDNVKNTYAALSVMHSEKLHVDPDNFRLLADCITVCAA  455
-
-
-
-Lambda      K        H
-   0.318    0.134    0.401 
-
-
-Effective search space used: 576240
 
 
   Database: multidb na

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only | --pfoff3-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -147,6 +147,16 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   throw in a list with `nut`, then twice the letters of the query of mix2_q.fna that hits `nnp`/`nut` alone, whose two
   HSPs turn its batch's prefetch off at `PRE_FETCH_SEQS_LIMIT=1`, so that its rows load the subject and look its name
   up. `make_multidb.py --pfoff2-only MAKEBLASTDB` builds only these.
+- `pf3p`, `pf3u`, `pfo_qr.faa` (line DBID pfoff-3, review 1 of the item, H1): `pf3p` (version 5, `-parse_seqids`)
+  holds `ref|XP_810001.1|`, two separated copies of segments of `pfo_qr.faa`, so its alignment has two HSPs; `pf3u`
+  (version 5, no accession table, taxid 9606) holds `bsub`, a mutated copy of one segment, weak enough that psiblast's
+  first round does not report it and its second round does. In the list `pf3p pf3u` with the prefetch off, psiblast's
+  second round shows the two-part description table of the first `-num_descriptions` HSPs: with 2, the two HSPs of
+  `XP_810001.1` (whose lookup throws) fill it, and `bsub` is neither shown nor loaded (no text of a damaged taxonomy
+  database); with 3 it is. `pfo_qm.faa` (review 2 of the item, L7) holds `mix2_qc.faa`'s `mix2_c` and then
+  `pfo_q.faa`'s `P69905.2`, whose reports on `pa noacc_v5` have 13 and 12 Seq-aligns: with `BATCH_SIZE=1
+  PRE_FETCH_SEQS_LIMIT=12` the first batch's prefetch is off and the second's on, and that prefetch throws.
+  `make_multidb.py --pfoff3-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -686,6 +696,40 @@ def make_pfoff2(binary):
                 f.write(query[at:at + 60] + "\n")
 
 
+def make_pfoff3(binary):
+    """Builds pf3p and pf3u and writes pfo_qr.faa and pfo_qm.faa (line DBID pfoff-3, reviews 1 and 2 of the item)."""
+    query = ("IWVCGTEYVGHAEKMQHNPTFNQPWRLSAHCDYAQSMWQKPMTSECEELMWDMVKHMFIVHQEPSSGAHKPKKKQQLQGPWWWINPNWRWMRIPNIQTLTVIHD"
+             "WWLNCHASYYTWFRYNVTKVDQQACCEEEYPPIRRFPWWHEELGPY")
+    copies = ("MRIPWIQTLTVIHDWWLNCHASYYTWFRYNVTKVDQQACCEEENPPIRRFPWWHEELGPYHGAMVYYLNPTPLFSCGQYPERIDYRRPDTIWVCGTEYVVHAEKMQ"
+              "HNPTFNQPWRLSAHCDYAQSMWQRPMTSECEELMWDTVKHMFIV")
+    weak = "EECSRDAVFYDGYKRSAFHRVWLECKSNDYVGCHMWEFSFTCFFPQSFGIAPHPATFVEGMFCSEVNCQWLDWCGREEGCAQLKRIHVHKWAKTM"
+    for name, header, letters, options in (
+            ("pf3p", ">ref|XP_810001.1| pfoff-3 two copies of segments of pfo_qr", copies, ["-parse_seqids"]),
+            ("pf3u", ">bsub pfoff-3 a subject with a taxid", weak, ["-taxid", "9606"])):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n")
+            for at in range(0, len(letters), 60):
+                f.write(letters[at:at + 60] + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", "prot", "-out", name, *options, "-blastdb_version", "5",
+                    "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + ".pjs"))
+    with open(os.path.join(HERE, "pfo_qr.faa"), "w") as f:
+        f.write(">pfo_r a query whose second psiblast round shows two HSPs of pf3p before pf3u's bsub\n")
+        for at in range(0, len(query), 60):
+            f.write(query[at:at + 60] + "\n")
+    records = []
+    for name, which in (("mix2_qc.faa", 1), ("pfo_q.faa", 0)):
+        with open(os.path.join(HERE, name)) as f:
+            parts = [[]]
+            for line in f:
+                if line.startswith(">"):
+                    parts.append([])
+                parts[-1].append(line)
+        records.append("".join(parts[which + 1]))
+    with open(os.path.join(HERE, "pfo_qm.faa"), "w") as f:
+        f.write("".join(records))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -761,6 +805,8 @@ if __name__ == "__main__":
         make_pfoff(sys.argv[2])
     elif sys.argv[1] == "--pfoff2-only":
         make_pfoff2(sys.argv[2])
+    elif sys.argv[1] == "--pfoff3-only":
+        make_pfoff3(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -777,3 +823,4 @@ if __name__ == "__main__":
         make_v4late(sys.argv[1])
         make_pfoff(sys.argv[1])
         make_pfoff2(sys.argv[1])
+        make_pfoff3(sys.argv[1])

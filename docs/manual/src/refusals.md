@@ -51,6 +51,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
+| `-outfmt 0` with a PSSM query (`-in_pssm` or `-in_msa`) whose molecule type is `other` | Refused: not yet supported. NCBI runs it as a protein search and writes a line (`Sequence with id <id> no longer exists in database...alignment skipped`) in place of each alignment. The tabular formats are as NCBI's. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |

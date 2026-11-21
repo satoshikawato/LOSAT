@@ -329,6 +329,10 @@ fn run_queries(
             match (&pssm, input_files.as_mut()) {
                 (Some(current), _) => write_round_pssm(args, &mut files, current, outputs)?,
                 (None, Some((asn, ascii, posts))) if round == 1 => {
+                    // NCBI's posts of the bytes replaced in the search strategy request (written
+                    // above, before round 1) come before those of the PSSM file that round 1
+                    // writes.
+                    super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     write_file_posts(args, posts, outputs)?;
                     // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
                     // that cannot be written stops the run here.

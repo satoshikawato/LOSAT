@@ -301,11 +301,7 @@ impl LookupFailure {
     pub fn exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
         let message = self.ncbi_message()?;
         let site = crate::seqdb::lookup_throw_site(message)?;
-        // Only the ASCII text of `lookup_throw_site` gets here: the conversion loses nothing.
-        Some(crate::ncbi_exception::NcbiException::new(
-            site,
-            String::from_utf8_lossy(message),
-        ))
+        Some(crate::ncbi_exception::NcbiException::new(site, message))
     }
 
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
@@ -354,14 +350,6 @@ pub struct HitDescription {
 
 impl ParsedSubject {
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:390-395
-    // ```c++
-    //     int oid = -1;
-    //
-    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
-    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
-    //         return -1;
-    //     }
-    // ```
     // NCBI's formatters find the subject's sequence again from its Seq-align id, by the lookup that
     // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
     // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
@@ -423,21 +411,7 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
-    // ```c++
-    //     // set ID
-    //     retval->SetInt().SetId().Assign(*FindBestChoice(itr->GetId(), CSeq_id::BestRank));
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:272-283
-    // ```c++
-    //     CRef<CBlast_def_line_set> bdlRef = CSeqDB::ExtractBlastDefline(handle);
-    //     const list< CRef< CBlast_def_line > > &bdl = (bdlRef.Empty()) ? list< CRef< CBlast_def_line > >() : bdlRef->Get();
-    //     ...
-    //     if(bdl.empty()){ //no blast defline struct, should be no such case now
-    //         //actually not so fast...as we now fetch from entrez even when it's not in blast db
-    //         //there is no blast defline in such case.
-    //         seqid = GetSeqIdListString(ids, show_gi);
-    //         defline = sequence::CDeflineGenerator().GenerateDefline(handle);
-    // ```
     /// The `-subject` record with the ids `ids` and the FASTA title `title` under
     /// `-parse_deflines`, as one definition line: its Bioseq has no Blast-def-line user object, so
     /// its titles are generated and `stitle` and `salltitles` are `N/A`, and NCBI's scope holds
@@ -470,16 +444,7 @@ impl ParsedSubject {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:484-498
-    // ```c++
-    //     if (sid_in->IsLocal()) {
-    //         string id_token;
-    //         vector<string> title_tokens;
-    //         title_tokens = NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
-    //         ...
-    //         if (id_token == NcbiEmptyString || parse_local) {
-    //             const CObject_id& obj_id = sid_in->GetLocal();
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-498
     /// Whether the outfmt 0, XML and archive reports show this `-subject` record as one read
     /// without `-parse_deflines` (a local id `Subject_N`, `BelievedIds::subject_local`); its
     /// `sall*` are still its own ids (`s_ReplaceLocalId` keeps a local id with `parse_local`).
@@ -488,29 +453,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-416
-    // ```c++
-    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
-    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
-    //         return -1;
-    //     }
-    //     _TRACE("Found '" << seqid->AsFastaString() << "' at OID " << oid);
-    //
-    //     // Test for deflines.  If the filtering eliminates the Seq-id we
-    //     // are interested in, we just pretend we don't know anything about
-    //     // this Seq-id.  If there are other data loaders installed, they
-    //     // will have an opportunity to resolve the Seq-id.
-    //
-    //     bool found = false;
-    //
-    //     IBlastDbAdapter::TSeqIdList filtered = m_BlastDb->GetSeqIDs(oid);
-    //
-    //     ITERATE(IBlastDbAdapter::TSeqIdList, id, filtered) {
-    //         if (seqid->Compare(**id) == CSeq_id::e_YES) {
-    //             found = true;
-    //             break;
-    //         }
-    //     }
-    // ```
     // NCBI's data loader serves the Bioseq of the first OID that `SeqidToOid` gives for the
     // Seq-align id (`seqdb::lookup::SeqidLookup::seqid_to_oid`), and only where one of that
     // sequence's ids compares equal to it: a version 5 database finds `gb|X|` under the key `X`,
@@ -563,19 +505,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1168
-    // ```c++
-    //         bool found_taxid_in_taxonomy_blastdb = true;
-    //         ...
-    //         try {
-    //             found_taxid_in_taxonomy_blastdb = tax_info.GetTaxNames(*taxid, namerecord);
-    //         }
-    //         catch (CSeqDBException &) {
-    //             found_taxid_in_taxonomy_blastdb = false;
-    //         }
-    //         ...
-    //         if (found_taxid_in_taxonomy_blastdb) {
-    //             org->SetTaxname().swap(namerecord.scientific_name);
-    // ```
     // A title made from the source (`x_SetTitleFromBioSrc`, of the first source of the Bioseq,
     // whose volume puts the target's taxids first) names the organism only where the taxonomy
     // database gives a name for the taxid; else NCBI writes the title of a Bioseq without one
@@ -613,52 +542,7 @@ impl ParsedSubject {
     /// lines the list keeps. `use_gi` is whether the Seq-align id is a GI.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:113-150
-    /// ```c++
-    /// void GetFilteredRedundantSeqids(const IBlastSeqInfoSrc & seqinfo_src,
-    ///                              int                      oid,
-    ///                              vector<string>            & seqids,
-    /// 			     bool			use_gi)
-    /// {
-    ///     seqids.resize(0);
-    ///
-    ///     if (! seqinfo_src.HasGiList()) {
-    ///         return;
-    ///     }
-    ///
-    ///     list< CRef<CSeq_id> > seqid_list = seqinfo_src.GetId(oid);
-    ///
-    ///     ITERATE(list< CRef<CSeq_id> >, id, seqid_list) {
-    /// 	if (use_gi)
-    /// 	{
-    ///         	if ((**id).IsGi())
-    /// 		{
-    /// 			string sid_string = "gi:" + (*id)->GetSeqIdString(true);
-    /// 			seqids.push_back(sid_string);
-    /// 		}
-    /// 	}
-    /// 	else
-    /// 	{
-    /// 		const CTextseq_id* tsid = (*id)->GetTextseq_Id();
-    /// 		if (tsid && tsid->IsSetAccession())
-    /// 		{
-    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
-    /// 			seqids.push_back(sid_string);
-    /// 		}
-    /// 		else if ((*id)->IsPdb())
-    /// 		{
-    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
-    /// 			seqids.push_back(sid_string);
-    /// 		}
-    /// 	}
-    ///     }
-    /// }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1604-1605
-    /// ```c++
-    ///         // Get SeqIds for entrez query restriction.
-    /// 	vector<string> seqid_list;
-    ///         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1604-1606
     pub fn under_positive_list(mut self, positive_list: bool) -> Self {
         if !positive_list {
             return self;
@@ -720,19 +604,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360, 412-417
-    // ```c++
-    //     const CSeq_id& kSeqId = kAlignSet.Get().front()->GetSeq_id(1);
-    //
-    //     try {
-    //         const CBioseq_Handle& subj_handle = scope->GetBioseqHandle(kSeqId);
-    //     ...
-    //     } catch (const CException&) {
-    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //     	hit_exp->SetId(kSeqId.AsFastaString());
-    //         hit->SetDescription().push_back(hit_exp);
-    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
-    //     };
-    // ```
     // Where the batch's prefetch is off, the `Hit` loads its subject by the Seq-align id: the
     // lookup throws on the file there, and again in the `catch` (`GetLength` loads by the same id),
     // outside any `catch` of the hit; the report function of outfmt 15 and 16 catches it, 13 and 14
@@ -749,7 +620,7 @@ impl ParsedSubject {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (cited at
     // `algorithm::psiblast::pssm::input_msa`)
     /// LOSAT's refusal of what psiblast's PSSM reads by the Seq-align id of a subject that it
     /// includes (the `CSeqVector` of each Seq-align's range in NCBI's scope), where LOSAT does not
@@ -798,11 +669,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1437-1439
-    // ```c++
-    //     seqids = defline->GetSeqid();
-    //     ...
-    //     bioseq->SetId().swap(seqids);
-    // ```
     /// Whether the Bioseq that `GetBioseqNoData` builds of this sequence for its Seq-align id
     /// holds that id: the ids of the definition line its filter keeps (`target`,
     /// `DeflineSet::bioseq_defline`) hold one that compares equal to it (the scope's test on the
@@ -896,25 +762,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:770-786
-    // ```c++
-    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
-    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
-    //        LoadSequencesToScope(ids, ranges, scope);
-    // 	}
-    //     catch(const CSeqDBException & e) {
-    //         _TRACE(e.GetMsg());
-    //     	throw;
-    //     }
-    //     catch (const CException& e) {
-    // 	   if(s_IsUsingRemoteBlastDbDataLoader()) {
-    //           ERR_POST(Warning << "Error fetching sequence data from BLAST databases at NCBI, "
-    //                      "please try again later");
-    // 	   }
-    // 	   else {
-    //           ERR_POST(Warning << "Error pre-fetching sequence data");
-    // 	   }
-    //    }
-    // ```
     // The prefetch loads each subject's Bioseq by its Seq-align id, as the formatters find it
     // (`fetched`), by the exact lookup only (the weak matches come where it is off): an id that
     // the lookup finds nowhere loads nothing, without a message (probe of DBID P1 review 1:
@@ -1008,14 +855,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
-    // ```c++
-    // 		if(bdl->IsSetTitle()){
-    // 			alnDispParams->title = bdl->GetTitle();
-    // 		}
-    //         if(alnDispParams->title.empty()) {
-    //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-    //         }
-    // ```
     // NCBI's formatters generate the title of the Bioseq they fetch (`CDeflineGenerator`, from
     // the sources of that sequence's volume) for the outfmt 0 description (showdefline.cpp:498)
     // and heading, for the first word that replaces an id in the tabular formats
@@ -1046,44 +885,10 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:131-141
-    // ```c++
-    // void CSAM_CIGAR_Formatter::AdjustSeqIdType(CConstRef<CSeq_id>& id)
-    // {
-    //     ...
-    //     CSeq_id_Handle forced_id = sequence::GetId(*id, *scope, force_type);
-    //     if (forced_id) {
-    //         id.Reset(forced_id.GetSeqId());
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2743-2757 (`GetAccVer`, which
     // `GetId(eGetId_ForceAcc)` calls: the id itself where it is an accession with a version,
     // else `x_GetAccVer` of the Bioseq's ids)
-    // ```c++
-    //     if ( !(flags & CScope::fForceLoad) ) {
-    //         if ( idh.IsAccVer() ) {
-    //             return idh;
-    //         }
-    //     }
-    //     ...
-    //             CSeq_id_Handle ret = CScope::x_GetAccVer(info->GetIds());
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/scope.cpp:425-445
-    // ```c++
-    //     ITERATE ( TIds, iter, ids ) {
-    //         if ( iter->IsGi() ) {
-    //             // optimization to avoid calling GetSeqId() (it may be expensive)
-    //             continue;
-    //         }
-    //         if ( auto seq_id = iter->GetSeqId() ) { // need to hold CConstRef<>
-    //             if ( auto text_id = seq_id->GetTextseq_Id() ) {
-    //                 // found some text id, it can be returned
-    //                 ret = *iter;
-    //                 if ( text_id->IsSetAccession() && text_id->IsSetVersion() ) {
-    //                     // found acc.ver, stop searching
-    //                     break;
-    //                 }
-    // ```
     /// The Seq-id that NCBI's SAM formatter (outfmt 17) names the subject by
     /// (`AdjustSeqIdType` with `eGetId_ForceAcc`): the Seq-align id where it is an accession
     /// with a version, else the first such id of the subject Bioseq (its gis passed over), else
@@ -1162,16 +967,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
-    // ```c++
-    //     // adjust protein partial/organelle/taxname suffix, if necessary
-    //     if ( m_IsAA && (! m_MainTitle.empty()) && (! (flags & fLeavePrefixSuffix)) ) {
-    //         if (m_Idx) {
-    //             x_AdjustProteinTitleSuffixIdx (bsh);
-    //         } else {
-    //             x_AdjustProteinTitleSuffix (bsh);
-    //         }
-    //     }
-    // ```
     // `x_AdjustProteinTitleSuffix` (`report::defline::adjust_protein_title_suffix`) rewrites the
     // end of a protein title ending in `]` from the Bioseq's first source, also without a name
     // (a ` [ ]` end goes): `alpha, partial [Bacillus sp.]` is written `alpha [Bacillus sp.]`
@@ -1252,17 +1047,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
-    // ```c++
-    //         if (((*itr)->IsGeneral() &&
-    //             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-    //             != string::npos) ||
-    // 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-    //             vector<string> title_tokens;
-    //             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-    //             if (defline != NcbiEmptyString) {
-    //                 id_token =
-    //                     NStr::Split(defline, " ", title_tokens)[0];
-    // ```
     // The first word of a title that NCBI makes from the source with the taxonomy database is
     // the organism's for a nucleotide (`Homo` for an empty title with taxid 9606) and `unnamed`
     // for a protein, as without a source; of a protein title ending in `]`, the word before the
@@ -1362,14 +1146,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
-    // ```c++
-    //         } catch (const CException&) {
-    //             list<CRef<CSeq_id> > subject_ids;
-    //             CRef<CSeq_id> id(new CSeq_id());
-    //             id->Assign(align.GetSeq_id(1));
-    //             subject_ids.push_back(id);
-    //             SetSubjectId(subject_ids);
-    // ```
     /// Which of NCBI's lookups of the subject's tabular ids throw (`report::tabular::FailedLookup`):
     /// `SetSubjectId` where the subject Bioseq's ids hold one that `GetSeqIdList` replaces
     /// (`lcl|Subject_`, `gnl|BL_ORD_ID`) and `GenerateDefline` throws, `x_SetSubjectIds` where a
@@ -1458,21 +1234,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-556
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //         vector< CConstRef<CSeq_id> > original_seqids;
-    //
-    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //             original_seqids.clear();
-    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
-    //                 original_seqids.push_back(*id);
-    //             }
-    //             list<CRef<objects::CSeq_id> > next_seqid_list;
-    //             // Next call replaces BL_ORD_ID if found.
-    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
-    //             m_SubjectIds.push_back(next_seqid_list);
-    //         }
-    // ```
     /// The tabular ids of every definition line (`x_SetSubjectIds`: `sallseqid`, `sallgi`,
     /// `sallacc`), in the stored order: each line's ids after `seq_id_list` with the first word
     /// of the subject Bioseq's title, as `tabular_ids` makes them. Where `GenerateDefline` throws,
@@ -1562,13 +1323,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
-    // ```c++
-    //     //get id (sdl->id, sdl-gi)
-    //     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
-    //     ...
-    //     //get defline
-    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
-    // ```
     /// The display id: the id of the description line (`GetDisplayIds`' `wid`, the `WorstRank`
     /// best id of `display_defline`), by which the description table (outfmt 0 to 4) looks the
     /// title up again in NCBI's scope, which finds a query of the batch with that id before the
@@ -1577,50 +1331,10 @@ impl ParsedSubject {
         self.display_defline()?.0.display_id()
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
-    // ```c++
-    //                 if(alnDispParams) {
-    //                     numBdl++;
-    //                     if(isFirst){
-    //                         out << ">";
-    //                     } else{
-    //                         out << " ";
-    //     ...
-    //                     if (out.tellp() > 1L) {
-    //                         out << " ";
-    //                     }
-    // 					if(!alnDispParams->title.empty()) {
-    //                         s_WrapOutputLine(out, (m_AlignOption&eHtml) ?
-    //                                          CHTMLHelper::
-    //                                          HTMLEncode(alnDispParams->title) :
-    //                                          alnDispParams->title);
-    //                     }
-    //                     out<<"\n";
-    //                     isFirst = false;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384,2451-2471
     // `out` holds the heading of this subject only; the title of a definition line is its own,
     // or the subject Bioseq's generated title when it is empty (`x_FillDispParams`).
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3166-3180
-    // ```c++
-    //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()){
-    //         const CSeq_align::TSegs& seg = (*iter)->GetSegs();
-    //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
-    //             if(seg.GetStd().size() > 1){
-    //                 //has more than one stdseg. Need to seperate as each
-    //                 //is a distinct HSP
-    //                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
-    //                     CRef<CSeq_align> aln(new CSeq_align);
-    //                     if((*iterStdseg)->IsSetScores()){
-    //                         aln->SetScore() = (*iterStdseg)->GetScores();
-    //                     }
-    //                     aln->SetSegs().SetStd().push_back(*iterStdseg);
-    //                     alnSetRef->Set().push_back(aln);
-    //                 }
-    //
-    //             } else {
-    //                 alnSetRef->Set().push_back(*iter);
-    //             }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3166-3183
     /// The definition-line lines of the outfmt 0 alignment of the subject (each ending with a
     /// newline; `Length=` follows): the definition lines (`heading_shows`), the first after `>`
     /// and the others after a space, with its id (`alignment_line_id`) and its title wrapped at
@@ -1668,14 +1382,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
-    // ```c++
-    //                 } catch (const CException&){
-    //                     out << "Sequence with id "
-    //                         << (avRef->GetSeqId(1)).GetSeqIdString().c_str()
-    //                         <<" no longer exists in database...alignment skipped\n";
-    //                     continue;
-    //                 }
-    // ```
     // `x_DisplayAlnvecInfo` fills each shown definition line (`x_FillDispParams`) before it
     // writes the heading, and a line without a title gets the Bioseq's generated title, whose
     // `NStr::HtmlDecode` throws where it cannot guess the encoding (a name of the taxonomy
@@ -1727,32 +1433,7 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2196-2202
-    // ```c++
-    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
-    //     TGi gi_in_use_this_gi = ZERO_GI;
-    //     bool isGiList = false;
-    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid,&isGiList);
-    //     if(match && isGiList) gi_in_use_this_gi = gi;
-    //
-    //     if(use_this_seqid.empty() || match) {
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4648-4664
-    // ```c++
-    // bool CAlignFormatUtil::MatchSeqInSeqList(TGi cur_gi, CRef<CSeq_id> &seqID, list<string> &use_this_seq,bool *isGiList)
-    // {
-    //     bool found = false;
-    //     bool isGi = false;
-    //
-    //     string curSeqID = CAlignFormatUtil::GetLabel(seqID,true); //uses GetSeqIdString(true)
-    //     ITERATE(list<string>, iter_seq, use_this_seq){
-    //         isGi = false;
-    //         string useThisSeq = s_UseThisSeqToTextSeqID(*iter_seq, isGi);
-    //         if((isGi && cur_gi == NStr::StringToNumeric<TGi>((useThisSeq))) || (!isGi && curSeqID == useThisSeq)){
-    //             found = true;
-    //             break;
-    //          }
-    //     }
-    // ```
     /// Whether the outfmt 0 alignment heading shows `defline`: under a positive list only a line
     /// that `use_this_seqid` names (a line of a local id alone is not shown, nor one without a
     /// GI when the strings are GIs; probe G05 of line DI-8).
@@ -1793,25 +1474,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:365-388
-    // ```c++
-    //         	ITERATE(list<CRef<CBlast_def_line> >, itr, bdlRef->Get()) {
-    //         		const CBlast_def_line & defline = **itr;
-    //         		CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //         		hit_exp->SetId(CShowBlastDefline::GetSeqIdListString(defline.GetSeqid(), true));
-    //
-    //         		 CRef<CSeq_id> best_id = FindBestChoice(defline.GetSeqid(), CSeq_id::Score);
-    //         		 CSeq_id_Handle id_handle = CSeq_id_Handle::GetHandle(*best_id);
-    //         		 string accession = CAlignFormatUtil::GetLabel(id_handle.GetSeqId());
-    //         		 if(accession != kEmptyStr)
-    //         			 hit_exp->SetAccession(accession);
-    //
-    //         		if(defline.IsSetTitle())
-    //         			hit_exp->SetTitle(defline.GetTitle());
-    //
-    //         		if(defline.IsSetTaxid() && defline.GetTaxid() != ZERO_TAX_ID) {
-    //         			TTaxId tax_id = defline.GetTaxid();
-    //        				hit_exp->SetTaxid(tax_id);
-    // ```
     /// The `HitDescr` of each definition line (XML2 and JSON), without the scientific names.
     pub fn hit_descriptions(&self) -> Vec<HitDescription> {
         self.set
@@ -1836,25 +1498,6 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:935-976
-    // ```c++
-    // CTaxFormat::SSeqInfo *CTaxFormat::x_FillTaxDispParams(const CRef< CBlast_def_line > &bdl,
-    //                                      const CBioseq_Handle& bsp_handle,
-    //                                      double bits,
-    //                                      double evalue,
-    // 		                             list<string>& use_this_seqid)
-    // {
-    //     SSeqInfo *seqInfo = NULL;
-    //
-    // 	const list<CRef<CSeq_id> > ids = bdl->GetSeqid();
-    // 	TGi gi =  CAlignFormatUtil::GetGiForSeqIdList(ids);
-    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
-    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid);
-    //
-    //     if(use_this_seqid.empty() || match) {
-    // 		...
-    // 		seqInfo->seqID = FindBestChoice(ids, CSeq_id::WorstRank);
-    // 		seqInfo->label =  CAlignFormatUtil::GetLabel(seqInfo->seqID);//Just accession without db part like ref| or pdbd|
-    // ```
     /// The definition lines of the organism report (outfmt 18, `report::tax_report`): of a
     /// database sequence, each line that a positive list keeps (`heading_shows`) with the label of
     /// its `WorstRank`-best id without version, its title (the Bioseq's generated title where it
@@ -2018,17 +1661,8 @@ fn check_pairwise_record(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt (the rows of the RefSeq
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt:241-266 (the rows of the RefSeq
 // kinds that `x_SetFlags` tests; `3+6` is a prefix of three characters and six digits)
-// ```
-// 3+6  AC_      refseq_chromosome
-// 3+6  NC_      refseq_chromosome
-// 3+6  NM_      refseq_mrna
-// 3+9  NM_      refseq_mrna
-// 3+6  NR_      refseq_ncrna
-// 3+6  XM_      refseq_mrna_predicted
-// 3+9  XM_      refseq_mrna_predicted
-// ```
 /// The RefSeq kind that `CSeq_id::IdentifyAccession` gives `accession` where `x_SetFlags` tests
 /// it: a chromosome or ncRNA (`BioseqFacts::refseq_chromosome_or_ncrna`) or an mRNA
 /// (`BioseqFacts::refseq_mrna`).
@@ -2110,28 +1744,6 @@ pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:336-359
-// ```c++
-// static void s_WrapOutputLine(CNcbiOstream& out, const string& str)
-// {
-//     const int line_len = 60;
-//     bool do_wrap = false;
-//     int length = (int) str.size();
-//     if (length > line_len) {
-//         for (int i = 0; i < length; i ++){
-//             if(i > 0 && i % line_len == 0){
-//                 do_wrap = true;
-//             }
-//             out << str[i];
-//             if(do_wrap && isspace((unsigned char) str[i])){
-//                 out << "\n";
-//                 do_wrap = false;
-//             }
-//         }
-//     } else {
-//         out << str;
-//     }
-// }
-// ```
 /// `s_WrapOutputLine`: `title`, with a newline after the first white space at or after each
 /// multiple of 60 bytes.
 pub fn wrap_title(title: &[u8], out: &mut Vec<u8>) {
@@ -2153,28 +1765,7 @@ pub fn wrap_title(title: &[u8], out: &mut Vec<u8>) {
 /// `Compare(..) == e_YES`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:478-487
-/// ```c++
-///             CSeq_align_set one_subject_alnset;
-///             CConstRef<CSeq_id> current_id(s_GetSubjectId(*(*iter)));
-///             for ( ; iter != alnset.Get().end(); ++iter) {
-///                 CConstRef<CSeq_id> next_id(s_GetSubjectId(*(*iter)));
-///                 if (!current_id->Match(*next_id)) {
-///                     break;
-///                 }
-///                 one_subject_alnset.Set().push_back(*iter);
-///             }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1750-1757
-/// ```c++
-///     ITERATE(CSeq_align_set::Tdata, iter, source.Get()){
-///         const CSeq_id& cur_id = (*iter)->GetSeq_id(1);
-///         if(previous_id.Empty()) {
-///             temp =  new CSeq_align_set;
-///             temp->Set().push_back(*iter);
-///             target.push_back(temp);
-///         } else if (cur_id.Match(*previous_id)){
-///             temp->Set().push_back(*iter);
-/// ```
 pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
     compare(&a.alignment_id, &b.alignment_id) == Sic::Yes
 }
@@ -2220,51 +1811,13 @@ pub fn rank_joins_as_copy(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-506
-// ```c++
-//     while (iter != alnset->Get().end()) {
-//         CRef<blastxml2::CHit> new_hit(new blastxml2::CHit);
-//         ...
-//         if ((*iter)->GetSegs().IsDisc()) {
-//             s_SeqAlignToXMLHit(new_hit, *(*iter), scope, matrix, mask_info,
-//                                ungapped, master_gentice_code, slave_genetic_code, hasTaxDB);
-//             ++iter;
-//         } else {
-//             ...
-//             for ( ; iter != alnset->Get().end(); ++iter) {
-//                 CConstRef<CSeq_id> next_id(s_GetSubjectId(*(*iter)));
-//                 if (!current_id->Match(*next_id)) {
-//                     break;
-//                 }
-//                 one_subject_alnset.Set().push_back(*iter);
-//             }
-//             ...
-//             s_SeqAlignToXMLHit(new_hit, disc_align_wrap, scope, matrix,
-//                                mask_info, ungapped, master_gentice_code, slave_genetic_code, hasTaxDB);
-//         }
-//
-//         hits.push_back(new_hit);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360, 412-417
-// (quoted at `ParsedSubject::lookup_throws`: the `Hit` loads its subject by the Seq-align id of
+// (cited at `ParsedSubject::lookup_throws`: the `Hit` loads its subject by the Seq-align id of
 // its first Seq-align, and a lookup that throws there throws again outside the hit's `catch`)
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-760
-// ```c++
-// BlastXML2_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream)
-// {
-// 	blastxml2::CBlastOutput2 bxmlout;
-// 	try {
-// 		s_FillBlastOutput(bxmlout, data);
-// 		s_WriteXML2ObjectNoHeader(bxmlout, out_stream);
-// 	}
-// 	catch(CException &e){
-// 	    ERR_POST(Error << e.GetMsg() << e.what() );
-// 	    return;
-// 	}
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-870 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-870 (cited at
 // `report::tabular::TabularSpec::row_throw`: a table's row whose subject block catches the throw)
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898 (cited at
 // `report::tabular::TabularSpec::reads_subject`: `slen` read outside any `catch`)
 /// What a report does after a subject whose lookup throws where its batch's prefetch is off
 /// (`ParsedSubject::lookup_throws`; DECISIONS 62 of line DBID): the one answer of each writer,
@@ -2612,7 +2165,7 @@ impl HitLoads {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
-// every application, quoted at `cli::NativeError::exception`): an exception that leaves a report
+// every application, cited at `cli::NativeError::exception`): an exception that leaves a report
 // ends the application; no later report, batch or load runs.
 /// The run's record of what its reports do after a subject whose lookup throws where a batch's
 /// prefetch is off (`run`, [`FormatThrow::of_run`]) and of whether a report's load ended the run
@@ -3169,9 +2722,9 @@ mod tests {
     fn only_the_lookup_text_ncbi_was_seen_to_throw_gives_its_exception() {
         let failed = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
         let exception = failed.exception().unwrap();
-        assert_eq!(exception.get_msg(), "DB contains no accession info.");
+        assert_eq!(exception.get_msg(), b"DB contains no accession info.");
         assert_eq!(
-            exception.what(),
+            String::from_utf8(exception.what()).unwrap(),
             // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
             crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{}/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp\", line 142: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi() - DB contains no accession info.\n",
@@ -3245,7 +2798,7 @@ mod tests {
             loads
                 .thrown(0)
                 .map(crate::ncbi_exception::NcbiException::get_msg),
-            Some("DB contains no accession info.")
+            Some(b"DB contains no accession info.".as_slice())
         );
         for unread in [2, 3, 4] {
             assert_eq!(loads.load(unread), HitLoad::Unread, "{unread}");

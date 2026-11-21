@@ -6,23 +6,6 @@
 //! BLASTX's reports write. The search takes the place of BLASTX's own (`RpsTblastnSearch`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:191-209
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//!
-//!             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
-//!
-//!             CRef<CSearchResultSet> results;
-//!
-//!             if (m_CmdLineArgs->ExecuteRemotely()) {
-//!                 ...
-//!             } else {
-//!             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
-//!             	results = local_search.Run();
-//!             }
-//! ```
 
 use std::io::Write;
 use std::sync::Arc;
@@ -186,7 +169,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             // its order, up to the first batch that fails, which ends the run with its error.
             // Each batch's search strategy request (`take`, `-export_search_strategy`) is
             // written in the replay, before the batch's report or error, as NCBI writes it
-            // before the batch's search (`SaveSearchStrategy`, quoted in the module's header):
+            // before the batch's search (`SaveSearchStrategy`, cited in the module's header):
             // after the batches before it are reported (their search spaces, which the request
             // holds, `StrategyExport::note_searched`), and none for a batch after one that fails.
             // NCBI's posts of the bytes replaced in it go to the diagnostics there, after the
@@ -233,14 +216,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             let read_result = read(
                 &mut |queries| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-                    // ```c++
-                    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-                    //     : m_QueryVector(& queries)
-                    // {
-                    //     if (queries.Empty()) {
-                    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-                    //     }
-                    // ```
                     // (After the batches before it, which NCBI's loop has written.)
                     if queries.is_empty() {
                         flush()?;
@@ -331,24 +306,7 @@ impl TranslatedRpsSearch {
     /// the frames' search spaces, the Gumbel block and the shortest length of the hit cutoff.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:158-164
-    /// ```c++
-    ///     // 2. Take care of any rps information
-    ///     if (Blast_ProgramIsRpsBlast(options->GetProgramType())) {
-    ///         const char* name = BlastSeqSrcGetName(seqsrc);
-    ///         const string rps_dbname(name ? name : "");
-    ///         retval->m_InternalData->m_RpsData =
-    ///             CSetupFactory::CreateRpsStructures(rps_dbname, options);
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181
-    /// ```c++
-    ///
-    ///     int status = m_PrelimSearch->CheckInternalData();
-    ///     if (status != 0)
-    ///     {
-    ///          // Search was not run, but we send back an empty CSearchResultSet.
-    ///          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
-    /// ```
     #[allow(clippy::too_many_arguments)]
     fn search_window(
         &self,
@@ -423,11 +381,6 @@ impl TranslatedRpsSearch {
         // `check_ideal` takes for RPSTBLASTN as for BLASTX.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2746-2748
-        // ```c
-        //    Boolean check_ideal =
-        //       (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
-        //        program == eBlastTypeRpsTblastn);
-        // ```
         let x_drops = self.search.x_drop_bits();
         // Volume after volume, each mapped for the window's search alone, as NCBI's
         // `CLocalRPSBlast` searches each query batch.
@@ -440,10 +393,6 @@ impl TranslatedRpsSearch {
             // length, as rpsblast's `cutoff_subject_length`).
             let gumbel = gumbel_block(options, units.gumbel_length(unit));
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:932-940
-            // ```c
-            //     int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-            //     params->prelim_evalue = cbs_stretch*evalue;
-            // ```
             // (The stretch is NCBI's only inside the Gumbel block's branch: blast_parameters.c:922-945.)
             let prelim_evalue = if cbs > 1 && gumbel.is_some() {
                 5.0 * options.evalue
@@ -772,15 +721,6 @@ struct RpsWindow {
 /// NCBI's loop of one batch at a time.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:193-208
-/// ```c++
-///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-///             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-///
-///             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
-///             ...
-///             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
-///             	results = local_search.Run();
-/// ```
 fn replay<T>(
     events: &[RpsEvent],
     searched: Vec<Option<Result<T>>>,
@@ -915,19 +855,6 @@ impl WindowBatch {
 /// `first_frame_valid`); every other footer shows the table's K `table_k`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
-/// ```c++
-///     // find the first valid context corresponding to this query
-///     for (i = 0; i < context_per_query; i++) {
-///         BlastContextInfo *ctx = query_info->contexts +
-///                                 query_number * context_per_query + i;
-///         if (ctx->is_valid) {
-///             ...
-///     const int ctx_index = query_number * context_per_query + i;
-///     ...
-///     if (sbp->kbp_gap) {
-///         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
-///     }
-/// ```
 fn footer_gapped_k(
     k_marks: &[Option<u32>],
     karlin_k: &[f64],
@@ -972,11 +899,6 @@ fn prepare_batches(
 /// queries (`prepare_unit_queries`: frames, masks, `-query_loc`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
-/// ```c++
-///     char* chunk_sz_str = getenv("CHUNK_SIZE");
-///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-///         retval = NStr::StringToInt(chunk_sz_str);
-/// ```
 /// NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
 /// structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value it
 /// reads changes nothing, and one it cannot convert is its `CStringException`
@@ -1150,7 +1072,7 @@ mod tests {
     /// 60 letters of a coding sequence (20 codons) whose six frames all have letters.
     const DNA: &[u8] = b"ATGGCTAAAGGTGAACGTCTGATCGCTGTTGCTAAAGAACTGGGTCTGACCGCTAAAGAA";
 
-    // blast_engine.c:805-813 (quoted at `RpsFrame`): the frames of each query in NCBI's context
+    // blast_engine.c:805-813 (cited at `RpsFrame`): the frames of each query in NCBI's context
     // order, their letters at BLASTX's offsets between two sentinels, and the frames of the strand
     // that `-strand` leaves out without letters.
     #[test]
@@ -1208,7 +1130,7 @@ mod tests {
         queries[0].frames.iter().map(RpsFrame::length).collect()
     }
 
-    // blast_engine.c:813 (quoted at `RpsFrame`): the last frame with letters.
+    // blast_engine.c:813 (cited at `RpsFrame`): the last frame with letters.
     #[test]
     fn the_preliminary_stat_length_is_the_last_frame_with_letters() {
         let options_both = options(&[]);
@@ -1236,7 +1158,7 @@ mod tests {
         assert_eq!(queries[0].stat_length(), 1);
     }
 
-    // blast_setup_cxx.cpp:72-77 and blast_query_info.c:379-381 (quoted at
+    // blast_setup_cxx.cpp:72-77 and blast_query_info.c:379-381 (cited at
     // `RpsQuery::translation_length`): each context starts one sentinel after the previous one,
     // an empty context takes no byte, and the buffer's length is the last context's offset plus
     // its length; BLASTX's layout (`prepare_unit_queries`) is NCBI's.
@@ -1367,7 +1289,7 @@ mod tests {
         let mut method = hsp(1, 1, (1, 2), (1, 2));
         method.comp_adjustment_method = 1;
         assert_eq!(blastx_hsp(&method, 0).composition_method, 1);
-        // `found_end` FALSE (blast_gapalign.c:4650-4653, quoted at `Hsp::seqalign_ends`): the
+        // `found_end` FALSE (blast_gapalign.c:4650-4653, cited at `Hsp::seqalign_ends`): the
         // HSP's ends stop before its starts while its edit script runs on. The HSP keeps them; its
         // Seq-align ends where the script does.
         let mut short = hsp(-2, 41, (11, 30), (3, 23));
@@ -1445,7 +1367,7 @@ mod tests {
         assert!(blastx_lists(None, 0).is_empty());
     }
 
-    // local_blast.cpp:176-181 (quoted at `search_window`): a batch without a valid frame is not
+    // local_blast.cpp:176-181 (cited at `search_window`): a batch without a valid frame is not
     // searched; its results are BLASTX's skipped batch.
     #[test]
     fn a_batch_without_a_valid_frame_is_not_searched() {
@@ -1896,7 +1818,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    // blast_results.cpp:82-104 (quoted at `footer_gapped_k`): only the first query's footer reads
+    // blast_results.cpp:82-104 (cited at `footer_gapped_k`): only the first query's footer reads
     // `kbp_gap[0]`, which the batch's last redo wrote (the highest profile: the stream reads the
     // lists by ordinal id), and only where frame +1 is valid.
     #[test]

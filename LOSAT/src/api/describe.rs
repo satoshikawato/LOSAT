@@ -7,20 +7,6 @@
 //! §9, reads the same definitions).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
-//! ```c++
-//! string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
-//! {
-//!     CPrintUsage x(*this);
-//!     list<string> arr;
-//!
-//!     // SYNOPSIS
-//!     arr.push_back("USAGE");
-//!     x.AddSynopsis(arr, m_UsageName, "    ");
-//!
-//!     // DESCRIPTION
-//!     arr.push_back(kEmptyStr);
-//!     x.AddDescription(arr, detailed);
-//! ```
 #![warn(missing_docs, unused)]
 
 use clap::CommandFactory;
@@ -30,19 +16,6 @@ use super::search::{alignment_options, file_options, API_OWNED};
 use crate::cli::Cli;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
-// ```c++
-//     enum EType {
-//         eString = 0, ///< An arbitrary string
-//         eBoolean,    ///< {'true', 't', 'false', 'f'},  case-insensitive
-//         eInt8,       ///< Convertible into an integer number (Int8 only)
-//         eInteger,    ///< Convertible into an integer number (int or Int8)
-//         eIntId,      ///< Convertible to TIntId (int or Int8 depending on NCBI_INT8_GI
-//         eDouble,     ///< Convertible into a floating point number (double)
-//         eInputFile,  ///< Name of file (must exist and be readable)
-//         eOutputFile, ///< Name of file (must be writable)
-//         eIOFile,     ///< Name of file (must be writable)
-//         eDirectory,  ///< Name of file directory
-// ```
 /// What an option's value is, from the type that the command line's parser makes of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -100,12 +73,6 @@ pub struct Description {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1024
-// ```c++
-//         arg_desc.AddDefaultKey(kArgQueryGeneticCode, "int_value",
-//                                "Genetic code to use to translate query (see https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for details)\n",
-//                                CArgDescriptions::eInteger,
-//                                NStr::IntToString(BLAST_GENETIC_CODE));
-// ```
 // NCBI's argument takes any integer and the genetic-code table decides later; LOSAT's parser
 // decides at once, so the accepted values are those the parser takes.
 /// Genetic codes are small integers; every accepted one is below this bound.

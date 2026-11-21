@@ -104,17 +104,7 @@ bzip2 = "0.6"
 ruzstd = "0.9"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-# ```c++
-# #else
-# /// Portable alias for ifstream.
-# typedef IO_PREFIX::ifstream      CNcbiIfstream;
-# #endif
-# ```
 # NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-# ```c++
-#     x_FillBuffer((size_t) m_Sb->in_avail());
-#     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-# ```
 # LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969 (`GET_PAGESIZE`; LMDB's
 # notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB))
 # Rust system calls for the native readable-byte hint (`io`), and for the page size
@@ -163,29 +153,13 @@ xstats = []
 # them and says so on stderr. No NCBI counterpart.
 diagnostics = []
 parallel = ["rayon"]
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-# ```c
-# int num_threads = args[kArgNumThreads].AsInteger();
-# if (num_threads > kMaxValue) {
-#     m_NumThreads = kMaxValue;
-# } else {
-#     m_NumThreads = num_threads;
-# }
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 #
 # Standard WASI aliases and packaging select this feature together with the
 # wasm32-wasip1-threads target and a runtime that implements thread spawning.
 # Explicit wasm32-wasip1 and wasm32-unknown-unknown builds remain serial.
 wasm-threads = ["parallel"]
 # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
-# ```c++
-#     /* Use a local diagnostics structure, because the one passed in an input
-#       argument can be shared between multiple threads, so we don't want to pass
-#       it to the engine and have a lot of mutex contention. */
-#     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-#
-#     if ((status =
-# ```
 # Diagnostic-only host clock/worker identity; never read by search or reporting.
 blastx-worker-probe = []
 # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
@@ -224,7 +198,5 @@ explicit_counter_loop = "allow"
 # NCBI's tables keep NCBI's digits so they diff against NCBI's source; each literal rounds to
 # the same f64.
 excessive_precision = "allow"
-# The NCBI C/C++ snippets (AGENTS.md rule 4) are quoted with NCBI's own tabs.
-tabs_in_doc_comments = "allow"
 # Functions that take a list of ranges are given the whole span as one range.
 single_range_in_vec_init = "allow"

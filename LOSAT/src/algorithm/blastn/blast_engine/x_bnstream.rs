@@ -6,14 +6,6 @@
 //! which the threads wait for the slowest subject of the block).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427
-//! ```c
-//!     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//!        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//!            continue;
-//!        }
-//! ```
 //! The hand-over keeps the order of NCBI's one-thread loop, so the hit lists are the same.
 //!
 //! With `assist` (the `-db` path, LOSAT_X_BNDBSTREAM, `database/x_db_stream.rs`), a thread that

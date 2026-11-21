@@ -2,33 +2,6 @@
 //! one problem per vector lane, bit for bit.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768,774-777,781-785
-//! ```c
-//!     while (its <= maxits) {
-//!         /* Compute the residuals */
-//!         EvaluateReFunctions(values, grads, alphsize, x, q, old_scores,
-//!                             constrain_rel_entropy);
-//!         CalculateResiduals(&rnorm, resids_x, alphsize, resids_z, values,
-//!                            grads, row_sums, col_sums, x, z,
-//!                            constrain_rel_entropy, relative_entropy);
-//! ...
-//!         if ( !(rnorm > tol) ) {
-//!             /* We converged at the current iterate */
-//!             break;
-//!         } else {
-//!             /* we did not converge, so increment the iteration counter
-//!                and start a new iteration */
-//!             if (++its <= maxits) {
-//! ...
-//!                 FactorReNewtonSystem(newton_system, x, z, grads,
-//!                                      constrain_rel_entropy, workspace);
-//!                 SolveReNewtonSystem(resids_x, resids_z, newton_system,
-//!                                     workspace);
-//! ...
-//!                 alpha = Nlm_StepBound(x, n, resids_x, 1.0 / .95);
-//!                 alpha *= 0.95;
-//!                 Nlm_AddVectors(x, n, alpha, resids_x);
-//!                 Nlm_AddVectors(z, m, alpha, resids_z);
-//! ```
 //! Each lane runs this loop for its own problem with exactly the operation
 //! sequence of `x_newton_exact::optimize` (which is the reference's sequence
 //! of IEEE-754 operations per value): the same operations on the same
@@ -73,11 +46,6 @@ use std::ops::{Index, IndexMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
-// ```c
-//     n  = alphsize * alphsize;
-//     mA = 2 * alphsize - 1;
-//     m  = constrain_rel_entropy ? mA + 1 : mA;
-// ```
 // `N` is `alphsize`, `NN` is `n`, `M` is `m` with `constrain_rel_entropy` set (the only case here).
 const N: usize = COMPO_NUM_TRUE_AA;
 const NN: usize = N * N;
@@ -155,21 +123,6 @@ pub(crate) fn print_stats() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1385-1399
-// ```c
-//     Blast_ApplyPseudocounts(row_probs, length1,
-//                             NRrecord->first_standard_freq, pseudocounts);
-//     Blast_ApplyPseudocounts(col_probs, length2,
-//                             NRrecord->second_standard_freq, pseudocounts);
-//
-//     status =
-//         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
-//                                         COMPO_NUM_TRUE_AA,
-//                                         &iteration_count,
-//                                         &NRrecord->mat_b[0][0],
-//                                         row_probs, col_probs,
-//                                         (desired_re > 0.0),
-//                                         desired_re,
-// ```
 // The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
 // `desired_re` with `desired_re > 0.0`).
 /// The `q` of the inputs of one batch: one copy of the workspace's `mat_b`, shared by them.
@@ -188,17 +141,6 @@ pub(crate) struct NewtonInput {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:789-797
-// ```c
-//     converged = 0;
-//     if (its <= maxits && rnorm <= tol) {
-//         /* Newton's iteration converged */
-//         if ( !constrain_rel_entropy || z[m - 1] < 1 ) {
-//             /* and the final iterate is a minimizer */
-//             converged = 1;
-//         }
-//     }
-//     status = converged ? 0 : 1;
-// ```
 /// Result of one problem: the final iterate `x` and the status (0 converged).
 #[derive(Clone)]
 pub(crate) struct NewtonOutput {
@@ -381,14 +323,6 @@ lane_vec!(F4, M4, 4, 32, [0, 1, 2, 3]);
 lane_vec!(F8, M8, 8, 64, [0, 1, 2, 3, 4, 5, 6, 7]);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:706-722
-// ```c
-//     double * scores;       /* the scores of the old matrix */
-// ...
-//     double * resids_x;     /* the residuals in the x variables */
-//     double * resids_z;     /* the residuals in the z variables */
-// ...
-//     double *z;             /* the dual variables */
-// ```
 // The working arrays of `Blast_OptimizeTargetFrequencies` (and of `x_newton_exact::optimize`) for
 // `V::L` problems, value `k` of lane `l` at `[k][l]`. `d`, `lsp`, `c` are the Cholesky factor in the
 // structured storage of `x_newton_exact::Factor` (lower triangle of `c` only).
@@ -432,15 +366,6 @@ thread_local! {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:675-679,747-748
-// ```c
-//     for (i = 0;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             k = i * alphsize + j;
-//             scores[k] = log(target_freqs[k] / (row_freqs[i] * col_freqs[j]));
-// ...
-//     /* Use q as the initial value for x */
-//     memcpy(x, q, n * sizeof(double));
-// ```
 // `ComputeScoresFromProbs`, `x = q` and `z = 0` for one problem in lane `l`, as at the start of
 // `x_newton_exact::optimize`. Returns whether every `q` is finite and non-zero (then the first
 // iteration's quotients `x[k] / q[k]` are exactly 1.0).
@@ -468,12 +393,6 @@ fn load_lane<V: LaneVec>(st: &mut LaneState<V>, l: usize, input: &NewtonInput) -
     }
     st.re[l] = input.relative_entropy;
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748,636-636
-    // ```c
-    //     /* Use q as the initial value for x */
-    //     memcpy(x, q, n * sizeof(double));
-    // ...
-    //         temp = log(x[k] / q[k]);
-    // ```
     input.q.iter().all(|&v| v.is_finite() && v != 0.0)
 }
 
@@ -524,23 +443,6 @@ fn move_lane<A: LaneVec, B: LaneVec>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
-// ```c
-//     double sum   = 1.0;   /* sum of squares of elements in v */
-//     double scale = 0.0;   /* a scale factor for the elements in v */
-//     int i;                /* iteration index */
-//     for (i = 0;  i < n;  i++) {
-//         if (v[i] != 0.0) {
-//             double absvi = fabs(v[i]);
-//             if (scale < absvi) {
-//                 sum = 1.0 + sum * (scale/absvi) * (scale/absvi);
-//                 scale = absvi;
-//             } else {
-//                 sum += (absvi/scale) * (absvi/scale);
-//             }
-//         }
-//     }
-//     return scale * sqrt(sum);
-// ```
 // `Nlm_EuclideanNorm` per lane. The branch taken by each lane is chosen by a select: when no lane
 // has a new maximum, only the `else` branch is evaluated (lanes with `v[i] == 0.0` keep `sum`);
 // otherwise both branches are evaluated and selected per lane. `sum * (scale/absvi) * (scale/absvi)`
@@ -557,19 +459,6 @@ fn euclidean_norm<V: LaneVec>(v: &[V]) -> V {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:196-206
-// ```c
-//     for (i = 0;  i < n;  i++) {
-//         if (v[i] != 0.0) {
-//             double absvi = fabs(v[i]);
-//             if (scale < absvi) {
-//                 sum = 1.0 + sum * (scale/absvi) * (scale/absvi);
-//                 scale = absvi;
-//             } else {
-//                 sum += (absvi/scale) * (absvi/scale);
-//             }
-//         }
-//     }
-// ```
 /// One element of `Nlm_EuclideanNorm` (the body of the loop), `V::L` vectors.
 #[inline(always)]
 fn euclidean_norm_step<V: LaneVec>(sum: &mut V, scale: &mut V, value: V) {
@@ -592,21 +481,6 @@ fn euclidean_norm_step<V: LaneVec>(sum: &mut V, scale: &mut V, value: V) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177,179-183
-// ```c
-//     for (i = 0;  i < n;  i++) {
-//         temp = x[i];
-//         for (j = 0;  j < i;  j++) {
-//             temp -= L[i][j] * x[j];
-//         }
-//         x[i] = temp/L[i][i];
-//     }
-// ...
-//     for (j = n - 1;  j >= 0;  j--) {
-//         x[j] /= L[j][j];
-//         for (i = 0;  i < j;  i++) {
-//             x[i] -= L[j][i] * x[j];
-//         }
-// ```
 // `x_newton_exact::solve_structured` per lane: forward substitution by columns (the zero products
 // of the diagonal block included), back substitution as descending dot products; each element
 // receives the same terms in the same order and the same final division.
@@ -655,11 +529,6 @@ fn solve_factored<V: LaneVec>(x: &mut [V; M], d: &[V; N], lsp: &[[V; N]; N], c: 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:146-148
-// ```c
-//             for (k = 0;  k < j;  k++) {
-//                 temp -= A[i][k] * A[j][k];
-//             }
-// ```
 // `x_newton_exact::column_terms` per lane: `B` elements of column `jj` from row `start`, each receiving
 // `temp -= L[20+ii][k] * L[20+jj][k]` for k = 0..19 in increasing order (kept in registers).
 /// `col[start + t] -= lsp[k][start + t] * lsp[k][jj]` for `k = 0..20`, `t < B`.
@@ -687,58 +556,8 @@ fn column_terms_block<const B: usize, V: LaneVec>(
 static UNREAD_DINV: [f64; NN] = [0.0; NN];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:504-510,525-531,534-534
-// ```c
-//      if (constrain_rel_entropy) {
-//         double eta;             /* dual variable for the relative
-//                                    entropy constraint */
-//         eta = z[m - 1];
-//         for (i = 0;  i < n;  i++) {
-//             Dinv[i] = x[i] / (1 - eta);
-//         }
-// ...
-//         W[m - 1][m - 1] = 0.0;
-//         for (i = 0;  i < n;  i++) {
-//             workspace[i] = Dinv[i] * grad_re[i];
-//             W[m - 1][m - 1] += grad_re[i] * workspace[i];
-//         }
-//         MultiplyByA(0.0, &W[m - 1][0], alphsize, 1.0, workspace);
-// ...
-//     Nlm_FactorLtriangPosDef(W, m);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:575-578,581-583,587-587,593-602
-// ```c
-//     for (i = 0;  i < n;  i++) {
-//         workspace[i] = x[i] * Dinv[i];
-//     }
-//     MultiplyByA(1.0, z, alphsize, -1.0, workspace);
-// ...
-//         for (i = 0;  i < n;  i++) {
-//             z[m - 1] -= grad_re[i] * workspace[i];
-//         }
-// ...
-//     Nlm_SolveLtriangPosDef(z, m, W);
-// ...
-//     if (constrain_rel_entropy) {
-//         for(i = 0; i < n; i++) {
-//             x[i] += grad_re[i] * z[m - 1];
-//         }
-//     }
-//     MultiplyByAtranspose(1.0, x, alphsize, 1.0, z);
-//     for (i = 0;  i < n;  i++) {
-//         x[i] *= Dinv[i];
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
-// ```c
-//     for (i = 0; i < n; i++) {
-//         double alpha_i;    /* a step to the boundary for the current i */
-//         alpha_i = -x[i] / step_x[i];
-//         if (alpha_i >= 0 && alpha_i < alpha) {
-//             alpha = alpha_i;
-//         }
-//     }
-//     return alpha;
-// ```
 // One Newton step (factor, solve, step bound, update of x and z) for every lane, in the operation
 // order of `x_newton_exact::optimize`; the Cholesky factor of a lane whose `structure_ok` fails (or,
 // in tests, a forced lane) comes from `factor_literal` on that lane's values. Lanes with `step[l]`
@@ -960,11 +779,6 @@ fn newton_step<V: LaneVec>(st: &mut LaneState<V>, step: &[bool; MAX_LANES], _rou
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:749-751
-// ```c
-//     its = 0;        /* Initialize the iteration count. Note that we may
-//                        converge in zero iterations if the initial x is
-//                        optimal. */
-// ```
 // Per lane: the problem it holds (`NO_PROBLEM` for none), that problem's `its`, and whether its first
 // round may take log(1) for every quotient (`load_lane`).
 struct LaneSlots {
@@ -985,23 +799,6 @@ impl LaneSlots {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
-// ```c
-//     while (its <= maxits) {
-//         /* Compute the residuals */
-//         EvaluateReFunctions(values, grads, alphsize, x, q, old_scores,
-//                             constrain_rel_entropy);
-//         CalculateResiduals(&rnorm, resids_x, alphsize, resids_z, values,
-//                            grads, row_sums, col_sums, x, z,
-//                            constrain_rel_entropy, relative_entropy);
-// ...
-//         if ( !(rnorm > tol) ) {
-//             /* We converged at the current iterate */
-//             break;
-//         } else {
-//             /* we did not converge, so increment the iteration counter
-//                and start a new iteration */
-//             if (++its <= maxits) {
-// ```
 // The Newton loop for a queue of problems, `V::L` lanes at a time. In each round every lane with a
 // problem performs one pass of the loop body of `x_newton_exact::optimize` (residuals, stopping
 // test, iteration count, Newton step); a lane whose problem ends (converged or `its > maxits`)
@@ -1061,17 +858,6 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
         rounds += 1;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:634-645
-        // ```c
-        //     values[0] = 0.0; values[1] = 0.0;
-        //     for (k = 0;  k < alphsize * alphsize;  k++) {
-        //         temp = log(x[k] / q[k]);
-        //         values[0]   += x[k] * temp;
-        //         grads[0][k]  = temp + 1;
-        //         if (constrain_rel_entropy) {
-        //             temp += scores[k];
-        //             values[1]   += x[k] * temp;
-        //             grads[1][k]  = temp + 1;
-        // ```
         // ---- EvaluateReFunctions: log(x / q) per lane (values[0] is never read by the reference).
         for k in 0..NN {
             st.logs[k] = st.x[k].div(st.q[k]);
@@ -1102,13 +888,6 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:277-279,286-286
-        // ```c
-        //         eta = z[2 * alphsize - 1];
-        //         for (i = 0;  i < n;  i++) {
-        //             resids_x[i] = -grads[0][i] + eta * grads[1][i];
-        // ...
-        //     MultiplyByAtranspose(1.0, resids_x, alphsize, 1.0, z);
-        // ```
         // ---- grads, values[1], DualResiduals and MultiplyByAtranspose, as in x_newton_exact.
         let eta = st.z[M - 1];
         let mut values1 = zero;
@@ -1136,21 +915,8 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:331-332
-        // ```c
-        //     DualResiduals(resids_x, alphsize, grads, z, constrain_rel_entropy);
-        //     norm_resids_x = Nlm_EuclideanNorm(resids_x, alphsize * alphsize);
-        // ```
         let norm_resids_x = norm_scale.mul(norm_sum.sqrt());
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:243-249
-        // ```c
-        //     for (i = 0;  i < alphsize;  i++) {
-        //         rA[i] = col_sums[i];
-        //     }
-        //     for (i = 1;  i < alphsize;  i++) {
-        //         rA[i + alphsize - 1] = row_sums[i];
-        //     }
-        //     MultiplyByA(1.0, rA, alphsize, -1.0, x);
-        // ```
         // ---- ResidualsLinearConstraints: column sums over i, then row sums over j.
         st.resids_z[..N].copy_from_slice(&st.col);
         for i in 1..N {
@@ -1171,15 +937,6 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
             st.resids_z[i + N - 1] = s;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:337-344
-        // ```c
-        //         resids_z[2 * alphsize - 1] = relative_entropy - values[1];
-        //         norm_resids_z = Nlm_EuclideanNorm(resids_z, 2 * alphsize);
-        //     } else {
-        //         norm_resids_z = Nlm_EuclideanNorm(resids_z, 2 * alphsize - 1);
-        //     }
-        //     *rnorm =
-        //         sqrt(norm_resids_x * norm_resids_x + norm_resids_z * norm_resids_z);
-        // ```
         st.resids_z[M - 1] = st.re.sub(values1);
         let norm_resids_z = euclidean_norm(&st.resids_z);
         let rnorm = norm_resids_x
@@ -1187,25 +944,6 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
             .add(norm_resids_z.mul(norm_resids_z))
             .sqrt();
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:762-768,789-797
-        // ```c
-        //         if ( !(rnorm > tol) ) {
-        //             /* We converged at the current iterate */
-        //             break;
-        //         } else {
-        //             /* we did not converge, so increment the iteration counter
-        //                and start a new iteration */
-        //             if (++its <= maxits) {
-        // ...
-        //     converged = 0;
-        //     if (its <= maxits && rnorm <= tol) {
-        //         /* Newton's iteration converged */
-        //         if ( !constrain_rel_entropy || z[m - 1] < 1 ) {
-        //             /* and the final iterate is a minimizer */
-        //             converged = 1;
-        //         }
-        //     }
-        //     status = converged ? 0 : 1;
-        // ```
         // ---- Stopping test per lane; a finished lane writes its result.
         let mut step = [false; MAX_LANES];
         for l in 0..V::L {
@@ -1248,12 +986,6 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:749-752
-// ```c
-//     its = 0;        /* Initialize the iteration count. Note that we may
-//                        converge in zero iterations if the initial x is
-//                        optimal. */
-//     while (its <= maxits) {
-// ```
 // The four-lane loop over a whole batch (no lane holds a problem, the queue at its start).
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]
@@ -1268,12 +1000,6 @@ fn solve_lanes4_body<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:749-752
-// ```c
-//     its = 0;        /* Initialize the iteration count. Note that we may
-//                        converge in zero iterations if the initial x is
-//                        optimal. */
-//     while (its <= maxits) {
-// ```
 // The eight-lane loop over a whole batch until the queue is empty and at most `hand_over_at` lanes
 // hold a problem (0: to the end); then those problems move to four lanes in lane order (`move_lane`,
 // with their `its` and first-round flag) and finish there. Each problem keeps its operations.
@@ -1307,9 +1033,6 @@ fn solve_lanes8_body<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
-// ```c
-//     while (its <= maxits) {
-// ```
 // No NCBI counterpart: the same lane body compiled with AVX2 enabled so that the compiler may use
 // 256-bit vectors. Rust does not fuse `a * b + c` or reorder sums, so every lane computes the same
 // IEEE-754 operations as the body without the feature; it does not change any value NCBI computes.
@@ -1324,9 +1047,6 @@ unsafe fn solve_lanes_avx2<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
-// ```c
-//     while (its <= maxits) {
-// ```
 // No NCBI counterpart: the lane body without target features (Wasm, other targets,
 // LOSAT_X_NEWTONEXACT_LEVEL=0); it does not change any value NCBI computes.
 fn solve_lanes_plain<O: BorrowMut<NewtonOutput>>(
@@ -1338,9 +1058,6 @@ fn solve_lanes_plain<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
-// ```c
-//     while (its <= maxits) {
-// ```
 // No NCBI counterpart: the eight-lane loop compiled with AVX2 enabled (each `F8` operation is two
 // 256-bit operations on independent values); x86-64 runs it only in the unit tests
 // (the eight lanes run on aarch64). It does not change any value NCBI computes.
@@ -1357,9 +1074,6 @@ unsafe fn solve_lanes8_avx2<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
-// ```c
-//     while (its <= maxits) {
-// ```
 // No NCBI counterpart: the eight-lane loop without target features (aarch64 NEON through the
 // baseline target; other targets in the unit tests); it does not change any value NCBI computes.
 fn solve_lanes8_plain<O: BorrowMut<NewtonOutput>>(
@@ -1373,15 +1087,6 @@ fn solve_lanes8_plain<O: BorrowMut<NewtonOutput>>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
 // Solves every problem of the batch, each with the result of this function (`x` and the status).
 // Batches of fewer than `MIN_LANE_BATCH` problems use `x_newton_exact` (same results); with
 // aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
@@ -1396,15 +1101,6 @@ pub(crate) fn solve_batch<O: BorrowMut<NewtonOutput>>(inputs: &[NewtonInput], ou
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
 // `solve_batch` with the width given: `lanes8` is `None` for four lanes, `Some(hand_over_at)` for
 // eight lanes on batches of `MIN_LANE8_BATCH` or more (see `solve_lanes8_body`).
 /// Solves `inputs[i]` into `outputs[i]`.
@@ -1458,15 +1154,6 @@ thread_local! {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
 // An eight-lane batch (`solve_lanes8_body`), AVX2 or plain as the four-lane batches.
 /// Solves `inputs[i]` into `outputs[i]` on eight lanes.
 fn solve_batch8<O: BorrowMut<NewtonOutput>>(
@@ -1686,15 +1373,6 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
 // No NCBI counterpart: looks up a result computed ahead for exactly this input (relative entropy,
 // column and row probabilities, q compared by bits); on a hit `x` receives the stored final iterate
 // and the stored status is returned. It does not change any value NCBI computes.
@@ -1753,15 +1431,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1385-1399
-    // ```c
-    //     Blast_ApplyPseudocounts(row_probs, length1,
-    //                             NRrecord->first_standard_freq, pseudocounts);
-    //     Blast_ApplyPseudocounts(col_probs, length2,
-    //                             NRrecord->second_standard_freq, pseudocounts);
-    //
-    //     status =
-    //         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
-    // ```
     // Test problems: realistic ones through `x_newton_input` (BLOSUM62 joint probabilities as q,
     // compositions of random sequences with biased letter frequencies, pseudocounts), and harder
     // ones with random q, compositions and relative entropies.
@@ -1867,15 +1536,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-    // ```c
-    // int
-    // Blast_OptimizeTargetFrequencies(double x[],
-    // ...
-    //                                 int constrain_rel_entropy,
-    //                                 double relative_entropy,
-    //                                 double tol,
-    //                                 int maxits)
-    // ```
     // Expected results of each test problem: the exact module and the reference port (which must
     // agree with each other).
     fn expected(problems: &[NewtonInput]) -> Vec<NewtonOutput> {
@@ -1925,19 +1585,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
-    // ```c
-    //     while (its <= maxits) {
-    //         /* Compute the residuals */
-    //         EvaluateReFunctions(values, grads, alphsize, x, q, old_scores,
-    //                             constrain_rel_entropy);
-    //         CalculateResiduals(&rnorm, resids_x, alphsize, resids_z, values,
-    //                            grads, row_sums, col_sums, x, z,
-    //                            constrain_rel_entropy, relative_entropy);
-    // ...
-    //         if ( !(rnorm > tol) ) {
-    //             /* We converged at the current iterate */
-    //             break;
-    // ```
     // The test solves batches of every size 1..=13 and one of 64 (mixed iteration counts, lanes
     // refilled as problems end) and compares status and all 400 values by bits with the exact
     // module and the reference port, then repeats batches with the literal factorisation forced on
@@ -1992,19 +1639,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
-    // ```c
-    //     while (its <= maxits) {
-    //         /* Compute the residuals */
-    //         EvaluateReFunctions(values, grads, alphsize, x, q, old_scores,
-    //                             constrain_rel_entropy);
-    //         CalculateResiduals(&rnorm, resids_x, alphsize, resids_z, values,
-    //                            grads, row_sums, col_sums, x, z,
-    //                            constrain_rel_entropy, relative_entropy);
-    // ...
-    //         if ( !(rnorm > tol) ) {
-    //             /* We converged at the current iterate */
-    //             break;
-    // ```
     // The eight-lane batches (aarch64): every size 1..=21 and one of 64, with the move
     // to four lanes and without it, the plain compilation, and the literal factorisation forced on one
     // lane (any of the eight) in one round; status and all 400 values compared by bits with the exact
@@ -2211,15 +1845,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-    // ```c
-    // int
-    // Blast_OptimizeTargetFrequencies(double x[],
-    // ...
-    //                                 int constrain_rel_entropy,
-    //                                 double relative_entropy,
-    //                                 double tol,
-    //                                 int maxits)
-    // ```
     // The ignored test times `optimize_target_frequencies_exact` (one problem per call) against
     // four lanes and eight lanes (with and without the move to four lanes, at every batch size) on
     // the realistic test problems and checks the results by bits.

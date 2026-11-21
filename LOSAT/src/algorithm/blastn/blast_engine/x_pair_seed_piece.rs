@@ -6,25 +6,7 @@
 //! memory only).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-//! ```c
-//!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-//!
-//!         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-//! ...
-//!         hits_extended += extend(offset_pairs, hitsfound, word_params,
-//!                                 lookup_wrap, query, subject, matrix,
-//!                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1447-1454 (`MB_ACCESS_HITS`)
-//! ```c
-//!    if (PV_TEST(pv, index, pv_array_bts)) {                         \
-//!       if (total_hits >= max_hits) {                                 \
-//!          if ((Int4)(s_off) > scan_range[0])                         \
-//!             scan_range[0] = s_off;                                  \
-//!          break;                                                     \
-//!       }                                                             \
-//! ```
 //! NCBI scans the subject into an offset array of `OFFSET_ARRAY_SIZE + longest_chain` pairs per
 //! thread, stops when it is full and extends those pairs before the scan goes on from where it
 //! stopped; only the diagonal hash carries over from one batch to the next. The strips stage

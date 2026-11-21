@@ -79,7 +79,7 @@ pub(crate) fn key_table(table: &Table) -> Box<KeyTable> {
 /// BLOSUM62's keys, from its scores as `x_ungapped_fast::build_table` takes them (-128 for
 /// `BLAST_SCORE_MIN`), built in place (no byte table beside them); `None` if a score does not fit
 /// a byte.
-// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]` (the scores the reference walks add).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 `matrix[q[i]][s[i]]` (the scores the reference walks add).
 pub(crate) fn blosum62_keys() -> Option<Box<KeyTable>> {
     let mut keys = Box::new([0i64; KEY_TABLE_LEN]);
     for q in 0..CODES {
@@ -313,7 +313,7 @@ impl<'a> XSentSubject<'a> {
 /// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0)
 /// with every position up to it readable and fewer than `2^32 - 1` positions before it, all codes
 /// up to it are below 32, `keys` is the table's keys and `1 <= dropoff <= 127`.
-// NCBI reference: aa_ungapped.c:804-883 (see the module comment).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (see the module comment).
 #[inline(always)]
 unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
     keys: *const i64,
@@ -360,7 +360,7 @@ unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
 ///
 /// SAFETY: `1 <= dropoff <= 127` (an X-drop that [`XSentQuery::new`] or
 /// [`XSentQuery::new_of`] checked).
-// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn two_hit(
     query: &XSentQuery,
@@ -395,7 +395,7 @@ pub(crate) unsafe fn two_hit(
 /// largest score `M`, `M * (len + 4) < i32::MAX` for the `len` letters of `query` (BLOSUM62's 11
 /// and at most `i32::MAX / 16` letters, or `M <= 31` and at most `i32::MAX / 32`: module
 /// comment); fewer than `i32::MAX` bytes in `subject`; `TAIL` is 1 or 2; and `W` is 1 to 4.
-// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize>(
     keys: &KeyTable,

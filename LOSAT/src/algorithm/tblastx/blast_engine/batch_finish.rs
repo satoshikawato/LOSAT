@@ -26,15 +26,7 @@ pub(super) fn collect_hits(
     >,
     local_collector: std::sync::Mutex<Option<HitCollector>>,
 ) -> Vec<TblastxHsp> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
-    // ```c
-    // for (int index = 0; index < hit_list->hsplist_count; index++) {
-    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-    //     if (!hsp_list)
-    //         continue;
-    //     Blast_HSPListSortByEvalue(hsp_list);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
     // Each traversal ends with the batch's hit lists in report order (tblastx/hit_collector.rs):
     // from the writer thread, or from the collector the subject loop fed.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]

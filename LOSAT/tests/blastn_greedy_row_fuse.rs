@@ -2,11 +2,6 @@
 //! `src/algorithm/blastn/alignment/x_greedy_row_fuse.rs`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
-//! ```c
-//!         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-//! ...
-//!             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-//! ```
 //! The switch chooses between two builds of one distance of `BLAST_GreedyAlign` on x86-64 CPUs
 //! with AVX2, BMI1, BMI2 and LZCNT: the three passes of `x_greedy_row_avx2` (`=0`) or the two passes
 //! of the fused build (the unit tests compare the two on single distances and whole alignments).
@@ -131,9 +126,6 @@ fn check_line(stderr: &str, off: bool, what: &str) {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ```
 /// NZ_CP006932 against itself: the default's report (the fused build, and with `LOSAT_X_STATS` the
 /// build that counts its distances) and `=0`'s are the frozen NCBI report, and the line says which
 /// build ran.
@@ -160,9 +152,6 @@ fn megablast_with_fused_rows_gives_the_ncbi_report() {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ```
 /// Sakai against MG1655 with the alignments (`-outfmt 0`): the default's report (the fused build at
 /// one thread, the counting build at four) is `=0`'s, and no `[X_STATS]` line without
 /// `LOSAT_X_STATS`.

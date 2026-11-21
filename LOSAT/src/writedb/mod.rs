@@ -27,9 +27,15 @@
 //! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name` and the other options
 //! of `makeblastdb::UNSUPPORTED_OPTIONS`; `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
 //! files of the metadata file (`metadata::metadata_user_path`).
+//!
+//! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
+//! sequence in the form of the sequence file with its definition lines (and their PIG), the
+//! ranges of its masking algorithms and the blobs of its other columns, through the same
+//! `BuildDatabase` and `WriteDb` as a FASTA input.
 
 pub mod bioseq;
 pub mod build_db;
+pub(crate) mod column;
 pub mod convert;
 pub mod data_size;
 pub mod deflines;
@@ -51,6 +57,7 @@ pub(crate) mod metadata;
 pub(crate) mod ofstream;
 pub(crate) mod oid_list;
 pub mod platform;
+pub(crate) mod raw_source;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;

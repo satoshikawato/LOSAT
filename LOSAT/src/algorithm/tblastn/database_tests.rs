@@ -127,7 +127,7 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let database = open_with_taxdb("x16_ntaxid", None, &cwd);
-    let stream = database.x_stream(1).unwrap();
+    let stream = database.x_stream(1, None).unwrap();
     let of = |letters: bool| {
         let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
         let mut titles = DatabaseTitles::new();
@@ -182,7 +182,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
     // The reports of one batch of `queries` (the lists of each query), as the run makes them:
     // the titles, the reported sequences by rank, then the batch's prefetch.
     let text = |database: &TblastnDatabase, queries: &[&[(i32, i32)]]| -> String {
-        let stream = database.x_stream(1).unwrap();
+        let stream = database.x_stream(1, None).unwrap();
         let mut hitlists: Vec<KappaResultHitList> =
             queries.iter().map(|&lists| hitlist(lists)).collect();
         let mut titles = DatabaseTitles::new();

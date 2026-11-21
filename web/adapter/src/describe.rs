@@ -16,11 +16,18 @@ use crate::run::Program;
 /// `-outfmt` of its own, whose other formats and 6 or 7 with fields add an output,
 /// `run::parse_run`) and the thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
-/// which needs `-num_threads` and has no effect; `-use_index`, which a search of records ignores
-/// as NCBI ignores it with `-subject`).
+/// which needs `-num_threads` and has no effect; `-use_index` and `-index_name`, which a search
+/// of records ignores as NCBI ignores them with `-subject`).
 /// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
 /// distinct hit list size of its formats (`run::search_groups`).
-const ADAPTER_OWNED: [&str; 5] = ["out", "outfmt", "num_threads", "mt_mode", "use_index"];
+const ADAPTER_OWNED: [&str; 6] = [
+    "out",
+    "outfmt",
+    "num_threads",
+    "mt_mode",
+    "use_index",
+    "index_name",
+];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;

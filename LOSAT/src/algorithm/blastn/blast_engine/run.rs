@@ -44,7 +44,7 @@ use super::super::args::{BlastnArgs, QueryStrand};
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     chunk_query_masks, configure_task, finalize_task_config, prepare_sequence_data, query_masks,
-    reverse_mask_intervals, subject_metadata_from_records, LookupTables, QueryLetters,
+    reverse_mask_intervals, subject_metadata_from_records, LookupTables, MaskError, QueryLetters,
     SequenceData, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
@@ -69,9 +69,10 @@ use super::super::lookup::{
 use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, pairwise_windows, DisplayMasks, Rows as PairwiseRows};
 use super::super::query_split::{
-    restrict_masks, restrict_masks_with_letter_before, split_query_batch, splits, QueryChunk,
-    SplitSizes,
+    masked_before_part, restrict_masks, restrict_masks_with_letter_before, split_query_batch,
+    splits, QueryChunk, SplitSizes,
 };
+use super::super::repeat_filter::MasksOutside;
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, ContextKarlin,
 };
@@ -153,6 +154,10 @@ mod x_rpt_stream;
 // types).
 #[path = "database.rs"]
 mod database;
+// `-use_index true`: NCBI's loader of the MegaBLAST database index, its error lines and its
+// warning, and LOSAT's refusal of an index that NCBI searches with (line RG item D5b).
+#[path = "mb_index.rs"]
+mod mb_index;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c (whole file)
 // BLASTN `-culling_limit`: the culling writer of the preliminary stage and the culling pipe of
@@ -4773,6 +4778,9 @@ struct BlastnReportInputs<'a> {
     /// The DUST-only masks of every query (outfmt 11's `LCaseMask`), or with
     /// `-window_masker_db` the WindowMasker masks; empty without outfmt 11.
     archive_dust: &'a [Vec<MaskedInterval>],
+    /// With `-filtering_db`, the repeat hits of every query (outfmt 11's `LCaseMask`,
+    /// `repeat_filter::RepeatFilter::hits`); empty without outfmt 11 or without the option.
+    archive_repeats: &'a [Vec<(usize, usize)>],
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
     query_eff_searchsp: &'a [i64],
@@ -4873,6 +4881,8 @@ struct BlastnReportInputs<'a> {
     /// The DUST options as NCBI's filter string prints them (BLAST XML's `Parameters_filter`);
     /// `None`: no DUST.
     dust: Option<(i32, i32, i32)>,
+    /// The database of `-filtering_db` (the filter string's `R -d <name>;`).
+    repeat_filter: Option<&'a str>,
     /// The WindowMasker option (the filter string's `W -d <name>;` or `W -t <taxid>;`).
     window_masker: Option<crate::report::blast_xml::filter::WindowMasker<'a>>,
     /// `-soft_masking` (the filter string's `m;`).
@@ -5001,6 +5011,7 @@ fn call_batches<'a>(
         }),
         query_masks: report.query_masks,
         dust_masks: report.archive_dust,
+        repeat_hits: report.archive_repeats,
         unsearched,
         lcase_masking: report.lcase_masking,
         window_masker: report.window_masker.is_some(),
@@ -5260,7 +5271,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI's best hit pipe is there in its place (`-best_hit_overhang`, `-best_hit_score_edge`;
@@ -5271,7 +5282,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             params,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -6084,15 +6095,17 @@ pub fn run(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too (`cli_output_formats`). `GetExportSearchStrategyStream` comes first: it creates
+    // there too (`output_formats_of`). `GetExportSearchStrategyStream` comes first: it creates
     // the search strategy file (`strategy::open_strategy_file`), which an error after it
-    // leaves empty.
+    // leaves empty, and with it a value that does not parse is left to the formatting handler
+    // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         "BLASTN",
     )?;
-    let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
+    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let output_formats = output_formats_of(&choice, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -6111,7 +6124,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(&args, args.dust_filtering.as_deref()),
-                app::parse_formatting_string(&args.outfmt)?.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -6207,7 +6220,7 @@ pub fn run(
             .tabular_spec()
             .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
     });
-    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -6295,7 +6308,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -6527,6 +6540,7 @@ fn search_cli(
     args.resolve_dust()?;
     args.window_masker_registry = Some(settings.window_masker_registry.clone());
     args.resolve_window_masker()?;
+    args.resolve_repeat_filter(&settings);
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
     let database = open_search_database(
@@ -6694,6 +6708,7 @@ fn search_cli(
         subjects,
         outputs,
         output_formats,
+        None,
     )
 }
 
@@ -6751,9 +6766,23 @@ fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    let choice = app::parse_formatting_string(outfmt)?;
-    app::report_format(&choice, Program::Blastn, out)?
-        .map(|format| BlastnOutputFormat::of(format, &choice))
+    output_formats_of(
+        &app::EarlyFormat::Parsed(app::parse_formatting_string(outfmt)?),
+        out,
+    )
+}
+
+/// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
+/// none for one that NCBI itself rejects later, nor for one it left to the formatting handler.
+fn output_formats_of(
+    choice: &app::EarlyFormat,
+    out: Option<&std::path::Path>,
+) -> Result<Vec<BlastnOutputFormat>> {
+    let Some(choice) = choice.parsed() else {
+        return Ok(Vec::new());
+    };
+    app::report_format(choice, Program::Blastn, out)?
+        .map(|format| BlastnOutputFormat::of(format, choice))
         .into_iter()
         .collect()
 }
@@ -6789,19 +6818,6 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80
-        // (SAM's one line per subject of an ungapped search, `-outfmt 17`)
-        // The Seq-aligns of an ungapped search (8, 9, 11, 12) are Dense-diags, which
-        // `report::serial::seqalign::write_seq_align_dendiag` writes (NCBI reference (598d8ae6):
-        // c++/src/algo/blast/api/blast_seqalign.cpp:1274-1311,
-        // `x_UngappedHSPToDenseDiag`); SAM's line of a subject that joins its HSPs (O4a-2) is
-        // not written yet.
-        if args.ungapped && choice.number == 17 {
-            anyhow::bail!(
-                "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                choice.number
-            );
-        }
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -6888,6 +6904,13 @@ fn run_local_formats(
             "-window_masker_taxid (a directory of WindowMasker counts files) is not supported in the browser yet"
         );
     }
+    // The database of `-filtering_db` is looked up with the caller's settings (the library gives
+    // them, `api::run`); LOSAT Web has no databases.
+    if args.filtering_db.is_some() && args.repeat_filter.is_none() {
+        anyhow::bail!(
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+        );
+    }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
@@ -6933,6 +6956,7 @@ fn run_local_formats(
         Subjects::Records(SubjectLetters::new(searched_subjects, None)),
         outputs,
         output_formats,
+        None,
     )
 }
 
@@ -6973,21 +6997,109 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, output_formats, settings, view)
+                search_database(args, query_records, output_formats, settings, view, None)
             });
             outputs.finish_archive(&handle, query_records.is_empty(), result)
         }
-        None => search_database(args, query_records, output_formats, settings, outputs),
+        None => search_database(args, query_records, output_formats, settings, outputs, None),
     }
 }
 
-/// `run_local_database` from the taxid or seqid list on.
+/// The repeat search of blastn's `-filtering_db` (`repeat_filter`): `args` (the search's options,
+/// `RepeatFilter::search_args`) over `query_records` against the filter's database, in `pool`, the
+/// pool of the search whose queries it masks, without a report: the hit lists, as the search hands
+/// them to a library caller (`ReportOutputs::hits`). Its messages are dropped, as NCBI reads only
+/// the alignments of its search of the repeats, and nothing that only a formatter reads is read
+/// (`BlastnArgs::hits_only`: NCBI's search of the repeats has no formatter). An exception of NCBI's
+/// search is `RepeatError::Posted`, its message: an error of the database reader where the
+/// database is opened, and the stop of a batch that the search's set-up finds without a valid query
+/// (`BLAST engine error: `, `CBlastException` eSetup).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-390
+pub(crate) fn repeat_search_hits(
+    args: BlastnArgs,
+    query_records: &[FastaRecord],
+    filter: &super::super::repeat_filter::RepeatFilter,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> std::result::Result<Vec<Arc<Vec<PairwiseHit>>>, super::super::repeat_filter::RepeatError> {
+    use super::super::repeat_filter::RepeatError;
+    use crate::algorithm::common::database::DatabaseOpenError;
+    // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
+    // opens the database (`common::database::restrict_database`).
+    let opened = crate::algorithm::common::database::open_search_database(
+        filter.database(),
+        crate::seqdb::SeqType::Nucleotide,
+        filter.settings(),
+    );
+    let failed = match opened {
+        Ok(database) => database.check_alias_values().err(),
+        Err(DatabaseOpenError::Reader(error)) => Some(error),
+        Err(DatabaseOpenError::Registry(_)) => None,
+    };
+    if let Some(error) = failed {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639
+        // The set-up of each query posts the exception's `GetMsg()`.
+        match (error.ncbi_exception(), error.ncbi_message()) {
+            (Some(exception), _) => return Err(RepeatError::Posted(exception.get_msg().to_vec())),
+            (None, Some(text)) => return Err(RepeatError::Posted(text)),
+            (None, None) => {}
+        }
+    }
+    // The search writes a tabular report, which nothing reads (as the library's batches do,
+    // `api::batches`): the hits come from the hit lists.
+    let mut diagnostics: Vec<u8> = Vec::new();
+    let mut report = std::io::sink();
+    let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
+    let result = {
+        let mut on_hits = |hits| collected.push(hits);
+        let mut outputs = ReportOutputs {
+            formats: vec![crate::api::local_blast::FormatOutput {
+                outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                sink: crate::api::local_blast::OutputSink::Writer(&mut report),
+            }],
+            diagnostics: &mut diagnostics,
+            later_warnings: None,
+            hits: Some(&mut on_hits),
+            observer: None,
+        };
+        parse_output_formats(std::iter::once(("6", None))).and_then(|output_formats| {
+            search_database(
+                args,
+                query_records,
+                output_formats,
+                filter.settings().clone(),
+                &mut outputs,
+                Some(pool),
+            )
+        })
+    };
+    result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
+        // The search's set-up that finds no valid query stops with its messages, which the
+        // command line writes after `BLAST engine error: `.
+        Ok(native) => match native
+            .message
+            .strip_prefix(b"BLAST engine error: ")
+            .and_then(|text| text.strip_suffix(b"\n"))
+        {
+            Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
+            _ => RepeatError::Search(native.into()),
+        },
+        Err(error) => RepeatError::Search(error),
+    })?;
+    Ok(collected)
+}
+
+/// `run_local_database` from the taxid or seqid list on, in the pool `within` when one is given
+/// (`repeat_search_hits`).
 fn search_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
+    within: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
@@ -6998,6 +7110,7 @@ fn search_database(
     args.resolve_dust()?;
     args.window_masker_registry = Some(settings.window_masker_registry.clone());
     args.resolve_window_masker()?;
+    args.resolve_repeat_filter(&settings);
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
     let database = open_search_database(
@@ -7023,6 +7136,7 @@ fn search_database(
         Subjects::Database(&database),
         outputs,
         output_formats,
+        within,
     )
 }
 
@@ -7037,103 +7151,7 @@ enum SearchQueries<'a> {
     Taken(&'a x_query_drop::Store),
 }
 
-/// What `-use_index true` found (`megablast_index`).
-enum MegablastIndex {
-    /// NCBI does not ask for an index (`BlastnArgs::megablast_index_name`), or asked, found
-    /// none, warned and searches without one.
-    NotAsked,
-    /// A file of the database's index: NCBI searches with the index, which LOSAT does not.
-    Found(std::path::PathBuf),
-    /// A `-db` value with a comma, which NCBI's loader of old-style indices reads as a range of
-    /// index volumes (`blast_dbindex.cpp:964-995`) that LOSAT does not read.
-    VolumeRange,
-}
-
-impl MegablastIndex {
-    /// LOSAT's refusal of a search that NCBI runs with a MegaBLAST database index.
-    fn check(&self) -> Result<()> {
-        match self {
-            Self::NotAsked => Ok(()),
-            Self::Found(file) => anyhow::bail!(
-                "-use_index true with a database that has a MegaBLAST index ({}) is not supported by LOSAT's BLASTN",
-                file.display()
-            ),
-            Self::VolumeRange => anyhow::bail!(
-                "-use_index true with a -db value that has a comma (old-style index volumes) is not supported by LOSAT's BLASTN"
-            ),
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:216-221
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:447-459
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1145-1168
-/// `-use_index true` of a megablast search of `-db` (`BlastnArgs::megablast_index_name`): NCBI
-/// looks for the database's MegaBLAST index (new style, then old style). Without one it writes
-/// the two loaders' exceptions as one warning, with the source paths of the official Linux x64
-/// build as LOSAT's other NCBI exceptions (`NCBI_BUILD_ROOT`), and searches as without
-/// `-use_index`; the archive records the name (`report::archive::options`). With one, NCBI
-/// searches with the index, which LOSAT refuses (`MegablastIndex::check`).
-fn megablast_index(
-    args: &BlastnArgs,
-    database: &database::BlastnDatabase,
-    diagnostics: &mut (dyn std::io::Write + Send),
-) -> Result<MegablastIndex> {
-    let Some(index_name) = args.megablast_index_name() else {
-        return Ok(MegablastIndex::NotAsked);
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:440-446
-    // A megablast search with a template (`-template_type` and `-template_length`, which
-    // require each other) looks for no index.
-    let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
-    } else {
-        if index_name.contains(',') {
-            return Ok(MegablastIndex::VolumeRange);
-        }
-        if let Some(file) = database.megablast_index_file(index_name) {
-            return Ok(MegablastIndex::Found(file));
-        }
-        use crate::ncbi_exception::{NcbiException, ThrowSite};
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:794-797
-        const NO_VOLUME_INDEX: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 795,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New"),
-        };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1023-1027
-        const NO_INDEX_FILE: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 1026,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old"),
-        };
-        let new_style = NcbiException::new(NO_VOLUME_INDEX, "no database volume has an index");
-        let old_style = NcbiException::new(
-            NO_INDEX_FILE,
-            format!("no index file specified or index '{index_name}*' not found."),
-        );
-        // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
-        // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
-        // " Database index will not be used." (setup_factory.cpp:455).
-        [
-            b"Warning: (1.1) [blastn] ".as_slice(),
-            &new_style.what(),
-            b"\n",
-            &old_style.what(),
-            b" Database index will not be used.\n",
-        ]
-        .concat()
-    };
-    // One diagnostic: the archive saves it as one message.
-    match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, &warning)?,
-        None => diagnostics.write_all(&warning)?,
-    }
-    Ok(MegablastIndex::NotAsked)
-}
-
+#[allow(clippy::too_many_arguments)]
 fn search(
     mut args: BlastnArgs,
     queries: SearchQueries<'_>,
@@ -7142,6 +7160,7 @@ fn search(
     subjects: Subjects<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
+    within: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     // EXPERIMENT (LOSAT_X_QSTREAM): a streamed search has no records here (its reading is never
     // `Records`), and its query input comes from the lengths of the first reading; EXPERIMENT
@@ -7161,11 +7180,13 @@ fn search(
         return Ok(());
     }
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
-    // and before the formatter (`megablast_index`); LOSAT's refusal of an index comes with its
-    // other limits below.
+    // and before the formatter (`mb_index::megablast_index`); LOSAT's refusal of an index comes
+    // with its other limits below.
     let megablast_index = match subjects {
-        Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
-        Subjects::Records(_) => MegablastIndex::NotAsked,
+        Subjects::Database(database) => {
+            mb_index::megablast_index(&args, database, outputs.diagnostics)?
+        }
+        Subjects::Records(_) => mb_index::MegablastIndex::NotUsed,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -7207,12 +7228,7 @@ fn search(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:255-258
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file takes the file name as the base of its side files).
-    for format in &outputs.formats {
-        app::xinclude_check_for(
-            &app::parse_formatting_string(format.outfmt)?,
-            format.side_out(args.out.as_deref()),
-        )?;
-    }
+    outputs.xinclude_check(args.out.as_deref())?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
@@ -7298,7 +7314,10 @@ fn search(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    let x_result = crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
+    // The repeat search of `-filtering_db` runs in the pool of the search whose queries it masks
+    // (`repeat_search_hits`); every other search has its own.
+    let requested = args.num_threads;
+    let run = |pool: &crate::utils::threading::SearchPool<'_>| {
         run_in_pool(
             args,
             queries,
@@ -7311,7 +7330,11 @@ fn search(
             pool,
             batching,
         )
-    });
+    };
+    let x_result = match within {
+        Some(pool) => run(pool),
+        None => crate::utils::threading::with_search_pool(requested, "blastn", run),
+    };
     // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
     x_result
@@ -7855,7 +7878,8 @@ enum BatchStage<'a> {
     /// (`-window_masker_db`, whose errors stop the batch before its search); `None`: made here.
     /// `lower_case_before`: whether the letter before each query's interval is lower case, which
     /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
-    /// `-window_masker_db`).
+    /// `-window_masker_db`). `masks_outside`: with `-filtering_db`, the masks next to each query's
+    /// interval that the batch's masks joined (`repeat_filter::MasksOutside`; empty without them).
     ///
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
@@ -7864,6 +7888,7 @@ enum BatchStage<'a> {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
+        masks_outside: &'a [MasksOutside],
         last: bool,
     },
     /// The preliminary search of one query chunk of a split batch
@@ -8317,6 +8342,9 @@ fn run_in_pool(
         // an error there (the whole queries' masks were made) is LOSAT's rejection
         // (`window_masker::rejection`). The masks made here are those the search uses.
         let mut window_masker_masks = None;
+        // The masks' failure of the batch as NCBI reports it: the messages of its queries' set-ups
+        // and the error.
+        let mut mask_failure: Option<(Posts, crate::cli::NativeError)> = None;
         if let Some(window_masker) = &args.window_masker {
             // The batch's query source loads the registry of `-window_masker_taxid` before it
             // makes the masks, after the reader's messages of the batch: its posts go with them
@@ -8333,52 +8361,78 @@ fn run_in_pool(
                     QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
                 ),
             };
-            if let Err(error) = &masks {
-                let Some((masker_warnings, failure)) =
-                    window_masker.batch_error(error, searched.len(), first_load)
-                else {
-                    return Err(window_masker_rejection(&args, error));
-                };
-                // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                // written when the loop took them.
-                let before = |outputs: &mut ReportOutputs<'_>| {
-                    write_before_failed_batch(
-                        &args,
-                        queries.before(&kept, start),
-                        ReportSubjects {
-                            source,
-                            shown: &shown,
-                            titles: &titles,
-                        },
-                        &report_ranges,
-                        outputs,
-                        &output_formats,
-                        BatchResults {
-                            hit_lists,
-                            warnings: &warnings[..start],
-                            reads: &query_reads[..start],
-                            lengths: &lengths[..start],
-                            unsearched,
-                            query_masks: &query_masks,
-                            context_karlin: &context_karlin,
-                            query_eff_searchsp: &query_eff_searchsp,
-                            batches: &batch_spans,
-                        },
-                    )
-                };
-                // In the first batch nothing was streamed: the call of the off path writes the
-                // prologs that come with the reports (outfmt 20's line of the field names).
-                if stream.acting() && start > 0 {
-                    stream.finish_sam(outputs)?;
-                } else {
-                    before(outputs)?;
+            match masks {
+                Ok(masks) => {
+                    batch_title_warnings.append(window_masker.load_posts(first_load));
+                    window_masker_masks = Some(masks);
                 }
-                batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-                masker_warnings.write(&mut *outputs.diagnostics, archive)?;
-                return Err(failure.into());
+                Err(error) => match window_masker.batch_error(&error, searched.len(), first_load) {
+                    Some(failure) => mask_failure = Some(failure),
+                    None => return Err(window_masker_rejection(&args, &error)),
+                },
             }
-            batch_title_warnings.append(window_masker.load_posts(first_load));
-            window_masker_masks = masks.ok();
+        }
+        // With `-filtering_db` the batch's masks are made here too (`repeat_batch_masks`), where
+        // NCBI sets the batch's queries up; the masks next to each query's `-query_loc` interval
+        // that they join go on to the chunks of a split batch (`BatchStage::Search`'s
+        // `masks_outside`).
+        let mut masks_outside: Vec<MasksOutside> = Vec::new();
+        if let Some(filter) = &args.repeat_filter {
+            let ranged = (args.lcase_masking && query_input.placements.ranged()).then(|| {
+                (start..end)
+                    .map(|index| {
+                        let input = query_input.ordinal(index) - input_start;
+                        (&batch_records.input()[input], query_offsets[index])
+                    })
+                    .collect()
+            });
+            let searched = batch_records.searched();
+            match repeat_batch_masks(&args, filter, searched, ranged, parallel_pool)? {
+                Ok((masks, outside)) => {
+                    window_masker_masks = Some(masks);
+                    masks_outside = outside;
+                }
+                Err(failure) => mask_failure = Some((Posts::new(), failure)),
+            }
+        }
+        if let Some((masker_warnings, failure)) = mask_failure {
+            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
+            // written when the loop took them.
+            let before = |outputs: &mut ReportOutputs<'_>| {
+                write_before_failed_batch(
+                    &args,
+                    queries.before(&kept, start),
+                    ReportSubjects {
+                        source,
+                        shown: &shown,
+                        titles: &titles,
+                    },
+                    &report_ranges,
+                    outputs,
+                    &output_formats,
+                    BatchResults {
+                        hit_lists,
+                        warnings: &warnings[..start],
+                        reads: &query_reads[..start],
+                        lengths: &lengths[..start],
+                        unsearched,
+                        query_masks: &query_masks,
+                        context_karlin: &context_karlin,
+                        query_eff_searchsp: &query_eff_searchsp,
+                        batches: &batch_spans,
+                    },
+                )
+            };
+            // In the first batch nothing was streamed: the call of the off path writes the
+            // prologs that come with the reports (outfmt 20's line of the field names).
+            if stream.acting() && start > 0 {
+                stream.finish_sam(outputs)?;
+            } else {
+                before(outputs)?;
+            }
+            batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
+            masker_warnings.write(&mut *outputs.diagnostics, archive)?;
+            return Err(failure.into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1025
@@ -8486,6 +8540,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    masks_outside: &masks_outside,
                     last,
                 },
                 &mut warnings[start],
@@ -8505,6 +8560,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    masks_outside: &masks_outside,
                     last,
                 },
                 &mut warnings[start],
@@ -8703,9 +8759,9 @@ fn run_in_pool(
         // search (a database's titles are read in its traceback, above): a value that NCBI cannot
         // convert stops the first batch here, after its reader's messages and before its query
         // warnings (`app::check_prefetch_environment`).
-        if let Err(error) =
-            crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
-        {
+        if let Err(error) = crate::blastinput::app::check_prefetch_environment(
+            outputs.only_archive() || args.hits_only,
+        ) {
             write_before_failed_batch(
                 &args,
                 queries.before(&kept, start),
@@ -9662,6 +9718,31 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
+    // With `-filtering_db` the query vector's masks of a query with repeat hits are its masks
+    // combined with the hits (`repeat_filter::RepeatFilter::add_masks`): the archive searches the
+    // repeats again, one search for each query batch, as the batch's set-up searched them.
+    let archive_repeats: Vec<Vec<(usize, usize)>> = match &args.repeat_filter {
+        Some(filter) if output_formats.contains(&BlastnOutputFormat::Archive) => {
+            let serial = crate::utils::threading::SearchPool::x_serial();
+            let pool = x_pool.unwrap_or(&serial);
+            let whole = [0..query_records.len()];
+            let spans = if results.batches.is_empty() {
+                &whole[..]
+            } else {
+                results.batches
+            };
+            let mut found = Vec::with_capacity(query_records.len());
+            for span in spans {
+                found.extend(
+                    filter
+                        .hits(&args.strand, &query_records[span.clone()], pool)
+                        .map_err(|error| super::super::repeat_filter::rejection(filter, error))?,
+                );
+            }
+            found
+        }
+        _ => Vec::new(),
+    };
     let records_parsed = if args.parse_deflines && reported.is_none() {
         crate::report::db_subject::parsed_records(
             subject_letters
@@ -9704,6 +9785,7 @@ fn write_reports_untimed(
         ranges,
         query_masks: results.query_masks,
         archive_dust: &archive_dust,
+        archive_repeats: &archive_repeats,
         lcase_masking: args.lcase_masking,
         database_mask: args.db_mask_resolved.as_ref().map(|mask| mask.id),
         query_eff_searchsp: results.query_eff_searchsp,
@@ -9765,6 +9847,7 @@ fn write_reports_untimed(
         dust: args.dust.params().map(|(level, window, linker)| {
             (level as i32, window as u32 as i32, linker as u32 as i32)
         }),
+        repeat_filter: args.filtering_db.as_deref(),
         window_masker: args
             .window_masker
             .as_deref()
@@ -9866,6 +9949,55 @@ fn window_masker_rejection(
     )
 }
 
+/// The masks of a query batch with `-filtering_db` (`coordination::query_masks`: DUST's, the
+/// lower case and the hits of `filter`'s repeat search of the `searched` letters), and with
+/// `-query_loc` and `-lcase_masking` (`ranged`: each query's record and the start of its
+/// interval) the lower case next to the intervals that they join (`repeat_filter::MasksOutside`).
+/// NCBI makes them in the set-up of the batch's queries: an error of the repeat search that it
+/// reports fails each query of the batch (`Ok(Err(..))`, `repeat_filter::batch_error`).
+#[allow(clippy::type_complexity)]
+fn repeat_batch_masks(
+    args: &BlastnArgs,
+    filter: &super::super::repeat_filter::RepeatFilter,
+    searched: &[FastaRecord],
+    ranged: Option<Vec<(&FastaRecord, usize)>>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<
+    std::result::Result<(Vec<Vec<MaskedInterval>>, Vec<MasksOutside>), crate::cli::NativeError>,
+> {
+    let mut outside: Vec<MasksOutside> = ranged
+        .unwrap_or_default()
+        .iter()
+        .zip(searched)
+        .map(|(&(record, offset), part)| {
+            MasksOutside::lower_case(record.seq(), offset, part.seq().len())
+        })
+        .collect();
+    match super::super::coordination::query_masks(args, searched, &mut outside, pool) {
+        Ok(masks) => Ok(Ok((masks, outside))),
+        Err(MaskError::Repeats(error)) => {
+            match super::super::repeat_filter::batch_error(&error, searched.len()) {
+                Some(failure) => Ok(Err(failure)),
+                None => Err(super::super::repeat_filter::rejection(filter, error)),
+            }
+        }
+        Err(error) => Err(mask_rejection(args, error)),
+    }
+}
+
+/// LOSAT's rejection of an error of the masks (`coordination::MaskError`) that the batch loop does
+/// not report as NCBI does: WindowMasker's (`window_masker_rejection`) and the repeat search's
+/// (`repeat_filter::rejection`).
+fn mask_rejection(args: &BlastnArgs, error: MaskError) -> anyhow::Error {
+    match error {
+        MaskError::WindowMasker(error) => window_masker_rejection(args, &error),
+        MaskError::Repeats(error) => match args.repeat_filter.as_deref() {
+            Some(filter) => super::super::repeat_filter::rejection(filter, error),
+            None => anyhow::anyhow!("a repeat search without -filtering_db"),
+        },
+    }
+}
+
 /// `blastinput::app::check_diag_table_window` for a query batch (DI-6, `-window_size`), before
 /// `search_query_batch`, whose code a check inside would change (its inlining; the default
 /// search's code must stay the same). The concatenated length is that of the batch's contexts
@@ -9956,7 +10088,9 @@ fn read_db_seq_ranges(
     // Every hard chunk carries its range inline, so the full range is not written.
     let mut none = std::mem::take(&mut subject_scratch.db_soft_ranges);
     none.clear();
-    subject_scratch.db_hard_split.start(s_len_full, ranges);
+    subject_scratch
+        .db_hard_split
+        .start(s_len_full, ranges, true);
     Some(none)
 }
 
@@ -10041,8 +10175,8 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_masks: Some(masks),
             ..
         } => masks.to_vec(),
-        BatchStage::Search { .. } => query_masks(args, &letters, parallel_pool)
-            .map_err(|error| window_masker_rejection(args, &error))?,
+        BatchStage::Search { .. } => query_masks(args, &letters, &mut [], parallel_pool)
+            .map_err(|error| mask_rejection(args, error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
@@ -10256,6 +10390,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         BatchStage::Search {
             query_offsets,
             lower_case_before,
+            masks_outside,
             ..
         } if any_valid_context && !UNGAPPED => {
             let chunks = search_query_chunks(
@@ -10264,6 +10399,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 &seq_data.query_masks,
                 query_offsets,
                 lower_case_before,
+                masks_outside,
                 option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
                 &query_context_offsets,
                 subjects,
@@ -10738,6 +10874,7 @@ fn search_query_chunks(
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[usize],
     lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
     batch_eff_searchsp: &[i64],
     context_offsets: &[i32],
     subjects: SubjectSource<'_>,
@@ -10795,14 +10932,19 @@ fn search_query_chunks(
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
-        // A query whose letter before its `-query_loc` interval is lower case
-        // (`lower_case_before`) restricts that letter too.
+        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
+        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
+        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
         let restricted = chunk
             .queries
             .iter()
             .map(|part| {
                 let (masks, offset) = (&query_masks[part.query], query_offsets[part.query]);
-                if lower_case_before.get(part.query) == Some(&true) {
+                let letter_before = lower_case_before.get(part.query) == Some(&true)
+                    || masks_outside
+                        .get(part.query)
+                        .is_some_and(|outside| outside.before & 1 != 0);
+                if letter_before {
                     restrict_masks_with_letter_before(masks, part, offset)
                 } else {
                     restrict_masks(masks, part, offset)
@@ -10815,8 +10957,31 @@ fn search_query_chunks(
         if let Some(window_masker) = &args.window_masker {
             posts.append(window_masker.load_posts(false));
         }
-        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
-            .map_err(|error| window_masker_rejection(args, &error))?;
+        // With `-filtering_db` the masks that the chunk keeps before a part's letters join the
+        // part's masks when it combines the part's repeat hits with them
+        // (`query_split::masked_before_part`).
+        let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
+            chunk
+                .queries
+                .iter()
+                .map(|part| {
+                    let before = masks_outside
+                        .get(part.query)
+                        .map_or(0, |outside| outside.before);
+                    MasksOutside::before_part(masked_before_part(
+                        &query_masks[part.query],
+                        before,
+                        part,
+                        query_offsets[part.query],
+                    ))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let part_masks =
+            chunk_query_masks(args, &parts, restricted, &mut parts_outside, parallel_pool)
+                .map_err(|error| mask_rejection(args, error))?;
         let batch = search_query_batch::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),

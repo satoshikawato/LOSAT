@@ -303,7 +303,7 @@ fn run_app(
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
     let mut target = diag_target(log_file(words));
-    start.write_log_setup(&mut target);
+    start.write_log_setup(&mut target, err);
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.

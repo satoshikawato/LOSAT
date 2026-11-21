@@ -158,9 +158,10 @@ impl<'a> XStageSubjects<'a> {
                 if let Some(store) = slot.as_ref() {
                     return Ok(XHeld::Store(Arc::clone(store)));
                 }
-                // Two threads may ask at once: the stream reads it once (`read_shared`).
+                // Two threads may ask at once: the stream reads it once (`read_shared`). With
+                // `-db_hard_mask` the stages read `B` over its masks (`XDbStream::read_stage`).
                 drop(slot);
-                let store = stream.read_shared(oid)?;
+                let store = stream.read_stage(oid)?;
                 slot = stores[at].lock().unwrap_or_else(|e| e.into_inner());
                 Ok(XHeld::Store(Arc::clone(slot.get_or_insert(store))))
             }

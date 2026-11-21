@@ -57,7 +57,7 @@ describe('accessionLines', () => {
 
   it('points to Fetch only for an accession on the first line of a Seq-id reason (WA2-OP-04)', () => {
     const reason = (line: string) =>
-      `the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)`;
+      `the first line of the query ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's BLASTN (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)`;
     const accessions = ['AB000001.1', 'ab000001', 'NR_074540.1', 'P12345', 'Q9Y261', 'C_AA004835.1', 'AAA12345'];
     for (const line of accessions) {
       expect(pointsToFetch(reason(line), `${line}\nACGT\n`), line).toBe(true);
@@ -72,12 +72,12 @@ describe('accessionLines', () => {
     expect(pointsToFetch(undefined, 'AB000001.1\nACGT')).toBe(false);
     expect(pointsToFetch(reason('AB000001.1'), '')).toBe(false);
     expect(isSeqIdReason(reason('x'))).toBe(true);
-    expect(isSeqIdReason('line 3 is a gap line')).toBe(false);
+    expect(isSeqIdReason("a query record longer than 2147483647 letters is not supported by LOSAT's BLASTN")).toBe(false);
   });
 
-  it("tells the adapter's Seq-id reason by a part of its text, which the adapter still has (WA2-OP-04)", () => {
-    const adapter = readFileSync(resolve(import.meta.dirname, '../../../adapter/src/scan/ncbi.rs'), 'utf8');
-    expect(adapter).toContain(SEQ_ID_REASON);
+  it("tells the engine's Seq-id reason by a part of its text, which the engine's reader still has (WA2-OP-04)", () => {
+    const reader = readFileSync(resolve(import.meta.dirname, '../../../../LOSAT/src/blastinput/fasta_reader/seq_id.rs'), 'utf8');
+    expect(reader).toContain(SEQ_ID_REASON);
   });
 
   it('knows what EBI cannot serve without asking it', () => {

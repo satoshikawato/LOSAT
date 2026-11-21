@@ -22,8 +22,8 @@ use crate::utils::winmask::{
 use super::checkdup::check_duplicates;
 use super::ids::IdLists;
 use super::work::{
-    considered, database_source, fasta_source, open_counts, report, unsupported, winmask_failure,
-    Failure, Record, SequenceSource,
+    database_source, fasta_source, open_counts, report, unsupported, winmask_failure, Failure,
+    Record, SequenceSource,
 };
 
 /// Where the counts go (`CSeqMaskerOstat`'s stream).
@@ -222,9 +222,12 @@ impl GenomeInput<'_, '_, '_, '_> {
                     .map_err(|_| Failure::Ncbi(read_error()))?;
                 fasta_source(file, false)?
             };
+            if self.lists.match_titles() {
+                source.make_titles();
+            }
             while let Some(record) = source.next_record(self.out, self.diag)? {
                 post_read_texts::<Failure>(&record.texts, self.out, self.diag)?;
-                if record.iupac.is_empty() || !considered(self.lists, &record)? {
+                if record.iupac.is_empty() || !self.lists.consider(&record) {
                     continue;
                 }
                 f(&record, self.out, self.diag)?;

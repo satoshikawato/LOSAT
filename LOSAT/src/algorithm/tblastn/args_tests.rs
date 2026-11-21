@@ -167,16 +167,8 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         ),
         (9, 1, 18.0, 15)
     );
-    for extra in [
-        &["-ungapped", "-comp_based_stats", "F"][..],
-        &["-max_target_seqs", "1073741799"],
-        &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
-    ] {
-        assert!(
-            limit(extra).contains("not supported by LOSAT's TBLASTN"),
-            "{extra:?}"
-        );
-    }
+    assert!(limit(&["-ungapped", "-comp_based_stats", "F"])
+        .contains("not supported by LOSAT's TBLASTN"));
     // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
     for extra in [
         &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
@@ -342,10 +334,17 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     for value in ["bogus", "0", "F", "2u", "D", "t"] {
         check_options(&parse(&["-comp_based_stats", value]).unwrap()).unwrap();
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 through an int: 2^30 without composition statistics
-    // keeps a preliminary hit list of 10 subjects.
-    check_options(&parse(&["-comp_based_stats", "0", "-max_target_seqs", "1073741824"]).unwrap())
-        .unwrap();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70: a hit list size whose
+    // preliminary size overflows NCBI's `int` (2^30 without composition-based statistics, 2^30 - 25
+    // with them, up to 2^31 - 1) runs; LOSAT computes the size without overflow.
+    for extra in [
+        &["-comp_based_stats", "0", "-max_target_seqs", "1073741824"][..],
+        &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
+        &["-max_target_seqs", "1073741799"],
+        &["-max_target_seqs", "2147483647"],
+    ] {
+        check_options(&parse(extra).unwrap()).unwrap();
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319: -qcov_hsp_perc and -max_hsps.
     let resolved = parse(&["-max_hsps", "2", "-qcov_hsp_perc", "50.5"])
         .unwrap()
@@ -362,7 +361,7 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
     for extra in [
-        &["-db_soft_mask", "1"][..],
+        &["-gilist", "ids.gil"][..],
         &["-remote"],
         &["-use_sw_tback"],
     ] {

@@ -14,8 +14,9 @@ use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::dbindex::factory::{make_index, Stop};
+use crate::dbindex::format::{volume_name, SuperHeader};
 use crate::dbindex::stream::{BlastDbStream, FastaStream, Filter, SequenceStream, StreamError};
-use crate::dbindex::{save_super_header, unsupported, volume_name, Options, SeqNum, MAX_STRIDE};
+use crate::dbindex::{unsupported, Options, SeqNum, MAX_STRIDE};
 use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{open_text_file, Cin};
 use crate::ncbi_app::Diag;
@@ -301,7 +302,7 @@ fn new_style(
             ));
             return Ok(1);
         }
-        save_super_header(&format!("{dbv_name}.shd"), num_seq, num_vol);
+        SuperHeader { num_seq, num_vol }.save(&format!("{dbv_name}.shd"));
     }
     Ok(0)
 }

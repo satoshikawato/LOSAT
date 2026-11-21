@@ -15,7 +15,7 @@ pub(crate) struct WriteDbFile {
     /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
     stream: OfStream,
     base_name: String,
-    extension: &'static str,
+    extension: String,
     index: u32,
     use_index: bool,
     fname: String,
@@ -40,7 +40,7 @@ impl WriteDbFile {
     // NCBI does not test the stream: a file that cannot be opened (a directory of its name
     // that the removal of the old database could not delete) is written to nowhere and the
     // build goes on, as makeblastdb's (`super::ofstream`).
-    fn create(base_name: &str, extension: &'static str, index: u32, max_file_size: u64) -> Self {
+    fn create(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
         file.create_now();
         file
@@ -48,16 +48,11 @@ impl WriteDbFile {
 
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
-    pub(crate) fn lazy(
-        base_name: &str,
-        extension: &'static str,
-        index: u32,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),
-            extension,
+            extension: extension.to_string(),
             index,
             use_index: true,
             fname: format!("{}.{extension}", make_short_name(base_name, index)),
@@ -340,11 +335,6 @@ impl IndexFile {
             seq,
             amb,
         }
-    }
-
-    /// `m_Letters`: the residues or bases of the volume.
-    pub(crate) fn letters(&self) -> u64 {
-        self.letters
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:228-236

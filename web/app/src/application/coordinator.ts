@@ -10,7 +10,15 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
+import {
+  WINDOW_MASKER_FLAG,
+  WINDOW_MASKER_TAXID_FLAG,
+  type FastaReader,
+  type PrintedKind,
+  type ProgramId,
+  type RunFile,
+  type RunOutput,
+} from 'losat/domain';
 import {
   isUnavailable,
   RunCancelledError,
@@ -25,8 +33,7 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, runFileName, runOutputs } from '../domain/output-format';
-import { fastaParser, programById } from '../domain/programs';
+import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -97,8 +104,10 @@ export interface CoordinatorDeps {
   readonly dataWorkerEnded?: Promise<Error>;
 }
 
-export type EnqueueResult = ValidationResult & { readonly runId?: string };
-export type EnqueueAllResult = ValidationResult & { readonly runIds?: readonly string[] };
+/** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
+type Queued = { readonly ok: true } | { readonly ok: false; readonly message: string };
+export type EnqueueResult = Queued & { readonly runId?: string };
+export type EnqueueAllResult = Queued & { readonly runIds?: readonly string[] };
 
 const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
   preparing: 'preparing',
@@ -172,7 +181,7 @@ export class Coordinator {
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
-      const { dryRun } = start.start;
+      const { dryRun, prints } = start.start;
       // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
       const conffileName = registryName(start.start);
       if (conffileName !== undefined && request.conffile !== undefined) {
@@ -193,7 +202,7 @@ export class Coordinator {
         return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
+      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -214,13 +223,15 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
-      const program = programById(request.program);
+    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
+      // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
+      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
+        // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
+        query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
+        subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
       } catch (error) {
         return { ok: false, message: failureText(error) };
       }
@@ -251,6 +262,7 @@ export class Coordinator {
           ...(windowMasker === undefined ? {} : { windowMasker }),
           ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
           ...(dryRun ? { dryRun: true as const } : {}),
+          ...(prints === null ? {} : { prints }),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
@@ -338,6 +350,26 @@ export class Coordinator {
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
   }
 
+  /** The input of a run that reads none (one that prints the command line's help or version): no bytes, no records. */
+  private async noInput(name: string): Promise<InputSnapshot> {
+    const bytes = new Uint8Array(0);
+    return Object.freeze({ name, bytes, sha256: await this.deps.digest(bytes), revisionIds: Object.freeze([]), records: Object.freeze([]) });
+  }
+
+  /**
+   * Saves the text that a run printed in place of a search (RunRecord.printed: the command line's help or version; line
+   * WQA's D14, 2026-11-20), its bytes as the engine wrote them, named by printedFileName.
+   */
+  async exportPrinted(runId: string): Promise<void> {
+    const view = this.find(runId);
+    const bytes = view?.record.printed;
+    const kind = view?.snapshot.prints;
+    if (view?.status !== 'completed' || bytes === undefined || kind === undefined) throw new Error('the run printed no text');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const task = await this.taskOf(view.snapshot);
+    this.deps.downloader.save(printedFileName({ number, program, task, queuedAt, argv }, kind, bytes), bytes, printedFileType(bytes).type);
+  }
+
   /**
    * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
    * changes do not reach), the run's input, and their SHA-256.
@@ -401,7 +433,7 @@ export class Coordinator {
     role: string,
     input: SequenceInput,
     name: string,
-    parser: FastaParserKind,
+    reader: FastaReader,
     made: Made,
   ): Promise<InputSnapshot> {
     try {
@@ -423,7 +455,7 @@ export class Coordinator {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
         made.sources.push(source.sourceId);
-        const revision = await this.deps.data.indexSource(source.sourceId, parser);
+        const revision = await this.deps.data.indexSource(source.sourceId, reader);
         revisionIds = Object.freeze([revision.revisionId]);
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
@@ -519,6 +551,7 @@ export class Coordinator {
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
           ...(runFiles === undefined ? {} : { runFiles }),
+          ...(runtime.printed === undefined ? {} : { printed: runtime.printed }),
         },
       });
     } catch (error) {
@@ -592,6 +625,10 @@ interface Prepared {
   /** The registry file of the argv's `-conffile`, read from the chosen file: what the snapshot keeps of it, and its bytes. */
   readonly conffile: { readonly snapshot: ConffileSnapshot; readonly file: Blob } | undefined;
   readonly dryRun: boolean;
+  /** What the run prints in place of a search, as the engine's start says; null for a search. */
+  readonly prints: PrintedKind | null;
+  /** Whether the run reads its inputs with NCBI's data loaders on (the validation's verdict: `[BLAST] DATA_LOADERS` of its registry). */
+  readonly dataLoaders: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

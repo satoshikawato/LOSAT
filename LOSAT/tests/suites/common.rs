@@ -23,18 +23,24 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastn_mb_index_fixtures.rs"]
+mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
 mod compressed_clut_pairs;
+#[path = "../database_sequence_without_letters.rs"]
+mod database_sequence_without_letters;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
+#[path = "../db_unreadable_files.rs"]
+mod db_unreadable_files;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../entry_names.rs"]
@@ -49,6 +55,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../makeblastdb_failed_index.rs"]
+mod makeblastdb_failed_index;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

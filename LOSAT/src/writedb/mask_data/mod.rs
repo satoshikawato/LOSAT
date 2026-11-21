@@ -12,7 +12,6 @@
 //!   the set of ranges.
 //! * [`registry`]: `CMaskInfoRegistry`, the id of each algorithm.
 //! * [`range_set`]: `CMaskedRangeSet`, the ranges of each sequence.
-//! * [`column`](mod@column): `CWriteDB_Column`, the files of the column of a volume.
 //! * [`MaskWriter`]: the part of `CWriteDB_Impl` that registers algorithms
 //!   and builds the two blobs of a sequence; `WriteDb` holds one.
 //!
@@ -43,7 +42,6 @@
 //! (a `MaskWriter` holds empty containers that do not allocate, and its
 //! blobs and column description stay `None`).
 
-pub(crate) mod column;
 pub(crate) mod process;
 pub(crate) mod range_set;
 pub(crate) mod registry;
@@ -59,13 +57,10 @@ mod tests_ids;
 #[cfg(test)]
 mod tests_ncbi_unit;
 
-use std::collections::BTreeMap;
-
-use column::ColumnMeta;
+use super::column::{unsupported_late_column, BlobPair, ColumnMeta};
 pub(crate) use range_set::{ranges_are_empty, MaskedRangeSet, MaskedRanges};
 pub(crate) use registry::MaskInfoRegistry;
 
-use super::volume::MaskBlobs;
 use super::WriteDbError;
 
 /// `s_EscapeColon`: a ':' of an option or a name becomes the byte 0x01.
@@ -87,20 +82,6 @@ pub(crate) struct MaskWriter {
     /// `m_Blobs` of the mask column for the sequence being written, `Some`
     /// once `SetMaskData` has filled both (`m_HaveBlob`).
     blobs: Option<(Vec<u8>, Vec<u8>)>,
-    /// The creation dates of the column index files by volume, set by a test
-    /// (`set_column_date`); a volume without one reads the clock.
-    dates: BTreeMap<usize, Vec<u8>>,
-    /// The date of a column when the clock cannot be read.
-    date_fallback: Option<Vec<u8>>,
-}
-
-fn unsupported_late_column() -> WriteDbError {
-    WriteDbError::Unsupported(
-        "the mask column of a database is created before its first volume is written; register \
-         the masking algorithms before the first sequence is published (NCBI adds blank records \
-         to the open volume, which LOSAT does not)"
-            .to_string(),
-    )
 }
 
 impl MaskWriter {
@@ -257,13 +238,10 @@ impl MaskWriter {
 
     /// The blobs `x_Publish` hands to `WriteSequence`: empty when the
     /// sequence has no mask data.
-    pub(crate) fn blobs(&self) -> MaskBlobs<'_> {
+    pub(crate) fn blobs(&self) -> BlobPair<'_> {
         match &self.blobs {
-            Some((blob, blob2)) => MaskBlobs { blob, blob2 },
-            None => MaskBlobs {
-                blob: &[],
-                blob2: &[],
-            },
+            Some((blob, blob2)) => BlobPair { blob, blob2 },
+            None => BlobPair::EMPTY,
         }
     }
 
@@ -272,31 +250,9 @@ impl MaskWriter {
         self.column_meta.as_ref()
     }
 
-    /// Test hook: the creation date of the mask column of volume `index`.
-    #[cfg(test)]
-    pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
-        self.dates.insert(index, date.to_vec());
-    }
-
-    /// The date of the build, for a clock that cannot be read.
-    pub(crate) fn set_date_fallback(&mut self, date: &[u8]) {
-        self.date_fallback = Some(date.to_vec());
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:199-199
-    /// The date stored in the index file of the column of volume `index`:
-    /// the one a test set, or `CTime(CTime::eCurrent).AsString()`.
-    pub(crate) fn column_date(&self, index: usize) -> Result<Vec<u8>, WriteDbError> {
-        if let Some(date) = self.dates.get(&index) {
-            return Ok(date.clone());
-        }
-        if let Some(now) = super::time::LocalTime::now() {
-            return Ok(now.log_time().into_bytes());
-        }
-        self.date_fallback.clone().ok_or_else(|| {
-            WriteDbError::Other(
-                "the system has no clock for the date of the mask column files".to_string(),
-            )
-        })
+    /// The metadata of the mask column to change (`AddColumnMetaData`), `None` when the
+    /// database has none.
+    pub(crate) fn existing_column_meta_mut(&mut self) -> Option<&mut ColumnMeta> {
+        self.column_meta.as_mut()
     }
 }

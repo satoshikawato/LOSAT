@@ -1556,11 +1556,9 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-db_soft_mask", "11"][..]),
-        ("tblastx", &["-db_soft_mask", "11"]),
+        ("tblastn", &["-gilist", "ids.gil"][..]),
+        ("tblastx", &["-gilist", "ids.gil"]),
         ("blastp", &["-gilist", "ids.gil"]),
-        ("blastp", &["-db_soft_mask", "21"]),
-        ("blastp", &["-db_hard_mask", "21"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -1575,49 +1573,75 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356 (cited at
 // `blastinput::db_mask::DbMaskArgs`)
-// BLASTN's `-db_soft_mask` and `-db_hard_mask` (series NP, M4a-2): strings, each excluding the
-// other, `-subject` and `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage;
-// probes o04, o05, o06 of the M4a-2 survey); `-db_hard_mask` is not a refusal of the run
-// (`RUN_REFUSALS`, series NP, M4a-2b).
+// BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
+// PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
+// `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
+// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
 #[test]
-fn blastn_takes_the_database_masks() {
-    let blastn = |words: &[&str]| {
-        let mut argv = vec!["losat", "blastn", "-query", "q.fa"];
+fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
+    let masks = |program: &str, words: &[&str]| {
+        let mut argv = vec!["losat", program, "-query", "q.fa"];
         argv.extend(words);
-        parse_argv(argv)
+        parse_argv(argv).map(|cli| match cli.command {
+            Commands::Blastn(args) => args.db_mask,
+            Commands::Blastp(args) => args.db_mask,
+            Commands::Blastx(args) => args.db_mask,
+            Commands::Tblastn(args) => args.db_mask,
+            Commands::Tblastx(args) => args.db_mask,
+            _ => panic!("{program}"),
+        })
     };
-    let Commands::Blastn(args) = blastn(&["-db", "d", "-db_soft_mask", "+11"])
-        .unwrap()
-        .command
-    else {
-        panic!()
-    };
-    assert_eq!(args.db_mask.db_soft_mask.as_deref(), Some("+11"));
-    assert_eq!(args.db_mask.db_hard_mask, None);
-    let Commands::Blastn(args) = blastn(&["-db", "d", "-db_hard_mask", "dust"])
-        .unwrap()
-        .command
-    else {
-        panic!()
-    };
-    assert_eq!(args.db_mask.db_hard_mask.as_deref(), Some("dust"));
-    for words in [
-        &["-db", "d", "-db_soft_mask", "11", "-db_hard_mask", "11"][..],
-        &["-subject", "s.fa", "-db_soft_mask", "11"],
-        &["-subject", "s.fa", "-db_hard_mask", "11"],
-        &["-subject_loc", "1-5", "-db_soft_mask", "11"],
-        &["-subject_loc", "1-5", "-db_hard_mask", "11"],
-    ] {
-        let error = blastn(words).unwrap_err();
-        assert_eq!(
-            error.kind(),
-            clap::error::ErrorKind::ArgumentConflict,
-            "{words:?}"
-        );
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        let found = masks(program, &["-db", "d", "-db_soft_mask", "+11"]).unwrap();
+        assert_eq!(found.db_soft_mask.as_deref(), Some("+11"), "{program}");
+        assert_eq!(found.db_hard_mask, None, "{program}");
+        let found = masks(program, &["-db", "d", "-db_hard_mask", "seg"]).unwrap();
+        assert_eq!(found.db_hard_mask.as_deref(), Some("seg"), "{program}");
+        for words in [
+            &["-db", "d", "-db_soft_mask", "11", "-db_hard_mask", "11"][..],
+            &["-subject", "s.fa", "-db_soft_mask", "11"],
+            &["-subject", "s.fa", "-db_hard_mask", "11"],
+            &["-subject_loc", "1-5", "-db_soft_mask", "11"],
+            &["-subject_loc", "1-5", "-db_hard_mask", "11"],
+        ] {
+            let error = masks(program, words).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{program} {words:?}"
+            );
+        }
+        assert!(!crate::cli::RUN_REFUSALS
+            .iter()
+            .any(|&(refused, name, _)| refused == program
+                && (name == "db_hard_mask" || name == "db_soft_mask")));
     }
-    assert!(!crate::cli::RUN_REFUSALS
-        .iter()
-        .any(|&(program, name, _)| program == "blastn" && name == "db_hard_mask"));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:61-62,
+// blastx_args.cpp:62-63, psiblast_args.cpp:58, rpsblast_args.cpp:86, rpstblastn_args.cpp:61
+// Only blastp's and blastx's database arguments turn the database masking on; NCBI's psiblast,
+// rpsblast and rpstblastn leave it off, so `-db_soft_mask` and `-db_hard_mask` are NCBI's unknown arguments there (exit
+// 1, `Unknown argument`): LOSAT's parser's unknown option, not a refusal by name (series NP,
+// M4b).
+#[test]
+fn psiblast_rpsblast_and_rpstblastn_have_no_database_masks() {
+    for program in ["psiblast", "rpsblast", "rpstblastn"] {
+        for flag in ["-db_soft_mask", "-db_hard_mask"] {
+            let argv = vec!["losat", program, "-query", "q.fa", "-db", "d", flag, "21"];
+            let error = parse_argv(argv).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{program} {flag}"
+            );
+            let text = crate::cli::render_message(&error);
+            assert!(
+                !text.contains("is not supported by LOSAT"),
+                "{program} {flag}: {text}"
+            );
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
@@ -1864,10 +1888,11 @@ fn tblastx_takes_a_database_and_its_size() {
 }
 
 #[test]
-fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
+fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs; blast_hits.c:43-70: a -max_target_seqs whose preliminary size wraps to a
-    // negative int crashes NCBI.
+    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
+    // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
         let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
             unreachable!("blastp")
@@ -1884,7 +1909,6 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
         &["-evalue", "1.7976931348623157e308"],
-        &["-max_target_seqs", "1073741799"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
         assert!(
@@ -1897,6 +1921,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "1.7976931348623156e308"],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
+        // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
+        &["-max_target_seqs", "1073741799"],
     ] {
         blastp(words).unwrap();
     }
@@ -1921,10 +1947,10 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
     // in an option's value (`-out -version` prints the version). The command line prints the
-    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`); the
-    // parser's callers without the command line's application start (the library API and the
-    // Web engine) refuse them by name in that place too, instead of writing a file named
-    // "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
+    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`), and
+    // so does the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the parser's callers without
+    // an application start (the library API) refuse them by name in that place too, instead of
+    // writing a file named "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
     // (`Unknown argument: "version"`, exit status 1; LOSAT's parser error, exception 1).
     for (program, upper) in [
         ("blastn", "BLASTN"),
@@ -1941,7 +1967,7 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!(
-                    "the option {} runs on the command line of LOSAT's {upper} only",
+                    "the option {} runs on the command line and in LOSAT Web of LOSAT's {upper} only",
                     words.last().unwrap()
                 )),
                 "{program} {words:?}: {error}"
@@ -2059,10 +2085,12 @@ fn toolkit_file_options_need_an_application_start() {
             assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
         }
         // The versions, which the command line prints before parsing (line RG item E3), are
-        // refused by the library's parser and the Web engine's alike (line RG item E1w-2).
+        // refused by the library's parser and the Web engine's ABI v1 alike (line RG item E1w-2); a
+        // run of the Web engine's ABI v2 prints them before its parse, as the command line does
+        // (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
         for word in ["-version", "-version-full-json"] {
             let text = format!(
-                "the option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"
+                "the option {word} runs on the command line and in LOSAT Web of LOSAT's {upper} only: the library API does not write NCBI's version text"
             );
             for error in [
                 parse(program, &["-out", word]).unwrap_err(),
@@ -2385,13 +2413,21 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
             .map(|error| error.exit_code()),
         Some(0)
     );
-    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`);
-    // the library API, which these tests are (no application start), refuses it by name.
-    for program in ["blastn", "makeblastdb", "rpsbproc"] {
+    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`)
+    // and, for the programs it runs, in the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the
+    // library API, which these tests are (no application start), refuses it by name.
+    for (program, place) in [
+        (
+            "blastn",
+            "the command line and in LOSAT Web of LOSAT's BLASTN",
+        ),
+        ("makeblastdb", "the command line of LOSAT's"),
+        ("rpsbproc", "the command line of LOSAT's"),
+    ] {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
-            text.contains("the option -xmlhelp runs on the command line of LOSAT's"),
+            text.contains(&format!("the option -xmlhelp runs on {place}")),
             "{program}: {text}"
         );
     }
@@ -2498,10 +2534,8 @@ fn use_index_parses_as_an_ncbi_boolean() {
         assert!(parse("blastn", &["-use_index", value]).is_ok(), "{value}");
     }
     assert!(parse("blastn", &["-use_index", "maybe"]).is_err());
-    // NCBI's other programs have no -use_index; `-index_name` stays unported.
+    // NCBI's other programs have no -use_index nor -index_name.
     assert!(parse("blastp", &["-use_index", "false"]).is_err());
-    let error = parse("blastn", &["-index_name", "x"])
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+    assert!(parse("blastp", &["-index_name", "x"]).is_err());
+    assert!(parse("blastn", &["-index_name", "x"]).is_ok());
 }

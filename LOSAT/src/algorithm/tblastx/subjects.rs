@@ -197,14 +197,17 @@ impl<'a> Subjects<'a> {
             // A short sequence keeps its block until its letters' frames are made, when it has
             // ambiguous bases (a nested subject on this thread may take another block); a long one
             // is read again then, instead of being held through the search.
+            // With `-db_hard_mask` (series NP, M4b PR 2) the frames of the letters are those of
+            // the stages after the preliminary one, `B` over the masks (`x_letter_frames`).
             Self::Stream(stream) => stream.with_block(oid, |sequence| {
                 let length = sequence.len();
                 if length < shortest {
                     return Ok(None);
                 }
+                let hard = stream.mask().is_some_and(|mask| mask.hard());
                 let block = match &sequence {
-                    XSequence::Block { block, i, .. } => Some((Arc::clone(block), *i)),
-                    XSequence::Store(_) => None,
+                    XSequence::Block { block, i, .. } if !hard => Some((Arc::clone(block), *i)),
+                    _ => None,
                 };
                 let (frames, of_letters) = sequence.with_view(|view| {
                     let frames = x_generate_frames_in_windows(
@@ -212,7 +215,7 @@ impl<'a> Subjects<'a> {
                         &mut |from, out| view.bases_into(from, out),
                         table,
                     );
-                    (frames, view.ambiguity_runs().is_empty())
+                    (frames, !hard && view.ambiguity_runs().is_empty())
                 });
                 Ok(Some((
                     length,
@@ -265,7 +268,8 @@ impl<'a> Subjects<'a> {
                     }
                     .with_view(of_view)
                 }
-                None => of_view(stream.read_shared(oid)?.view()),
+                // With `-db_hard_mask`, the sequence as the later stages read it.
+                None => of_view(stream.read_stage(oid)?.view()),
             },
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
         })

@@ -5,18 +5,22 @@ directory's path in the standard error written as @CWD@. A row whose words name 
 a new empty directory there; the files the run leaves in it follow its standard output, each as
 a line "@OUT@/<name> <length>" after a newline and the file's bytes (tests/masker_fixtures.rs
 reads LOSAT's runs the same way), and the directory's path in the standard error is written
-@OUT@. First makes db/wm and db/wm_ps with NCBI makeblastdb from in/multi.fa (the second with
--parse_seqids), db/multi_ids and db/wm_b from in/multi_ids.fa (the first with -parse_seqids),
-db/cd from in/cd.fa, and the counts files of the -convert rows in counts/ with NCBI windowmasker
+@OUT@. A row's first words of the form NAME=value set that variable for its run (BLASTDB: where
+the taxonomy database is). First makes db/wm and db/wm_ps with NCBI makeblastdb from in/multi.fa
+(the second with -parse_seqids), db/multi_ids and db/wm_b from in/multi_ids.fa (the first with
+-parse_seqids), db/cd from in/cd.fa, db/wm_tx from in/tx.fa (-parse_seqids -taxid_map
+in/tx_taxid.txt), and the counts files of the -convert rows in counts/ with NCBI windowmasker
 (units of 4 letters of dm2L_60k.fa in each format; the ascii file without its ##pct lines, with
 a unit size of 0 and of 256, and with ##pct lines whose values NCBI fails to read; the binary
 file with a cut ##pct line; the optimized binary file of -t_high 1000, whose counts above 511
 overflow; the files of -t_high_pct 0; the binary counts written to the standard output). NCBI is
 run here only, never by the tests.
 
-Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb>"""
+Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb> [--only ROW...]
+(--only: those rows, and only the databases that are missing; the other rows' files stay.)"""
 import argparse
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -48,12 +52,16 @@ def cases():
             continue
         name, arguments = line.split("\t", 1)
         words = shlex.split(arguments)
+        variables = {}
+        while words and re.fullmatch(r"[A-Z_]+=.*", words[0], re.S):
+            name_, value = words.pop(0).split("=", 1)
+            variables[name_] = value
         stdin = None
         if "<" in words:
             at = words.index("<")
             stdin = words[at + 1]
             del words[at:at + 2]
-        rows.append((name, words, stdin))
+        rows.append((name, words, stdin, variables))
     return rows
 
 
@@ -103,28 +111,36 @@ def make_counts(windowmasker, env):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ncbi-bin", required=True)
+    ap.add_argument("--only", nargs="+")
     a = ap.parse_args()
     windowmasker = os.path.join(a.ncbi_bin, "windowmasker")
     makeblastdb = os.path.join(a.ncbi_bin, "makeblastdb")
     env = environment()
     db = os.path.join(HERE, "db")
-    shutil.rmtree(db, ignore_errors=True)
-    os.makedirs(db)
+    if not a.only:
+        shutil.rmtree(db, ignore_errors=True)
+    os.makedirs(db, exist_ok=True)
     for name, source, extra in (("wm", "multi.fa", []), ("wm_ps", "multi.fa", ["-parse_seqids"]),
                                 ("multi_ids", "multi_ids.fa", ["-parse_seqids"]), ("wm_b", "multi_ids.fa", []),
-                                ("cd", "cd.fa", [])):
+                                ("cd", "cd.fa", []),
+                                ("wm_tx", "tx.fa", ["-parse_seqids", "-taxid_map", "in/tx_taxid.txt"])):
+        if os.path.exists(os.path.join(db, f"{name}.nsq")):
+            continue
         subprocess.run([makeblastdb, "-in", f"in/{source}", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
                        cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     make_counts(windowmasker, env)
     out_dir = os.path.join(HERE, "ncbi")
-    shutil.rmtree(out_dir, ignore_errors=True)
-    os.makedirs(out_dir)
-    for name, words, stdin in cases():
+    if not a.only:
+        shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir, exist_ok=True)
+    for name, words, stdin, variables in cases():
+        if a.only and name not in a.only:
+            continue
         source = open(os.path.join(HERE, stdin), "rb") if stdin else subprocess.DEVNULL
         out = tempfile.mkdtemp(prefix=f"wm-{name}-") if any("@OUT@" in w for w in words) else None
         if out:
             words = [w.replace("@OUT@", out) for w in words]
-        r = subprocess.run([windowmasker] + words, cwd=HERE, env=env, stdin=source,
+        r = subprocess.run([windowmasker] + words, cwd=HERE, env={**env, **variables}, stdin=source,
                            capture_output=True, timeout=600)
         status = r.returncode if r.returncode >= 0 else 128 - r.returncode
         stdout, err = r.stdout, r.stderr
@@ -142,7 +158,7 @@ def main():
         if name in MERGED:
             source = open(os.path.join(HERE, stdin), "rb") if stdin else subprocess.DEVNULL
             with open(os.path.join(out_dir, f"{name}.merged"), "wb") as one:
-                subprocess.run([windowmasker] + words, cwd=HERE, env=env, stdin=source,
+                subprocess.run([windowmasker] + words, cwd=HERE, env={**env, **variables}, stdin=source,
                                stdout=one, stderr=one, timeout=600)
             with open(os.path.join(out_dir, f"{name}.merged"), "rb") as f:
                 merged = f.read().replace(HERE.encode(), b"@CWD@")

@@ -45,25 +45,6 @@ fn runs_of_words_of_the_first_word_match() {
     assert!(!two.find(b"rec2"));
 }
 
-#[test]
-fn titles_lose_trailing_dots_and_spaces_and_third_party_ids_get_tpa() {
-    let tpg = ParsedSeqId::Tpg(Default::default());
-    assert_eq!(
-        get_title(&[], Some(b"rec4. ."), false),
-        Title::Text(b"rec4".to_vec())
-    );
-    assert_eq!(
-        get_title(std::slice::from_ref(&tpg), Some(b"third party"), false),
-        Title::Text(b"TPA: third party".to_vec())
-    );
-    assert_eq!(
-        get_title(std::slice::from_ref(&tpg), Some(b"tpa: x"), false),
-        Title::Text(b"tpa: x".to_vec())
-    );
-    assert_eq!(get_title(&[tpg], None, false), Title::Text(Vec::new()));
-    assert_eq!(get_title(&[], Some(b"."), true), Title::FromSource);
-}
-
 fn seq_id(text: &str) -> ParsedSeqId {
     seq_id_from_text(text.as_bytes(), parse_flags::ANY_RAW, &mut |_| {}).unwrap()
 }
@@ -82,7 +63,7 @@ fn record(ids: Vec<ParsedSeqId>) -> Record {
         title: Some(b"title".to_vec()),
         taxname: None,
         has_source: false,
-        any_source: false,
+        get_title: None,
         iupac: b"ACGT".to_vec(),
         texts: Vec::new(),
     }
@@ -200,30 +181,44 @@ fn an_empty_seq_id_list_keeps_every_sequence() {
         ids: Some(IdSet::SeqId(SeqIdSet::default())),
         exclude_ids: None,
     };
-    assert!(matches!(
-        lists.consider(&record(vec![seq_id("lcl|x")])),
-        Ok(true)
-    ));
+    assert!(lists.consider(&record(vec![seq_id("lcl|x")])));
     let lists = IdLists {
         ids: Some(IdSet::SeqId(seq_id_list(&["lcl|y"]))),
         exclude_ids: None,
     };
-    assert!(matches!(
-        lists.consider(&record(vec![seq_id("lcl|x")])),
-        Ok(false)
-    ));
-    assert!(matches!(
-        lists.consider(&record(vec![seq_id("lcl|Y")])),
-        Ok(true)
-    ));
+    assert!(!lists.consider(&record(vec![seq_id("lcl|x")])));
+    assert!(lists.consider(&record(vec![seq_id("lcl|Y")])));
     let lists = IdLists {
         ids: None,
         exclude_ids: Some(IdSet::SeqId(seq_id_list(&["lcl|y"]))),
     };
-    assert!(matches!(
-        lists.consider(&record(vec![seq_id("lcl|y")])),
-        Ok(false)
-    ));
+    assert!(!lists.consider(&record(vec![seq_id("lcl|y")])));
+}
+
+// A list matched as text reads the title the source made (`Record::get_title`), and only a
+// list that is not empty asks for it.
+#[test]
+fn a_text_list_matches_the_title_the_source_made() {
+    let lists = IdLists {
+        ids: Some(IdSet::Text(list(&["Homo"]))),
+        exclude_ids: None,
+    };
+    assert!(lists.match_titles());
+    let mut titled = record(vec![seq_id("lcl|x")]);
+    titled.get_title = Some(b"Homo sapiens".to_vec());
+    assert!(lists.consider(&titled));
+    titled.get_title = Some(b"No definition line found".to_vec());
+    assert!(!lists.consider(&titled));
+    let empty = IdLists {
+        ids: None,
+        exclude_ids: Some(IdSet::Text(TextMatchIds::default())),
+    };
+    assert!(!empty.match_titles());
+    let seq_ids = IdLists {
+        ids: Some(IdSet::SeqId(seq_id_list(&["lcl|y"]))),
+        exclude_ids: None,
+    };
+    assert!(!seq_ids.match_titles());
 }
 
 // tmf_wm_ids_bad of probe s1: NCBI's post (its build tree aside), here in LOSAT's words; the

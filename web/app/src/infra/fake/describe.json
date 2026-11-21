@@ -221,6 +221,11 @@
     "takes_value": true
    },
    {
+    "flag": "-filtering_db",
+    "help": "BLAST database containing filtering elements (i.e.: repeats)",
+    "takes_value": true
+   },
+   {
     "flag": "-window_masker_taxid",
     "help": "Enable WindowMasker filtering using a Taxonomic ID",
     "takes_value": true
@@ -520,6 +525,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -618,6 +633,16 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
     "takes_value": true
    },
    {
@@ -1131,6 +1156,16 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
    },
    {
     "flag": "-dbsize",
@@ -1675,6 +1710,16 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
    },
    {
     "flag": "-dbsize",
@@ -2226,6 +2271,16 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
    },
    {
     "flag": "-dbsize",

@@ -5,9 +5,9 @@
 //! reads the field list, writes the comment lines of outfmt 7, the header line of outfmt 20 and
 //! the rows.
 //!
-//! `TabularSpec::of` returns `None` for the default reports (outfmt 6 and 7 with the `std` fields
-//! and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with their
-//! own writers.
+//! `TabularSpec::of_app` returns `None` for the default reports (outfmt 6 and 7 with the `std`
+//! fields and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with
+//! their own writers.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 
@@ -393,10 +393,42 @@ impl TabularNeeds {
 }
 
 impl TabularSpec {
-    /// The tabular report of `format` with the custom specification of `choice`, or `None` for
-    /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which BLASTX writes with `std`'s spec and the other programs with their own writers.
-    pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:186-189
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:183-186
+    /// The tabular report of `format` with the custom specification of `choice` as the formatter
+    /// of `app`'s application writes it, or `None` for a format that is not tabular and for the
+    /// default outfmt 6 and 7 (the `std` fields and a tab), which BLASTX writes with `std`'s spec
+    /// and the other programs with their own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
+    /// tblastx hand `-outfmt`'s custom delimiter to their formatter (`SetCustomDelimiter`,
+    /// blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266, tblastx_app.cpp:169);
+    /// psiblast's, rpsblast's and rpstblastn's never do, so their reports keep the format's own
+    /// delimiter, the tab or the comma (blast_format.cpp:783-785 above), and a `delim=` with the
+    /// `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=` is still checked
+    /// against the fields (`custom_delimiter_conflict`). The one reading of a tabular `-outfmt`
+    /// value, of the command line and the library, for every program: no other function makes a
+    /// spec of a format choice.
+    pub fn of_app(
+        format: ReportFormat,
+        choice: &FormatChoice,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Option<Self> {
+        use crate::report::archive::options::RequestKind;
+        let delimiter = match app {
+            RequestKind::Psiblast | RequestKind::Rpsblast | RequestKind::Rpstblastn => "",
+            RequestKind::Blastn
+            | RequestKind::Blastp
+            | RequestKind::Blastx
+            | RequestKind::Tblastn
+            | RequestKind::PsiTblastn
+            | RequestKind::Tblastx => &choice.delimiter,
+        };
+        Self::of_fields(format, &choice.spec, delimiter)
+    }
+
+    /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
+    fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
@@ -412,12 +444,13 @@ impl TabularSpec {
             }
             _ => return None,
         };
-        let fields = parse_fields(&choice.spec);
-        let delimiter = if choice.delimiter.is_empty() {
-            default_delimiter.to_string()
+        let fields = parse_fields(spec);
+        let delimiter = if delimiter.is_empty() {
+            default_delimiter
         } else {
-            choice.delimiter.clone()
-        };
+            delimiter
+        }
+        .to_string();
         let default_report = matches!(kind, TabularKind::Tabular | TabularKind::Commented)
             && fields == STD_FIELDS
             && delimiter == "\t";
@@ -429,7 +462,7 @@ impl TabularSpec {
     }
 
     /// The default report of outfmt 6 or 7 (`commented`): the `std` fields and a tab, for which
-    /// `of` gives `None` (BLASTX writes it with this module as any field list,
+    /// `of_app` gives `None` (BLASTX writes it with this module as any field list,
     /// `algorithm::blastx::args::ResolvedOptions::tabular_report`). Made once per process.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81
@@ -556,6 +589,24 @@ impl TabularSpec {
             Btop,
             SubjectStrand,
         ]) || (self.has(NumIdentical) && *num_ident > 0)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
+    /// Whether NCBI's formatter reads the query's and the subject's letters for a row of this field
+    /// list (`CAlnVec::GetWholeAlnSeqString`) in psiblast, whose formatter fetches sequences
+    /// (`kNoFetchSequence` is false): `qseq`, `sseq`, `positive`, `ppos`, `btop`, `nident`,
+    /// `mismatch` and `pident`, and so the default fields.
+    pub fn reads_sequences(&self) -> bool {
+        self.has_any(&[
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+            NumIdentical,
+            Mismatches,
+            PercentIdentical,
+        ])
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837,973-980 and 973-980
@@ -1564,6 +1615,36 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 }
 
 const NA: &[u8] = b"N/A";
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:548
+/// The exception that ends a tabular report at its first row when the query's Bioseq has the
+/// molecule `other` (psiblast's `-in_msa` with `[molecule=other]`, or `-in_pssm` of such a PSSM):
+/// the object manager reads the query's letters of the coding number `coding` (iupacaa 2, ncbieaa 8,
+/// ncbistdaa 10) as the coding of a nucleotide sequence
+/// (`Incompatible sequence codings: <coding> -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
+/// are read ([`TabularSpec::reads_sequences`]). The report's text before the row stays; the run
+/// ends with NCBI's exception (exit status 255).
+pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiException {
+    crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/objmgr/seq_vector_ci.cpp",
+            line: 548,
+            kind: "CSeqVectorException::eCodingError",
+            function: Some("ncbi::objects::CSeqVector_CI::x_FillCache"),
+        },
+        format!("Incompatible sequence codings: {coding} -> 1"),
+    )
+}
+
+/// The end of a report at a row that reads the letters of a query whose molecule is `other`
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
+/// flushed, and the exception is the run's error.
+pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
+    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
+}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)

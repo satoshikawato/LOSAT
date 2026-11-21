@@ -500,6 +500,7 @@ fn stopped_as_query_joins_scope(
         round_query: None,
         split_setup: None,
         from_msa: false,
+        query_other_coding: None,
     };
     let file = InPssmFile {
         object: pssm,
@@ -655,6 +656,15 @@ pub(crate) fn psi_search_and_object_of(
         .is_none()
         .then(|| crate::report::query_warnings::invalid_residues_error(&residues.invalid))
         .flatten();
+    // A nucleotide Bioseq (`mol` dna, rna or na) is the query set-up's first error
+    // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
+    // frequency ratios only, whose engine sets the query up first too.
+    let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
+    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+        Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else {
+        invalid_residues
+    };
     let (mut scores_error, setup_error) = if ratios_only {
         (invalid_residues, None)
     } else {
@@ -769,7 +779,20 @@ pub(crate) fn psi_search_and_object_of(
             .map_or(0, |last| last + 1);
         title[..end].to_vec()
     };
-    if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
+    // `other` (255): psiblast searches it as a protein (NCBI's query set-up refuses only the
+    // nucleotide molecules). tblastn's query is checked as before.
+    let mol_other = if query.inst.mol.1 == 255 && reader.program == "PSIBLAST" {
+        match query.inst.seq_data.as_ref() {
+            // The coding that NCBI's object manager converts (`CSeq_data::E_Choice`).
+            Some(SeqData::Iupacaa(_)) => Some(2),
+            Some(SeqData::Ncbieaa(_)) => Some(8),
+            Some(SeqData::Ncbistdaa(_)) => Some(10),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if !(matches!(query.inst.mol.1, 1..=4) || mol_other.is_some()) || query.inst.repr.1 != 2 {
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
             query.inst.repr.0, query.inst.mol.0
@@ -957,6 +980,7 @@ pub(crate) fn psi_search_and_object_of(
         round_query: None,
         split_setup: None,
         from_msa: false,
+        query_other_coding: mol_other,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI

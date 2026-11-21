@@ -21,7 +21,7 @@ use crate::algorithm::blastx::input::{parse_fasta_stream_keeping, FastaRecord, F
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::blastx::subjects::Subjects;
 use crate::algorithm::blastx::{archive, seqalign};
-use crate::blastinput::app::{self, FormatChoice, Program};
+use crate::blastinput::app::{self, EarlyFormat, Program};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::blastinput::query_batch::QueryScopes;
 use crate::blastinput::seq_range::SequenceRange;
@@ -40,7 +40,7 @@ use std::{cell::RefCell, io::Write, sync::Arc};
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3630
 pub(super) struct RunSetup {
-    pub(super) choice: FormatChoice,
+    pub(super) choice: EarlyFormat,
     pub(super) archive: Option<ArchiveHandle>,
     pub(super) strategy: Option<StrategyExport>,
     pub(super) resolution: Result<ResolvedOptions>,
@@ -67,14 +67,15 @@ impl RunSetup {
         // write is rejected there too. The custom tabular fields are read as NCBI reads them
         // (`ResolvedOptions::tabular`).
         // `GetExportSearchStrategyStream` comes first: it creates the search strategy file
-        // (`strategy::open_strategy_file`), which an error after it leaves empty.
+        // (`strategy::open_strategy_file`), which an error after it leaves empty; with it a value
+        // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
             program.upper,
         )?;
-        let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let format = choice.report_format(Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
         // The run's options handle, which its archive and its search strategy share.
@@ -91,7 +92,7 @@ impl RunSetup {
             crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs.map(|count| count as usize),
                     num_descriptions: args.num_descriptions,
@@ -104,11 +105,16 @@ impl RunSetup {
         strategy_slot.clone_from(&strategy);
         // Preserve explicit product refusals; defer supported semantic failures
         // until subject and standard query/output streams have been extracted.
-        let mut resolution = match args.resolve() {
-            Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
-                return Err(error)
-            }
-            resolution => resolution,
+        // A deferred `-outfmt` value is read again by the formatting handler (`at_formatting_handler`),
+        // which fails with NCBI's error after the errors of the arguments that come before it.
+        let mut resolution = match &choice {
+            EarlyFormat::Deferred => Err(SemanticOptionsError::from(String::new()).into()),
+            EarlyFormat::Parsed(_) => match args.resolve() {
+                Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
+                    return Err(error)
+                }
+                resolution => resolution,
+            },
         };
         // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file when
         // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused

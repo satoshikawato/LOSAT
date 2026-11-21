@@ -187,6 +187,16 @@ pub(super) struct RpsSearchRun<'a> {
     pub(super) prelim_hitlist_size: usize,
     /// The query batches (searched-query ranges) of the run.
     pub(super) batches: Vec<std::ops::Range<usize>>,
+    /// Whether the engine counts each HSP's identities again for the reports: NCBI's reports
+    /// count them on the sequences of their scope (outfmt 0 always, the tabular formats inside
+    /// their alignment block), not on the masked query of the traceback's count
+    /// (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and default tabular
+    /// writers print the HSP's count, so the engine counts again for them; the tabular writer of
+    /// a field list or outfmt 10 counts on the rows itself and reads the traceback's count for
+    /// the block's gate (`tabular::needs_rows`). Decided once from the reports that the call
+    /// writes (`call_setup::requested_reports`: no `BlastpReport::CustomTabular`), so that the
+    /// count and the report read one decision.
+    pub(super) recount_identities: bool,
 }
 
 /// What blastp's set-up of an rpsblast search reads of its first search unit in place of the
@@ -322,15 +332,8 @@ pub(super) fn rps_search(
     // The X-drops in bits and the gap trigger (`RpsSearch::x_drop_bits`); the engine converts
     // them at each volume's scale (`RpsRun::cutoffs`, `RpsRun::gapped_x_drops`).
     let x_drops = rps.x_drop_bits();
-    // NCBI's reports count an HSP's identities on the sequences of their scope (outfmt 0 always,
-    // the tabular formats inside their alignment block), not on the masked query of the
-    // traceback's count (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and
-    // default tabular writers print the HSP's count, so the engine counts again for them; the
-    // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
-    // traceback's count for the block's gate (`tabular::needs_rows`).
-    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none()
-        && crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number
-            != crate::blastinput::app::output_format::ARCHIVE_FORMAT;
+    // The reports' identities (`RpsSearchRun::recount_identities`).
+    let recount_identities = run.recount_identities;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // A query that NCBI's engine would cut into chunks (`s_GetNextSubjectChunk`) is refused.
     if let Some(long) = run.contexts.iter().find(|ctx| ctx.aa_len > MAX_DBSEQ_LEN) {

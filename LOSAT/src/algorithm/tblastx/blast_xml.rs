@@ -181,6 +181,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         None,
         args.seg_spec()?.filter_options(),
         None,
+        None,
         args.soft_masking(),
     );
     let xml_run = XmlRun {

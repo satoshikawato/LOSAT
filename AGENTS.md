@@ -132,6 +132,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      process-wide id table can print the type of another id of the same prefix,
      digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
      with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
+     Approved difference: `losat rpsbproc` sorts with Rust's standard sort, so hits equal in
+     E-value and bit score, and data rows of one key, keep their input order, where NCBI's
+     `std::sort` leaves an order of its own (Owner, 2026-11-20, PD-LOSAT-NCBI-DEFECTS 1.67); a
+     NaN E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20).
 
 4. NCBI references are mandatory for modifications.
    - Every code change must cite the NCBI C/C++ source it follows, by path and line numbers

@@ -519,7 +519,7 @@ pub(crate) fn search_sets(
 /// The ordinal ids of the profiles of one query batch's final hit lists `lists`, renamed from
 /// their OIDs (`shift_ordinal_ids`), for the reports, which look them up by ordinal id: NCBI's
 /// lookup table holds every profile of a volume and its search ignores the alias files'
-/// `FIRST_OID` and `LAST_OID`, while its formatter does not find a profile that they leave out
+/// `FIRST_OID`, `LAST_OID` and `OIDLIST`, while its formatter does not find a profile that they leave out
 /// (`Unknown`, "no longer exists in database", or a null pointer exception in `sacc` and
 /// `saccver`). The formatter looks up only the profiles it reports: the first `cut` subjects of
 /// each query's list (the hit list size, `PruneSeqalign` with `m_HitlistSize`, which counts
@@ -568,14 +568,14 @@ pub(crate) fn report_ordinal_ids(
                     Ok(Found::Copy(ordinal)) => Some(ordinal),
                     Ok(Found::Nothing) => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID (NCBI BLAST+ 2.17.0's report does not find it: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST (NCBI BLAST+ 2.17.0's report does not find it: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;
                     }
                     Ok(Found::Other(other)) => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {other}), is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {other}), is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;

@@ -15,6 +15,7 @@ pub mod lookup;
 pub mod ncbi_cutoffs;
 pub(crate) mod pairwise;
 pub mod query_split;
+pub(crate) mod repeat_filter;
 pub mod scoring;
 pub mod sequence_compare;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:280-313: the query masks of `-window_masker_db`.

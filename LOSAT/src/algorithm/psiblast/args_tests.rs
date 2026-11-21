@@ -147,7 +147,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
+    for format in ["1", "3", "5", "8", "11", "15", "16", "18"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()
@@ -157,6 +157,24 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             error,
             format!("output format {format} is not supported by LOSAT's PSIBLAST")
         );
+    }
+    // Outfmt 13 and 14 to a file are refused here; to standard output they go on to NCBI's
+    // own error (`Please provide a file name for outfmt 13.`, blast_app_util.cpp:888-899),
+    // which comes later (rows db.dlm.ps.o13, .o14).
+    for format in ["13", "14"] {
+        let error = parse(&["-outfmt", format, "-out", "r.out"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            format!("output format {format} is not supported by LOSAT's PSIBLAST")
+        );
+        assert!(parse(&["-outfmt", format])
+            .unwrap()
+            .into_blastp_args()
+            .is_ok());
     }
     for format in [
         "0",

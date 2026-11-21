@@ -91,7 +91,7 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
@@ -101,6 +101,8 @@ class ManualEngine implements EngineGateway {
   shownIds?: ShownIds;
   /** Where the runs' messages go, as the engine says (`RuntimeInfo.messages`). */
   messages: MessagePlace = 'diagnostics';
+  /** The text that the next runs print in place of a search (`RuntimeInfo.printed`). */
+  printed?: Uint8Array;
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
@@ -110,7 +112,7 @@ class ManualEngine implements EngineGateway {
   }
   async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
     this.registries.push(registry);
-    return { ok: true };
+    return { ok: true, dataLoaders: true };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
@@ -130,6 +132,7 @@ class ManualEngine implements EngineGateway {
             messages: this.messages,
             ...(runFiles === undefined ? {} : { runFiles }),
             ...(this.shownIds === undefined ? {} : { shownIds: this.shownIds }),
+            ...(this.printed === undefined ? {} : { printed: this.printed }),
           });
         },
         reject,
@@ -174,7 +177,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
@@ -344,10 +347,9 @@ describe('Coordinator', () => {
 
   it('does not queue an input that the index scan cannot read', async () => {
     const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: '>q\nACGT\n>?10\n' } })).toEqual({
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n$$$$$$\n' } })).toEqual({
       ok: false,
-      message:
-        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
+      message: "Query FASTA: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -615,9 +617,9 @@ describe('Coordinator', () => {
 
   it('does not queue a request whose argv the engine cannot start, with its message', async () => {
     const engine = new ManualEngine();
-    engine.startResult = { ok: false, message: "error: unexpected argument '-version' found" };
+    engine.startResult = { ok: false, message: 'the engine cannot start this argv' };
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue({ ...request, extra: ['-version'] })).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
+    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({ ok: false, message: 'the engine cannot start this argv' });
     expect(engine.registries).toEqual([]);
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -653,6 +655,52 @@ describe('Coordinator', () => {
       await waitFor(coordinator, runId, 'completed');
       expect(viewOf(coordinator, runId)!.record.messages).toBe(messages);
     }
+  });
+
+  // Line WQA's D14, 2026-11-20: an argv with a help or version word prints the command line's text and searches nothing,
+  // as the CLI does. The run reads no input (none is chosen), keeps the text, and saves it under the run's names.
+  it("runs an argv that prints the command line's help or version without inputs, and keeps and saves its text", async () => {
+    const engine = new ManualEngine();
+    engine.startResult = startOf({ prints: 'version' });
+    engine.printed = new TextEncoder().encode('blastn: 2.17.0+\n');
+    const { coordinator, saved } = setup(engine);
+    const runId = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: ['-version'] })).runId!;
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
+    expect(snapshot.prints).toBe('version');
+    expect(snapshot.query).toMatchObject({ name: 'query.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    expect(snapshot.subject).toMatchObject({ name: 'subject.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    await waitFor(coordinator, runId, 'running');
+    engine.finish(runId);
+    await waitFor(coordinator, runId, 'completed');
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: 2.17.0+\n');
+    await coordinator.exportPrinted(runId);
+    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: 2.17.0+\n', type: 'text/plain' }]);
+    // NCBI's XML and JSON are saved as what they are (the bytes unchanged).
+    for (const [word, kind, text, name, type] of [
+      ['-xmlhelp', 'help', '<?xml version="1.0"?>\n<ncbi_application/>\n', 'help.xml', 'application/xml'],
+      ['-version-full-json', 'version', '{\n  "appname": "blastn"\n}\n', 'version.json', 'application/json'],
+    ] as const) {
+      engine.printed = new TextEncoder().encode(text);
+      engine.startResult = startOf({ prints: kind });
+      const other = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: [word] })).runId!;
+      await waitFor(coordinator, other, 'running');
+      engine.finish(other);
+      await waitFor(coordinator, other, 'completed');
+      saved.length = 0;
+      await coordinator.exportPrinted(other);
+      expect(saved).toEqual([{ fileName: expect.stringMatching(new RegExp(`\\.${name.replace('.', '\\.')}$`)), text, type }]);
+    }
+
+    // A search has no printed text, and says nothing of one.
+    engine.startResult = startOf({});
+    delete engine.printed;
+    const search = (await coordinator.enqueue(request)).runId!;
+    expect('prints' in viewOf(coordinator, search)!.snapshot).toBe(false);
+    await waitFor(coordinator, search, 'running');
+    engine.finish(search);
+    await waitFor(coordinator, search, 'completed');
+    expect('printed' in viewOf(coordinator, search)!.record).toBe(false);
+    await expect(coordinator.exportPrinted(search)).rejects.toThrow('the run printed no text');
   });
 
   it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {
@@ -888,7 +936,7 @@ describe('Coordinator', () => {
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
-      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true };
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
     expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
@@ -913,7 +961,7 @@ describe('Coordinator', () => {
     const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
-    const query = (await data.indexSource(source.sourceId, 1)).revisionId;
+    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     const result = await coordinator.enqueueAll([
       { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
     ]);
@@ -927,7 +975,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 1)).revisionId;
+      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');

@@ -1,6 +1,6 @@
 # makembindex
 
-`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which NCBI's `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` does not read the index yet: it refuses `-use_index true` (see [What LOSAT refuses](../refusals.md)).
+`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which NCBI's `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` does not search with an index yet: it refuses `-use_index true` when NCBI's `blastn` would search with the index, and runs as NCBI does when NCBI would not use it (no index, or a `-word_size` below the index's; see [What LOSAT refuses](../refusals.md)).
 
 It writes the same files as NCBI's `makembindex` 2.17.0, byte for byte.
 
@@ -30,7 +30,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-legacy` | `true` | The index format that `blastn -use_index` reads. `-legacy false` writes the newer format, with `-stride` and `-ws_hint`. |
 | `-stride` | `5` | With `-legacy false`: distance between the database positions that are stored. |
 | `-ws_hint` | `28` | With `-legacy false`: the word size you expect to search with. A value below `-nmer` + `-stride` − 1 is raised to it, with a warning. |
-| `-idmap` | `false` | Also write `VOLUME.map`, the first word of each sequence's title, one per line. |
+| `-idmap` | `false` | Also write `VOLUME.map`, the first word of each sequence's title as NCBI makes it, one per line (for a database sequence without a title and with a tax id, the first word of its organism's scientific name from the taxonomy database, or `No`). |
 | `-old_style_index` | `false` | One index for the whole input, named by `-output` (deprecated in NCBI). |
 | `-output` | none | With `-old_style_index true`: the name of the index files. Ignored otherwise, with a warning. |
 | `-iformat` | `blastdb` (`fasta` for the old style) | Input format. |
@@ -66,7 +66,8 @@ None in the files or the messages of a normal run.
 - `-legacy false` with a `-stride` of 32768 or more, where NCBI's index has no defined result.
 - An index volume of more than 4 GiB of packed sequences (a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume), where NCBI's index sizes wrap at 32 bits.
 - A command-line word that is not UTF-8.
-- The database cases that `dustmasker` refuses, such as a sequence whose title NCBI cannot read.
+- The database cases that `dustmasker` refuses, such as a definition line with bytes NCBI reads as `#` or a tax id with an empty `taxdb.btd`.
+- A database sequence without letters, which only a damaged database has: NCBI's `makembindex` stops with a null-pointer report.
 
 See [What LOSAT refuses](../refusals.md).
 

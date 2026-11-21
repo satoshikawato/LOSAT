@@ -64,15 +64,21 @@ impl<'a> QueryFile<'a> {
 }
 
 /// The reader configuration of the command line for the input of `role`: the program's flags,
-/// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`). `writes_archive`
-/// is whether the search writes the BLAST archive (outfmt 11), or `None` where its formats are not
-/// known yet (`read_inputs`).
-fn reader_config(program: Program, role: Role, writes_archive: Option<bool>) -> ReaderConfig {
+/// and NCBI's data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`) or as the
+/// application's settings give them (`data_loaders`, `ApplicationSettings::data_loaders`).
+/// `writes_archive` is whether the search writes the BLAST archive (outfmt 11), or `None` where its
+/// formats are not known yet (`read_inputs`).
+fn reader_config(
+    program: Program,
+    role: Role,
+    writes_archive: Option<bool>,
+    data_loaders: bool,
+) -> ReaderConfig {
     let name = program.reader_name();
     let protein = is_protein(program, role);
     let config = match role {
-        Role::Query => ReaderConfig::query(name, protein, true),
-        Role::Subject => ReaderConfig::subject(name, protein, true),
+        Role::Query => ReaderConfig::query(name, protein, data_loaders),
+        Role::Subject => ReaderConfig::subject(name, protein, data_loaders),
     };
     match writes_archive {
         // The archive (outfmt 11) shows each record's defline as it is written, and the formats of
@@ -125,7 +131,7 @@ pub(super) fn check_archive_inputs(program: Program, inputs: Inputs<'_>) -> Resu
 /// only has no record. A reader error is the command line's message (`Error::Input`).
 pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<FastaRecord>, Error> {
     read_source(
-        FastaInputSource::from_bytes(bytes, reader_config(program, role, None)),
+        FastaInputSource::from_bytes(bytes, reader_config(program, role, None, true)),
         role,
     )
 }
@@ -183,6 +189,7 @@ pub fn read_inputs(
         search.program(),
         &search.any_subject(),
         None,
+        true,
         query,
         subject,
     )
@@ -224,21 +231,25 @@ fn strand_of(command: &Commands) -> Option<&str> {
 /// read: the reader keeps them then, and refuses an id with a range as it reads it, as the command
 /// line's reader does (`refuse_range_in_archive`). `None` where the formats are not known yet
 /// (`read_inputs`): every defline is kept, and the search refuses such a record when it writes the
-/// archive (`check_archive_inputs`). A reader error is the command line's message (`read_source`).
-/// The one reading of `read_inputs` and LOSAT Web's `register_inputs` (`web/adapter`, docs/web/
-/// abi_v2.md §4). Returns `(query, subject)`.
+/// archive (`check_archive_inputs`). `data_loaders` is whether NCBI's data loaders are on
+/// (`ApplicationSettings::data_loaders` of the search's start; the library reads with them on,
+/// `CallStart::settings`), under which the reader refuses a first line that NCBI would fetch as a
+/// Seq-id and without which it reads that line as data. A reader error is the command line's
+/// message (`read_source`). The one reading of `read_inputs` and LOSAT Web's `register_inputs`
+/// (`web/adapter`, docs/web/abi_v2.md §4). Returns `(query, subject)`.
 pub fn read_search_inputs(
     program: Program,
     command: &Commands,
     writes_archive: Option<bool>,
+    data_loaders: bool,
     query: &[u8],
     subject: &[u8],
 ) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
     let parse_deflines = parse_deflines_of(command);
     let scope = parse_deflines.then(Default::default);
     let read = |role: Role, bytes: &[u8]| {
-        let config =
-            reader_config(program, role, writes_archive).with_parse_deflines(parse_deflines);
+        let config = reader_config(program, role, writes_archive, data_loaders)
+            .with_parse_deflines(parse_deflines);
         let config = match strand_of(command) {
             Some(strand) if role == Role::Query => config.with_strand(strand),
             _ => config,

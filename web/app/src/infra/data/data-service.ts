@@ -10,11 +10,9 @@ import { RunOutputReceiver } from 'losat';
 import {
   CUSTOM_OUTPUT,
   OUTPUT_FORMATS,
-  type FastaParserKind,
+  type FastaReader,
   type IndexedRecord,
-  type InputRole,
   type OutputPlace,
-  type ProgramId,
   type RecordKey,
   type RunOutput,
 } from 'losat/domain';
@@ -29,6 +27,7 @@ import {
   type RecordScanner,
 } from 'losat/ports';
 import { includedRecords, normalizeExclusion, recordKey, type DatasetRevision } from '../../domain/dataset';
+import { fastaParser, programById } from '../../domain/programs';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
 import type {
   CleanupState,
@@ -134,9 +133,10 @@ export class DataService implements DataGateway {
     return { sourceId, name: file.name, size: file.size };
   }
 
-  async indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision> {
+  async indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision> {
     const file = this.source(sourceId);
-    const { records } = await this.deps.scanner.scan(parser, readChunks(file, this.chunkBytes));
+    const parser = fastaParser(programById(reader.program), reader.role);
+    const { records } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
     checkRecordTable(records, file.size);
     const hashes = await this.hashRecords(file, records);
     return this.keep({
@@ -189,9 +189,9 @@ export class DataService implements DataGateway {
     return { bytes: concatBytes(parts), records: Object.freeze(records) };
   }
 
-  async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
+  async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
     const { bytes } = await this.runInputBytes(revisionIds);
-    return this.deps.checker.check(program, role, bytes);
+    return this.deps.checker.check(reader, bytes);
   }
 
   async dropSource(sourceId: string): Promise<void> {

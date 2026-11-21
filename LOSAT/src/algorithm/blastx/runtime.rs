@@ -222,7 +222,7 @@ fn x_speculate_match(
     use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
     worker.x_set_matrix(None);
     X_REDO_PROBE.with(|probe| probe.set(0));
-    let encoded = subjects.read_encoded(list.oid).ok()?;
+    let encoded = subjects.read_searched(list.oid, options).ok()?;
     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
     let redone = worker.redo_list_observed(&input, batch, &encoded).ok()?;
     let probe = X_REDO_PROBE.with(|probe| probe.get());
@@ -965,7 +965,7 @@ impl PreliminarySink for Runtime<'_> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1500-1508
             for lists in result_batches {
-                let encoded = self.subjects.read_encoded(lists[0].oid)?;
+                let encoded = self.subjects.read_searched(lists[0].oid, self.options)?;
                 for list in lists {
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407

@@ -4,10 +4,11 @@
 // reader with the nucleotide or the protein flags) closely enough to pass
 // tests/contract/record-scanner.contract.ts, with these simplifications: CR, LF and CR LF
 // end a line, without the quirks of NCBI's line reader (which joins the rest of a line to the
-// next after a CR in a file of LF line ends, or the reverse, and has buffer ends); it never
-// takes a first line for a Seq-id that NCBI's data loaders would fetch, nor refuses a record
-// over 2147483647 letters; and it always reports the checkpoints layout.
-import type { FastaParserKind, IndexedRecord, InputRole, ProgramId, RecordKey } from 'losat/domain';
+// next after a CR in a file of LF line ends, or the reverse, and has buffer ends); it reads a
+// `>?` gap line's size from its first digits (after `unk`), without NCBI's modifiers; and it
+// never takes a first line for a Seq-id that NCBI's data loaders would fetch, nor refuses a
+// record over 2147483647 letters.
+import type { FastaParserKind, FastaReader, IndexedRecord, InputRole, ProgramId, RecordKey } from 'losat/domain';
 import type { InputCheck, InputChecker, RecordScanner, ScanResponse } from 'losat/ports';
 import { recordKey } from '../../domain/dataset';
 import { fastaParser, programById } from '../../domain/programs';
@@ -19,15 +20,14 @@ const CR = 0x0d;
 const QUESTION = 0x3f;
 const UNDERSCORE = 0x5f;
 const SEMICOLON = 0x3b;
-const CHECKPOINT_EVERY = 65_536;
 /** `CheckDataLine`'s window. */
 const CHECK_WINDOW = 70;
 /** The letters that kind 1 stores, in either case. */
 const NUCLEOTIDES = new Set([...'ABCDGHKMNRSTUVWY'].map((letter) => letter.charCodeAt(0)));
 
 export class FakeScanner implements RecordScanner {
-  async scan(parser: FastaParserKind, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
-    if (parser !== 1 && parser !== 2) throw new Error(`unknown or unavailable FASTA parser kind ${String(parser)}`);
+  async scan(reader: FastaReader, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
+    const parser = fastaParser(programById(reader.program), reader.role);
     const parts: Uint8Array[] = [];
     for await (const chunk of chunks) parts.push(chunk.slice());
     return { records: fakeScan(concatBytes(parts), parser) };
@@ -43,9 +43,11 @@ interface Builder {
   readonly id: string;
   readonly headerOffset: number;
   readonly sequenceOffset: number;
+  /** The letters of the record, a gap's included. */
   length: number;
+  /** The residues of its data lines (NCBI's `m_SeqData`), which a gap does not fill. */
+  stored: number;
   readonly counts: number[];
-  readonly checkpoints: number[];
 }
 
 /** `isspace` of the C locale. */
@@ -71,10 +73,24 @@ function angle(bytes: Uint8Array, at: number, end: number): number | undefined {
   return byte(2) === UNDERSCORE && byte(3) !== QUESTION ? 3 : undefined;
 }
 
-function gapError(line: number): Error {
-  return new Error(
-    `line ${line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser`,
-  );
+/** The letters of a gap line (`>?` from `at`): its size, the first digits after white space and `unk`; 1 without them. */
+function gapSize(bytes: Uint8Array, at: number, end: number): number {
+  let i = at + 2;
+  while (i < end && space(bytes[i]!)) i++;
+  if (i + 3 <= end && bytes[i] === 0x75 && bytes[i + 1] === 0x6e && bytes[i + 2] === 0x6b) {
+    i += 3;
+    while (i < end && space(bytes[i]!)) i++;
+  }
+  let size = 0;
+  while (i < end && bytes[i]! >= 0x30 && bytes[i]! <= 0x39) size = size * 10 + bytes[i++]! - 0x30;
+  return size > 0 ? size : 1;
+}
+
+/** Adds a gap line's letters to a record: `N` for kind 1, `X` for kind 2. */
+function gap(bytes: Uint8Array, at: number, end: number, builder: Builder, parser: FastaParserKind): void {
+  const size = gapSize(bytes, at, end);
+  builder.counts[parser === 1 ? 0x4e : 0x58]! += size;
+  builder.length += size;
 }
 
 /** The ID of a defline: its title (NCBI's `ParseDefLine`) up to the first space. */
@@ -122,12 +138,17 @@ export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): IndexedRec
     let next = end;
     if (next < bytes.length) next += bytes[next] === CR && bytes[next + 1] === LF ? 2 : 1;
     lineNumber++;
-    if (bytes[start] === GT) {
-      const skip = angle(bytes, start, end);
-      if (skip === undefined) throw gapError(lineNumber);
+    if (bytes[start] === GT && angle(bytes, start, end) !== undefined) {
       close(start);
       needDefline = false;
-      current = newBuilder(titleId(bytes, start + skip, end), start, next);
+      current = newBuilder(titleId(bytes, start + angle(bytes, start, end)!, end), start, next);
+    } else if (bytes[start] === GT) {
+      if (needDefline) {
+        // A gap line starts the input's first record, without a defline.
+        needDefline = false;
+        current = newBuilder('', 0, 0);
+      }
+      gap(bytes, start, end, current!, parser);
     } else {
       let at = start;
       while (at < end && space(bytes[at]!)) at++;
@@ -148,7 +169,7 @@ export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): IndexedRec
 }
 
 function newBuilder(id: string, headerOffset: number, sequenceOffset: number): Builder {
-  return { id, headerOffset, sequenceOffset, length: 0, counts: new Array<number>(256).fill(0), checkpoints: [] };
+  return { id, headerOffset, sequenceOffset, length: 0, stored: 0, counts: new Array<number>(256).fill(0) };
 }
 
 /** A data line from its first byte other than white space: its stored residues until a `;`. */
@@ -156,19 +177,22 @@ function dataLine(bytes: Uint8Array, at: number, end: number, line: number, buil
   let checked: number[] = [...bytes.subarray(at, end)];
   if (bytes[at] === GT) {
     const skip = angle(bytes, at, end);
-    if (skip === undefined) throw gapError(line);
+    if (skip === undefined) {
+      gap(bytes, at, end, builder, parser);
+      return;
+    }
     checked = [GT, ...checked.slice(skip)];
   }
-  // NCBI checks the data lines of a record until it has a residue.
-  if (builder.length === 0 && !plausible(checked)) {
+  // NCBI checks the data lines of a record until it has a residue (a gap's letters are not its residues).
+  if (builder.stored === 0 && !plausible(checked)) {
     throw new Error(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`);
   }
   for (let i = at; i < end && bytes[i] !== SEMICOLON; i++) {
     const residue = stored(bytes[i]!, parser);
     if (residue === undefined) continue;
-    if (builder.length % CHECKPOINT_EVERY === 0) builder.checkpoints.push(i);
     builder.counts[residue]!++;
     builder.length++;
+    builder.stored++;
   }
 }
 
@@ -184,7 +208,6 @@ function finish(builder: Builder, index: number, end: number): IndexedRecord {
     sequence_offset: builder.sequenceOffset,
     end_offset: end,
     length: builder.length,
-    line_layout: { kind: 'checkpoints', every: CHECKPOINT_EVERY, offsets: builder.checkpoints },
     residue_counts: residueCounts,
   };
 }
@@ -197,7 +220,7 @@ function finish(builder: Builder, index: number, end: number): IndexedRecord {
  * without the engine.
  */
 export class FakeInputChecker implements InputChecker {
-  async check(program: ProgramId, role: InputRole, bytes: Uint8Array): Promise<InputCheck> {
+  async check({ program, role }: FastaReader, bytes: Uint8Array): Promise<InputCheck> {
     let records: IndexedRecord[];
     try {
       records = fakeScan(bytes, fastaParser(programById(program), role));

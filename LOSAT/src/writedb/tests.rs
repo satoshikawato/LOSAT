@@ -308,7 +308,7 @@ fn build_version(
     let result = (|| {
         let mut db = BuildDatabase::new(
             out_base,
-            title,
+            title.as_bytes(),
             is_protein,
             &mut log,
             &time_of(date),
@@ -1513,7 +1513,7 @@ fn run_v5_case(case: &V5Case) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        let actual = mask_column_date(file, std::fs::read(tmp.0.join(file)).unwrap());
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -1529,6 +1529,29 @@ fn run_v5_case(case: &V5Case) {
             ),
         }
     }
+}
+
+/// The index file of a column (`.?aa`, `.?ba`, ...: a `p` or `n`, the column's letter, `a`) with
+/// the creation time it stores (the second string after the 32 bytes of its head) as `<C>`, as
+/// the cases have it; another file as it is.
+pub(super) fn mask_column_date(file: &str, mut bytes: Vec<u8>) -> Vec<u8> {
+    let extension = file.rsplit('.').next().unwrap_or("").as_bytes();
+    let is_column_index = extension.len() == 3
+        && matches!(extension[0], b'p' | b'n')
+        && extension[2] == b'a'
+        && crate::writedb::column::COLUMN_LETTERS.contains(&extension[1]);
+    if !is_column_index || bytes.len() < 34 {
+        return bytes;
+    }
+    let title_len = usize::from(bytes[32]);
+    let at = 33 + title_len;
+    let date_len = usize::from(bytes[at]);
+    assert!(
+        title_len < 64 && date_len < 64,
+        "{file}: a column head of short strings"
+    );
+    bytes.splice(at..at + 1 + date_len, *b"\x03<C>");
+    bytes
 }
 
 fn run_v5_cases(prefix: &str) {
@@ -1608,6 +1631,21 @@ fn metadata_output_prefix_runs_as_makeblastdb() {
 )]
 fn oid_masks_runs_as_makeblastdb() {
     run_v5_cases("O_");
+}
+
+/// `-input_type blastdb` as makeblastdb 2.17.0 has it: copies of databases of version 5 and 4 into
+/// either version (sequences with ambiguities, taxids, GIs, local ids, several definition lines,
+/// a source without parsed ids), several volumes in and out, several names (sorted, a name twice),
+/// the mask algorithms (two of one program, an `other` one, `-mask_data` beside them, an id taken
+/// by another name), `-taxid`, `-taxid_map`, `-hash_index`, `-logfile`, `-oid_masks`, a PIG and
+/// membership bits, and the refusals of the command line (line RG item D3c).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn blastdb_input_runs_as_makeblastdb() {
+    run_v5_cases("B_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed

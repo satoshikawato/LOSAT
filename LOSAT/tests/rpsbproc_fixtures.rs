@@ -9,7 +9,9 @@
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md); a `widened`
 //! case gives the bytes of `widened/`, LOSAT's own where NCBI's `int` coordinate arithmetic
 //! overflows (PD-LOSAT-NCBI-DEFECTS exception 12; each beside a `compare` case of its nearby
-//! input, README.md). NCBI is not run here.
+//! input, README.md); a `tied` case gives the bytes of `tied/`, LOSAT's own order of hits that
+//! NCBI's `std::sort` leaves in an order of its own (PD-LOSAT-NCBI-DEFECTS 1.67), which differ
+//! from NCBI's frozen bytes only as `tied/CLASSES.tsv` counts. NCBI is not run here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -250,8 +252,8 @@ fn file_in_losat_words(frozen: &[u8]) -> Vec<u8> {
     file
 }
 
-/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `expected` (`oracle/`
-/// or `widened/`): the number of rows.
+/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `expected` (`oracle/`,
+/// `widened/` or `tied/`): the number of rows.
 fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
     let run_dir = RunDir::new(stem);
     let dir = &run_dir.0;
@@ -285,7 +287,295 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 384);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 375);
+}
+
+// The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.67, the Owner's decision
+// of 2026-11-20): hits equal in E-value and bit score keep their input order, where NCBI's
+// `std::sort` leaves an order of its own; a NaN E-value or bit score sorts after every number of
+// its key (Owner-delegated, 2026-11-20).
+#[test]
+fn rpsbproc_orders_tied_hits_by_its_rule() {
+    assert_eq!(compare_rows("tied", "tied", "tied"), 9);
+}
+
+/// Where LOSAT's standard output of a `tied` row differs from NCBI's: the blocks and lines that
+/// `tied/CLASSES.tsv` lists.
+#[derive(Debug, PartialEq, Eq)]
+struct TiedDifference {
+    /// Query blocks whose DOMAINS lines differ only among hits of one E-value and bit score.
+    tie_blocks: usize,
+    /// Query blocks that hold a hit with a NaN E-value or bit score.
+    nan_blocks: usize,
+    /// NCBI's lines of the differing blocks that a longest common subsequence of the two blocks
+    /// leaves out: the lines a diff removes.
+    ncbi_lines: usize,
+    /// LOSAT's lines of the differing blocks that the common subsequence leaves out: the lines a
+    /// diff adds.
+    losat_lines: usize,
+}
+
+/// The length of a longest common subsequence of two blocks' lines.
+fn common_lines(a: &[&[u8]], b: &[&[u8]]) -> usize {
+    let mut previous = vec![0; b.len() + 1];
+    for line in a {
+        let mut current = vec![0; b.len() + 1];
+        for (j, other) in b.iter().enumerate() {
+            current[j + 1] = if line == other {
+                previous[j] + 1
+            } else {
+                previous[j + 1].max(current[j])
+            };
+        }
+        previous = current;
+    }
+    previous[b.len()]
+}
+
+/// A line outside the query blocks, or a query block (`QUERY` to `ENDQUERY`).
+#[derive(PartialEq)]
+enum Segment<'a> {
+    Line(&'a [u8]),
+    Query(Vec<&'a [u8]>),
+}
+
+fn segments(text: &[u8]) -> Vec<Segment<'_>> {
+    let mut segments = Vec::new();
+    let mut block: Option<Vec<&[u8]>> = None;
+    for line in text.split(|&byte| byte == b'\n') {
+        match block.as_mut() {
+            None if line.starts_with(b"QUERY\t") => block = Some(vec![line]),
+            None => segments.push(Segment::Line(line)),
+            Some(lines) => {
+                lines.push(line);
+                if line.starts_with(b"ENDQUERY") {
+                    segments.push(Segment::Query(block.take().unwrap()));
+                }
+            }
+        }
+    }
+    assert!(block.is_none(), "a QUERY block without its ENDQUERY");
+    segments
+}
+
+fn fields(line: &[u8]) -> Vec<&[u8]> {
+    line.split(|&byte| byte == b'\t').collect()
+}
+
+/// The section (`DOMAINS`, `SITES`, `MOTIFS`) of each line of a query block; `None` for the
+/// markers and the lines outside the sections.
+fn sections<'a>(block: &[&'a [u8]]) -> Vec<Option<&'a [u8]>> {
+    let mut current = None;
+    block
+        .iter()
+        .map(|&line| match line {
+            b"DOMAINS" | b"SITES" | b"MOTIFS" => {
+                current = Some(line);
+                None
+            }
+            b"ENDDOMAINS" | b"ENDSITES" | b"ENDMOTIFS" => {
+                current = None;
+                None
+            }
+            _ => current,
+        })
+        .collect()
+}
+
+/// Whether a DOMAINS line of the block has a NaN E-value or bit score (`-nan`, NCBI's text).
+fn holds_nan(block: &[&[u8]]) -> bool {
+    let nan = |field: &[u8]| field == b"-nan" || field == b"nan";
+    block.iter().zip(sections(block)).any(|(line, section)| {
+        let line = fields(line);
+        section == Some(&b"DOMAINS"[..]) && line.len() >= 8 && (nan(line[6]) || nan(line[7]))
+    })
+}
+
+/// The query, E-value and bit score of a DOMAINS line (fields 2, 7 and 8): the key of a tie.
+fn tie_key<'a>(line: &[&'a [u8]]) -> (&'a [u8], &'a [u8], &'a [u8]) {
+    (line[1], line[6], line[7])
+}
+
+/// The hit types (field 3) of DOMAINS lines, sorted.
+fn hit_types<'a>(lines: &[&'a [u8]]) -> Vec<&'a [u8]> {
+    let mut types: Vec<&[u8]> = lines.iter().map(|&line| fields(line)[2]).collect();
+    types.sort_unstable();
+    types
+}
+
+/// Compares NCBI's and LOSAT's standard output of a `tied` row (README.md, "Tied hits"): equal
+/// outside the query blocks, the blocks in pairs with the same `QUERY` line, and each block that
+/// differs either a block with a NaN key, or one of the same length whose runs of differing lines
+/// are DOMAINS lines of one query, E-value and bit score (fields 2, 7 and 8) with the same hit types
+/// (field 3) on both sides. The lines of the differing blocks are counted as a diff counts them
+/// (`common_lines`).
+fn tied_difference(ncbi: &[u8], losat: &[u8]) -> Result<TiedDifference, String> {
+    let (ncbi, losat) = (segments(ncbi), segments(losat));
+    if ncbi.len() != losat.len() {
+        return Err("the number of lines and query blocks".to_string());
+    }
+    let mut found = TiedDifference {
+        tie_blocks: 0,
+        nan_blocks: 0,
+        ncbi_lines: 0,
+        losat_lines: 0,
+    };
+    for (a, b) in ncbi.iter().zip(&losat) {
+        let (a, b) = match (a, b) {
+            _ if a == b => continue,
+            (Segment::Query(a), Segment::Query(b)) => (a, b),
+            _ => return Err("a line outside the query blocks".to_string()),
+        };
+        let name = String::from_utf8_lossy(a[0]).into_owned();
+        if a[0] != b[0] {
+            return Err(format!("{name}: the QUERY line"));
+        }
+        let differs = |i: usize| a.get(i) != b.get(i);
+        let longer = a.len().max(b.len());
+        let common = common_lines(a, b);
+        found.ncbi_lines += a.len() - common;
+        found.losat_lines += b.len() - common;
+        if holds_nan(a) || holds_nan(b) {
+            found.nan_blocks += 1;
+            continue;
+        }
+        if a.len() != b.len() {
+            return Err(format!("{name}: the number of lines, without a NaN"));
+        }
+        let sections = sections(a);
+        let mut start = 0;
+        while start < longer {
+            if !differs(start) {
+                start += 1;
+                continue;
+            }
+            let end = (start..longer).find(|&i| !differs(i)).unwrap_or(longer);
+            let run: Vec<Vec<&[u8]>> = (start..end)
+                .flat_map(|i| [fields(a[i]), fields(b[i])])
+                .collect();
+            if sections[start..end]
+                .iter()
+                .any(|&section| section != Some(&b"DOMAINS"[..]))
+            {
+                return Err(format!("{name}: a difference outside DOMAINS"));
+            }
+            if run.iter().any(|line| line.len() < 8) {
+                return Err(format!("{name}: a DOMAINS line of fewer than 8 fields"));
+            }
+            if run.iter().any(|line| tie_key(line) != tie_key(&run[0])) {
+                return Err(format!(
+                    "{name}: lines of different queries, E-values or bit scores"
+                ));
+            }
+            if hit_types(&a[start..end]) != hit_types(&b[start..end]) {
+                return Err(format!("{name}: the hit types of tied lines"));
+            }
+            start = end;
+        }
+        found.tie_blocks += 1;
+    }
+    Ok(found)
+}
+
+// Each `tied` row differs from NCBI's frozen bytes only where PD-LOSAT-NCBI-DEFECTS 1.67 says, in
+// the blocks and lines that `tied/CLASSES.tsv` counts (no row is left out, and the table names each
+// `tied` row once): the evidence of the approved difference kept as a check, so that `tied/` cannot
+// drift from NCBI's bytes in any other way.
+#[test]
+fn tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits() {
+    let read = |dir: &str, case: &str, suffix: &str| {
+        fs::read(fixtures().join(dir).join(format!("{case}.{suffix}"))).unwrap()
+    };
+    let in_losat_words = |bytes: Vec<u8>| losat::wording::losat_output_bytes(&bytes).into_owned();
+    let table = fs::read_to_string(fixtures().join("tied").join("CLASSES.tsv")).unwrap();
+    let mut listed = Vec::new();
+    for line in table.lines().skip(1).filter(|line| !line.is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(fields.len(), 5, "{line}");
+        let count = |i: usize| fields[i].parse::<usize>().unwrap();
+        let (case, expected) = (
+            fields[0],
+            TiedDifference {
+                tie_blocks: count(1),
+                nan_blocks: count(2),
+                ncbi_lines: count(3),
+                losat_lines: count(4),
+            },
+        );
+        for suffix in ["err", "rc"] {
+            assert_eq!(
+                in_losat_words(read("oracle", case, suffix)),
+                read("tied", case, suffix),
+                "{case}: {suffix}"
+            );
+        }
+        let ncbi = in_losat_words(read("oracle", case, "out"));
+        let losat = read("tied", case, "out");
+        assert_eq!(tied_difference(&ncbi, &losat), Ok(expected), "{case}");
+        listed.push(case.to_string());
+    }
+    let mut tied: Vec<String> = cases()
+        .into_iter()
+        .filter(|row| row[1] == "tied")
+        .map(|row| row[0].clone())
+        .collect();
+    tied.sort();
+    listed.sort();
+    assert_eq!(listed, tied);
+    assert_eq!(tied.len(), 9);
+}
+
+// The check of `tied_difference` itself: it takes a change of order, a moved hit type and another
+// tied hit printed in a hit's place among hits of one E-value and bit score, and any change in a
+// query with a NaN key; it refuses a move across E-values or bit scores, a changed hit type alone,
+// and a change outside DOMAINS or outside the query blocks.
+#[test]
+fn the_tied_check_takes_only_the_order_of_tied_hits() {
+    let report = |domains: &[&str], sites: &str| {
+        let mut text = String::from("#DATA\nQUERY\tQuery_1\tPeptide\t9\tq\nDOMAINS\n");
+        for line in domains {
+            text.push_str(&line.replace(' ', "\t"));
+            text.push('\n');
+        }
+        text.push_str("ENDDOMAINS\nSITES\n");
+        text.push_str(&sites.replace(' ', "\t"));
+        text.push_str("\nENDSITES\nENDQUERY\nENDDATA\n");
+        text.into_bytes()
+    };
+    let a = "1 Query_1 Specific 1 1 9 1e-05 50 A a - -";
+    let b = "1 Query_1 Non-specific 2 2 9 1e-05 50 B b - -";
+    let b_specific = "1 Query_1 Specific 2 2 9 1e-05 50 B b - -";
+    let a_non = "1 Query_1 Non-specific 1 1 9 1e-05 50 A a - -";
+    let c = "1 Query_1 Non-specific 3 3 9 0.001 40 C c - -";
+    let n = "1 Query_1 Specific 4 4 9 -nan 45 D d - -";
+    let site = "1 Query_1 Specific site A1 1 1 1";
+    let ncbi = report(&[a, b, c], site);
+    let check = |domains: &[&str], sites: &str| tied_difference(&ncbi, &report(domains, sites));
+    let counts = |tie_blocks, nan_blocks, ncbi_lines, losat_lines| {
+        Ok(TiedDifference {
+            tie_blocks,
+            nan_blocks,
+            ncbi_lines,
+            losat_lines,
+        })
+    };
+    assert_eq!(check(&[a, b, c], site), counts(0, 0, 0, 0));
+    assert_eq!(check(&[b, a, c], site), counts(1, 0, 1, 1));
+    assert_eq!(check(&[b_specific, a_non, c], site), counts(1, 0, 2, 2));
+    assert_eq!(check(&[b_specific, b, c], site), counts(1, 0, 1, 1));
+    assert!(check(&[a, c, b], site).is_err());
+    assert!(check(&[a_non, b, c], site).is_err());
+    assert!(check(&[a, b, c], "1 Query_1 Specific site A2 1 1 1").is_err());
+    assert!(check(&[a, b], site).is_err());
+    let with_nan = report(&[a, n, b, c], site);
+    let nan_check = |domains: &[&str]| tied_difference(&with_nan, &report(domains, ""));
+    assert_eq!(nan_check(&[a, b, c, n]), counts(0, 1, 2, 2));
+    // A line changed after a moved one counts as well.
+    let c_moved = "1 Query_1 Non-specific 3 3 8 0.001 40 C c - -";
+    assert_eq!(nan_check(&[a, b, c_moved, n]), counts(0, 1, 3, 3));
+    let mut header = ncbi.clone();
+    header[1] = b'd';
+    assert!(tied_difference(&ncbi, &header).is_err());
 }
 
 // The rows where NCBI's `int` coordinate arithmetic overflows (undefined; NCBI's 0.5.1 builds wrap

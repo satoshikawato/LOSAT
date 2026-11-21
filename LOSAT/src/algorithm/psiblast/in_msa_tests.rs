@@ -451,7 +451,7 @@ fn pssm_of(
         master_index,
         ignore_master,
     };
-    let pssm = pssm_from_msa(&input, scoring);
+    let pssm = pssm_from_msa(&input, scoring, &mut std::io::sink());
     let _ = std::fs::remove_dir_all(&dir);
     pssm
 }
@@ -638,6 +638,7 @@ fn the_id_refusals_name_the_master_sequence() {
             &input,
             &scoring("BLOSUM62", 11, 1),
             crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+            &mut std::io::sink(),
         )
         .err()
         .unwrap();

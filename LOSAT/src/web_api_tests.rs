@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn v1_output_format_reads_the_frozen_numbers() {
+    use crate::report::OutputFormat;
+    let parse = super::v1_blastp::v1_output_format;
+    assert_eq!(parse("0").unwrap(), (OutputFormat::Pairwise, None));
+    assert_eq!(parse("6").unwrap(), (OutputFormat::Tabular, None));
+    assert_eq!(
+        parse("7").unwrap(),
+        (OutputFormat::TabularWithComments, None)
+    );
+    // With custom fields
+    let (fmt, fields) = parse("6 qaccver saccver").unwrap();
+    assert_eq!(fmt, OutputFormat::Tabular);
+    assert_eq!(fields, Some("qaccver saccver".to_string()));
+    // Invalid format; ABI v1 reads `06` as no format.
+    assert!(parse("99").is_err());
+    assert!(parse("06").is_err());
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-651
 #[test]
 fn fasta_store_allocates_and_releases_handles() {

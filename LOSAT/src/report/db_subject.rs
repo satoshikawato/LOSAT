@@ -273,14 +273,23 @@ impl LookupFailure {
 
     /// The failure of a lookup with the error `error`: NCBI's message where it is one of NCBI's
     /// (`SeqDbError::ncbi_message`), NCBI's crash where LOSAT refuses a file that NCBI crashes on
-    /// (`SeqDbError::ncbi_crashes`), else LOSAT's text.
+    /// (`SeqDbError::ncbi_crashes`) or where a read fails after the file's first byte
+    /// (`SeqDbError::Read`: NCBI reads bytes of its mapping that the system no longer gives,
+    /// SIGBUS; line WQA D18, 2026-11-21), else LOSAT's text. A first byte that cannot be read
+    /// where the file is opened (`SeqDbError::Map`) is NCBI's failed mapping, an error that NCBI
+    /// reports: without NCBI's text for it (a code outside `utils::os_error_text` on WASI,
+    /// Windows) it is LOSAT's text, as a file that does not open (review r2 of D18, L1).
     pub fn of_error(error: &crate::seqdb::SeqDbError) -> Self {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
-            None if error.ncbi_crashes() => Self {
-                message: error.to_string().into_bytes(),
-                ncbi: NcbiFailure::Crashes,
-            },
+            None if error.ncbi_crashes()
+                || matches!(error, crate::seqdb::SeqDbError::Read { .. }) =>
+            {
+                Self {
+                    message: error.to_string().into_bytes(),
+                    ncbi: NcbiFailure::Crashes,
+                }
+            }
             None => Self::losat(error.to_string()),
         }
     }
@@ -1908,15 +1917,20 @@ impl FormatThrow {
     }
 
     /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
-    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused).
-    pub fn of_outfmt(outfmt: &str, program: crate::blastinput::app::Program) -> Self {
+    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
+    /// formatter writes it (`TabularSpec::of_app`).
+    pub fn of_outfmt(
+        outfmt: &str,
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Self {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
         let Some((format, choice)) = parse_formatting_string(outfmt).ok().and_then(|choice| {
             ReportFormat::from_number(choice.number).map(|format| (format, choice))
         }) else {
             return FormatThrow::Refused;
         };
-        let spec = super::tabular::TabularSpec::of(format, &choice);
+        let spec = super::tabular::TabularSpec::of_app(format, &choice, app);
         Self::of(format, spec.as_ref(), program)
     }
 
@@ -1954,15 +1968,17 @@ impl FormatThrow {
         }
     }
 
-    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
+    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
+    /// application.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
     ) -> Option<RunThrow> {
         Self::of_run(
             outfmts
                 .into_iter()
-                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+                .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
         )
     }
 }

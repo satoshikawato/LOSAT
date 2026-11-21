@@ -530,6 +530,7 @@ pub(crate) fn x_word_finder_diag<S: BxScoring>(
         entries: diagonals.entries.clone(),
         offset: diagonals.offset,
         window: diagonals.window,
+        x_db_masks: None,
     };
     let reference = word_finder_any(
         scoring,

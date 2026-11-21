@@ -264,6 +264,7 @@ pub(super) fn prefetch_reported_subjects(
                 crate::report::db_subject::FormatThrow::of_outfmts(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
+                    args.app.request_kind(),
                 ),
             )
         });
@@ -1350,7 +1351,13 @@ pub(super) fn report_values(
         ShownQueries::of(query_records, args),
         shown_subjects,
         args.scoring.matrix,
-        psi_round::searched_other_letters(args),
+        // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
+        // reports count their stored letters (series NP, M4b).
+        psi_round::searched_other_letters(args)
+            || args
+                .db_mask_resolved
+                .as_ref()
+                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
         &mut engine_counts,
     );
     Ok(ReportValues {

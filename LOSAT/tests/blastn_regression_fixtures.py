@@ -81,6 +81,7 @@ KE = f"-query {I}/kaempty_query.fa -subject {I}/s60k.fa"
 KEB = f"-query {I}/kaempty_batch_query.fa -subject {I}/s60k.fa"
 WMC = "tests/winmask/counts/mg1655_u9.obinary"
 WMB = "tests/winmask/counts/dm2L_u9.binary"
+RPT = "tests/db_search/rpt_d4"
 AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
      " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
 # O4a (blastn -ungapped): the inputs of generate_ungapped_inputs (the t2 pair, rep, B and A are the ones above).
@@ -507,6 +508,18 @@ _CASES = [
     ("wm.hard_fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 5", ""),
     ("wm.hard_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 11", ""),
     ("wm.hard_fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 15", ""),
+    # Line RG item D4 (blastn -filtering_db: the database of repeats tests/db_search/rpt_d4 and the queries
+    # rpt_*.fa, written by tests/db_search/make_rpt_d4.py): the query ranges of the repeat hits mask the
+    # queries (with -soft_masking false the hits stop at them, outfmt 0 shows them in lower case), joined to
+    # the masks of DUST and of the lower case within 4 letters; each query chunk searches its own letters
+    # for repeats again; the archive names the database (RepeatFilteringDB) and its LCaseMask holds the
+    # joined masks. The -db rows are db.rpt.* (tests/db_search_manifest/blastn.rpt.tsv).
+    ("rpt.megablast", f"{WM} -filtering_db {RPT} -soft_masking false -outfmt 6", ""),
+    ("rpt.blastn_fmt0", f"{WM3} -task blastn -filtering_db {RPT} -max_hsps 2 -outfmt 0", ""),
+    ("rpt.lc", f"-query {I}/rpt_query_lc.fa -subject {I}/s60k.fa -task blastn -filtering_db {RPT} -lcase_masking"
+               " -soft_masking false -outfmt 6", ""),
+    ("rpt.split_c600", f"{WM} -task blastn -filtering_db {RPT} -soft_masking false -outfmt 6", "", "CHUNK_SIZE=600"),
+    ("rpt.fmt11", f"{WM3} -filtering_db {RPT} -outfmt 11", ""),
     # Line NP, series SM: in the Karlin-Altschul table error of a batch, a query without letters keeps its
     # set-up warning after the error ("Error: ... Warning: Sequence contains no data "), first, in the middle
     # and last; in a first batch and in a later one (BATCH_SIZE=1 gives the query of N only its own batch).

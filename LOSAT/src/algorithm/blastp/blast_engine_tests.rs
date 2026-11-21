@@ -2,6 +2,33 @@ use super::*;
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 use std::path::PathBuf;
 
+// NCBI 2.17.0 (line RG F/d36 probes ps.06, ps.06std, ps.p7, ps.00, bp.06, bp.p0; rows
+// db.dlm.ps.n06, db.dlm.bp.p0): `-outfmt 06`, `"06 std"`, `+7` and `00` are outfmt 6, 7 and 0
+// (`NStr::StringToInt`), the library's value as given as the command line's.
+#[test]
+fn text_formats_read_the_number_as_ncbi() {
+    for (outfmt, format) in [
+        ("0", OutputFormat::Pairwise),
+        ("6", OutputFormat::Tabular),
+        ("7", OutputFormat::TabularWithComments),
+        ("06", OutputFormat::Tabular),
+        ("06 std", OutputFormat::Tabular),
+        (" +7 ", OutputFormat::TabularWithComments),
+        ("00", OutputFormat::Pairwise),
+        ("6 qaccver saccver", OutputFormat::Tabular),
+    ] {
+        assert_eq!(blastp_text_format(outfmt), Ok(format), "{outfmt}");
+    }
+    for outfmt in ["99", "5", "10", "x6"] {
+        let error = blastp_text_format(outfmt).unwrap_err();
+        assert!(error.starts_with("Unsupported output format: "), "{outfmt}");
+    }
+    assert_eq!(
+        blastp_text_format("10 qseqid").unwrap_err(),
+        "Unsupported output format: 10. Supported: 0, 6, 7"
+    );
+}
+
 // EXPERIMENT (LOSAT_X_BPRECOUNTO): each index is tested once, its answer kept, whatever the order
 // of the questions.
 #[test]
@@ -447,6 +474,7 @@ fn make_blastp_args() -> BlastpArgs {
         subject: Some(PathBuf::from("subject.faa")),
         db: None,
         db_filter: Default::default(),
+        db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,
@@ -465,6 +493,8 @@ fn make_blastp_args() -> BlastpArgs {
         max_hsps_per_subject: None,
         qcov_hsp_perc: None,
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         subject_besthit: false,
         ungapped: false,
         xdrop_ungap: None,

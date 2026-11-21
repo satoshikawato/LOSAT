@@ -19,13 +19,13 @@
 //! `BlastpContextLookupBounds`, the format kinds' functions, the query frames' and subjects'
 //! encoders, the lookup builders, `x_prelim_block_plan`, `BlastpPrelimCutoffs`,
 //! `BlastpSubjectParameters`, the cutoffs', search spaces' and scan's functions) and its sibling
-//! modules `culling`, `database`, `psi_round`, `pssm_hooks`, `rps_hooks`, `x_ih_pool`,
+//! modules `database`, `psi_round`, `pssm_hooks`, `rps_hooks`, `x_ih_pool`,
 //! `x_lookup_ahead`, `x_soft_subject` and `x_subject_meta`.
 
 use std::ops::Range;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use super::database::BlastpDatabase;
 use super::x_lookup_ahead::{XAheadBlock, XAheadLookup};
@@ -37,13 +37,14 @@ use super::{
     blastp_concatenated_query_length, blastp_context_lookup_bounds, blastp_is_archive,
     blastp_is_xml, blastp_offset_array_size, blastp_prelim_cutoffs, blastp_prelim_cutoffs_of,
     blastp_prelim_evalue, blastp_preliminary_cutoff_subject_length, blastp_query_anchored_view,
-    blastp_query_frames_marked, blastp_seqalign_format, blastp_x_dropoff_init_for_context,
-    blastp_xml2_kind, build_blastp_concatenated_query, build_redone_match_heaps,
-    compute_blosum62_ideal_karlin_params, compute_diag_table_shape, culling, database,
-    prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks, split_option_space,
-    x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan, x_soft_subject,
-    BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport, BlastpReports,
-    BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimOnly,
+    blastp_query_frames_marked, blastp_seqalign_format, blastp_text_format,
+    blastp_x_dropoff_init_for_context, blastp_xml2_kind, build_blastp_concatenated_query,
+    build_redone_match_heaps, compute_blosum62_ideal_karlin_params, compute_diag_table_shape,
+    database, prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks,
+    split_option_space, x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan,
+    x_soft_subject, BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport,
+    BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimFilter,
+    PrelimOnly,
 };
 use crate::algorithm::blastp::args::{
     BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs,
@@ -115,7 +116,7 @@ pub(super) fn requested_reports(
         .iter()
         .map(|format| -> Result<BlastpReport> {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20.
-            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt) {
+            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt, args.app) {
                 return Ok(BlastpReport::CustomTabular(spec));
             }
             if let Some(serial) = blastp_seqalign_format(format.outfmt) {
@@ -132,15 +133,14 @@ pub(super) fn requested_reports(
             }
             // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`; psiblast and rpsblast
             // refuse them, line RG PS15).
-            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt)? {
+            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
-            // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`TabularSpec::of`).
-            let (outfmt, custom_fields) =
-                OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
-            if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
-                bail!("blastp outfmt 0 does not accept custom field lists");
-            }
+            // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`custom_tabular_spec`
+            // is `None`), their number as NCBI reads it (`blastp_text_format`); the words after
+            // outfmt 0's number (the library's value as given) are dropped, as NCBI drops them
+            // (`parse_formatting_string`).
+            let outfmt = blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?;
             Ok(match outfmt {
                 OutputFormat::Pairwise => {
                     BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
@@ -1151,18 +1151,12 @@ pub(super) fn prelim_cutoffs(
         .min()
         .unwrap_or(i32::MAX);
 
-    // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
-    // -max_target_seqs from 2^31 - 24 wraps to 2..48; a size that is not positive (NCBI
-    // crashes) was rejected with the options (`validate_requested_blastp_support`).
-    let prelim_hitlist_size =
-        usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-            args.max_target_seqs,
-            args.comp_based_stats.is_enabled(),
-            !args.ungapped,
-        ))
-        .ok()
-        .filter(|&size| size > 0)
-        .context("BLASTP preliminary hit list size is not positive")?;
+    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
+    let prelim_hitlist_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        args.max_target_seqs,
+        args.comp_based_stats.is_enabled(),
+        !args.ungapped,
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
@@ -1298,13 +1292,14 @@ fn one_subject<const UNGAPPED: bool>(
     })
 }
 
-/// What the call's preliminary stage and redo write (`prelim_sinks`): the culling writer, the first
+/// What the call's preliminary stage and redo write (`prelim_sinks`): the writer of a filtering
+/// option (`-culling_limit`, `-best_hit_*`), the first
 /// overflow of a subject's search space, the count of lists freed by the redo, the redo's heaps,
 /// the preliminary hit lists (full and compact) and the diagnostic counters at their start.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:286-287
 pub(super) struct BlastpPrelimSinks {
-    pub(super) culling: Option<culling::PrelimCulling>,
+    pub(super) prelim_filter: Option<PrelimFilter>,
     pub(super) subject_space_overflow: crate::stats::setup::SubjectSpaceOverflow,
     pub(super) x_prelim_freed: usize,
     pub(super) redone_matches: Vec<BlastCompoHeap>,
@@ -1314,8 +1309,8 @@ pub(super) struct BlastpPrelimSinks {
     pub(super) x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>>,
 }
 
-/// The call's `BlastpPrelimSinks` for its `query_count` queries (the culling writer only where the
-/// preliminary stage does not run in blocks, `x_blocks`, LOSAT_X_BPQBLOCK).
+/// The call's `BlastpPrelimSinks` for its `query_count` queries (a filtering option's writer only
+/// where the preliminary stage does not run in blocks, `x_blocks`, LOSAT_X_BPQBLOCK).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:291-293
 pub(super) fn prelim_sinks(
@@ -1324,13 +1319,16 @@ pub(super) fn prelim_sinks(
     prelim_hitlist_size: usize,
     query_count: usize,
 ) -> BlastpPrelimSinks {
-    // `-culling_limit`: NCBI's culling writer takes the place of the collector (`CreateHspWriter`,
-    // setup_factory.cpp:318-342). The choice is made once for this call: the whole search, a block
-    // of query batches, or one chunk of a split query, each with its own writer.
+    // `-culling_limit` and `-best_hit_*`: NCBI's culling writer or best hit writer takes the place
+    // of the collector (`CreateHspWriter`, setup_factory.cpp:305-342). The choice is made once for
+    // this call: the whole search, a block of query batches, or one chunk of a split query, each
+    // with its own writer.
     // EXPERIMENT (LOSAT_X_BPQBLOCK): with the preliminary stage in blocks (`x_blocks`) each block's
     // call has its own writer, as NCBI's batch.
-    let culling = (args.culling_limit > 0 && x_blocks.is_none())
-        .then(|| culling::PrelimCulling::new(prelim_hitlist_size, args.culling_limit));
+    let prelim_filter = x_blocks
+        .is_none()
+        .then(|| PrelimFilter::of_options(args, prelim_hitlist_size))
+        .flatten();
     // The first overflow of a subject's search space (`subject_parameters`), noted by the kernel.
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     // `x_prelim_free.rs`.
@@ -1347,7 +1345,7 @@ pub(super) fn prelim_sinks(
     let x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
         std::iter::repeat_with(|| None).take(query_count).collect();
     BlastpPrelimSinks {
-        culling,
+        prelim_filter,
         subject_space_overflow,
         x_prelim_freed,
         redone_matches,

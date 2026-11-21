@@ -270,7 +270,10 @@ impl From<SeqDbError> for ListStop {
         }
         match error.ncbi_message() {
             Some(text) => ListStop::Ncbi([b"BLAST Database error: ".as_slice(), &text].concat(), 2),
-            None => ListStop::Refused(refusal(&error.to_string())),
+            None => ListStop::Refused(crate::algorithm::common::database::losat_reader_error(
+                &error,
+                super::PROGRAM,
+            )),
         }
     }
 }

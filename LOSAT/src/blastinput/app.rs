@@ -158,6 +158,59 @@ impl FormatChoice {
     }
 }
 
+/// A `-outfmt` value after the early reading that every program's `run` makes before its option
+/// handlers (`early_format_choice`): the choice it read, or the value left to the formatting
+/// handler. A deferred value has no format number and no custom specification, so the type has
+/// nothing to read for it: a place that needs the choice takes it from `parsed`, `number` or
+/// `at_formatting_handler`, and says what it does for a value not read yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EarlyFormat {
+    /// A value that NCBI's `ParseFormattingString` read.
+    Parsed(FormatChoice),
+    /// A value that does not parse, of a run that writes a search strategy file: NCBI reads no
+    /// `-outfmt` before its option handlers, and the program's formatting handler reads the
+    /// value again and stops with its error (`at_formatting_handler`).
+    Deferred,
+}
+
+impl EarlyFormat {
+    /// The choice that was read, none for a deferred value.
+    pub fn parsed(&self) -> Option<&FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Some(choice),
+            EarlyFormat::Deferred => None,
+        }
+    }
+
+    /// The format number that was read, none for a deferred value.
+    pub fn number(&self) -> Option<i32> {
+        self.parsed().map(|choice| choice.number)
+    }
+
+    /// The choice at the program's formatting handler, the last of its option handlers: a
+    /// deferred value reads the value `outfmt` again, with NCBI's error (the one owner of where
+    /// the value's error comes), any other is as read.
+    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Ok(choice.clone()),
+            EarlyFormat::Deferred => parse_formatting_string(outfmt),
+        }
+    }
+
+    /// `report_format` of the choice; a deferred value has no report (its error comes at the
+    /// formatting handler).
+    pub fn report_format(
+        &self,
+        program: Program,
+        out: Option<&Path>,
+    ) -> anyhow::Result<Option<ReportFormat>> {
+        match self {
+            EarlyFormat::Parsed(choice) => report_format(choice, program, out),
+            EarlyFormat::Deferred => Ok(None),
+        }
+    }
+}
+
 /// The reports of NCBI's search programs: every `EOutputFormat` that blastn, blastp, blastx,
 /// tblastn or tblastx writes (blast_args.hpp:1023-1074 above). The AIRR rearrangement (19)
 /// and FASTA (21) formats are igblastn's and magicblast's (`formatting_handler_check`).
@@ -515,6 +568,36 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
         JSON => Err(options_error("Please provide a file name for outfmt 13.")),
         XML2 => Err(options_error("Please provide a file name for outfmt 14.")),
         _ => Ok(()),
+    }
+}
+
+/// Whether NCBI refuses the format choice `choice` of a `program` run with `-out` `out` itself,
+/// later than its parse: SAM, AIRR and FASTA outside their programs and a custom delimiter that
+/// the field list uses (`formatting_handler_check`), and an XInclude format (13, 14) without a
+/// file name (`xinclude_check_for`). LOSAT's refusals of the formats that psiblast, rpsblast and
+/// rpstblastn do not write yet, which come at the parse, leave these to NCBI's own error at its
+/// place (line RG F/d36 probes rps.conf20, rps.o14, ps.o13, ps.o14).
+pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<&Path>) -> bool {
+    formatting_handler_check(choice, program).is_err() || xinclude_check_for(choice, out).is_err()
+}
+
+/// The early reading of the `-outfmt` value `outfmt` that every program's `run` makes before its
+/// option handlers (NCBI's `ArchiveFormatRequested`), with NCBI's errors: the choice, or
+/// `EarlyFormat::Deferred` where the value does not parse and the run writes a search strategy
+/// file (`strategy`). NCBI then reads no `-outfmt` before its option handlers: the strategy file
+/// is created first and the early read is skipped (the `||` of that reference), so the value's error comes
+/// from the formatting handler, the last of the handlers, after the arguments' own errors in
+/// their order (`-subject` opened and `-subject_loc` read, `-query` opened, `-out` created,
+/// `-query_loc` read; line RG F/d36 review 2c B1). The program's own formatting handler reads the
+/// value again and raises it there; nothing before it can use a deferred choice (`EarlyFormat`
+/// has no number for it).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<EarlyFormat> {
+    match parse_formatting_string(outfmt) {
+        Ok(choice) => Ok(EarlyFormat::Parsed(choice)),
+        Err(_) if strategy => Ok(EarlyFormat::Deferred),
+        Err(error) => Err(error),
     }
 }
 

@@ -79,21 +79,24 @@ impl TblastxDatabase {
     /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
+    /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
+    /// `diagnostics`).
     pub(crate) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
-            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: the setup of a batch with a valid context divides by the
         // statistics' number of sequences, a count of 0 LOSAT's refusal there
         // (`context_cutoffs`, `shared::check_setup_count`).
@@ -227,6 +230,56 @@ impl TblastxDatabase {
         shared::pairwise_database(&self.db)
     }
 
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(crate) fn pairwise_database_masked(
+        &self,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
+    }
+
+    /// The formatter's step of the database masking `option` (`shared::resolve_database_masking`;
+    /// series NP, M4b PR 2): its warning goes to `diagnostics` (as one message of the archive
+    /// `archive`), and the program options to `archive` and `strategy`.
+    pub(crate) fn resolve_mask_option(
+        &self,
+        option: &crate::blastinput::db_mask::DbMaskOption,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
+        shared::resolve_database_masking(
+            &self.db,
+            &self.name,
+            option,
+            PROGRAM,
+            archive,
+            strategy,
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
+    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
+    /// bases).
+    pub(crate) fn check_mask_limits(
+        &self,
+        mask: &crate::blastinput::db_mask::ResolvedMask,
+        word_size: usize,
+    ) -> Result<()> {
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Translated {
+                min_length: word_size * 3 + 2,
+            },
+        )
+    }
+
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
@@ -278,8 +331,14 @@ impl TblastxDatabase {
     /// of its sequences would be read, with the same errors, and its sequences read where each
     /// query batch searches them (`subjects::Subjects::Stream`) and reports them
     /// (`read_reported`).
-    pub(crate) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
-        XDbStream::new(&self.db, threads, PROGRAM)
+    pub(crate) fn x_stream(
+        &self,
+        threads: usize,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> Result<XDbStream<'_>> {
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
+            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
+        ))
     }
 }
 
@@ -347,7 +406,36 @@ pub(crate) fn read_titles(
 
 /// The stores of the sequences that the reported hits of the query batches read so far name, by
 /// ordinal id (`read_reported`).
-pub(crate) type ReportedStores = BTreeMap<u32, Arc<PackedNucleotide>>;
+pub(crate) type ReportedStores = BTreeMap<u32, ReportedStore>;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2717
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:322-370
+// NCBI counts an HSP's identities and positives (the Seq-align's `num_ident`, `num_positives`)
+// in its ungapped re-evaluation, on the translation of the subject that the re-evaluation
+// fetched: with `-db_hard_mask`, a copy with `B` over the masked bases. The reports show the
+// stored letters.
+/// The letters of a reported database sequence (`read_reported`): those the reports show and
+/// those the search's re-evaluation read, on which the engine's counts are made again
+/// (`report::engine_counts`, `report::stored_engine_identities`).
+#[derive(Clone)]
+pub(crate) struct ReportedStore {
+    /// The stored letters (`XDbStream::read_shared`): the rows of the reports.
+    pub(crate) shown: Arc<PackedNucleotide>,
+    /// The letters of the re-evaluation (`XDbStream::read_stage`: with `-db_hard_mask`, `B` over
+    /// the masked bases; otherwise the same store as `shown`): the engine's identities and
+    /// positives.
+    pub(crate) engine: Arc<PackedNucleotide>,
+}
+
+impl ReportedStore {
+    /// The letters of sequence `ordinal` of `stream`.
+    fn read(stream: &XDbStream<'_>, ordinal: usize) -> Result<Self> {
+        let shown = stream.read_shared(ordinal)?;
+        // Without a hard mask this is `shown` again (the stream shares a store while it is held).
+        let engine = stream.read_stage(ordinal)?;
+        Ok(Self { shown, engine })
+    }
+}
 
 /// Reads the sequences that the reported hits `ordered` of a query batch name into `stores`, once
 /// each (`XDbStream::read_shared`: a long sequence that a search holds is not read again), for
@@ -365,7 +453,7 @@ pub(crate) fn read_reported(
             continue;
         }
         if let std::collections::btree_map::Entry::Vacant(entry) = stores.entry(ordinal) {
-            entry.insert(stream.read_shared(ordinal as usize)?);
+            entry.insert(ReportedStore::read(stream, ordinal as usize)?);
         }
     }
     Ok(())
@@ -631,8 +719,8 @@ pub(crate) struct ReportedSubjects {
     pub(crate) records: Vec<FastaRecord>,
     /// The number of bases of each rank.
     pub(crate) lengths: Vec<u32>,
-    /// The store of each rank (`read_reported`), or none when no report reads letters.
-    pub(crate) stores: Vec<Arc<PackedNucleotide>>,
+    /// The stores of each rank (`read_reported`), or none when no report reads letters.
+    pub(crate) stores: Vec<ReportedStore>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -703,7 +791,7 @@ pub(crate) fn hit_identities(
     stores.get(&hsp.hit.s_idx).map_or(1, |store| {
         super::report::stored_engine_identities(
             hsp,
-            store,
+            &store.engine,
             query,
             query_code,
             db_code,
@@ -722,6 +810,7 @@ pub(crate) fn after_throw<'a>(
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
         crate::blastinput::app::Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
     )
 }
 
@@ -891,8 +980,8 @@ pub(crate) fn reported_subjects(
                         database.db.oid(ordinal)
                     )
                 })?;
-                kept.push(Arc::clone(store));
-                u32::try_from(store.len()).expect("a database sequence's length fits Int4")
+                kept.push(store.clone());
+                u32::try_from(store.shown.len()).expect("a database sequence's length fits Int4")
             }
             None => *read_lengths.get(&ordinal).with_context(|| {
                 format!(

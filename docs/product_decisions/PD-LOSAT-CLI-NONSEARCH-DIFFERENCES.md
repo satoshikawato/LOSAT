@@ -354,7 +354,7 @@ BLAST+.
   `-conffile` and `-dryrun` as the command line does: every `validate` and `run` makes NCBI's
   application start, the file of `-conffile` is a file that the page gives the engine, the `-logfile`
   file comes back as a file of the run, and a `-dryrun` run reads no record and writes no output (a
-  `-logfile` name with a directory is refused, the browser has no directories). Since version 1.21 the library API (and
+  `-logfile` name with a directory, refused until line WQA's sweep D11 of 2026-11-20, is read as the command line on Linux reads it where the name's directories exist). Since version 1.21 the library API (and
   pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
   E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
   application start; the `-logfile` file gets what the command line writes there, the registry

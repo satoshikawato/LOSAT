@@ -380,9 +380,8 @@ impl OfflineQuery {
     /// it threw or LOSAT refuses.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:286-315
     // (A NaN E-value or bit score is kept, as in an archive (`query::process_cd_query`):
-    // `domains::calculate` sorts the hits as NCBI's `std::sort` does and refuses only where that
-    // sort would read outside its vector. `Calculate` of a frame without hits gives an empty
-    // classification. `missed`, the PSSM-IDs that the data lack, is never printed.)
+    // `domains::calculate` sorts it after every number. `Calculate` of a frame without hits gives
+    // an empty classification. `missed`, the PSSM-IDs that the data lack, is never printed.)
     pub(crate) fn finish(self, data: &CddData) -> Result<DomQuery, ProcessError> {
         if let Some(failure) = self.failure {
             return Err(failure);
@@ -411,16 +410,14 @@ impl OfflineQuery {
         }
         if !query.is_na {
             let all: Vec<usize> = (0..query.aligns.len()).collect();
-            query.frames[0] =
-                calculate(&mut query.aligns, &all, data).map_err(ProcessError::Unsupported)?;
+            query.frames[0] = calculate(&mut query.aligns, &all, data);
             return Ok(query);
         }
         let frames = sort_reading_frames(&query.aligns, query.length)
             .map_err(|what| ProcessError::Std(what.to_string()))?;
         for (frame, selected) in frames.iter().enumerate() {
             if !selected.is_empty() {
-                query.frames[frame] = calculate(&mut query.aligns, selected, data)
-                    .map_err(ProcessError::Unsupported)?;
+                query.frames[frame] = calculate(&mut query.aligns, selected, data);
             }
         }
         Ok(query)

@@ -48,6 +48,7 @@ pub mod isam_num;
 pub mod lmdb_read;
 pub mod lookup;
 pub mod mask;
+pub(crate) mod oid_list;
 pub(crate) mod oid_mask;
 pub(crate) mod rps;
 pub mod seqidlist;
@@ -79,6 +80,7 @@ use crate::seqid::model::ObjectId;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
+pub use column::ColumnBlock;
 pub use header::Defline;
 pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
@@ -191,8 +193,24 @@ pub enum SeqDbError {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// The operating system failed to read a file.
+    /// The operating system failed to tell the length of a file that it opened.
     Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// The operating system failed to read the first byte of a file of `len` bytes where it was
+    /// opened (`file::DbFile::open`): what NCBI meets where it maps the file
+    /// ([`SeqDbError::ncbi_message`]).
+    Map {
+        path: PathBuf,
+        len: u64,
+        source: std::io::Error,
+    },
+    /// The operating system failed to read bytes of a file after its first byte was read where
+    /// it was opened (a file that a disk or the network stopped giving, a file that became
+    /// shorter): where NCBI reads mapped bytes that the system no longer gives and ends by
+    /// SIGBUS. LOSAT's own error ("cannot be read"; line WQA D18, 2026-11-21).
+    Read {
         path: PathBuf,
         source: std::io::Error,
     },
@@ -211,6 +229,12 @@ pub enum SeqDbError {
     /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
     /// ([`SeqDbError::ncbi_crashes`]).
     NcbiCrashes { path: PathBuf, message: String },
+    /// A `CSeqDBException` of the code `eMemoryMappingFailure` whose message is NCBI's (an OID
+    /// list file of an alias file's `OIDLIST` that is not a file, `oid_list::OidListError`): a
+    /// search program reports `Database memory map file error - <message>`
+    /// ([`SeqDbError::ncbi_message`]), blastdbcmd the message alone
+    /// ([`SeqDbError::ncbi_request_message`]).
+    MemoryMap(Vec<u8>),
     /// A request outside the database (ordinal id, block range).
     Range(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
@@ -223,10 +247,15 @@ pub enum SeqDbError {
 impl std::fmt::Display for SeqDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SeqDbError::NotFound(message) => f.write_str(&String::from_utf8_lossy(message)),
+            SeqDbError::NotFound(message) | SeqDbError::MemoryMap(message) => {
+                f.write_str(&String::from_utf8_lossy(message))
+            }
             SeqDbError::Range(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
+            }
+            SeqDbError::Map { path, source, .. } | SeqDbError::Read { path, source } => {
+                write!(f, "{} cannot be read: {}", path.display(), source)
             }
             SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
                 write!(f, "{}: {}", path.display(), message)
@@ -266,6 +295,20 @@ impl SeqDbError {
         matches!(self, SeqDbError::NcbiCrashes { .. })
     }
 
+    /// Whether this is a file whose bytes the system does not give, in LOSAT's words: a read
+    /// that fails after the file's first byte was read ([`SeqDbError::Read`], where NCBI ends by
+    /// SIGBUS), or a first byte that cannot be read without NCBI's text for it
+    /// ([`SeqDbError::Map`] whose [`SeqDbError::ncbi_message`] is `None`). A program reports it
+    /// as LOSAT's error, not as a database that LOSAT does not read (line WQA D18 review M1,
+    /// 2026-11-21).
+    pub fn is_unreadable(&self) -> bool {
+        match self {
+            SeqDbError::Read { .. } => true,
+            SeqDbError::Map { .. } => self.ncbi_message().is_none(),
+            _ => false,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
     // `BLAST_UNKNOWN_ERROR` is 255 (blast_app_util.hpp:161); blastdbcmd catches the exception the
     // same way (`CATCH_ALL`). NCBI's guess of a database type moves on to the nucleotide
@@ -283,7 +326,10 @@ impl SeqDbError {
 impl std::error::Error for SeqDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            SeqDbError::Open { source, .. } | SeqDbError::Io { source, .. } => Some(source),
+            SeqDbError::Open { source, .. }
+            | SeqDbError::Io { source, .. }
+            | SeqDbError::Map { source, .. }
+            | SeqDbError::Read { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -292,7 +338,7 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 13] = [
+const NCBI_FORMAT_MESSAGES: [&str; 15] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -315,6 +361,11 @@ const NCBI_FORMAT_MESSAGES: [&str; 13] = [
     "CBlastDbBlob::x_ReadRaw: hit end of data",
     // seqdbimpl.cpp:2375-2376
     "Error in stored mask algorithm description data.",
+    // seqdb_lmdb.cpp:418-420, 678-680: an empty `.pos`/`.nos` or `.pot`/`.not`
+    // (`tax_files::OidIndex::open`; NCBI BLAST+ 2.17.0 with -negative_seqidlist
+    // and -negative_taxids: line WQA D18 review M4, probe 10 of round 2).
+    "Failed to open oid-to-seqid lookup file",
+    "Failed to open oid-to-taxids lookup file",
 ];
 
 /// seqdbvol.cpp:3365-3382 (the title or the counts follow), seqdbimpl.cpp:2456-2459 (the volume
@@ -328,24 +379,49 @@ const NCBI_COLUMN_MESSAGE_PREFIXES: [&str; 3] = [
 /// seqdbalias.cpp:740-754; the name of the alias file follows.
 const NCBI_EMPTY_DBLIST_PREFIX: &str = "No database names were found in alias file [";
 
+/// ncbifile.cpp:5893-5943: `CMemoryFile`'s text for a file it cannot open; the path, `':` and the
+/// `strerror` text follow (`SeqDbError::memory_map_message`).
+const MEMORY_FILE_PREFIX: &str = "CMemoryFile: Cannot memory map file '";
+
+/// The text of `strerror` for EMFILE and ENFILE, which makes NCBI's exception of a file it cannot
+/// map `eTooManyOpenFiles` (seqdbatlas.hpp:713-715).
+const TOO_MANY_OPEN_FILES: &[u8] = b"Too many open files";
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:712-718
+/// Whether NCBI's exception of a file it cannot map, whose message is `message`, is
+/// `eTooManyOpenFiles`: whatever the message names, also a path (a missing file's message holds
+/// it), NCBI tests the whole text.
+fn too_many_open_files(message: &[u8]) -> bool {
+    message
+        .windows(TOO_MANY_OPEN_FILES.len())
+        .any(|window| window == TOO_MANY_OPEN_FILES)
+}
+
 impl SeqDbError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-    // `BLAST_DATABASE_ERROR` is 2 (blast_app_util.hpp:153). The exception of
-    // a file that cannot be opened is cited at `file::DbFile::open`: its
-    // message is `CMemoryFile: Cannot memory map file '<path>':<strerror>`,
-    // and it has the code `eTooManyOpenFiles` when that text holds "Too many
-    // open files" (the `strerror` text of EMFILE and of ENFILE).
-    //
-    // `std::io::Error` prints an operating system error as the `strerror`
-    // text followed by ` (os error N)`; the text before that suffix is what
-    // NCBI appends. On Windows NCBI's text comes from another call
-    // (`WIN_LAST_ERROR_STR`), which LOSAT does not reproduce: the error is
-    // then reported as LOSAT's own.
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-720
+    // `BLAST_DATABASE_ERROR` is 2 (blast_app_util.hpp:153). A database file
+    // that cannot be opened or mapped (`file::DbFile::open`) is the reader's
+    // rethrow of `CMemoryFile`'s exception (`memory_file_exception`): its code
+    // is `eTooManyOpenFiles` when that text holds "Too many open files" (the
+    // `strerror` text of EMFILE and of ENFILE), the text then NCBI's own, and
+    // `eMemoryMappingFailure` otherwise, `Database memory map file error - `
+    // and the exception's text. NCBI maps a file whole where it opens it:
+    // LOSAT reads the file's first byte there, and a first byte that the
+    // system does not give has the text of that mapping (NCBI BLAST+ 2.17.0
+    // with `mmap()` failing with EIO, and a 3 GiB header file:
+    // `length=3221225472`; line WQA D18 probe 3, 2026-11-21). A read that
+    // fails later ([`SeqDbError::Read`]: the system stopped giving the bytes,
+    // the file became shorter) is where NCBI reads mapped bytes that are gone
+    // and ends by SIGBUS: LOSAT's own error (review M1 of D18, 2026-11-21). On
+    // Windows NCBI's text comes from another call, which LOSAT does not
+    // reproduce: the error is LOSAT's there.
     /// The text NCBI BLAST+ gives for this error, when it is one of NCBI's
     /// own: a search program prints `BLAST Database error: <text>` and ends
     /// with exit status 2. `None`: the error is LOSAT's (a database that
-    /// LOSAT refuses, a damaged file, a failed read), to be reported in
-    /// LOSAT's words. The text is bytes ([`SeqDbError::NotFound`]).
+    /// LOSAT refuses, a damaged file, a read that fails after the file's
+    /// first byte: [`SeqDbError::is_unreadable`]), to be reported
+    /// in LOSAT's words. The text is bytes ([`SeqDbError::NotFound`]).
     pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
@@ -356,34 +432,84 @@ impl SeqDbError {
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone().into_bytes()),
-            SeqDbError::Open { path, source } => {
-                let code = source.raw_os_error()?;
-                let text = source.to_string();
-                let strerror = text.strip_suffix(&format!(" (os error {code})"))?;
-                if strerror.contains("Too many open files") {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-197
+            SeqDbError::MemoryMap(_) | SeqDbError::Open { .. } | SeqDbError::Map { .. } => {
+                let message = self.memory_map_message()?;
+                if too_many_open_files(&message) {
                     Some(b"Too many open files, please raise the open file limit".to_vec())
-                } else if cfg!(unix) {
-                    Some(
-                        [
-                            b"Database memory map file error - CMemoryFile: Cannot memory map file '"
-                                .as_slice(),
-                            &crate::utils::os_bytes::path_bytes(path),
-                            b"':",
-                            strerror.as_bytes(),
-                        ]
-                        .concat(),
-                    )
                 } else {
-                    None
+                    Some([b"Database memory map file error - ".as_slice(), &message].concat())
                 }
             }
             SeqDbError::Io { .. }
+            | SeqDbError::Read { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5893-5947
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5600-5656
+    /// The `CFileException` (`eMemoryMap`) of NCBI's `CMemoryFile` for this error, where it is
+    /// one: a file that does not open ([`SeqDbError::Open`], `CMemoryFileMap::x_Open`) or whose
+    /// first byte cannot be had where it was opened ([`SeqDbError::Map`], the mapping of the
+    /// whole file, `CMemoryFileSegment`), with the system's text (`utils::os_error_text::ncbi_strerror`;
+    /// `None` without one). The database reader's atlas rethrows it as its own error
+    /// ([`SeqDbError::ncbi_message`]); the lookup files that NCBI maps without the atlas give it
+    /// to the program as it is (`filter::lookup_file_error`).
+    pub(crate) fn memory_file_exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
+        let (path, strerror) = match self {
+            SeqDbError::Open { path, source } | SeqDbError::Map { path, source, .. } => {
+                (path, crate::utils::os_error_text::ncbi_strerror(source)?)
+            }
+            _ => return None,
+        };
+        let path = crate::utils::os_bytes::path_bytes(path);
+        let (line, function, message) = match self {
+            SeqDbError::Map { len, .. } => (
+                5650,
+                "ncbi::CMemoryFileSegment::CMemoryFileSegment",
+                [
+                    b"Cannot map file '".as_slice(),
+                    &path,
+                    format!("' to memory (offset=0, length={len}): {strerror}").as_bytes(),
+                ]
+                .concat(),
+            ),
+            _ => (
+                5945,
+                "ncbi::CMemoryFileMap::x_Open",
+                [
+                    MEMORY_FILE_PREFIX.as_bytes(),
+                    &path,
+                    b"':",
+                    strerror.as_bytes(),
+                ]
+                .concat(),
+            ),
+        };
+        Some(crate::ncbi_exception::NcbiException::new(
+            ThrowSite {
+                file: "src/corelib/ncbifile.cpp",
+                line,
+                kind: "CFileException::eMemoryMap",
+                function: Some(function),
+            },
+            message,
+        ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
+    /// Whether NCBI's constructor fails here with a `CSeqDBException`, which NCBI's guess of a
+    /// database's type catches to look for the name as a nucleotide database: an error in NCBI's
+    /// words ([`Self::ncbi_message`]) or a failed integrity check ([`SeqDbError::Integrity`], as an
+    /// OID list file of its header alone at the constructor's scan: probes RB_G3 and RB_G4 of
+    /// review B of line RG D1b-1). LOSAT's refusals are not: NCBI may open that database.
+    pub fn is_seqdb_exception(&self) -> bool {
+        self.ncbi_message().is_some() || matches!(self, SeqDbError::Integrity { .. })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:229-252
@@ -408,6 +534,47 @@ impl SeqDbError {
         match self.ncbi_message()? {
             message if message == TOO_MANY.as_bytes() => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5893-5943
+    // A file that NCBI cannot map is one exception of `CSeqDBFileMemMap::Init`, whose message is
+    // the text of `CMemoryFile` (`eMemoryMappingFailure`, or `eTooManyOpenFiles` when that text
+    // holds "Too many open files"): `To be memory mapped the file must exist: '<path>'` for a path
+    // that is not a file (`SeqDbError::MemoryMap`), `CMemoryFile: Cannot memory map file
+    // '<path>':<strerror>` for one that cannot be opened (`SeqDbError::Open`, cited at
+    // `file::DbFile::open`; probe S2 of review A of line RG D1b-1: an OID list file of mode 000),
+    // `Cannot map file '<path>' to memory (offset=0, length=<bytes>): <strerror>` for one whose
+    // first byte cannot be read where it was opened (`SeqDbError::Map`; line WQA D18). Both of
+    // these are the message of `memory_file_exception`, with the system's text of
+    // `utils::os_error_text::ncbi_strerror` (Linux's on WASI too); on Windows NCBI's text comes
+    // from another call (`WIN_LAST_ERROR_STR`), which LOSAT does not reproduce: the error is then
+    // LOSAT's own.
+    /// The message of NCBI's exception for a file it cannot map, without the text that the
+    /// programs' `catch` puts before it; `None` for another error.
+    fn memory_map_message(&self) -> Option<Vec<u8>> {
+        match self {
+            SeqDbError::MemoryMap(message) => Some(message.clone()),
+            SeqDbError::Open { .. } | SeqDbError::Map { .. } => self
+                .memory_file_exception()
+                .map(|exception| exception.get_msg().to_vec()),
+            _ => None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:888-895
+    /// The text blastdbcmd gives for this error where a request meets it (its `catch` posts
+    /// `Error: [blastdbcmd] <GetMsg()>`, exit status 1), which is also the message of NCBI's
+    /// exception that dustmasker and segmasker report (`throw_site`): the message of a file NCBI
+    /// cannot map without the search programs' text before it (`memory_map_message`), the message
+    /// of an exception of NCBI's that is not a `CSeqDBException` (`SeqDbError::Ncbi`: a lookup
+    /// file's `CFileException`, `filter::lookup_file_error`; NCBI BLAST+ 2.17.0's blastdbcmd with
+    /// a `.pto` of mode 000: line WQA D18 probe 8, 2026-11-21), else [`Self::ncbi_message`].
+    pub fn ncbi_request_message(&self) -> Option<Vec<u8>> {
+        match self {
+            SeqDbError::Ncbi(exception) => Some(exception.get_msg().to_vec()),
+            _ => self.memory_map_message().or_else(|| self.ncbi_message()),
         }
     }
 }
@@ -441,8 +608,12 @@ impl SeqDbError {
 // ...`, exit 3; blastp and blastn: `Error: mdb_dbi_open: ...`, exit 255; review 1 of line DBID
 // pfoff-1, L4). So no text of the reader's table below is GetDbi's: its one throw that NCBI's
 // programs reach is the lookup's (`lookup_throw_site`).)
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:699-722
+// (The OID list file of an alias file's `OIDLIST` that is not a file, `SeqDbError::MemoryMap`:
+// segmasker 2.17.0 names the line 718 of the official build and the function without a module,
+// probe mk of line RG D1b.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 7] = [
     (
         "No alias or index file found for ",
         seqdb_site(
@@ -483,7 +654,18 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
             "BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile",
         ),
     ),
+    (
+        "To be memory mapped the file must exist: '",
+        seqdb_site(SEQDBATLAS, 718, "ncbi::CSeqDBFileMemMap::Init"),
+    ),
+    (
+        MEMORY_FILE_PREFIX,
+        seqdb_site(SEQDBATLAS, 718, "ncbi::CSeqDBFileMemMap::Init"),
+    ),
 ];
+
+/// NCBI's header of the memory-mapped files of the reader.
+const SEQDBATLAS: &str = "include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp";
 
 /// The place of `CBlastLMDBManager::CBlastEnv::GetDbi`'s throw of a version 5 database's missing
 /// table (`DB contains no ...`).
@@ -512,10 +694,15 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// `seqmasks_io::bdb_reader`; a lookup's own throw is [`lookup_throw_site`]'s). Each place
 /// reports the code `eInvalid` (`CSeqDBException` names none). `None` for every other text, of
 /// which LOSAT does not know the place: also the texts that `ncbi_message` gives of the codes
-/// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
-/// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
-/// never throws (it throws lmdb's error first, `InitDbi` cited above).
+/// `eTooManyOpenFiles` and `eMemoryMappingFailure` (but the exception's own message of a file
+/// NCBI cannot map, `ncbi_request_message`), which are the texts of the programs' `CATCH_ALL`
+/// and not the exception's own message, the message of `eTooManyOpenFiles` (another line of
+/// `CSeqDBFileMemMap::Init`), and `DB contains no ...`, which NCBI's reader never throws (it
+/// throws lmdb's error first, `InitDbi` cited above).
 pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
+    if too_many_open_files(message) {
+        return None;
+    }
     DATABASE_ERROR_SITES
         .iter()
         .find(|(start, _)| message.starts_with(start.as_bytes()))
@@ -592,14 +779,21 @@ pub struct SeqLocation {
     id: u32,
 }
 
-/// A database resolved without opening its volumes
+/// A database resolved with only the headers of its volumes read
 /// ([`SeqDb::locate_one_name_metadata`]).
 #[derive(Debug)]
 pub(crate) struct LocatedDatabase {
     /// `GetTitle()`.
     pub title: Vec<u8>,
+    /// `GetDate()`, or the exception of the `CTime` that NCBI's `GetDBMetaData` builds from it.
+    pub date: Result<String, date::DateError>,
+    /// Whether every volume names an LMDB file: a version 5 database.
+    pub version5: bool,
     /// The volume paths without extension, in NCBI's order.
     pub volumes: Vec<String>,
+    /// The number of sequences and the total length that the header of each volume holds,
+    /// in the order of `volumes`.
+    pub volume_totals: Vec<(u32, u64)>,
     /// The alias files (paths with extension), sorted.
     pub alias_files: Vec<String>,
 }
@@ -720,7 +914,7 @@ pub struct SeqDb {
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
     /// Whether NCBI's OID bit set is the special all-set one after the alias files' OID ranges
-    /// (`alias::all_bits_special_set`): a positive list left with no id then keeps every OID
+    /// (`alias::AliasOids`): a positive list left with no id then keeps every OID
     /// (`SeqDb::restrict_seqids`).
     all_bits_special_set: bool,
     /// NCBI's `m_OidListSetup`: whether its OID list was built, which a database opened
@@ -728,6 +922,22 @@ pub struct SeqDb {
     oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
+    /// Whether the alias files make NCBI's `CSeqDB` scan the totals without a list (an
+    /// `OIDLIST` not covered by `NSEQ` and `LENGTH`, `alias::needs_totals_scan`): the counts and
+    /// the printed counts are then the scan of the included OIDs.
+    alias_scanned: bool,
+    /// The iteration range that NCBI's first build of the alias files' OID list sets
+    /// (`alias::top_iteration_range`, every OID without it), inside which a list's scan starts
+    /// (`SeqDb::restrict`).
+    alias_range: (u32, u32),
+    /// The failure of an OID list file of the alias files, which every build of NCBI's OID list
+    /// meets (`SeqDb::build_oid_list`; a search's reads, `SeqDb::fail_search_reads_with_oid_list`).
+    oid_list_error: Option<oid_list::OidListError>,
+    /// Whether NCBI's constructor builds the list to scan the totals
+    /// (`alias::needs_totals_scan`) and so fails with `oid_list_error`: after the warnings and
+    /// errors of a list (`SeqDb::restrict`), else before the walks of the alias files' counts
+    /// (`SeqDb::check_alias_values`).
+    oid_list_fails_scan: bool,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -778,6 +988,53 @@ fn fix_string(s: &[u8]) -> &[u8] {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
+// NCBI opens the LMDB file of a version 5 database when it opens the
+// database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
+// volume list with the volumes: `lmdb_entries`.
+/// The checks of `CSeqDBLMDBSet`'s constructor on the volumes' `bases` (paths without
+/// extension) and the names of the LMDB files their indexes hold: a version 4 volume among
+/// version 5 ones (or the other way round), and an LMDB file that is not there. A volume is
+/// version 5 when its index names an LMDB file.
+fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbError> {
+    let names_lmdb = |name: &Option<&[u8]>| name.is_some_and(|name| !name.is_empty());
+    if let Some((_, first)) = volumes.first() {
+        let version5 = names_lmdb(first);
+        if let Some((other, _)) = volumes
+            .iter()
+            .find(|(_, name)| names_lmdb(name) != version5)
+        {
+            return Err(SeqDbError::Format {
+                path: other.clone(),
+                message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
+            });
+        }
+    }
+    for (base, name) in volumes {
+        if !names_lmdb(name) {
+            continue;
+        }
+        // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
+        // name that is not UTF-8).
+        let lmdb_name = name.unwrap_or_default();
+        let lmdb_path = base.with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
+        if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
+            return Err(SeqDbError::NotFound(
+                [
+                    b"File ".as_slice(),
+                    &crate::utils::os_bytes::path_bytes(&lmdb_path),
+                    b" not found. If you renamed any BLAST database files, please use \
+                      original file names, and makeblastdb to rename the database. If you \
+                      deleted any BLAST database files, you need to recreate the database.",
+                ]
+                .concat(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl SeqDb {
     /// Opens the database `name`: a path without extension, absolute or
     /// relative to the current directory. `name.{p|n}al` is read when it
@@ -812,7 +1069,9 @@ impl SeqDb {
     /// [`SeqDb::open_in`] without the errors of the alias files' counts, which depend on a
     /// list that the caller applies next ([`SeqDb::restrict`]); the caller then calls
     /// [`SeqDb::check_alias_values`] before it reads the database. The errors of the OID
-    /// ranges (`FIRST_OID`, `LAST_OID`) come here, as NCBI's `ComputeMasks` runs first.
+    /// ranges (`FIRST_OID`, `LAST_OID`) come here, as NCBI's `ComputeMasks` runs first; those of
+    /// the alias files' OID lists where NCBI's constructor scans the totals come after the list
+    /// (`restrict`) or in `check_alias_values`.
     pub fn open_search_in(
         name: &str,
         seqtype: SeqType,
@@ -837,8 +1096,9 @@ impl SeqDb {
         self.name_records = match names.as_slice() {
             [one] if one == name => {
                 // The reports' database is this one opened again without the list: after a
-                // list, its walks of the counts meet their errors here (`check_alias_values`).
-                if self.list_applied {
+                // list, its walks of the counts meet their errors here (`check_alias_values`),
+                // unless its alias files make it scan the totals too.
+                if self.list_applied && !self.alias_scanned {
                     use alias::WalkKey;
                     self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
                 }
@@ -1024,27 +1284,67 @@ impl SeqDb {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1612-1616
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1726
-    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does, without
-    /// opening its volumes (the alias files are read and the index file of every volume they name
-    /// is located), and returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
-    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which `volume_title` gives
-    /// for a volume path), the volume paths and the paths of the alias files
-    /// (`FindVolumePaths(paths, alias, true)`). No volume file is read, so the cost does not grow
-    /// with the number of sequences. `search` is the search path that the message of a database
-    /// which is not there names; only `name` itself is looked for.
+    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does and reads
+    /// the header of each volume's index file as NCBI's constructor of `CSeqDB` reads it
+    /// ([`index::IndexFile::read_mapped_header`]: a file that ends early reads as zeros to the end of
+    /// its page), without opening the other files of the volumes and without reading the
+    /// offset arrays: the cost does not grow with the number of sequences. Returns what
+    /// `CSeqDB::GetDBMetaData` reads of the opened database: the title (`GetTitle`: the alias
+    /// files' `TITLE`, else the volumes' titles), the date, the volume paths with their totals
+    /// and the paths of the alias files (`FindVolumePaths(paths, alias, true)`). `search` is
+    /// the search path that the message of a database which is not there names; only `name`
+    /// itself is looked for.
     pub(crate) fn locate_one_name_metadata(
         name: &str,
         seqtype: SeqType,
         search: &SearchPath,
-        volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<LocatedDatabase, SeqDbError> {
         let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
+        let mut headers = Vec::with_capacity(tree.volumes.len());
+        for volume_name in &tree.volumes {
+            let index_path = volume::with_extension(Path::new(volume_name), seqtype, "in");
+            let file = file::DbFile::open(&index_path)?;
+            headers.push(index::IndexFile::read_mapped_header(&file, seqtype)?);
+        }
+        let bases: Vec<(PathBuf, Option<&[u8]>)> = tree
+            .volumes
+            .iter()
+            .zip(&headers)
+            .map(|(name, header)| (PathBuf::from(name), header.lmdb_file.as_deref()))
+            .collect();
+        check_lmdb_names(&bases)?;
         let mut title = Vec::new();
-        alias::walk_title(&tree.root, volume_title, &mut title);
+        alias::walk_title(
+            &tree.root,
+            &|volume_name| {
+                tree.volumes
+                    .iter()
+                    .position(|name| name == volume_name)
+                    .map(|at| headers[at].title.clone())
+            },
+            &mut title,
+        );
+        let title = fix_string(&title).to_vec();
+        let dates: Vec<String> = headers
+            .iter()
+            .map(|header| String::from_utf8_lossy(fix_string(&header.date)).into_owned())
+            .collect();
+        let date_refs: Vec<&str> = dates.iter().map(String::as_str).collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
         Ok(LocatedDatabase {
             title,
+            date: date::database_date(&date_refs),
+            version5: headers.first().is_some_and(|header| {
+                header
+                    .lmdb_file
+                    .as_ref()
+                    .is_some_and(|name| !name.is_empty())
+            }),
+            volume_totals: headers
+                .iter()
+                .map(|header| (header.num_oids, header.volume_length))
+                .collect(),
             volumes: tree.volumes,
             alias_files: alias_files.into_iter().collect(),
         })
@@ -1090,51 +1390,16 @@ impl SeqDb {
         volume_starts.push(num_oids as u32);
 
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
-        // A volume counts as version 5 when its index names an LMDB file.
-        let names_lmdb = |volume: &Volume| {
-            volume
-                .index()
-                .lmdb_file
-                .as_ref()
-                .is_some_and(|name| !name.is_empty())
-        };
-        if let Some(first) = volumes.first() {
-            let version5 = names_lmdb(first);
-            if let Some(other) = volumes.iter().find(|volume| names_lmdb(volume) != version5) {
-                return Err(SeqDbError::Format {
-                    path: other.base().to_path_buf(),
-                    message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
-                });
-            }
-        }
-
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
-        // NCBI opens the LMDB file of a version 5 database when it opens the
-        // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
-        // volume list with the volumes: below, `lmdb_entries`.
-        for volume in &volumes {
-            if !names_lmdb(volume) {
-                continue;
-            }
-            // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
-            // name that is not UTF-8).
-            let lmdb_name = volume.index().lmdb_file.as_deref().unwrap_or_default();
-            let lmdb_path = volume
-                .base()
-                .with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
-            if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-                return Err(SeqDbError::NotFound(
-                    [
-                        b"File ".as_slice(),
-                        &crate::utils::os_bytes::path_bytes(&lmdb_path),
-                        b" not found. If you renamed any BLAST database files, please use \
-                          original file names, and makeblastdb to rename the database. If you \
-                          deleted any BLAST database files, you need to recreate the database.",
-                    ]
-                    .concat(),
-                ));
-            }
-        }
+        let bases: Vec<(PathBuf, Option<&[u8]>)> = volumes
+            .iter()
+            .map(|volume| {
+                (
+                    volume.base().to_path_buf(),
+                    volume.index().lmdb_file.as_deref(),
+                )
+            })
+            .collect();
+        check_lmdb_names(&bases)?;
 
         let mut title = Vec::new();
         alias::walk_title(
@@ -1185,6 +1450,10 @@ impl SeqDb {
             all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
+            alias_scanned: false,
+            alias_range: (0, num_oids as u32),
+            oid_list_error: None,
+            oid_list_fails_scan: false,
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1209,15 +1478,23 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:94-139
-    // `HasFilters` runs `ComputeMasks` (the OID ranges, `alias::compute_masks`) after the
-    // volumes and the LMDB files are open. The walks of a value that does not convert fail
-    // where NCBI's constructor reaches them, which depends on the list (`check_alias_values`).
-    // `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int` of the walks' `Int8`
-    // (seqdbimpl.cpp:948-949); the ranges make the OID list (`alias::range_mask`), which a
-    // list later intersects (`restrict`), and the iteration range that its first build sets
-    // (`alias::top_iteration_range`), inside which a search reads the list's OIDs.
-    /// Reads the counts, the OID ranges and their errors from the alias tree `root` of the
-    /// volumes `names` (the volume paths in the order of `self.volumes`).
+    // `HasFilters` runs `ComputeMasks` (the OID ranges and the paths of the OID lists,
+    // `alias::compute_masks`) after the volumes and the LMDB files are open. The walks of a value
+    // that does not convert fail where NCBI's constructor reaches them, which depends on the list
+    // and on the scan (`check_alias_values`). `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int`
+    // of the walks' `Int8` (seqdbimpl.cpp:948-949); the filters make the OID list
+    // (`alias::alias_oids`), which a list later intersects (`restrict`), and the iteration
+    // range that its first build sets (`alias::top_iteration_range`), inside which a search reads
+    // the list's OIDs. An `OIDLIST` that no node with both `NSEQ` and `LENGTH` covers makes the
+    // constructor build the list and scan the totals (`alias::needs_totals_scan`, `scan_alias`):
+    // an OID list file that fails is then the constructor's error (probes G1, G3, G6, G7 of line
+    // RG D1b, exit status 2), which comes after a list's warnings and errors (`CSeqDBGiListSet`
+    // resolves the list before the alias files' OID lists are read; probe S1 of review A of line
+    // RG D1b-1) and before the walks of the counts (`oid_list_fails_scan`); else NCBI builds the
+    // list at its first use, where that error comes (`build_oid_list`: `-info` never meets it,
+    // probe G2a).
+    /// Reads the counts, the OID ranges and lists and their errors from the alias tree `root` of
+    /// the volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
         &mut self,
         root: &mut alias::AliasNode,
@@ -1235,14 +1512,29 @@ impl SeqDb {
             (volume.num_oids(), volume.index().volume_length)
         });
         let num_oids = self.num_oids();
-        let mask = alias::range_mask(
-            root,
-            &|path| {
-                let at = at(path);
-                (self.volume_starts[at], self.volume_starts[at + 1])
-            },
-            num_oids,
-        );
+        let scan = alias::needs_totals_scan(root);
+        let volumes: Vec<(&str, u32, u32)> = names
+            .iter()
+            .enumerate()
+            .map(|(at, name)| {
+                (
+                    name.as_str(),
+                    self.volume_starts[at],
+                    self.volume_starts[at + 1],
+                )
+            })
+            .collect();
+        let oids = match alias::alias_oids(root, &volumes, num_oids) {
+            Ok(oids) => oids,
+            Err(failure) => {
+                self.oid_list_error = Some(failure);
+                self.oid_list_fails_scan = scan;
+                alias::AliasOids {
+                    words: None,
+                    all_bits_special_set: false,
+                }
+            }
+        };
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -1261,17 +1553,23 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.all_bits_special_set = alias::all_bits_special_set(root, names, &self.volume_starts);
-        if let Some(words) = mask {
+        self.all_bits_special_set = oids.all_bits_special_set;
+        self.alias_totals = totals;
+        if self.oid_list_fails_scan {
+            return Ok(());
+        }
+        if let Some(words) = oids.words {
             let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
+            self.alias_range = range;
             let filter = filter::OidFilter::new(words, num_oids).with_range(range);
+            if scan {
+                return self.scan_alias(filter);
+            }
             self.num_seqs = filter.count();
             self.filter = Some(Box::new(filter));
             self.set_included_length(None);
         }
-        self.alias_totals = totals;
-        self.update_first_oid_length()?;
-        Ok(())
+        self.update_first_oid_length()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938 (at
@@ -1302,14 +1600,22 @@ impl SeqDb {
     /// (`deflines`), whose error for any other Seq-id is `SeqDbError::Unsupported`
     /// (`SeqDbError::is_parsed_seqids`). `Ok(true)` when some volume's first header holds
     /// parsed Seq-ids; any other error of a first header is returned. A volume whose header
-    /// file cannot be opened (missing, or an `open` that fails) is not checked: NCBI opens a
-    /// header file at its first read, and the error comes there.
+    /// file cannot be opened, mapped or read (missing, an `open` that fails, a first byte that
+    /// the system does not give: [`SeqDbError::Map`], or a later read: [`SeqDbError::Read`]) is
+    /// not checked: NCBI opens and maps a header file at its first read, and its error, or its
+    /// SIGBUS, comes there (after the outfmt 0 prolog; line WQA D18).
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {
             if volume.num_oids() > 0 {
                 match self.first_deflines(at) {
-                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
+                    Ok(_)
+                    | Err(
+                        SeqDbError::NotFound(_)
+                        | SeqDbError::Open { .. }
+                        | SeqDbError::Map { .. }
+                        | SeqDbError::Read { .. },
+                    ) => {}
                     Err(error) if error.is_parsed_seqids() => parsed = true,
                     Err(error) => return Err(error),
                 }
@@ -1388,7 +1694,7 @@ impl SeqDb {
         path: &SearchPath,
     ) -> Result<Self, SeqDbError> {
         let mut db = Self::open_search_in(name, seqtype, path)?;
-        db.walk_errors(UNLISTED_WALK_KEYS)?;
+        db.check_alias_values()?;
         db.include_every_oid();
         Ok(db)
     }
@@ -1553,14 +1859,19 @@ impl SeqDb {
     /// The errors and LOSAT's refusals of the alias files' values that NCBI's `CSeqDB` of the
     /// search meets (`read_alias_tree`): without a list the walks of `NSEQ`, `LENGTH`,
     /// `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN` in that order; after a list
-    /// ([`SeqDb::restrict`]), which makes NCBI scan the totals, those of `STATS_NSEQ` and
-    /// `STATS_TOTLEN` (the reports' database, opened again without the list, reads the others:
-    /// [`SeqDb::read_name_records`]). NCBI's error is `SeqDbError::Ncbi`. [`SeqDb::open_in`]
-    /// calls this; a search program opens with [`SeqDb::open_search_in`] and calls it after its
-    /// list.
+    /// ([`SeqDb::restrict`]) or with an `OIDLIST` that makes NCBI scan the totals
+    /// (`alias::needs_totals_scan`), those of `STATS_NSEQ` and `STATS_TOTLEN` (the reports'
+    /// database, opened again without the list, reads the others unless it scans too:
+    /// [`SeqDb::read_name_records`]). NCBI's error is `SeqDbError::Ncbi`. Before them, an alias
+    /// file's OID list file that fails where NCBI's constructor scans the totals (its build of
+    /// the OID list, [`SeqDb::build_oid_list`]). [`SeqDb::open_in`] calls this; a search program
+    /// opens with [`SeqDb::open_search_in`] and calls it after its list.
     pub fn check_alias_values(&self) -> Result<(), SeqDbError> {
         use alias::WalkKey;
-        let keys: &[WalkKey] = if self.list_applied {
+        if self.oid_list_fails_scan {
+            self.build_oid_list()?;
+        }
+        let keys: &[WalkKey] = if self.list_applied || self.alias_scanned {
             &[WalkKey::StatsNseq, WalkKey::StatsTotlen]
         } else {
             UNLISTED_WALK_KEYS

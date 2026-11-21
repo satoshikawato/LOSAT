@@ -293,6 +293,57 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:328-353 and
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1631-1636
+    // With `-db_hard_mask`, each fetch after the preliminary stage (the composition-based
+    // statistics, the traceback) is a copy with `X` over the sequence's masks; the formatter
+    // reads the stored letters.
+    /// The residues of subject `oid` for the stages after the preliminary search that score it
+    /// (the composition redo, the traceback): `read_encoded`, with `X` over the masks of
+    /// `-db_hard_mask` (`options.db_mask`). The reports' records read `read_encoded`.
+    pub(crate) fn read_searched(
+        &self,
+        oid: usize,
+        options: &super::args::ResolvedOptions,
+    ) -> Result<Cow<'a, [u8]>> {
+        let encoded = self.read_encoded(oid)?;
+        match options.db_mask.as_ref() {
+            Some(mask) if mask.kind == crate::blastinput::db_mask::MaskKind::Hard => {
+                self.x_hard_masked(oid, mask.id, encoded)
+            }
+            _ => Ok(encoded),
+        }
+    }
+
+    /// `encoded` (the residues of database sequence `oid`) with `X` over its stored masks of the
+    /// algorithm `algo_id` (`db_mask_search::mask_protein_letters`).
+    #[cold]
+    #[inline(never)]
+    fn x_hard_masked(
+        &self,
+        oid: usize,
+        algo_id: i32,
+        encoded: Cow<'a, [u8]>,
+    ) -> Result<Cow<'a, [u8]>> {
+        let Some(db) = self.seqdb() else {
+            return Ok(encoded);
+        };
+        let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
+        let masks = reader.of(
+            db,
+            oid as u32,
+            algo_id,
+            crate::algorithm::common::database::database_error_of,
+            "BLASTX",
+        )?;
+        if masks.is_empty() {
+            return Ok(encoded);
+        }
+        let mut residues = encoded.into_owned();
+        crate::algorithm::common::db_mask_search::mask_protein_letters(&mut residues, masks);
+        Ok(Cow::Owned(residues))
+    }
+
     /// The reader of one pass over the subjects in ascending
     /// order (`XSubjectPass::view`).
     pub(crate) fn x_pass(&self) -> XSubjectPass<'a> {

@@ -646,3 +646,110 @@ impl ColumnBlobs {
         }
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1955-2052
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2082-2115
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:368-375
+// NCBI numbers a column of the database by its title (`GetColumnId`: one entry per title,
+// holding each volume's own column of that title or none); LOSAT names it by the title. The
+// metadata of the database's column is made once from the volumes in their order, and a key
+// keeps the value of the first volume that has it. A sequence of a volume without a column of
+// the title has an empty blob.
+impl super::SeqDb {
+    /// `ListColumns`: the titles of the columns of all the volumes, each once, in the byte
+    /// order of the titles. Every volume opens its columns (`Volume::columns`), in the order of
+    /// the volumes, so the first volume whose columns cannot be opened gives the error.
+    pub fn column_titles(&self) -> Result<Vec<Vec<u8>>, SeqDbError> {
+        let mut all = std::collections::BTreeSet::new();
+        for volume in self.volumes() {
+            for column in volume.columns()? {
+                all.insert(column.title().to_vec());
+            }
+        }
+        Ok(all.into_iter().collect())
+    }
+
+    /// `GetColumnMetaData(GetColumnId(title))`: the metadata of the columns titled `title` of
+    /// all the volumes, a key with the value of the first volume (in the order of the volumes)
+    /// that has it.
+    pub fn column_meta_data(&self, title: &[u8]) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SeqDbError> {
+        let mut merged = BTreeMap::new();
+        for volume in self.volumes() {
+            let Some(column) = volume
+                .columns()?
+                .iter()
+                .find(|column| column.title() == title)
+            else {
+                continue;
+            };
+            for (key, value) in column.metadata() {
+                merged.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        Ok(merged)
+    }
+
+    /// The blobs of the column titled `title` (`GetColumnBlob`) for the sequences of `range`,
+    /// read into `block` with one read of the column's offset array and one of its data
+    /// ([`Column::read_blobs`]); none when the volume of `range` has no column of the title.
+    /// [`ColumnBlock::blob`] gives each sequence's.
+    pub fn read_column_block(
+        &self,
+        title: &[u8],
+        range: super::BlockRange,
+        block: &mut ColumnBlock,
+    ) {
+        block.error = None;
+        block.present = false;
+        let Some(volume) = self.volumes().get(range.volume) else {
+            block.error = Some(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes().len()
+            )));
+            return;
+        };
+        let columns = match volume.columns() {
+            Ok(columns) => columns,
+            Err(error) => {
+                block.error = Some(error);
+                return;
+            }
+        };
+        let Some(column) = columns.iter().find(|column| column.title() == title) else {
+            return;
+        };
+        block.present = true;
+        column.read_blobs(range.first, range.end, &mut block.blobs);
+    }
+}
+
+/// The blobs of one column of the database for the sequences of a block
+/// ([`super::SeqDb::read_column_block`]), kept with their buffers from one block to the next.
+/// No NCBI counterpart: NCBI points into its mapping of the column for each sequence.
+#[derive(Debug, Default)]
+pub struct ColumnBlock {
+    /// The error of every sequence of the block: the volume's columns could not be opened.
+    error: Option<SeqDbError>,
+    /// Whether the volume has a column of the title (none: every blob is empty).
+    present: bool,
+    blobs: ColumnBlobs,
+}
+
+impl ColumnBlock {
+    /// `GetColumnBlob` of the sequence `vol_oid` (volume-relative) of the block read: its blob
+    /// as the data file holds it, empty when it has none. An error is given once, owned: the
+    /// caller stops at it.
+    pub fn blob(&mut self, vol_oid: u32) -> Result<&[u8], SeqDbError> {
+        if let Some(error) = self.error.take() {
+            return Err(error);
+        }
+        if !self.present {
+            return Ok(&[]);
+        }
+        if self.blobs.blob(vol_oid).is_err() {
+            return Err(std::mem::take(&mut self.blobs).into_error(vol_oid));
+        }
+        Ok(self.blobs.blob(vol_oid).unwrap_or(&[]))
+    }
+}

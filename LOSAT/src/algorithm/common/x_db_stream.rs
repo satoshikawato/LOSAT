@@ -69,6 +69,7 @@ use std::sync::{Arc, Condvar, Mutex, Weak};
 use anyhow::Result;
 
 use crate::algorithm::common::database as shared;
+use crate::algorithm::common::db_mask_search::{SearchMask, SubjectMasks};
 use crate::seqdb::{AmbiguityRun, SeqDb, SequenceBlock};
 use crate::sequence::packed_subject::{x_stored_runs, PackedNucleotide, PackedRef};
 
@@ -182,6 +183,12 @@ pub(crate) struct XDbStream<'a> {
     stores: XSharedReads<PackedNucleotide>,
     /// The blocks that something holds or a thread reads, by their number in `grid` (`with_block`).
     blocks: XSharedReads<SequenceBlock>,
+    /// The database masking of the search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2),
+    /// `None` without the options (`with_mask`).
+    mask: Option<SearchMask>,
+    /// With `-db_hard_mask`, the sequences as the stages after the preliminary one read them
+    /// (`read_stage`), by ordinal id, while something holds them.
+    masked_stores: XSharedReads<PackedNucleotide>,
     /// The cuts made of the sequences, by their key (`x_kept_cut`).
     #[cfg(any(feature = "parallel", test))]
     cuts: Mutex<Vec<(u64, Arc<[u32]>)>>,
@@ -210,12 +217,109 @@ impl<'a> XDbStream<'a> {
             mapped: threads > 1,
             stores: XSharedReads::new(),
             blocks: XSharedReads::new(),
+            mask: None,
+            masked_stores: XSharedReads::new(),
             #[cfg(any(feature = "parallel", test))]
             cuts: Mutex::new(Vec::new()),
             #[cfg(test)]
             block_reads: AtomicUsize::new(0),
             #[cfg(test)]
             x_failing: (Vec::new(), false),
+        })
+    }
+
+    /// The stream of a search masked with `mask` (`-db_soft_mask`, `-db_hard_mask`; `None`: not
+    /// masked), whose algorithm the database's volumes know (`SeqDb::check_search_masks`, before
+    /// the search).
+    pub(crate) fn with_mask(mut self, mask: Option<SearchMask>) -> Self {
+        self.mask = mask;
+        self
+    }
+
+    /// The database masking of the search (`with_mask`).
+    pub(crate) fn mask(&self) -> Option<SearchMask> {
+        self.mask
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:315-320, 393-402 and
+    // c++/src/algo/blast/core/blast_util.c:182-217
+    // In a masked search every fetched sequence carries the complement of its masks as its
+    // ranges (one range, the whole sequence, for a sequence without masks), and the masking kind.
+    /// The ranges in bases of sequence `ordinal` of `length` bases in a masked search (`with_mask`):
+    /// the complement of its stored masks of the search's algorithm, in the order stored
+    /// (`complement_masks`; `[0, length)` for a sequence without masks); `None` in a search
+    /// without the options. The preliminary stage's read of the masks: an error is an
+    /// `XReadError` with the error of the search's reads (`search_read_error_of`).
+    pub(crate) fn mask_ranges(
+        &self,
+        ordinal: usize,
+        length: usize,
+    ) -> Result<Option<Vec<(i32, i32)>>> {
+        let Some(mask) = self.mask else {
+            return Ok(None);
+        };
+        let mut ranges = Vec::new();
+        self.with_stored_masks(ordinal, mask, true, |masks| {
+            crate::core::subject_split::complement_masks(masks, length, &mut ranges);
+        })?;
+        Ok(Some(ranges))
+    }
+
+    /// `f` of the stored masks of sequence `ordinal` for the algorithm of `mask`, read by the
+    /// thread's reader of the preliminary stage (`preliminary`: a window of blocks, with the
+    /// search's read errors) or of the later stages (one sequence at a time, with the
+    /// database's errors), each kept by the thread for this stream.
+    fn with_stored_masks<R>(
+        &self,
+        ordinal: usize,
+        mask: SearchMask,
+        preliminary: bool,
+        f: impl FnOnce(&[(u32, u32)]) -> R,
+    ) -> Result<R> {
+        let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
+        X_MASK_READERS.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot
+                .as_ref()
+                .is_none_or(|readers| readers.stream != self.id)
+            {
+                *slot = Some(XMaskReaders {
+                    stream: self.id,
+                    preliminary: SubjectMasks::default(),
+                    later: SubjectMasks::with_window(1),
+                });
+            }
+            let readers = slot.as_mut().expect("the thread's readers were set");
+            let (reader, error): (_, fn(&crate::seqdb::SeqDbError, &str) -> anyhow::Error) =
+                if preliminary {
+                    (&mut readers.preliminary, shared::search_read_error_of)
+                } else {
+                    (&mut readers.later, shared::database_error_of)
+                };
+            let masks = reader
+                .of(self.db, ordinal, mask.algo_id, error, self.program)
+                .map_err(|error| anyhow::Error::from(XReadError(error)))?;
+            Ok(f(masks))
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:322-370 and
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1539, 1580-1589
+    // With hard masks, every fetch after the preliminary stage (the traceback's, the composition
+    // statistics', the ungapped re-evaluation's) is a copied ncbi4na fetch whose masked bases are
+    // B, over the ambiguities; a partial fetch masks each slice it reads the same way.
+    /// Sequence `ordinal` as the stages after the preliminary one read it: with `-db_hard_mask`, its
+    /// store with `B` over its stored masks (`db_mask_search::mask_nucleotide_store`), shared
+    /// as `read_shared` shares the store; otherwise `read_shared`.
+    pub(crate) fn read_stage(&self, ordinal: usize) -> Result<Arc<PackedNucleotide>> {
+        let Some(mask) = self.mask.filter(|mask| mask.hard()) else {
+            return self.read_shared(ordinal);
+        };
+        self.masked_stores.read_once(ordinal, || {
+            let store = self.read_shared(ordinal)?;
+            self.with_stored_masks(ordinal, mask, false, |masks| {
+                crate::algorithm::common::db_mask_search::mask_nucleotide_store(&store, masks)
+            })
         })
     }
 
@@ -530,6 +634,23 @@ impl Drop for XDbStream<'_> {
 
 /// The streams open in the process (`XDbStream::new` to its drop).
 static X_OPEN_STREAMS: AtomicUsize = AtomicUsize::new(0);
+
+/// A thread's readers of the stored masks of one stream (`XDbStream::with_stored_masks`).
+#[derive(Debug)]
+struct XMaskReaders {
+    /// The stream's number (`XDbStream::id`).
+    stream: u64,
+    /// The reader of the preliminary stage (a window of sequences).
+    preliminary: SubjectMasks,
+    /// The reader of the later stages (one sequence).
+    later: SubjectMasks,
+}
+
+thread_local! {
+    /// The thread's readers of masks, for the last masked stream it read.
+    static X_MASK_READERS: std::cell::RefCell<Option<XMaskReaders>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 /// Whether a `-db` stream is open in the process: then TBLASTN's large frames of a dropped subject
 /// plan go to `utils::x_mapped::X_BYTES`, from which the next frames and reads take them

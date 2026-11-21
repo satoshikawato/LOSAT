@@ -439,3 +439,63 @@ fn query_row_id_of_std_segs_without_ids() {
     assert!(matches!(std.query_id, QueryRowId::Missing));
     assert_eq!(std.segs[0].hit, StdLoc::Missing);
 }
+
+/// `read_all` of `text` with the input given one byte per read: every value is read after the
+/// stream's buffer was filled again.
+fn read_all_by_byte(text: &[u8]) -> Vec<std::result::Result<Archive, AsnTextError>> {
+    use crate::report::serial::asn_text_reader::tests::OneByte;
+    let start = text
+        .iter()
+        .position(|&b| (b as i8) > b' ' as i8)
+        .expect("a byte that is not white space");
+    let mut stream = ArchiveStream::new(OneByte(&text[start + 1..]), &text[start..=start]);
+    let mut out = Vec::new();
+    loop {
+        match stream.next_archive() {
+            Ok(Some(archive)) => out.push(Ok(archive)),
+            Ok(None) => return out,
+            Err(error) => {
+                out.push(Err(error));
+                return out;
+            }
+        }
+    }
+}
+
+/// The archive fixtures read with the input given one byte per read are read as with the input
+/// given in blocks: the same objects, errors and refusals, whole and cut at 24 lengths.
+#[test]
+fn archives_read_one_byte_per_read() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rpsbproc/arch");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .chain(std::fs::read_dir(dir.join("bad")).unwrap())
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_file())
+        .collect();
+    paths.sort();
+    let mut read = 0;
+    for path in paths {
+        let data = std::fs::read(&path).unwrap();
+        let text = if path.extension().is_some_and(|e| e == "gz") {
+            let mut out = Vec::new();
+            std::io::Read::read_to_end(&mut flate2::read::MultiGzDecoder::new(&data[..]), &mut out)
+                .unwrap();
+            out
+        } else {
+            data
+        };
+        let Some(start) = text.iter().position(|&b| (b as i8) > b' ' as i8) else {
+            continue;
+        };
+        let mut cuts: Vec<usize> = (1..24).map(|k| text.len() * k / 24).collect();
+        cuts.push(text.len());
+        for cut in cuts.into_iter().filter(|&cut| cut > start) {
+            let blocks = format!("{:?}", read_all(&text[..cut]));
+            let bytes = format!("{:?}", read_all_by_byte(&text[..cut]));
+            assert_eq!(blocks, bytes, "{} cut {cut}", path.display());
+            read += 1;
+        }
+    }
+    assert!(read > 1000, "{read}");
+}

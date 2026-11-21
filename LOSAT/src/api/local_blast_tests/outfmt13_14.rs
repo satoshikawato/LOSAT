@@ -127,18 +127,21 @@ fn run_local_does_not_write_outfmt_13_and_14() {
     }
 }
 
-/// Without an output file or a receiver of side files, TBLASTN and TBLASTX (like BLASTP and BLASTN) stop at
-/// NCBI's XInclude error.
+/// Without an output file or a receiver of side files, TBLASTN, TBLASTX and BLASTX (like BLASTP and
+/// BLASTN) stop at NCBI's XInclude error, as their command lines do on standard output (BLASTX's
+/// library had its own refusal of the formats "in memory" until line RG F/d36 review 2).
 #[test]
-fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
+fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
     use super::support::reader_records as records;
     use crate::api::local_blast::{
-        run_local_tblastn, run_local_tblastx, FormatOutput, OutputSink, ReportOutputs,
+        run_local_blastx, run_local_tblastn, run_local_tblastx, FormatOutput, OutputSink,
+        ReportOutputs,
     };
     use crate::blastinput::fasta_reader::ReaderConfig;
     use crate::cli::{try_parse_from, Cli, Commands};
     let (pquery, nsubject) = (inputs().join("qprot_bad.faa"), inputs().join("snucl.fna"));
     let nquery = inputs().join("qnucl_valid.fna");
+    let psubject = inputs().join("sprot.faa");
     let scratch = TempDir(temp_dir("rl"));
     let pquery = {
         // qprot_bad.faa has a bad third record: use the first two
@@ -148,7 +151,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
         valid
     };
     for format in ["13", "14"] {
-        for program in ["tblastn", "tblastx"] {
+        for program in ["tblastn", "tblastx", "blastx"] {
             let mut diagnostics = Vec::new();
             let mut sink = Vec::new();
             let mut outputs = ReportOutputs {
@@ -167,13 +170,18 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
             } else {
                 &nquery
             };
+            let subject = if program == "blastx" {
+                &psubject
+            } else {
+                &nsubject
+            };
             let cli: Cli = try_parse_from([
                 "LOSAT",
                 program,
                 "-query",
                 query.to_str().unwrap(),
                 "-subject",
-                nsubject.to_str().unwrap(),
+                subject.to_str().unwrap(),
             ])
             .unwrap();
             let error = match cli.command {
@@ -187,6 +195,12 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
                     args,
                     &records(query, ReaderConfig::query("TBLASTX", false, true)),
                     &records(&nsubject, ReaderConfig::subject("TBLASTX", false, true)),
+                    &mut outputs,
+                ),
+                Commands::Blastx(args) => run_local_blastx(
+                    args,
+                    &records(query, ReaderConfig::query("BLASTX", false, true)),
+                    &records(subject, ReaderConfig::subject("BLASTX", true, true)),
                     &mut outputs,
                 ),
                 _ => unreachable!(),

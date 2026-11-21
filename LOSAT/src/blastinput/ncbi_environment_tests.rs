@@ -380,6 +380,22 @@ fn the_program_directories_are_ncbis() {
     let rooted = |name: &[u8]| name == b"x" || name == b"/x";
     assert_eq!(unix_program_name(Some(b"x"), b"", b"", &rooted), b"/x");
     assert_eq!(unix_program_name(Some(b"x"), b"", b"", &none), b"x");
+    // A working directory of 4095 bytes or more is read as none (`getcwd_reads`), which is
+    // what `program_directories` takes (line WQA's D11 round 4, 2026-11-20).
+    let deep = |length: usize| {
+        getcwd_reads(OsString::from(format!("/{}", "d".repeat(length - 1))))
+            .map(|cwd| cwd.as_encoded_bytes().to_vec())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        unix_program_name(Some(b"x"), b"", &deep(4095), &rooted),
+        b"/x"
+    );
+    let in_deep = |name: &[u8]| name == b"x" || name.ends_with(b"d/x");
+    assert_eq!(
+        unix_program_name(Some(b"x"), b"", &deep(4094), &in_deep),
+        [deep(4094).as_slice(), b"/x"].concat()
+    );
     // The directories: the name's, then the resolved name's when it is another one (the
     // last of '/', '\\' and ':' ends a directory on every platform).
     let dirs = |name: &str, resolved: Option<&str>| {
@@ -1087,6 +1103,291 @@ fn the_log_file_is_the_last_one_before_the_delimiter() {
     ));
 }
 
+/// NCBI's reading of a `-logfile` name on Unix (`log_file_name`): the directory that
+/// `SetLogFile` checks, the file that is opened and the directory whose free space counts
+/// (line WQA's D11 round 2, 2026-11-20; NCBI BLAST+ 2.17.0 makes `logs` for `logs/`,
+/// `run.log` for ` run.log`, `run.log` for `a/../run.log` where `a` is a link, and
+/// `abs/run.log` for `<dir>/abs/run.log/`). Round 3: the directory of `//run.log` is `//`,
+/// which `CDirEntry::Reset` empties (NCBI keeps the messages on `cerr`, also where `/` is
+/// writable); without a working directory a relative name is opened with its '\' made '/'.
+#[test]
+fn a_log_name_is_read_as_ncbi_reads_it() {
+    let read = |name: &[u8], cwd: Option<&[u8]>| {
+        let file = log_file_name(PathRules::Unix, name, cwd).expect("Unix reads every name");
+        (file.directory, file.path, file.space)
+    };
+    let paths = |directory: Option<&str>, path: &str, space: &str| {
+        (directory.map(Into::into), path.into(), space.into())
+    };
+    let cwd = Some(&b"/w"[..]);
+    for (name, read_as) in [
+        ("run.log", paths(Some("."), "/w/run.log", "/w/")),
+        ("logs/", paths(Some("."), "/w/logs", "/w/")),
+        ("logs//", paths(Some("."), "/w/logs", "/w/")),
+        ("run.log/", paths(Some("."), "/w/run.log", "/w/")),
+        ("a/b/", paths(Some("a"), "/w/a/b", "/w/a/")),
+        ("a/./", paths(Some("a"), "/w/a", "/w/")),
+        (" run.log", paths(Some("."), "/w/run.log", "/w/")),
+        ("run.log\t", paths(Some("."), "/w/run.log", "/w/")),
+        (
+            " logs/run.log",
+            paths(Some(" logs"), "/w/logs/run.log", "/w/logs/"),
+        ),
+        (" /run.log", paths(Some(" "), "/w/run.log", "/w/")),
+        ("a/../run.log", paths(Some("a/.."), "/w/run.log", "/w/")),
+        ("../run.log", paths(Some(".."), "/run.log", "/")),
+        (".", paths(Some("."), "/w", "/")),
+        ("  ", paths(Some("."), "/w", "/")),
+        (
+            "/tmp/abs/run.log/",
+            paths(Some("/tmp/abs"), "/tmp/abs/run.log", "/tmp/abs/"),
+        ),
+        ("/dev/fd/2", paths(Some("/dev/fd"), "/dev/fd/2", "/dev/fd/")),
+        (
+            "//dev/./stderr",
+            paths(Some("//dev/."), "/dev/stderr", "//dev/./"),
+        ),
+        (
+            "/dev/fd/../stderr",
+            paths(Some("/dev/fd/.."), "/dev/stderr", "/dev/fd/../"),
+        ),
+        ("/", paths(Some("/"), "/", "/")),
+        ("///", paths(None, "/", "")),
+        // A directory of '/'s only is no directory (round 3, M1).
+        ("//run.log", paths(Some(""), "/run.log", "//")),
+        ("///run.log", paths(Some(""), "/run.log", "///")),
+        ("//", paths(None, "/", "")),
+        // On Unix '\' is a byte of a name, ':' too.
+        ("a\\b.log", paths(Some("."), "/w/a\\b.log", "/w/")),
+        ("C:run.log", paths(Some("."), "/w/C:run.log", "/w/")),
+    ] {
+        assert_eq!(read(name.as_bytes(), cwd), read_as, "{name:?}");
+    }
+    // Without a working directory (`GetCwd` gives "") the name stays relative, and is opened
+    // by `ConvertToOSPath`'s relative branch: each '\' is a '/' (round 3, M2), unless the name
+    // is a Windows disk's or network path (`IsAbsolutePathEx`).
+    for (name, read_as) in [
+        ("logs/", paths(Some("."), "logs", "./")),
+        ("run.log", paths(Some("."), "run.log", "./")),
+        (" run.log ", paths(Some("."), "run.log", "./")),
+        ("a\\b.log", paths(Some("."), "a/b.log", "./")),
+        ("..\\run.log", paths(Some("."), "../run.log", "./")),
+        ("a/..\\run.log", paths(Some("a"), "run.log", "a/")),
+        ("x..", paths(Some("."), "x..", "./")),
+        ("C:\\run.log", paths(Some("."), "C:\\run.log", "./")),
+        ("\\\\run.log", paths(Some("."), "\\\\run.log", "./")),
+        ("/abs\\run.log", paths(Some("/"), "/abs\\run.log", "/")),
+    ] {
+        assert_eq!(read(name.as_bytes(), None), read_as, "{name:?}");
+    }
+    // NCBI keeps 2047 bytes of the name that it makes.
+    let long = vec![b'x'; 3000];
+    let (_, path, space) = read(&long, cwd);
+    assert_eq!(path, [b"/w/".as_slice(), &long[..2044]].concat());
+    assert_eq!(space, b"/w/");
+    // On Unix the cut may split a character, whose first bytes NCBI opens (round 4).
+    let japanese = "日".repeat(700);
+    let (_, path, _) = read(japanese.as_bytes(), cwd);
+    assert_eq!(
+        path,
+        [b"/w/".as_slice(), &japanese.as_bytes()[..2044]].concat()
+    );
+}
+
+/// NCBI's reading of a `-logfile` name on Windows (by NCBI's source: line WQA's D11 round 3,
+/// 2026-11-20; no Windows run): '\' and '/' both separate directories, a relative name is
+/// joined to the working directory with '\' and normalized, a name from one separator is on
+/// the working directory's disk (its first 3 bytes, as they are), and a relative name with a
+/// disk's ':' is none that NCBI reads (`CreateAbsolutePath` throws).
+#[test]
+fn a_log_name_is_read_on_windows_as_ncbi_reads_it() {
+    let read = |name: &str, cwd: Option<&str>| {
+        log_file_name(PathRules::Windows, name.as_bytes(), cwd.map(str::as_bytes))
+            .map(|file| (file.directory, file.path, file.space))
+    };
+    let paths = |directory: Option<&str>, path: &str, space: &str| {
+        Some((directory.map(Into::into), path.into(), space.into()))
+    };
+    let cwd = Some("C:\\w");
+    for (name, read_as) in [
+        ("run.log", paths(Some("."), "C:\\w\\run.log", "C:\\w\\")),
+        ("logs/", paths(Some("."), "C:\\w\\logs", "C:\\w\\")),
+        ("logs\\", paths(Some("."), "C:\\w\\logs", "C:\\w\\")),
+        (" run.log", paths(Some("."), "C:\\w\\run.log", "C:\\w\\")),
+        (
+            "logs\\run.log",
+            paths(Some("logs"), "C:\\w\\logs\\run.log", "C:\\w\\logs\\"),
+        ),
+        (
+            "a/../run.log",
+            paths(Some("a/.."), "C:\\w\\run.log", "C:\\w\\"),
+        ),
+        // After the disk's name a ".." stays (`C:` and `..`).
+        (
+            "..\\..\\run.log",
+            paths(Some("..\\.."), "C:\\..\\run.log", "C:\\..\\"),
+        ),
+        ("\\run.log", paths(Some("\\"), "C:\\\\run.log", "C:\\\\")),
+        ("/run.log", paths(Some("/"), "C:\\\\run.log", "C:\\/")),
+        (
+            "C:\\logs\\run.log",
+            paths(Some("C:\\logs"), "C:\\logs\\run.log", "C:\\logs\\"),
+        ),
+        ("C:/run.log/", paths(Some("C:/"), "C:\\run.log", "C:/")),
+        ("C:\\", paths(Some("C:\\"), "C:\\", "C:\\")),
+        (
+            "\\\\srv\\share\\run.log",
+            paths(
+                Some("\\\\srv\\share"),
+                "\\\\srv\\share\\run.log",
+                "\\\\srv\\share\\",
+            ),
+        ),
+        ("C:run.log", None),
+        ("logs\\a:b", None),
+        ("//run.log", paths(Some(""), "\\\\run.log", "//")),
+    ] {
+        assert_eq!(read(name, cwd), read_as, "{name:?}");
+    }
+    // A cut of NCBI's that splits a character leaves a string that NCBI's conversion to
+    // UTF-16 does not read (round 4, L1): the 2047 bytes of the name, the 2 of a part with a
+    // ':' (a 3-byte character); where the cuts end characters, the path is read.
+    let japanese = "日".repeat(700);
+    assert_eq!(read(&japanese, cwd), None);
+    let whole = format!("ab{japanese}");
+    let (_, path, _) = read(&whole, cwd).unwrap();
+    assert_eq!(path, format!("C:\\w\\ab{}", "日".repeat(680)).into_bytes());
+    assert_eq!(read("C:\\日:x\\..\\run.log", cwd), None);
+    assert_eq!(
+        read("C:\\é:x\\..\\run.log", cwd),
+        paths(Some("C:\\é:x\\.."), "C:\\é\\..\\run.log", "C:\\é:x\\..\\")
+    );
+    // Without a working directory a name from one separator stays as it is.
+    assert_eq!(
+        read("\\run.log", None),
+        paths(Some("\\"), "\\run.log", "\\")
+    );
+    assert_eq!(read("run.log", None), paths(Some("."), "run.log", ".\\"));
+    // NCBI's `NormalizePath` on Windows.
+    for (path, normalized) in [
+        ("a/b\\c", "a\\b\\c"),
+        ("a\\.\\b\\..\\c\\", "a\\c"),
+        ("\\\\?\\C:\\x\\.\\y", "C:\\x\\y"),
+        ("\\\\?\\UNC\\srv\\share\\x", "\\\\srv\\share\\x"),
+        ("\\\\srv\\share\\..\\x", "\\\\srv\\x"),
+        ("\\a\\..\\..\\b", "\\b"),
+        ("C:", "C:"),
+        ("C:.", "C:."),
+        ("C:\\.", "C:\\"),
+        ("C:\\.\\", "C:\\"),
+        ("C:\\..", "C:\\.."),
+        ("C:\\a:b\\..\\x", "C:\\a:\\..\\x"),
+        ("C:\\x\\..", "C:"),
+        ("/", "\\"),
+        ("//", "\\"),
+        ("..\\a", "..\\a"),
+    ] {
+        assert_eq!(
+            PathRules::Windows.normalize(path.as_bytes(), None),
+            Some(normalized.as_bytes().to_vec()),
+            "{path:?}"
+        );
+    }
+}
+
+/// `CDir::GetCwd` reads a working directory of up to 4094 characters (`getcwd(buf, 4095)`),
+/// and NCBI's free space is its `Uint8` product, modulo 2^64: 2^64 bytes free is none (line
+/// WQA's D11 round 3, 2026-11-20).
+#[test]
+fn the_working_directory_and_the_free_space_are_ncbi_s() {
+    let directory = |length: usize| {
+        let mut cwd = "/".to_string();
+        cwd.push_str(&"d".repeat(length - 1));
+        OsString::from(cwd)
+    };
+    assert_eq!(getcwd_reads(directory(4094)), Some(directory(4094)));
+    assert_eq!(getcwd_reads(directory(4095)), None);
+    assert_eq!(getcwd_reads(directory(4298)), None);
+    assert_eq!(free_space(4096, 5), LOW_DISK_SPACE);
+    assert_eq!(free_space(4096, 1 << 52), 0);
+    assert_eq!(free_space(4096, (1 << 52) + 4), 4 * 4096);
+    assert_eq!(free_space(u64::MAX, 2), u64::MAX - 1);
+}
+
+/// The command line opens the file that NCBI opens (`log_file_name`) and drops the messages
+/// of a file whose file system reports no free space (line WQA's D11 round 2, 2026-11-20;
+/// NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/fd/2` and `/proc/self/fd/2` write no message).
+/// The file that the test opens through procfs is one of its own, whatever its standard
+/// streams are (round 3).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_command_line_opens_the_file_that_ncbi_opens() {
+    use std::os::fd::AsRawFd;
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-environment-log-name-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("deep/x")).unwrap();
+    std::fs::create_dir(dir.join("logs")).unwrap();
+    std::os::unix::fs::symlink(dir.join("deep/x"), dir.join("a")).unwrap();
+    let target = |name: &str| {
+        let name = format!("{}/{name}", dir.display());
+        diag_target(Some(OsStr::new(&name)))
+    };
+    // A trailing '/' names the file without it; a directory stays `cerr`.
+    assert!(matches!(target("run.log/"), DiagTarget::File(_)));
+    assert!(dir.join("run.log").is_file());
+    assert!(matches!(target("logs/"), DiagTarget::Stderr));
+    assert!(matches!(target("missing/run.log"), DiagTarget::Stderr));
+    // ".." is read before the link is followed: `a/..` is `dir`, not `deep`.
+    assert!(matches!(target("a/../linked.log"), DiagTarget::File(_)));
+    assert!(dir.join("linked.log").is_file());
+    assert!(!dir.join("deep/linked.log").exists());
+    // A directory of '/'s only is none (round 3, M1): no file at the root.
+    let rooted = format!(
+        "//losat-ncbi-environment-{}.log",
+        crate::utils::test_dir::process_id()
+    );
+    assert!(matches!(
+        diag_target(Some(OsStr::new(&rooted))),
+        DiagTarget::Stderr
+    ));
+    assert!(!Path::new(&rooted).exists());
+    // procfs reports no free space: a file opened through it gets nothing. Through a link
+    // in a directory with free space, the same file gets the messages.
+    let own = std::fs::File::create(dir.join("own.log")).unwrap();
+    let fd = own.as_raw_fd();
+    std::os::unix::fs::symlink(format!("/proc/self/fd/{fd}"), dir.join("own-link")).unwrap();
+    for name in [
+        format!("/dev/fd/{fd}"),
+        format!("/proc/self/fd/{fd}"),
+        format!("/dev/fd/../fd/{fd}"),
+    ] {
+        assert!(
+            matches!(diag_target(Some(OsStr::new(&name))), DiagTarget::Discard),
+            "{name}"
+        );
+    }
+    assert!(matches!(target("own-link"), DiagTarget::File(_)));
+    drop(own);
+    // A relative name is opened in the working directory that `open_log_file` is given, the
+    // one that NCBI reads (`ncbi_cwd`; round 4, L3: not this process's own here).
+    assert!(matches!(
+        open_log_file(OsStr::new("relative.log"), Some(dir.as_os_str())),
+        DiagTarget::File(_)
+    ));
+    assert!(dir.join("relative.log").is_file());
+    assert!(matches!(
+        open_log_file(
+            OsStr::new("relative.log"),
+            Some(dir.join("missing").as_os_str())
+        ),
+        DiagTarget::Stderr
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// The writes of an application start on the standard error stream and on the file of a
 /// `-logfile` for the three targets, as the command line's entry and blastdbcmd make them:
 /// the usage report's messages on stderr at once, the first `SetupDiag`, then the
@@ -1104,7 +1405,7 @@ fn writes_of(start: &ApplicationStart, target: &str) -> (String, String, Option<
         "file" => diag_target(Some(file.as_os_str())),
         _ => diag_target(Some(OsStr::new("/dev/null"))),
     };
-    start.write_log_setup(&mut diag);
+    start.write_log_setup(&mut diag, &mut stderr);
     let status = start.write_config_load(&mut diag, &mut stderr).unwrap();
     drop(diag);
     let logged = std::fs::read_to_string(&file).unwrap_or_default();

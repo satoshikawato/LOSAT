@@ -4,6 +4,7 @@
 //! loop that hands the sequences of a FASTA input to the writer, and the end
 //! of the build, which removes the files of a failed one.
 
+use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -15,17 +16,20 @@ use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
 use super::mask_data::range_set::address_order_refusal;
 use super::mask_data::{ranges_are_empty, MaskedRangeSet};
 use super::platform::Platform;
-use super::taxid_set::TaxIdSet;
+use super::raw_source::{LeafTaxIds, RawCopyError, RawSeqDbSource};
+use super::taxid_set::{seq_id_key, TaxIdSet};
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::seqdb::column::MASK_DATA_TITLE;
 use crate::seqdb::{SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
 use crate::seqid::rank::{best_rank_score, find_best};
-use crate::seqid::ParsedSeqId;
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
-/// `CBuildDatabase` for a FASTA input without parsed Seq-ids.
+/// `CBuildDatabase`: a FASTA input (`add_fasta`) or the sequences of existing databases
+/// (`add_raw_sequences`).
 pub struct BuildDatabase<'a> {
     is_protein: bool,
     log: &'a mut dyn Write,
@@ -44,6 +48,9 @@ pub struct BuildDatabase<'a> {
     /// addresses (`mask_data::range_set`). It is raised by `end_build` only when the build would
     /// otherwise succeed, so that every error of NCBI that comes later in the run comes first.
     address_order: Option<WriteDbError>,
+    /// `m_Id2Leafs` (`SetLeafTaxIds`, with `m_KeepLeafs` set): the leaf taxids of a copied
+    /// database's definition lines by the first Seq-id's `AsFastaString`.
+    leaf_tax_ids: LeafTaxIds,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -269,6 +276,47 @@ const PROTEIN_DELTA: ThrowSite = ThrowSite {
 };
 const NO_WRITE_ACCESS: ThrowSite = create_directories_site(1069);
 
+/// The throws of `AddSequences(IRawSequenceSource &)` for raw data it cannot add
+/// (`CMultisourceException::eArg`).
+const fn raw_data_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/objtools/blast/seqdb_writer/build_db.cpp",
+        line,
+        kind: "CMultisourceException::eArgErr",
+        function: Some("BLASTDB::ncbi::CBuildDatabase::AddSequences"),
+    }
+}
+
+/// The exception of `AddSequences(IRawSequenceSource &)` for raw data it cannot add, thrown at
+/// `line` of build_db.cpp.
+fn raw_data_error(line: u32, message: &str) -> WriteDbError {
+    WriteDbError::Exception(NcbiException::new(raw_data_site(line), message))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:418-426
+/// `x_AddPig`: the PIG of a copied sequence, the first value of its first definition line's
+/// `other-info` (0 without one). An `other-info` without values, whose first value NCBI reads
+/// all the same, is LOSAT's refusal.
+fn raw_pig(headers: &DeflineSet) -> Result<i32, WriteDbError> {
+    let Some(first) = headers.deflines.first() else {
+        return Ok(0);
+    };
+    match &first.other_info {
+        None => Ok(0),
+        Some(values) => values.first().copied().ok_or_else(|| {
+            let mut id = Vec::new();
+            if let Some(seq_id) = first.ids.first() {
+                crate::seqid::label::fasta(seq_id, &mut id);
+            }
+            WriteDbError::Unsupported(format!(
+                "the first definition line of the input sequence {} has an empty other-info, \
+                 whose first value NCBI makeblastdb reads as the PIG (no defined result)",
+                String::from_utf8_lossy(&id)
+            ))
+        }),
+    }
+}
+
 /// A throw of `CMultisourceException` (`eOutputFileError`) at `line` of build_db.cpp.
 const fn create_directories_site(line: u32) -> ThrowSite {
     ThrowSite {
@@ -437,15 +485,16 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1165-1177
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1270-1273
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1094
-    /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
+    /// The constructor, then `SetMembBits` with no bits and the lines' own kept, as makeblastdb
     /// calls it. `now` is the time of the build, `version` the format version
     /// (`dbver`), `platform` the platform whose makeblastdb the files follow,
     /// `indices` `indexing` (`eFullIndex` for `-parse_seqids`, `eAddHash` for
-    /// `-hash_index`).
+    /// `-hash_index`). `title` is bytes: the title of an input database (`-input_type
+    /// blastdb`) is copied as it is stored.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         dbname: &str,
-        title: &str,
+        title: &[u8],
         is_protein: bool,
         log: &'a mut dyn Write,
         now: &LocalTime,
@@ -462,7 +511,7 @@ impl<'a> BuildDatabase<'a> {
             now.log_time()
         );
         let _ = writeln!(log, "New DB name:   {output_dbname}");
-        let _ = writeln!(log, "New DB title:  {title}");
+        let _ = log.write_all(&[b"New DB title:  ".as_slice(), title, b"\n"].concat());
         let _ = writeln!(log, "Sequence type: {mol_type}");
         if delete_blast_db(&output_dbname, is_protein)? {
             let _ = writeln!(
@@ -477,7 +526,7 @@ impl<'a> BuildDatabase<'a> {
         let output_db = WriteDb::new(
             &output_dbname,
             is_protein,
-            title.as_bytes(),
+            title,
             now.index_date().as_bytes(),
             1000 * 1000 * 1000,
             version,
@@ -496,6 +545,7 @@ impl<'a> BuildDatabase<'a> {
             mask_data: None,
             found_matching_masks: false,
             address_order: None,
+            leaf_tax_ids: LeafTaxIds::new(),
         })
     }
 
@@ -776,6 +826,183 @@ impl<'a> BuildDatabase<'a> {
             let _ = self.end_build(true, warn);
         }
         result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1278-1286
+    /// `SetLeafTaxIds(taxids, true)`: the leaf taxids of a copied database's definition lines
+    /// (`raw_source::scan_leaf_tax_ids`), which the copy adds to a line's own.
+    pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) {
+        let _ = writeln!(self.log, "Keep Leaf Taxids: T");
+        self.leaf_tax_ids = taxids;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:428-442
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1478-1512
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1562-1575
+    // makeblastdb gives no membership bits and keeps a line's own (`SetMembBits`), and removes
+    // no GI: those edits change nothing. A line some of whose keys
+    // (`GetDeflineKeys`, `GetSeqIdKey` of each Seq-id) are in the map of leaf taxids gets the
+    // ascending union of its own leaf taxids and the map's; any other keeps its own as stored.
+    /// `x_EditHeaders` of a copied sequence: `FixTaxId`, then the leaf taxids.
+    fn edit_raw_headers(&mut self, headers: &mut DeflineSet) {
+        self.taxids.fix_tax_id(headers);
+        if self.leaf_tax_ids.is_empty() {
+            return;
+        }
+        for defline in &mut headers.deflines {
+            let mut found: Option<BTreeSet<i32>> = None;
+            for id in &defline.ids {
+                let key = seq_id_key(id);
+                if key.is_empty() {
+                    continue;
+                }
+                if let Some(leafs) = self.leaf_tax_ids.get(&key) {
+                    found.get_or_insert_with(BTreeSet::new).extend(leafs);
+                }
+            }
+            if let Some(mut taxids) = found {
+                taxids.extend(defline.links.iter().flatten().copied());
+                defline.links = Some(taxids.into_iter().collect());
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:904-1048
+    // The columns of the input other than its mask column are made in the output (`FindColumn`,
+    // else `CreateUserColumn`) with all their metadata before the first sequence. Each sequence
+    // is checked, its definition lines edited, and it is added in the form of the sequence file
+    // with its PIG, its definition lines, the blobs of its columns that are not empty and its
+    // masks: the input's ranges, then, for each definition line whose Seq-ids `-mask_data` has
+    // ranges of, all the algorithms of that lookup (`GetRanges`), which makes the masks
+    // matched. The masks are set when an algorithm has a range.
+    //
+    // Unlike `add_fasta`, an error does not end the build: makeblastdb leaves it open, and its
+    // writer is closed when it is destroyed (`close_at_destruction`).
+    /// `AddSequences(IRawSequenceSource &)`: copies the sequences of `source`, then logs their
+    /// count when there were any. `warn` gets the writer's diagnostics as they are posted.
+    pub(crate) fn add_raw_sequences(
+        &mut self,
+        source: &mut RawSeqDbSource<'_>,
+        warn: Warn<'_>,
+    ) -> Result<(), RawCopyError> {
+        let start = std::time::Instant::now();
+        let mut output_columns = Vec::with_capacity(source.column_titles().len());
+        for index in 0..source.column_titles().len() {
+            let title = source.column_titles()[index].clone();
+            if title == MASK_DATA_TITLE {
+                output_columns.push(None);
+                continue;
+            }
+            let output_id = match self.output_db.find_column(&title) {
+                Some(id) => id,
+                None => self.output_db.create_user_column(&title)?,
+            };
+            for (key, value) in source.column_meta_data(index)? {
+                self.output_db
+                    .add_column_meta_data(output_id, &key, &value)?;
+            }
+            output_columns.push(Some(output_id));
+        }
+
+        let mut count = 0u64;
+        while let Some(raw) = source.next()? {
+            if raw.sequence.is_empty() {
+                return Err(raw_data_error(970, "Error in raw data: no sequence").into());
+            }
+            if !raw.ambiguities.is_empty() && self.is_protein {
+                return Err(raw_data_error(
+                    975,
+                    "Error in raw data: protein db cannot with ambiguities",
+                )
+                .into());
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:979-983
+            // NCBI's error for a sequence without header is its empty header, which LOSAT's
+            // reader gives as a set without lines and the scan of the leaf taxids refused.
+            let mut headers = raw.deflines;
+            self.edit_raw_headers(&mut headers);
+            self.output_db
+                .add_raw_sequence(raw.sequence, raw.ambiguities)?;
+            self.output_db.set_pig(raw_pig(&headers)?);
+
+            let mut masks = raw.masks;
+            if let Some(mask_data) = self.mask_data.as_mut() {
+                for defline in &headers.deflines {
+                    let found = mask_data.get_ranges(&defline.ids);
+                    if ranges_are_empty(found.ranges) {
+                        continue;
+                    }
+                    masks.extend(found.ranges.iter().cloned());
+                    self.found_matching_masks = true;
+                    if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+                        let mut sequence = Vec::new();
+                        if let Some(id) = headers.deflines[0].ids.first() {
+                            crate::seqid::label::fasta(id, &mut sequence);
+                        }
+                        self.address_order = Some(address_order_refusal(
+                            seq_ids,
+                            &String::from_utf8_lossy(&sequence),
+                        ));
+                    }
+                }
+            }
+            self.output_db.set_deflines(headers);
+            for (blob, output_id) in raw.column_blobs.iter().zip(&output_columns) {
+                let Some(output_id) = *output_id else {
+                    continue;
+                };
+                if !blob.is_empty() {
+                    self.output_db.set_blob_data(output_id, blob)?;
+                }
+            }
+            if !ranges_are_empty(&masks) {
+                self.output_db.set_mask_data(&masks)?;
+            }
+            self.post_diagnostics(warn);
+            count += 1;
+        }
+        if count != 0 {
+            let _ = writeln!(
+                self.log,
+                "Adding sequences from raw db source; added {count} sequences in {} seconds.",
+                format_seconds(start.elapsed().as_secs_f64())
+            );
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
+    // An error that ends makeblastdb outside `AddFasta` (which ends its build and removes its
+    // files) leaves the build open: the writer is closed when makeblastdb's application is
+    // destroyed, after the error's message and `~CBuildDatabase`'s, and writes what was added,
+    // the sequence added last included. A `CWriteDBException` of that close is posted; NCBI's
+    // destructor lets any other exception end the process, where LOSAT posts the error's
+    // message.
+    /// The close of the writer by its destructor after an error: the messages it posts (the
+    /// diagnostics of the sequence written last, the error of the close), each without its final
+    /// newline.
+    pub(crate) fn close_at_destruction(&mut self) -> Vec<Vec<u8>> {
+        let mut messages = Vec::new();
+        let error = self.output_db.close().err();
+        let diagnostics = self.output_db.take_diagnostics();
+        if !diagnostics.is_empty() {
+            messages.push(
+                diagnostics
+                    .strip_suffix(b"\n")
+                    .unwrap_or(&diagnostics)
+                    .to_vec(),
+            );
+        }
+        if let Some(error) = error {
+            self.output_db.destroy_after_failed_close();
+            messages.push(match error {
+                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                    [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
+                }
+                other => other.message(),
+            });
+        }
+        messages
     }
 
     /// `s_FixBioseqDeltas` on a record past NCBI's 32-bit length (`Bioseq::past_seq_pos`),

@@ -748,3 +748,83 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
     lines.retain_lines(&[false]);
     assert_eq!(lines, vec![1, 3]);
 }
+
+/// NCBI BLAST+ 2.17.0's texts of an LMDB file and of a lookup file that does not open or whose
+/// bytes cannot be had (line WQA D18 probes 5-7, 2026-11-21): the LMDB error for every code,
+/// EMFILE included, and `CMemoryFile`'s exception for the lookup files.
+#[cfg(target_os = "linux")]
+#[test]
+fn unreadable_lmdb_and_lookup_files_give_ncbis_errors() {
+    let open = |code: i32| SeqDbError::Open {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        source: std::io::Error::from_raw_os_error(code),
+    };
+    // The first byte, read where the file is opened (`DbFile::open`): NCBI's mapping.
+    let read = |code: i32| SeqDbError::Map {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        len: 1234,
+        source: std::io::Error::from_raw_os_error(code),
+    };
+    let lmdb = |error: SeqDbError| match lmdb_file_error(error) {
+        SeqDbError::NotFound(text) => String::from_utf8(text).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        lmdb(open(13)),
+        "LMDB runtime error: mdb_env_open: Permission denied"
+    );
+    assert_eq!(
+        lmdb(open(24)),
+        "LMDB runtime error: mdb_env_open: Too many open files"
+    );
+    assert_eq!(
+        lmdb(read(5)),
+        "LMDB runtime error: mdb_env_open: Input/output error"
+    );
+    let lookup = |error: SeqDbError| match lookup_file_error(error) {
+        SeqDbError::Ncbi(exception) => String::from_utf8(exception.what()).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+    let report = |line: u32, function: &str, text: &str| {
+        crate::wording::losat_text(&format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbifile.cpp\", line {line}: Error: \
+             (CFileException::eMemoryMap) ncbi::{function}() - {text}\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        ))
+        .into_owned()
+    };
+    assert_eq!(
+        lookup(open(13)),
+        report(
+            5945,
+            "CMemoryFileMap::x_Open",
+            "CMemoryFile: Cannot memory map file '/d/tm_psi.pos':Permission denied"
+        )
+    );
+    assert_eq!(
+        lookup(read(5)),
+        report(
+            5650,
+            "CMemoryFileSegment::CMemoryFileSegment",
+            "Cannot map file '/d/tm_psi.pos' to memory (offset=0, length=1234): Input/output error"
+        )
+    );
+    // A first byte that cannot be read without a system code, and a read that fails after the
+    // first byte (where NCBI ends by SIGBUS), are LOSAT's own errors.
+    let short = SeqDbError::Map {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        len: 1234,
+        source: std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+    };
+    assert!(matches!(lookup_file_error(short), SeqDbError::Map { .. }));
+    let later = || SeqDbError::Read {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        source: std::io::Error::from_raw_os_error(5),
+    };
+    assert!(matches!(
+        lookup_file_error(later()),
+        SeqDbError::Read { .. }
+    ));
+    assert!(matches!(lmdb_file_error(later()), SeqDbError::Read { .. }));
+}

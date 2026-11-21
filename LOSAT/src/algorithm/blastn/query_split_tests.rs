@@ -1,5 +1,21 @@
 use super::*;
 
+#[test]
+fn masks_before_a_part_of_a_ranged_query() {
+    let part = |from, to| ChunkQuery { query: 0, from, to };
+    // The query's interval starts at record letter 100: a mask of the searched letters
+    // 296..298 ends (with the extra residue) 2 letters before the part 300..600's interval.
+    let masks = [MaskedInterval::new(296, 298)];
+    assert_eq!(masked_before_part(&masks, 0, &part(300, 600), 100), Some(2));
+    // The first part keeps the lower case before the interval: record letter 97 (bit 2)
+    // ends 2 letters before the interval with its extra residue; letter 99 (bit 0) reaches
+    // the part's first letter, which `restrict_masks_with_letter_before` masks.
+    assert_eq!(masked_before_part(&[], 0b100, &part(0, 600), 100), Some(2));
+    assert_eq!(masked_before_part(&[], 0b1, &part(0, 600), 100), None);
+    // Without a range nothing lies before a part's interval.
+    assert_eq!(masked_before_part(&masks, 0, &part(300, 600), 0), None);
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
 #[test]
 fn the_chunk_count_and_size_are_ncbis() {

@@ -267,6 +267,16 @@
     "takes_value": true
    },
    {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
     "flag": "-ungapped",
     "help": "Perform ungapped alignment only",
     "takes_value": false,

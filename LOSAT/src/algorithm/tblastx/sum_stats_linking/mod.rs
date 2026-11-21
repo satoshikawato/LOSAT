@@ -1,6 +1,6 @@
 //! NCBI-style sum-statistics HSP linking with lh_helper optimization
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 //!
 //! Key optimizations from NCBI:
 //! 1. `changed` flag: skip recomputation when previous link is still valid
@@ -28,14 +28,7 @@ pub use params::{compute_avg_query_length_ncbi, find_smallest_lambda_params, Lin
 // Re-export cutoff calculation
 pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start->next = hp_frame_start[frame_index];
-//    number_of_hsps = hp_frame_number[frame_index];
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // Re-export main linking functions
 pub use linking::apply_sum_stats_even_gap_linking_with_parallel;
 pub(crate) use linking::link_one_hit_with_int4_ends;
@@ -45,10 +38,6 @@ pub(crate) use linking::link_one_hit_with_int4_ends;
 // dispatch, `main` its summary.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
 pub(crate) use linking::x_hsp_inplace;
 pub use linking::x_hsp_inplace_print_summary;
 
@@ -56,10 +45,6 @@ pub use linking::x_hsp_inplace_print_summary;
 // in-place path (tblastx/x_link_sort.rs, a child module of `linking`), for `main`.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:993-994
-// ```c
-//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_FwdCompareHSPsTransl);
-// ```
 // No NCBI counterpart for the summary: it prints counters.
 pub use linking::x_link_sort_print_summary;
 
@@ -68,12 +53,6 @@ pub use linking::x_link_sort_print_summary;
 // `main`.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-// ```
 // No NCBI counterpart for the summary: it prints counters.
 pub use linking::x_link_slices_print_summary;
 pub(crate) use linking::{x_link_helped, XHelped};

@@ -40,6 +40,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-gi_mask_name` | the `-mask_data` names | Comma-separated names of the GI-indexed mask files, one for each mask file. Needs `-mask_data` and `-gi_mask`. |
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
+| `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
 
 For every option: `losat makeblastdb -help`.
 
@@ -123,7 +124,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`, `-oid_masks` and `-metadata_output_prefix`: each stops with an error that names the option.
+- `-randomize` and `-oid_masks`: each stops with an error that names the option.
 - `-gi_mask` with two mask files whose GI-mask files would be the same files (one `-gi_mask_name` twice, or two names of one path). NCBI writes both into the same files at once, and what they then hold depends on its C++ library.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin`. Only `fasta` works.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.

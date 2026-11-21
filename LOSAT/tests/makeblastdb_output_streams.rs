@@ -34,6 +34,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// Proteins with a GI, a trace id and an accession (the probe's `RICH_P`).
 const RICH_P: &str = ">gi|1001|ref|NP_000001.1| alpha\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n>gnl|ti|12345 trace one\nMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNA\n>sp|P55555|CCC_HUMAN Gamma\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARR\n";
 /// Three proteins whose last one repeats the id of the second.

@@ -140,7 +140,7 @@ fn damaged_index_files() {
     version[3] = 2;
     assert_eq!(
         open(&version).ncbi_message().as_deref(),
-        Some("Gi-mask file uses unknown format_version.")
+        Some(b"Gi-mask file uses unknown format_version.".as_slice())
     );
     assert!(matches!(open(&good[..20]), SeqDbError::Integrity { .. }));
     let mut empty_desc = good.clone();
@@ -161,7 +161,7 @@ fn damaged_index_files() {
             .unwrap_err()
             .ncbi_message()
             .as_deref(),
-        Some("Could not open gi-mask index files.")
+        Some(b"Could not open gi-mask index files.".as_slice())
     );
 }
 
@@ -187,6 +187,9 @@ fn missing_data_volume_is_the_memory_map_error() {
     );
     assert_eq!(
         error.ncbi_message().as_deref(),
-        Some("Database memory map file error - To be memory mapped the file must exist: ''")
+        Some(
+            b"Database memory map file error - To be memory mapped the file must exist: ''"
+                .as_slice()
+        )
     );
 }

@@ -282,7 +282,7 @@ impl GiMaskFiles {
         let offset_path = search.resolve_file(&format!("{name}.{}", EXTENSIONS[1]));
         let (Some(index_path), Some(offset_path)) = (index_path, offset_path) else {
             return Err(SeqDbError::NotFound(
-                "Could not open gi-mask index files.".to_string(),
+                b"Could not open gi-mask index files.".to_vec(),
             ));
         };
         let index = MappedFile::open(Path::new(&index_path))?;

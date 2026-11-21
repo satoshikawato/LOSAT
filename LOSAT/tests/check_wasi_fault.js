@@ -2,8 +2,7 @@
 const fs = require("node:fs");
 const { createThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-// LOG_POST(Error << "Error: " << e.what()); exit_code = BLAST_UNKNOWN_ERROR;
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // The parent integration process requires explicit failure, never a hung guest.
 (async () => {
   const [artifact, query, fault] = process.argv.slice(2);

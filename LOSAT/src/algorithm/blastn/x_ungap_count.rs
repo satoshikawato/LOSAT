@@ -3,49 +3,6 @@
 //! before its loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:164-241
-//! ```c
-//!     q_avail = query->length - q_off;
-//!     s_avail = subject->length - s_off;
-//! ...
-//!     if (q_off < s_off) {
-//!         start = subject0 + (s_off - q_off) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((s_off - q_off) % COMPRESSION_RATIO);
-//!     } else {
-//!         start = subject0;
-//!         remainder = 3;
-//!     }
-//! ...
-//!     while ((s > start) || (s == start && base < remainder)) {
-//!         if (base == 3) {
-//!             s--;
-//!             base = 0;
-//!         } else {
-//!             ++base;
-//!         }
-//!         ch = *s;
-//!         if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-//! ...
-//!     if (q_avail < s_avail) {
-//!         sf = subject0 + (s_off + q_avail) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((s_off + q_avail) % COMPRESSION_RATIO);
-//!     } else {
-//!         sf = subject0 + (subject->length) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((subject->length) % COMPRESSION_RATIO);
-//!     }
-//! ...
-//!     while (s < sf || (s == sf && base > remainder)) {
-//!         ch = *s;
-//!         if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-//! ...
-//!         if (base == 0) {
-//!             base = 3;
-//!             s++;
-//!         } else
-//!             base--;
-//!     }
-//!
-//!     ungapped_data->length = (Int4)(q_end - q_beg);
-//! ```
 //!
 //! Where it runs. `extension::extend_hit_ungapped_exact_ncbi` (every caller of the exact
 //! extension: blastn-short and other word sizes below 11, and the exact pass that follows
@@ -89,14 +46,7 @@ fn cell(matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE], code: u8, base: usize) -> i
     unsafe { *matrix.get_unchecked(((code as usize) << 4) | base) }
 }
 
-/// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:149-153
-/// ```c
-/// static void
-/// s_NuclUngappedExtendExact(BLAST_SequenceBlk * query,
-///                           BLAST_SequenceBlk * subject, Int4 ** matrix,
-///                           Int4 q_off, Int4 s_off, Int4 X,
-///                           BlastUngappedData * ungapped_data)
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-153
 /// The arguments are those of `extend_hit_ungapped_exact_ncbi`: the query buffer without its outer
 /// sentinels (BLASTNA, one byte a letter), the packed subject (ncbi2na, four bases a byte, at least
 /// `subject_len.div_ceil(4)` bytes), the offsets of the hit, the subject length, the X-drop as a
@@ -113,13 +63,6 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
 ) -> UngappedData {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
-    // ```c
-    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-    //             }else {
-    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
-    //                                  -(cutoffs->x_dropoff), ungapped_data,
-    // ```
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
     // Such a walk can pass two of the query's sentinels (BLASTNA 15, `INT4_MIN / 2` against
@@ -193,117 +136,5 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::extension::extend_hit_ungapped_exact_ported;
-    use super::*;
-
-    fn next(state: &mut u64) -> u64 {
-        *state ^= *state << 13;
-        *state ^= *state >> 7;
-        *state ^= *state << 17;
-        *state
-    }
-
-    fn key(u: UngappedData) -> (usize, usize, usize, i32) {
-        (u.q_start, u.s_start, u.length, u.score)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:197 and
-    // blast_stat.c:1124-1127
-    // ```c
-    //         if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-    // ...
-    //         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
-    // ...
-    //         matrix[index1][BLASTNA_SIZE-1] = INT4_MIN / 2;
-    // ```
-    /// `-xdrop_ungap 1e10` (X-drop `INT_MIN`, which negates to itself): the left walk from the hit
-    /// at 3 passes the two sentinels (`INT4_MIN / 2` each: `INT_MIN`) and the mismatch A/C (-3),
-    /// where the `Int4` sum wraps to 2^31 - 3, above 0, as in NCBI's x86-64 build; the right walk
-    /// adds the two matches: `i32::MAX`. A build with overflow checks gives the same.
-    #[test]
-    fn a_walk_past_two_sentinels_wraps_as_ncbis_int4() {
-        let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -3);
-        let query = [0u8, 15, 15, 0, 0];
-        // C A A A A, packed (ncbi2na: A 0, C 1).
-        let packed = [0b0100_0000u8, 0];
-        let expected = (0, 0, 5, i32::MAX);
-        let counted =
-            extend_hit_ungapped_exact_counted(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
-        assert_eq!(key(counted), expected);
-        let ported = extend_hit_ungapped_exact_ported(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
-        assert_eq!(key(ported), expected);
-    }
-
-    /// Every hit offset of random query blocks (contexts of 1 to 40 letters between sentinels,
-    /// a few ambiguity codes) against random and periodic subjects of 1 to 140 bases packed into
-    /// exactly `len.div_ceil(4)` bytes, at three X-drops: the counted loops give the ported
-    /// loops' four results.
-    #[test]
-    fn every_offset_matches_the_ported_loops() {
-        let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -3);
-        let mut state = 0x9e37_79b9_7f4a_7c15u64;
-        let mut calls = 0u64;
-        for round in 0..400 {
-            let mut query = Vec::new();
-            for _ in 0..1 + next(&mut state) % 4 {
-                for _ in 0..1 + next(&mut state) % 40 {
-                    let r = next(&mut state);
-                    query.push(if r.is_multiple_of(50) {
-                        (4 + r % 11) as u8
-                    } else {
-                        (r % 4) as u8
-                    });
-                }
-                query.push(15);
-            }
-            query.pop();
-            let subject_len = 1 + (next(&mut state) % 140) as usize;
-            let period = 1 + (next(&mut state) % 6) as usize;
-            let motif: Vec<u8> = (0..period).map(|_| (next(&mut state) % 4) as u8).collect();
-            let bases: Vec<u8> = (0..subject_len)
-                .map(|i| {
-                    if round % 2 == 0 {
-                        motif[i % period]
-                    } else {
-                        (next(&mut state) % 4) as u8
-                    }
-                })
-                .collect();
-            let mut packed = vec![0u8; subject_len.div_ceil(4)];
-            for (i, b) in bases.iter().enumerate() {
-                packed[i / 4] |= b << (2 * (3 - i % 4));
-            }
-            for q_off in 0..query.len() {
-                for s_off in 0..subject_len {
-                    for x_dropoff in [5, 16, 40, i32::MIN] {
-                        let args = (q_off, s_off, subject_len, x_dropoff);
-                        assert_eq!(
-                            key(extend_hit_ungapped_exact_counted(
-                                &query,
-                                &packed,
-                                q_off,
-                                s_off,
-                                subject_len,
-                                x_dropoff,
-                                &matrix
-                            )),
-                            key(extend_hit_ungapped_exact_ported(
-                                &query,
-                                &packed,
-                                q_off,
-                                s_off,
-                                subject_len,
-                                x_dropoff,
-                                &matrix
-                            )),
-                            "round {round} {args:?}"
-                        );
-                        calls += 1;
-                    }
-                }
-            }
-        }
-        assert!(calls > 100_000, "{calls}");
-    }
-}
+#[path = "x_ungap_count_tests.rs"]
+mod tests;

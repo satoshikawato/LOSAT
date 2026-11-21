@@ -45,7 +45,8 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
         ReaderWarning::SeqId(warning) => {
             warnings.push_str(&format!(
                 "Warning: (1306.{}) {}\n",
-                warning.subcode, warning.message
+                warning.subcode,
+                String::from_utf8_lossy(&warning.message)
             ));
         }
     };
@@ -214,12 +215,19 @@ fn check(case: &Case) -> Vec<String> {
     match &run.error {
         None => {}
         Some(MaskReadError::Ncbi(error)) if case.segmasker => {
-            stderr.push_str(&error.what());
+            stderr.push_str(&String::from_utf8(error.what()).unwrap());
             stderr.push('\n');
             status = 1;
         }
         Some(MaskReadError::Ncbi(error)) => {
-            stderr.push_str(&error.report_default_ex(106, 16, "Application's execution failed"));
+            stderr.push_str(
+                &String::from_utf8(error.report_default_ex(
+                    106,
+                    16,
+                    "Application's execution failed",
+                ))
+                .unwrap(),
+            );
             status = 3;
         }
         Some(other) => problems.push(format!("error {other:?}")),
@@ -367,9 +375,10 @@ fn the_error_of_a_record_without_residues() {
     let Some(MaskReadError::Ncbi(error)) = &read.error else {
         panic!("{:?}", read.error)
     };
-    assert_eq!(error.get_msg(), "FASTA-Reader: No residues given");
+    assert_eq!(error.get_msg(), b"FASTA-Reader: No residues given");
     assert_eq!(
-        error.report_default_ex(106, 16, "Application's execution failed"),
+        String::from_utf8(error.report_default_ex(106, 16, "Application's execution failed"))
+            .unwrap(),
         // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         crate::wording::losat_text(
             "Error: (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)\n\

@@ -12,37 +12,6 @@ use crate::seqid::model::{
 };
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527
-// ```c++
-// void CDense_seg::CReserveHook::PreReadClassMember(CObjectIStream& in,
-//                                                   const CObjectInfoMI& member)
-// {
-//     static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, DENSE_SEG_RESERVE)> s_Reserve;
-//
-//     if ( !s_Reserve->Get() ) {
-//         return;
-//     }
-//     CDense_seg& ds = *CType<CDense_seg>::Get(member.GetClassObject());
-//     size_t numseg = ds.GetNumseg();
-//     try {
-//         switch ( member.GetMemberIndex() ) {
-//         case 4: // "starts"
-//             ds.SetStarts().reserve(ds.GetDim()*numseg);
-//             break;
-//         case 5: // "lens"
-//             ds.SetLens().reserve(numseg);
-//             break;
-//         case 6: // "strands"
-//             ds.SetStrands().reserve(ds.GetDim()*numseg);
-//             break;
-//         default:
-//             break;
-//         }
-//     }
-//     catch ( bad_alloc& /*ignored*/ ) {
-//         // ignore insufficient memory exception from advisory reserve()
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_seg.hpp:181-182 (the hook is global:
 // `NCBISER_HAVE_GLOBAL_READ_MEMBER_HOOK(CDense_seg, "starts,lens,strands", ...)`)
 // `numseg` and `dim` are `int` (Dense_seg_.hpp:92-93), so a negative one is a huge `size_t`, and the
@@ -92,64 +61,9 @@ pub(super) fn pre_read_member(
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:703-765
-// ```c++
-// void CSeqTable_multi_data::CReserveHook::PreReadChoiceVariant(
-//     CObjectIStream& in,
-//     const CObjectInfoCV& variant)
-// {
-//     static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, SEQ_TABLE_RESERVE)> s_Reserve;
-//
-//     if ( !s_Reserve->Get() ) {
-//         return;
-//     }
-//     if ( CSeq_table* table = CType<CSeq_table>::GetParent(in, 5, 2) ) {
-//         size_t size = table->GetNum_rows();
-//         CSeqTable_multi_data* data =
-//             CType<CSeqTable_multi_data>::Get(variant.GetChoiceObject());
-//         try {
-//             switch ( variant.GetVariantIndex() ) {
-//             case e_Int:
-//                 data->SetInt().reserve(size);
-//                 break;
-//             ...  (int1, int2, int8, real, string, bytes; the indexes of common-string and
-//                   common-bytes; loc, id, interval: `reserve(size)`)
-//             case e_Bit:
-//                 data->SetBit().reserve((size+7)/8);
-//                 break;
-//             ...
-//             default:
-//                 break;
-//             }
-//         }
-//         catch ( bad_alloc& /*ignored*/ ) {
-//             // ignore insufficient memory exception from advisory reserve()
-//         }
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_multi_data.hpp:231-232 (the hook
 // is global: `NCBISER_HAVE_GLOBAL_READ_VARIANT_HOOK(CSeqTable_multi_data, "*", ...)`)
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1906-1923
-// ```c++
-// TObjectPtr CObjectIStream::GetParentObjectPtr(TTypeInfo type,
-//                                               size_t max_depth,
-//                                               size_t min_depth) const
-// {
-//     for ( size_t i = 1, depth = 0, size = GetStackDepth(); i < size; ++i ) {
-//         const TFrame& frame = FetchFrameFromTop(i);
-//         if ( frame.GetFrameType() == TFrame::eFrameClass ||
-//              frame.GetFrameType() == TFrame::eFrameChoice ) {
-//             if ( depth >= min_depth && frame.HasTypeInfo(type) ) {
-//                 return const_cast<TObjectPtr>(frame.GetObjectPtr());
-//             }
-//             if ( ++depth > max_depth ) {
-//                 break;
-//             }
-//         }
-//     }
-//     return 0;
-// }
-// ```
 // The hook runs when the variant has been named, its frame on top of the stack: the multi-data's
 // own choice frame is depth 0, a column's `data` finds its Seq-table at depth 2, an `int-delta`
 // nested 1 to 3 times at 3 to 5, 4 times not (no reserve), an `int-scaled`'s data at 4 (NCBI
@@ -213,15 +127,6 @@ pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68
-// ```c++
-// void CSeq_descr::PostRead(void) const
-// {
-//     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
-//         NCBI_THROW(CSerialException, eInvalidData,
-//                    "empty Seq-descr is not allowed");
-//     }
-// }
-// ```
 // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless NCBI's environment or configuration file sets
 // it, which LOSAT does not read; NCBI 2.17.0 gives the error with the variable set too, c23 of
 // SURVEY_D3.)
@@ -235,73 +140,7 @@ fn seq_descr_post_read(value: Value) -> Result<Value, ReadError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Variation_ref.cpp:56-151
-// ```c++
-// void CVariation_ref::PostRead()
-// {
-//     // population-data: ignore; deprecated, drop
-//     if (Tparent::IsSetPopulation_data()) {
-//         ERR_POST(Error
-//                  << "Variation-ref.population-data is deprecated and "
-//                  "will be ignored");
-//         Tparent::ResetPopulation_data();
-//     }
-//
-//     // validated: move to VariantProperties.other-validation
-//     if (Tparent::IsSetValidated()) {
-//         if (SetVariant_prop().IsSetOther_validation()) {
-//             ERR_POST(Error
-//                      << "Both Variation-ref.validated and "
-//                      "Variation-ref.variant-properties.other-validation are "
-//                      "set; ignoring Variation-ref.validated");
-//         }
-//         else {
-//             SetVariant_prop().SetOther_validation(Tparent::GetValidated());
-//         }
-//         Tparent::ResetValidated();
-//     }
-//
-//     // clinical-test: should be moved to Seq-feat.dbxref; no access here!
-//     // FIXME: is this used anywhere?
-//     if (Tparent::IsSetClinical_test()) {
-//         ERR_POST(Error
-//                  << "Variation-ref.clinical-test is deprecated and "
-//                  "will be ignored");
-//         Tparent::ResetClinical_test();
-//     }
-//
-//     // allele-origin: move to Variant-properties
-//     if (Tparent::IsSetAllele_origin()) {
-//         if (SetVariant_prop().IsSetAllele_origin()) {
-//             ERR_POST(Error
-//                      << "Both Variation-ref.allele-origin and "
-//                      "Variation-ref.variant-properties.allele-origin are "
-//                      "set; ignoring Variation-ref.validated");
-//         }
-//         else {
-//             SetVariant_prop().SetAllele_origin(Tparent::GetAllele_origin());
-//         }
-//         Tparent::ResetAllele_origin();
-//     }
-//     ... (allele-state, allele-frequency and is-ancestral-allele the same way)
-//
-//     // pub: move to Seq-feat.dbxref; no access here
-//     // FIXME: do we need to do this?
-//     if (Tparent::IsSetPub()) {
-//         ERR_POST(Error
-//                  << "Variation-ref.pub is deprecated and "
-//                  "will be ignored");
-//         Tparent::ResetPub();
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/VariantProperties.cpp:50-55
-// ```c++
-// CVariantProperties::CVariantProperties(void)
-// {
-//     // Per Ming Ward and Lon Phan, 4/21/2011
-//     // the current bitfield version is 5
-//     SetVersion(5);
-// }
-// ```
 // `SetVariant_prop()` makes a `VariantProperties` (version 5) when the member is not set. The
 // messages are posted when the class has been read, before the members that follow it.
 fn variation_ref_post_read(mut value: Value, posts: &mut Vec<Post>) -> Value {

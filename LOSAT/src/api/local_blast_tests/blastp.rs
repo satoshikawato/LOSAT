@@ -102,20 +102,8 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new(8);
@@ -146,18 +134,13 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new(1);
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
-    // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851 and c++/src/objtools/align_format/tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
     // run as "0" and "6"); SAM (17) is NCBI's error for blastp (blast_args.cpp:2876-2879; LOSAT's
     // BLASTP writes every other format of NCBI's blastp since line RG T3a), and a delimiter that a
@@ -178,6 +161,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -222,6 +206,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -247,6 +232,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 sink: OutputSink::Writer(&mut report),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -257,7 +243,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -280,6 +266,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -362,6 +349,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -377,13 +365,7 @@ fn run_local_outputs(
     (sinks, diagnostics, result)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // A batch of queries without residues only stops NCBI after the prolog, with one message
 // per query (oracle `blastp.rec_empty_all.q.*`). This half checks the entry's own error (NCBI's
 // error with exit code 3 and its message), the prolog it wrote and that no other report has a
@@ -406,7 +388,7 @@ fn a_batch_of_queries_without_residues_stops() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
@@ -418,9 +400,6 @@ fn a_batch_of_queries_without_residues_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c++
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
 // The rendered rows of blastp's final hits made a window of queries at a time
 // (`src/algorithm/blastp/blast_engine/query_rows.rs`): outfmt 0, BLAST XML and the tabular fields
 // that show the alignment write the bytes of the rows made for every query up front.
@@ -741,6 +720,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -812,6 +792,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: None,
         };
@@ -892,6 +873,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };

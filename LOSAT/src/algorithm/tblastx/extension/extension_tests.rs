@@ -37,6 +37,6 @@ fn test_get_score_stop_codon() {
     assert!(score_stop <= 0);
 
     let score_stop_stop = get_score(ncbistdaa::STOP, ncbistdaa::STOP);
-    // NCBI BLAST BLOSUM62: *-* = +1 (sm_blosum62.c)
+    // NCBI BLAST BLOSUM62: *-* = +1 (c++/src/util/tables/sm_blosum62.c)
     assert_eq!(score_stop_stop, 1);
 }

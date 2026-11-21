@@ -177,10 +177,6 @@ Acceptance:
 
 Make all final HSP E-value assignments follow NCBI:
 
-```c
-hsp->evalue = BLAST_KarlinStoE_simple(score, kbp[kbp_context],
-                                      query_info->contexts[hsp->context].eff_searchsp);
-```
 
 Implementation direction:
 

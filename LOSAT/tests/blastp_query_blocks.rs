@@ -25,14 +25,6 @@
 //! (`LOSAT_X_BPREDOPAR`: the default test, `blastp_redo_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!             ...
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//! ```
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -290,6 +282,102 @@ fn one_block_takes_the_search_of_all_queries() {
         );
     }
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
+}
+
+/// One blastp run with unified P-values (`-comp_based_stats 2u`, outfmt 6, one thread) of a query
+/// file of `tests/fasta/x5` against the proteome `PajaWSV.faa`, in batches of `batch` letters and
+/// blocks of `block`: the exit status, the standard output, the lines of the standard error that
+/// are LOSAT's refusal, and the number of searches (`[TIMING] blastp_total` lines).
+fn blastp_unified_p(
+    query: &str,
+    batch: &str,
+    block: &str,
+    extra: &[&str],
+) -> (Option<i32>, Vec<u8>, Vec<String>, usize) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+            || text == "BATCH_SIZE"
+            || text == "CHUNK_SIZE"
+            || text == "OVERLAP_CHUNK_SIZE"
+        {
+            command.env_remove(name);
+        }
+    }
+    let _log = worker_log_if_unset(&mut command, "blastp_query_blocks_worker");
+    let output = command
+        .arg("blastp")
+        .arg("-query")
+        .arg(fixture(query))
+        .arg("-subject")
+        .arg(fixture("PajaWSV.faa"))
+        .args(["-comp_based_stats", "2u", "-outfmt", "6"])
+        .args(["-num_threads", "1"])
+        .args(extra)
+        .env("LOSAT_TIMING", "1")
+        .env("BATCH_SIZE", batch)
+        .env("LOSAT_X_BPQBLOCK", block)
+        .output()
+        .expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let searches = stderr
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] blastp_total:"))
+        .count();
+    let refusals = stderr
+        .lines()
+        .filter(|line| line.contains("unified P-values"))
+        .map(str::to_owned)
+        .collect();
+    (output.status.code(), output.stdout, refusals, searches)
+}
+
+// Unified P-values (`-comp_based_stats 2u`). LOSAT refuses a query batch in which a query is
+// followed by one without a search space (PD-LOSAT-NCBI-DEFECTS), after the reports of the
+// batches before, which the search of all queries writes: the block plan leaves a search that can
+// meet that refusal (unified P-values without `-searchsp`) to it. With `-searchsp` nothing is
+// refused, and the search runs in blocks. No NCBI counterpart: the block search is LOSAT's.
+#[test]
+fn unified_p_values_without_a_search_space_take_the_search_of_all_queries() {
+    // `x5/aba2x.faa` in batches of 140 letters: {A, B}, then {A again, 50 X}, which is refused
+    // after the rows of the first batch, the same with blocks of one batch (`1`) and without.
+    let reference = blastp_unified_p("x5/aba2x.faa", "140", "0", &[]);
+    assert_eq!(reference.0, Some(1), "{:?}", reference.2);
+    assert!(
+        !reference.1.is_empty(),
+        "the rows of the batch before the refused one"
+    );
+    assert!(
+        reference.2.len() == 1
+            && reference.2[0].contains("for query again_BDT63085.1, which is followed")
+            && reference.2[0].contains("(allx: no residue that can be scored"),
+        "{:?}",
+        reference.2
+    );
+    let blocks = blastp_unified_p("x5/aba2x.faa", "140", "1", &[]);
+    assert_eq!(blocks.0, reference.0);
+    assert!(
+        blocks.1 == reference.1,
+        "the rows before the refusal differ"
+    );
+    assert_eq!(blocks.2, reference.2);
+
+    // `x5/ab.faa` in batches of 100 letters: {A}, {B}; nothing to refuse. Without `-searchsp`
+    // the search of all queries runs whatever the block size; with it, a search per block.
+    for (extra, block_searches) in [
+        (&[][..], 1),
+        (&["-searchsp", "100000000", "-evalue", "1000"][..], 2),
+    ] {
+        let reference = blastp_unified_p("x5/ab.faa", "100", "0", extra);
+        let blocks = blastp_unified_p("x5/ab.faa", "100", "1", extra);
+        assert_eq!(reference.0, Some(0), "{extra:?}");
+        assert_eq!(blocks.0, Some(0), "{extra:?}");
+        assert!(!reference.1.is_empty(), "{extra:?}: the queries have rows");
+        assert!(blocks.1 == reference.1, "{extra:?}: rows differ");
+        assert_eq!(reference.3, 1, "{extra:?}: the reference");
+        assert_eq!(blocks.3, block_searches, "{extra:?}: searches");
+    }
 }
 
 // The default: with no variable the block is 50,000 query letters (the fixture's queries have

@@ -181,8 +181,7 @@ jobs:
       - name: Build exact native release artifact
         run: cd LOSAT && cargo build --release --locked
 
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # The shipped binary holds FMA instructions and references to fma only where LOSAT's one
       # mul_add emulates that line (docs/agents/diagnostics.md, "Floating-point contract").
       - name: Floating-point contract of the artifact
@@ -191,7 +190,7 @@ jobs:
 
       - name: Assemble, extract, and smoke native artifact
         run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
           # The helper invokes a committed BLASTP contract without changing or classifying its output.
           python LOSAT/tests/prepare_release_candidate_v010.py native \
             --repo-root . \
@@ -239,7 +238,7 @@ jobs:
 
       - name: Assemble, extract, and smoke serial-Wasm artifact
         run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
           # The WASI runner supplies the existing CLI inputs and does not implement BLAST behavior.
           python LOSAT/tests/prepare_release_candidate_v010.py wasm \
             --repo-root . \
@@ -299,7 +298,7 @@ jobs:
 
       - name: Run full integrated certification only when explicitly requested
         run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-832
           # Existing program authorities classify raw output; this job only invokes and archives them.
           python LOSAT/tests/certify_integrated_runtime_v010.py \
             --expected-sha "$CANDIDATE_SHA" \

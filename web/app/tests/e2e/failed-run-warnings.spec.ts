@@ -7,7 +7,9 @@
 // line for line. The FakeEngine fails a run of an empty input with a marked warning. A run of two
 // searches (ABI §7) has the outcome of the search of its own -outfmt: it fails as the command line
 // fails, with that search's warnings only (D3 review, 2026-11-19), and the formatting warnings of its
-// own format only (D3 review r2, 2026-11-19).
+// own format only (D3 review r2, 2026-11-19). A completed run whose -outfmt is structured shows the
+// queries' warnings that the command line writes for the other formats that the run writes (D3
+// review r3, 2026-11-19).
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -72,7 +74,8 @@ test('a failed run shows the warnings written before its error, as the command l
   await pickRun(page, 1);
   const status = page.getByTestId('results-status');
   await expect(status).toHaveAttribute('data-run-status', 'failed');
-  await expect(status).toContainText('A failed run keeps no results. It keeps the warnings written before the error.');
+  // The command line's outfmt 0 (the run's own) holds its prolog before the error (D15, 2026-11-20).
+  await expect(status).toContainText('It keeps the outputs written before the error. It keeps the warnings written before the error.');
   const warnings = page.getByTestId('results-failed-diagnostics');
   await expect(page.getByTestId('results-failed-warnings').getByRole('heading', { name: 'Warnings' })).toBeVisible();
   if (!BUILD_HAS_ENGINE) {
@@ -216,4 +219,38 @@ test('a failed run shows no formatting warning of the formats that its command l
   if (cli === undefined) return;
   expect(cli.status).toBe(3);
   expect(cli.stderr).toBe(`${shown}${ERROR}\n`);
+});
+
+// A structured -outfmt (5) writes none of the queries' warnings (NCBI's blast_format.cpp:1431-1452),
+// and the run also writes outfmt 0, 6 and 7, whose command lines warn of a query without residues:
+// the run's warnings are the CLI's standard error for -outfmt 5, then that warning, which the CLI's
+// standard error for outfmt 6 adds (line WQA's sweep, D3 review r3 M2, 2026-11-19: it was lost).
+test('a run with a structured -outfmt shows the query warnings that its other formats write', async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the warnings of the engine (engine build)');
+  const query = `>qempty no residues\n${QUERY}`;
+  const subject = `>s1 first subject\n${dna(9, 120)}${dna(7, 300).slice(30, 270)}${dna(10, 120)}\n`;
+  const warning = 'Warning: [blastn] Query_1 qempty no residues: Sequence contains no data \n';
+  await program(page, 'blastn');
+  await paste(page, 'query', query);
+  await paste(page, 'subject', subject);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-outfmt 5');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await pickRun(page, 1);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-diagnostics')).toBeVisible();
+  const shown = await page.getByTestId('run-diagnostics').evaluate((element) => element.textContent ?? '');
+  expect(shown).toBe(warning);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The native standard error: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const directory = mkdtempSync(join(testInfo.outputPath(), 'native-'));
+  writeFileSync(join(directory, 'query.fa'), query);
+  writeFileSync(join(directory, 'subject.fa'), subject);
+  const stderr = (outfmt: string) =>
+    String(spawnSync(NATIVE!, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory }).stderr);
+  expect(stderr('5')).toBe('');
+  expect(stderr('6')).toBe(warning);
 });

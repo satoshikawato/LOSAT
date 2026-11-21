@@ -166,12 +166,13 @@ fn sanity_check_failures() {
     let data = load("noindex.sqlite3");
     let e = TaxonomySqlite::open_named(&data, "/db/taxonomy4blast.sqlite3")
         .err()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert_eq!(
         e,
         "Database '/db/taxonomy4blast.sqlite3' does not have index TaxidInfoCompositeIdx_parent. Please run the following command or contact your system administrator to install it:\nupdate_blastdb.pl --decompress taxdb"
     );
-    let e = TaxonomySqlite::open(&data).err().unwrap();
+    let e = TaxonomySqlite::open(&data).err().unwrap().to_string();
     assert!(
         e.starts_with("Database 'taxonomy4blast.sqlite3' does not have index "),
         "{}",
@@ -179,7 +180,7 @@ fn sanity_check_failures() {
     );
     // an empty file is an empty database: both missing, the index is reported first
     let empty = load("empty.bin");
-    let e = TaxonomySqlite::open(&empty).err().unwrap();
+    let e = TaxonomySqlite::open(&empty).err().unwrap().to_string();
     assert!(
         e.contains("does not have index TaxidInfoCompositeIdx_parent"),
         "{}",
@@ -187,7 +188,7 @@ fn sanity_check_failures() {
     );
     // the table row removed from sqlite_master, the index there
     let d = load("notable.sqlite3");
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(
         e.contains("does not have table TaxidInfo. Please run"),
         "{}",
@@ -198,11 +199,12 @@ fn sanity_check_failures() {
 #[test]
 fn not_a_database() {
     let d = load("notdb.bin");
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(e.ends_with("[26] file is not a database"), "{}", e);
     let e = TaxonomySqlite::open(&b"SQLite format 3\0"[..])
         .err()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert!(e.contains("not a database"), "{}", e);
 }
 
@@ -211,7 +213,7 @@ fn wal_refused() {
     let mut d = load("p512.sqlite3");
     d[18] = 2;
     d[19] = 2;
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(e.contains("WAL"), "{}", e);
 }
 
@@ -322,7 +324,7 @@ impl ReadAt for FileSrc {
     fn len(&self) -> u64 {
         self.1
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         ReadAt::read_exact_at(&self.0, buf, offset)
     }
 }

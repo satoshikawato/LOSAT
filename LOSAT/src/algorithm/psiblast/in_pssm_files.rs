@@ -8,33 +8,6 @@
 //! LOSAT's refusals of what NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
-//! ```c++
-//! CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
-//!                              const CPsiBlastIterationState* itr)
-//! {
-//!     if (pssm.Empty()) {
-//!         return;
-//!     }
-//!
-//!     if (m_CmdLineArgs->SaveCheckpoint() &&
-//!         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//!          itr->GetIterationNumber() >= 1)) {
-//!         *m_CmdLineArgs->GetCheckpointStream() << MSerial_AsnText << *pssm;
-//!     }
-//!
-//!     if (m_CmdLineArgs->SaveAsciiPssm() &&
-//!         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//!          itr->GetIterationNumber() >= 1)) {
-//!         if (m_AncillaryData.Empty() && pssm.NotEmpty()) {
-//!             _ASSERT(itr->GetIterationNumber() == 1);
-//!             m_AncillaryData = ExtractPssmAncillaryData(*pssm);
-//!         }
-//!         CBlastFormatUtil::PrintAsciiPssm(*pssm,
-//!                                          m_AncillaryData,
-//!                                          *m_CmdLineArgs->GetAsciiPssmStream());
-//!     }
-//! }
-//! ```
 //! With `-in_pssm` the loop's first `SavePssmToFile(pssm, &itr)` writes the input PSSM, the object
 //! that `CPsiBlast` searches (`CPsiBlast(pssm, db_adapter, psi_opts)` holds the same `CRef`); its
 //! ASCII PSSM takes the ancillary data of the PSSM itself, which stays for the files written after
@@ -51,6 +24,7 @@ use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
+use crate::report::serial::encoder::ReplacedChar;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -111,8 +85,46 @@ fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> 
     }
     if request.ascii_path.is_some() {
         check_long_ascii(&file.object)?;
+        if !ascii_letters_defined(&file.object) {
+            bail!(
+                "an ASCII PSSM (-out_ascii_pssm) of a PSSM query with a residue that NCBIstdaa does not have (NCBI BLAST+ prints its letter from memory it never set) is not supported by LOSAT's PSIBLAST"
+            );
+        }
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:252-261
+// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:88-93 (`GetQuerySequenceData`)
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2045-2054
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:898-905 and the tables
+// of c++/src/util/sequtil/sequtil_tables.cpp:1674-1707 (`CIupacaaToStdaa`: the code of each
+// capital for it and for its lower case, 0xff for every other byte) and 1748-1781 (`CEaaToStdaa`:
+// the capitals, `*` and `-`, 0xff for every other byte)
+/// Whether NCBI's ASCII PSSM prints a letter of NCBIstdaa for every query residue of `object`:
+/// the query's data converts through `CSeqConvert`, whose tables give a code to the letters of
+/// iupacaa in either case (a lower-case letter prints its capital: M4a-1c LG probe
+/// `tk_low_iupac.files`), and to the capitals, `*` and `-` of ncbieaa; any other byte gives 0xff,
+/// whose `char` (-1) reads before `NCBISTDAA_TO_AMINOACID`, and an NCBIstdaa code of 28 or more
+/// reads past it (NCBI BLAST+ 2.17.0 printed a NUL byte, M4a-1c E probe
+/// `old_ps_bad_iupacaa.ps.files`).
+fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
+    match object
+        .pssm
+        .query
+        .as_ref()
+        .and_then(SeqEntry::seq)
+        .and_then(|query| query.inst.seq_data.as_ref())
+    {
+        Some(SeqData::Ncbistdaa(codes)) => {
+            codes.iter().all(|&code| usize::from(code) < BLASTAA_SIZE)
+        }
+        Some(SeqData::Iupacaa(text)) => text.iter().all(u8::is_ascii_alphabetic),
+        Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .all(|&c| c.is_ascii_uppercase() || c == b'*' || c == b'-'),
+        Some(SeqData::Other(_)) | None => true,
+    }
 }
 
 /// The refusal of the long ASCII form of a PSSM file that NCBI cannot print (`rounds_input`).
@@ -147,15 +159,6 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:274-282
-    // ```c++
-    //             for (SIZE_TYPE c = 0; c < DIM(RESIDUE_ORDER); c++) {
-    //                 if ((*pssm)(RESIDUE_ORDER[c], i) != BLAST_SCORE_MIN) {
-    //                     double value = 100;
-    //                     value *= (*weighted_res_freqs)(RESIDUE_ORDER[c], i);
-    //                     // round to the nearest integer
-    //                     value = (int)(value + (value > 0. ? 0.5 : -0.5));
-    //                     out << setw(4) << (int)value;
-    // ```
     // A weighted frequency whose rounded percentage is not an `int` (or is NaN) is undefined
     // behaviour in that conversion (x86-64 prints -2147483648): LOSAT's refusal, for the cells
     // NCBI prints (the engine's frequencies lie in [0, 1]; only a file reaches this).
@@ -189,7 +192,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 }
 
 /// The query's letters as NCBIstdaa codes (`CPssm::GetQuerySequenceData`, which converts an
-/// IUPACaa or NCBIeaa `Seq-data`; `in_pssm` admits only letters of NCBIstdaa).
+/// IUPACaa or NCBIeaa `Seq-data`, an IUPACaa letter in either case: `ascii_letters_defined`;
+/// `in_pssm` admits only letters of NCBIstdaa).
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     const LETTERS: &[u8; BLASTAA_SIZE] =
         crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID;
@@ -201,13 +205,24 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
         .and_then(|query| query.inst.seq_data.as_ref())
     {
         Some(SeqData::Ncbistdaa(codes)) => codes.clone(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
+        Some(SeqData::Iupacaa(text)) => text
+            .iter()
+            .map(|letter| {
+                let letter = letter.to_ascii_uppercase();
+                LETTERS.iter().position(|&c| c == letter).unwrap_or(0) as u8
+            })
+            .collect(),
+        Some(SeqData::Ncbieaa(text)) => text
             .iter()
             .map(|letter| LETTERS.iter().position(|c| c == letter).unwrap_or(0) as u8)
             .collect(),
         Some(SeqData::Other(_)) | None => Vec::new(),
     }
 }
+
+/// The files of the input PSSM: its ASN.1 text, its ASCII PSSM and NCBI's posts of the bytes that
+/// the ASN.1 text's stream replaces.
+pub(crate) type InputFiles = (Option<Vec<u8>>, Option<Vec<u8>>, Vec<ReplacedChar>);
 
 impl InPssmRounds {
     /// LOSAT's refusal of the input PSSM's files (`rounds_input`), made once the database is opened
@@ -221,22 +236,23 @@ impl InPssmRounds {
 
     /// The files of the input PSSM at the start of round 1 (`SavePssmToFile`): its ASN.1 text and
     /// its ASCII PSSM, as requested.
-    pub(crate) fn files(
-        &self,
-        request: &PssmRequest,
-    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+    ///
+    /// The third value is NCBI's post of each byte that its ASN.1 text stream replaces in the
+    /// file (a query title outside the visible ASCII range; `pssm::file_posts`).
+    pub(crate) fn files(&self, request: &PssmRequest) -> Result<InputFiles> {
         let Some(object) = self.object.as_ref() else {
-            return Ok((None, None));
+            return Ok((None, None, Vec::new()));
         };
-        let asn = match request.asn_path {
-            Some(_) => Some(
-                crate::report::serial::pssm::asn_text(object)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            ),
-            None => None,
+        let (asn, posts) = match request.asn_path {
+            Some(_) => {
+                let (asn, posts) = crate::report::serial::pssm::asn_text_posting(object)
+                    .map_err(|error| anyhow::anyhow!("{error}"))?;
+                (Some(asn), posts)
+            }
+            None => (None, Vec::new()),
         };
         let ascii = request.ascii_path.as_ref().map(|_| ascii_pssm(object));
-        Ok((asn, ascii))
+        Ok((asn, ascii, posts))
     }
 
     /// The ASN.1 text of the input PSSM after round 1's K/A write-back (`ungapped`: `kbp_psi[0]`,
@@ -244,25 +260,6 @@ impl InPssmRounds {
     /// writes after a round 1 without alignments.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:150-168
-    /// ```c++
-    ///     // Save the K&A values be as they might have been modified in the
-    ///     // composition adjustment library
-    ///     if (m_Pssm.NotEmpty()) {
-    ///         CPssm& pssm = m_Pssm->SetPssm();
-    ///         pssm.SetLambda
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->Lambda);
-    ///         pssm.SetKappa
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->K);
-    ///         pssm.SetH
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_gap_psi[0]->H);
-    ///         pssm.SetLambdaUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->Lambda);
-    ///         pssm.SetKappaUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->K);
-    ///         pssm.SetHUngapped
-    ///             (core_data->m_ScoreBlk->GetPointer()->kbp_psi[0]->H);
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:157-191 (`CPssm::SetLambda`
     /// and the others set the members of `finalData`)
     /// The redo of the composition-based statistics works on copies of the score block
@@ -273,9 +270,9 @@ impl InPssmRounds {
         request: &PssmRequest,
         ungapped: KarlinBlk,
         gapped: KarlinBlk,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<(Option<Vec<u8>>, Vec<ReplacedChar>)> {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
-            return Ok(None);
+            return Ok((None, Vec::new()));
         };
         // The six values are written in place of the object's (no copy of the object).
         let karlin = crate::report::serial::pssm::FinalKarlin {
@@ -286,8 +283,8 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_with_karlin(object, Some(karlin))
-            .map(Some)
+        crate::report::serial::pssm::asn_text_posting_with_karlin(object, Some(karlin))
+            .map(|(asn, posts)| (Some(asn), posts))
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
 }
@@ -297,56 +294,8 @@ impl InPssmRounds {
 /// diagnostics when it has `informationContent`, and the PSI blocks of its `finalData` (a member
 /// it lacks is `CPssm::kInvalidStat`, 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
-// ```c++
-// ExtractPssmAncillaryData(const CPssmWithParameters& pssm)
-// {
-//     _ASSERT(pssm.CanGetPssm());
-//     pair<double, double> lambda, k, h;
-//     lambda.first = pssm.GetPssm().GetLambdaUngapped();
-//     lambda.second = pssm.GetPssm().GetLambda();
-//     k.first = pssm.GetPssm().GetKappaUngapped();
-//     k.second = pssm.GetPssm().GetKappa();
-//     h.first = pssm.GetPssm().GetHUngapped();
-//     h.second = pssm.GetPssm().GetH();
-//     return CRef<CBlastAncillaryData>(new CBlastAncillaryData(lambda, k, h, 0,
-//                                                              true));
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
-// ```c++
-// CBlastAncillaryData::CBlastAncillaryData(pair<double, double> lambda,
-//                                          pair<double, double> k,
-//                                          pair<double, double> h,
-//                                          Int8 effective_search_space,
-//                                          bool is_psiblast /* = false */)
-// : m_GumbelBlk(0), m_UngappedKarlinBlk(0), m_GappedKarlinBlk(0), m_PsiUngappedKarlinBlk(0),
-//   m_PsiGappedKarlinBlk(0), m_SearchSpace(0), m_LengthAdjustment(0)
-// {
-//     if (is_psiblast) {
-//         m_PsiGappedKarlinBlk = Blast_KarlinBlkNew();
-//         m_PsiGappedKarlinBlk->Lambda = lambda.second;
-//         m_PsiGappedKarlinBlk->K = k.second;
-//         m_PsiGappedKarlinBlk->H = h.second;
-//
-//         m_PsiUngappedKarlinBlk = Blast_KarlinBlkNew();
-//         m_PsiUngappedKarlinBlk->Lambda = lambda.first;
-//         m_PsiUngappedKarlinBlk->K = k.first;
-//         m_PsiUngappedKarlinBlk->H = h.first;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196
-// ```c++
-//     // We use whether the information content is available to assume whether
-//     // the PSSM computation was done or not
-//     bool pssm_calculation_done = info_content.empty() ? false : true;
-//
-//     if (pssm_calculation_done) {
-//         out << "\nLast position-specific scoring matrix computed, weighted ";
-//         out << "observed percentages rounded down, information per position, ";
-//         out << "and relative weight of gapless real matches to pseudocounts\n";
-//     } else {
-//         out << "\nLast position-specific scoring matrix computed\n";
-//     }
-// ```
 fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
     let pssm = &object.pssm;
     let rows_n = usize::try_from(pssm.num_rows).unwrap_or(0);
@@ -405,272 +354,5 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::report::serial::asn_types::Value;
-    use crate::report::serial::pssm::{
-        FormatRpsDbParameters, ObjectId, Pssm, PssmIntermediateData, PssmParameters, PssmQuery,
-        SeqInst, Seqdesc,
-    };
-    use crate::seqid::ParsedSeqId;
-
-    /// A PSSM of `columns` positions of the letter M whose query has the Seq-id `id`.
-    fn pssm(id: ObjectId, columns: usize, rows: usize) -> PssmWithParameters {
-        PssmWithParameters {
-            pssm: Pssm {
-                is_protein: Some(true),
-                identifier: None,
-                num_rows: rows as i32,
-                num_columns: columns as i32,
-                row_labels: None,
-                by_row: Some(false),
-                query: Some(SeqEntry::Seq(Box::new(PssmQuery {
-                    ids: vec![ParsedSeqId::Local(id)],
-                    descr: None,
-                    inst: SeqInst::new(
-                        ("raw", 2),
-                        ("aa", 3),
-                        Some(columns as u32),
-                        Some(SeqData::Ncbistdaa(vec![12; columns])),
-                    ),
-                    annot: None,
-                }))),
-                intermediate_data: Some(PssmIntermediateData {
-                    freq_ratios: (0..columns * rows).map(|i| i as f64).collect(),
-                    ..PssmIntermediateData::default()
-                }),
-                final_data: None,
-            },
-            params: Some(PssmParameters {
-                pseudocount: Some(0),
-                rpsdbparams: Some(FormatRpsDbParameters {
-                    matrix_name: b"BLOSUM62".to_vec(),
-                    gap_open: None,
-                    gap_extend: None,
-                }),
-                ..PssmParameters::default()
-            }),
-        }
-    }
-
-    fn request(asn: bool, ascii: bool) -> PssmRequest {
-        PssmRequest {
-            asn_path: asn.then(|| "f.asn".to_string()),
-            ascii_path: ascii.then(|| "f.txt".to_string()),
-            save_each: false,
-            pseudocount: 0,
-            versions: Default::default(),
-        }
-    }
-
-    const GAPPED: KarlinBlk = KarlinBlk {
-        lambda: 0.267,
-        k: 0.0425,
-        h: 0.14,
-    };
-
-    // psiblast_aux_priv.cpp:440-502 (quoted at `with_computed_scores`): the ratios of a PSSM of
-    // fewer rows get zeros up to 28 rows in each column, the scores are the engine's by column, the
-    // gapped values the engine's, and the parameters get the gap costs.
-    #[test]
-    fn a_ratio_only_pssm_gets_the_constructors_scores() {
-        let mut value = pssm(ObjectId::Id(7), 2, 26);
-        let rows = vec![[1; BLASTAA_SIZE], [2; BLASTAA_SIZE]];
-        with_computed_scores(&mut value, &rows, GAPPED);
-        let matrix = &value.pssm;
-        assert_eq!(matrix.num_rows, 28);
-        let ratios = &matrix.intermediate_data.as_ref().unwrap().freq_ratios;
-        assert_eq!(ratios.len(), 56);
-        assert_eq!(&ratios[24..30], &[24.0, 25.0, 0.0, 0.0, 26.0, 27.0]);
-        assert_eq!(&ratios[54..], &[0.0, 0.0]);
-        let data = matrix.final_data.as_ref().unwrap();
-        assert_eq!(data.scores.len(), 56);
-        assert_eq!((data.scores[27], data.scores[28]), (1, 2));
-        assert_eq!((data.lambda, data.kappa, data.h), (0.267, 0.0425, 0.14));
-        assert_eq!(data.lambda_ungapped, None);
-        let rps = value.params.unwrap().rpsdbparams.unwrap();
-        assert_eq!((rps.gap_open, rps.gap_extend), (Some(11), Some(1)));
-    }
-
-    // The refusals of `rounds_input`, and what it keeps: the query's Seq-id (an integer stays
-    // one), the object only when a file is written.
-    #[test]
-    fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
-        // A file whose PSSM holds the members `unread` that the search does not read.
-        let file = |unread: Vec<&'static str>, computed: bool, params: bool| {
-            let mut object = pssm(ObjectId::Id(7), 2, 28);
-            if !params {
-                object.params = None;
-            }
-            let query = object
-                .pssm
-                .query
-                .as_mut()
-                .and_then(SeqEntry::seq_mut)
-                .unwrap();
-            for name in unread {
-                match name {
-                    "Seqdesc" => {
-                        let comment = crate::report::serial::asn_types::member_index(
-                            crate::report::serial::asn_types::table::named::SEQDESC,
-                            "comment",
-                        );
-                        query.descr = Some(vec![Seqdesc::Other(Value::Choice(
-                            comment as u16,
-                            Box::new(Value::Str(b"x".to_vec())),
-                        ))]);
-                    }
-                    "topology" => query.inst.topology = Some(2),
-                    "annot" => query.annot = Some(Vec::new()),
-                    other => unreachable!("{other}"),
-                }
-            }
-            InPssmFile {
-                object,
-                computed,
-                valid: true,
-            }
-        };
-        let refusal = |input: InPssmRounds| input.refuse_written_back().map(|()| input);
-        let input = refusal(rounds_input(
-            file(vec![], false, true),
-            &request(false, false),
-        ))
-        .unwrap();
-        assert!(input.object.is_none());
-        let input = refusal(rounds_input(
-            file(vec![], false, true),
-            &request(true, false),
-        ))
-        .unwrap();
-        assert!(input.object.is_some());
-        // The members that the search does not read are written back with the others.
-        let input = refusal(rounds_input(
-            file(vec!["Seqdesc", "topology", "annot"], false, true),
-            &request(true, false),
-        ))
-        .unwrap();
-        let (asn, _) = input.files(&request(true, false)).unwrap();
-        let asn = String::from_utf8(asn.unwrap()).unwrap();
-        assert!(
-            asn.contains("comment \"x\"")
-                && asn.contains("topology circular")
-                && asn.contains("annot {\n      }"),
-            "{asn}"
-        );
-        let error = refusal(rounds_input(
-            file(vec![], true, false),
-            &request(true, false),
-        ))
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("without params.rpsdbparams"), "{error}");
-        refusal(rounds_input(
-            file(vec![], false, false),
-            &request(true, false),
-        ))
-        .unwrap();
-        // A PSSM that NCBI's checks refuse writes nothing.
-        let mut invalid = file(vec!["annot"], true, false);
-        invalid.valid = false;
-        assert!(refusal(rounds_input(invalid, &request(true, true)))
-            .unwrap()
-            .object
-            .is_none());
-        // The long ASCII form needs every column it reads.
-        let mut long = file(vec![], false, true);
-        let data = long.object.pssm.intermediate_data.as_mut().unwrap();
-        data.information_content = Some(vec![0.5, 0.5]);
-        data.num_matching_seqs = Some(vec![2, 2]);
-        data.gapless_column_weights = Some(vec![1.0]);
-        data.weighted_res_freqs_per_pos = Some(vec![0.0; 56]);
-        let error = refusal(rounds_input(long, &request(false, true)))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("informationContent"), "{error}");
-    }
-
-    // The review of PS5b, N1 and S1: a longer `weightedResFreqsPerPos` is read as NCBI's
-    // `Convert2Matrix` reads it (its first cells); a printed weighted frequency whose rounded
-    // percentage is not an `int`, or is NaN, is refused (NCBI's conversion is undefined behaviour).
-    #[test]
-    fn the_long_ascii_form_reads_the_first_cells_and_refuses_weights_outside_int() {
-        let long = |weighted: Vec<f64>| {
-            let mut object = pssm(ObjectId::Id(1), 1, 28);
-            let mut row = [-1; BLASTAA_SIZE];
-            row[0] = BLAST_SCORE_MIN;
-            with_computed_scores(&mut object, &[row], GAPPED);
-            let data = object.pssm.intermediate_data.as_mut().unwrap();
-            data.information_content = Some(vec![0.5]);
-            data.num_matching_seqs = Some(vec![1]);
-            data.gapless_column_weights = Some(vec![0.0]);
-            data.weighted_res_freqs_per_pos = Some(weighted);
-            check_long_ascii(&object)
-        };
-        let mut weighted = vec![0.25; 28];
-        long(weighted.clone()).unwrap();
-        weighted.extend([7.0, 8.0]);
-        long(weighted.clone()).unwrap();
-        long(vec![0.25; 27]).unwrap_err();
-        // Row 0 (`-`) is not printed: its value is not read.
-        let mut unprinted = vec![0.25; 28];
-        unprinted[0] = f64::NAN;
-        long(unprinted).unwrap();
-        for value in [1e8, -1e8, f64::NAN, f64::INFINITY] {
-            let mut weighted = vec![0.25; 28];
-            weighted[1] = value;
-            let error = long(weighted).unwrap_err().to_string();
-            assert!(error.contains("not an int or is NaN"), "{value}: {error}");
-        }
-        let mut edge = vec![0.25; 28];
-        edge[1] = 21_474_836.47;
-        long(edge).unwrap();
-    }
-
-    // psiblast_impl.cpp:150-168 (quoted at `written_back`): the six values of `finalData`.
-    #[test]
-    fn the_write_back_sets_the_searched_blocks() {
-        let mut object = pssm(ObjectId::Str(b"myq".to_vec()), 1, 28);
-        with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED);
-        let input = InPssmRounds {
-            object: Some(object),
-            refusal: None,
-        };
-        let ungapped = KarlinBlk {
-            lambda: 0.3176,
-            k: 0.134,
-            h: 0.401,
-        };
-        let text = input
-            .written_back(&request(true, false), ungapped, GAPPED)
-            .unwrap()
-            .unwrap();
-        let read = crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap();
-        let data = read.pssm.final_data.unwrap();
-        assert_eq!(
-            (data.lambda_ungapped, data.kappa_ungapped, data.h_ungapped),
-            (Some(0.3176), Some(0.134), Some(0.401))
-        );
-        assert_eq!((data.lambda, data.kappa, data.h), (0.267, 0.0425, 0.14));
-        assert_eq!(
-            input
-                .written_back(&request(false, true), ungapped, GAPPED)
-                .unwrap(),
-            None
-        );
-    }
-
-    // blastfmtutil.cpp:186-196 (quoted at `ascii_pssm`): the short form of a PSSM without its
-    // information content, with the PSI blocks of its file (0 for those it lacks).
-    #[test]
-    fn a_file_pssm_without_information_content_prints_the_short_form() {
-        let mut object = pssm(ObjectId::Id(1), 1, 28);
-        let mut row = [-1; BLASTAA_SIZE];
-        row[1] = 4;
-        row[0] = BLAST_SCORE_MIN;
-        with_computed_scores(&mut object, &[row], GAPPED);
-        let text = String::from_utf8(ascii_pssm(&object)).unwrap();
-        let expected = "\nLast position-specific scoring matrix computed\n           A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V\n    1 M    4 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 \n\n                      K         Lambda\nPSI Ungapped         0.0000     0.0000\nPSI Gapped           0.0425     0.2670\n";
-        assert_eq!(text, expected);
-    }
-}
+#[path = "in_pssm_files_tests.rs"]
+mod tests;

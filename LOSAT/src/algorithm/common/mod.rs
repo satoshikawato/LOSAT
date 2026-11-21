@@ -12,10 +12,12 @@
 //! - The two-hit walks on keys of score and step, of blastp, BLASTX and TBLASTX (`x_key_walk`)
 
 pub(crate) mod database;
+pub(crate) mod db_mask_search;
 pub mod diagnostics;
 pub(crate) mod masks;
 pub(crate) mod tabular;
 pub(crate) mod translated_chunks;
+pub(crate) mod unknown_matrix;
 pub(crate) mod x_context_table;
 pub(crate) mod x_db_stream;
 pub(crate) mod x_key_walk;

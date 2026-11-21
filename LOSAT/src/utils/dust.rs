@@ -4,27 +4,12 @@
 //! The algorithm identifies low-complexity regions by calculating triplet-based
 //! complexity scores within sliding windows.
 //!
-//! Reference: NCBI BLAST symdust.cpp/hpp
+//! NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp, c++/include/algo/dustmask/symdust.hpp
 
 use std::collections::VecDeque;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/util/random_gen.cpp:241-264
-// ```c
-// static const CRandom::TValue sm_State[CRandom::kStateSize] = {
-//     0xd53f1852,  0xdfc78b83,  0x4f256096,  0xe643df7,
-//     ...
-//     0x6e37bd55
-// };
-// m_RJ = kStateOffset;
-// m_RK = kStateSize - 1;
-// ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/util/random_gen.hpp:217-240
-// ```c
-// r = m_State[m_RK] + m_State[m_RJ--];
-// m_State[m_RK--] = r;
-// ...
-// return x_GetRand32Bits() >> 1;
-// ```
+// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:241-264
+// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:217-240
 /// `CRandom` of `CIupac2Ncbi2na_converter` (the random numbers that resolve `N`): one per
 /// `CSymDustMasker`, so the calls of one masker draw from one sequence of numbers.
 pub(crate) struct NcbiLfgRandom {
@@ -179,17 +164,7 @@ impl DustMasker {
 
     #[inline]
     fn convert_iupac_to_ncbi2na(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
-        // ```c
-        // switch( r )
-        // {
-        //     case 67: return 1;
-        //     case 71: return 2;
-        //     case 84: return 3;
-        //     case 78: return (m_Random.GetRand() & 0x3);
-        //     default: return 0;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         match base {
             b'C' | b'c' => 1,
             b'G' | b'g' => 2,
@@ -203,11 +178,7 @@ impl DustMasker {
     /// new masker's random numbers (blastn's `Blast_FindDustFilterLoc` makes one masker per
     /// query).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:286-288
-    /// ```c
-    /// CSymDustMasker::operator()( const sequence_type & seq )
-    /// { return (*this)( seq, 0, seq.size() - 1 ); }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:286-290
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         if seq.is_empty() {
             return Vec::new();
@@ -221,23 +192,6 @@ impl DustMasker {
     /// a sequence between runs of `N`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:214-229
-    /// ```c
-    /// CSymDustMasker::operator()( const sequence_type & seq,
-    ///                             size_type start, size_type stop )
-    /// {
-    ///     std::unique_ptr< TMaskList > res( new TMaskList );
-    ///
-    ///     if( seq.empty() )
-    ///         return res;
-    ///
-    ///     if( stop >= seq.size() )
-    ///         stop = seq.size() - 1;
-    ///
-    ///     if( start > stop )
-    ///         start = stop;
-    ///
-    ///     while( stop > 2 + start )    // there must be at least one triplet
-    /// ```
     /// `mask_range_reference` ports this function. The ring-buffer version (was
     /// LOSAT_X_DUSTRING) runs the same steps and only needs a window of at most `X_RING` (64,
     /// the largest NCBI window); a larger window uses the reference.
@@ -268,18 +222,6 @@ impl DustMasker {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:229-282
-    // ```c
-    // while( stop > 2 + start )    // there must be at least one triplet
-    // ...
-    //         char c1 = *it, c2 = *++it;
-    //         triplet_type t = (converter_( c1 )<<2) + converter_( c2 );
-    // ...
-    //             t = ((t<<2)&TRIPLET_MASK) + (converter_( *it )&0x3);
-    // ...
-    //     // append the rest of the perfect intervals to the result
-    // ...
-    //     if( w.start() > 0 ) start += w.start();
-    // ```
     // This is `CSymDustMasker::operator()` with the window in `XTripletWindow` and the base
     // codes from `X_BASE_CODE`. The bases are converted in the same order, so a random
     // number for an `N` is drawn at the same point. It gives the same intervals.
@@ -299,14 +241,7 @@ impl DustMasker {
         let end = seq.len();
         let mut result = Vec::new();
         let mut current_start = start;
-        // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
-        // ```c
-        // case 67: return 1;
-        // case 71: return 2;
-        // case 84: return 3;
-        // case 78: return (m_Random.GetRand() & 0x3);
-        // default: return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         // 4 marks the bases that draw a random number.
         let code = |base: u8, rng: &mut NcbiLfgRandom| -> u8 {
             let c = X_BASE_CODE[base as usize];
@@ -400,16 +335,7 @@ impl DustMasker {
             // Create triplet window tracker
             let mut window = TripletWindow::new(self.window, self.low_k, &self.thresholds);
 
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:235-249
-            // ```c
-            // seq_citer_type it(seq, start);
-            // char c1 = *it, c2 = *++it;
-            // triplet_type t = (converter_( c1 )<<2) + converter_( c2 );
-            // it.SetPos(start + w.stop() + 2);
-            // ...
-            // t = ((t<<2)&TRIPLET_MASK) + (converter_( *it )&0x3);
-            // ++it;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:235-249
             let mut current_triplet = (Self::convert_iupac_to_ncbi2na(seq[current_start], rng)
                 << 2)
                 + Self::convert_iupac_to_ncbi2na(seq[current_start + 1], rng);
@@ -492,16 +418,7 @@ impl DustMasker {
         if let Some(p) = perfect_list.back() {
             if p.start < wstart {
                 let interval_start = p.start + offset;
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:185-208
-                // ```c
-                // TMaskedInterval b = P.back().bounds_;
-                // if( b.first < wstart ) {
-                //     TMaskedInterval b1( b.first + start, b.second + start );
-                //     ...
-                //     if( s + linker_ >= b1.first ) {
-                //         res.back().second = max( s, b1.second );
-                //     }
-                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:185-208
                 // NCBI stores b1.second as an inclusive CSeq_loc endpoint
                 // (dust_filter.cpp:101-112 passes GetTo() through). LOSAT's
                 // `MaskedInterval` is 0-based half-open, so add one here.
@@ -532,28 +449,12 @@ impl DustMasker {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:43,173
-/// ```c
-///       max_size_( window - 2 ), low_k_( low_k ),
-/// ...
-///       window_( (window >= 8 && window <= 64) ? window : DEFAULT_WINDOW ),
-/// ```
 /// NCBI accepts windows up to 64, so a window holds at most 62 triplets. 64 slots with
 /// index arithmetic modulo 64 are enough.
 /// Capacity of the ring buffer (the largest DUST window).
 const X_RING: usize = 64;
 
 /// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
-/// ```c
-/// Uint1 operator()( Uint1 r )
-/// {
-///     switch( r )
-///     {
-///         case 67: return 1;
-///         case 71: return 2;
-///         case 84: return 3;
-///         case 78: return (m_Random.GetRand() & 0x3);
-///         default: return 0;
-/// ```
 /// The same mapping as `convert_iupac_to_ncbi2na` in a 256-entry table (it also lists the
 /// lower case letters and `U` that function accepts). Entry 4 means that the caller
 /// draws a random number, as NCBI does for `N`.
@@ -574,16 +475,6 @@ static X_BASE_CODE: [u8; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:40-48
-/// ```c
-/// CSymDustMasker::triplets::triplets(
-///     size_type window, Uint1 low_k,
-///     perfect_list_type & perfect_list, thres_table_type & thresholds )
-///     : start_( 0 ), stop_( 0 ), max_size_( window - 2 ), low_k_( low_k ),
-///       L( 0 ), P( perfect_list ), thresholds_( thresholds ),
-///       r_w( 0 ), r_v( 0 ), num_diff( 0 )
-/// {
-///     std::fill( c_w, c_w + 64, 0 );
-/// ```
 /// The same state as NCBI's `triplets` class. Only the container for `triplet_list_`
 /// differs (a fixed ring instead of a `std::deque`). The perfect list `P` is passed to
 /// each method instead of being held by reference.
@@ -613,13 +504,6 @@ struct XTripletWindow<'a> {
 
 impl<'a> XTripletWindow<'a> {
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:43-48
-    /// ```c
-    ///     : start_( 0 ), stop_( 0 ), max_size_( window - 2 ), low_k_( low_k ),
-    ///       L( 0 ), P( perfect_list ), thresholds_( thresholds ),
-    ///       r_w( 0 ), r_v( 0 ), num_diff( 0 )
-    /// {
-    ///     std::fill( c_w, c_w + 64, 0 );
-    /// ```
     /// Starts with the same values, with an empty ring in place of the empty deque.
     fn new(window: usize, low_k: u8, thresholds: &'a [u32]) -> Self {
         Self {
@@ -642,9 +526,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:103
-    /// ```c
-    ///             rem_triplet_info( r_v, c_v, triplet_list_[off] );
-    /// ```
     /// `triplet_list_[index]` of the deque: index 0 is the newest triplet.
     #[inline(always)]
     fn at(&self, index: usize) -> u8 {
@@ -652,10 +533,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:54-55
-    /// ```c
-    ///     triplet_type s = triplet_list_.back();
-    ///     triplet_list_.pop_back();
-    /// ```
     /// Returns the oldest triplet and removes it.
     #[inline(always)]
     fn pop_back(&mut self) -> u8 {
@@ -664,9 +541,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:60
-    /// ```c
-    ///     triplet_list_.push_front( t );
-    /// ```
     /// Makes `triplet` the newest element (index 0).
     #[inline(always)]
     fn push_front(&mut self, triplet: u8) {
@@ -676,11 +550,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:275-277
-    /// ```c
-    /// void add_triplet_info(
-    ///         Uint4 & r, counts_type & c, triplet_type t )
-    /// { r += c[t]; ++c[t]; }
-    /// ```
     /// The same two steps in the same order.
     #[inline(always)]
     fn add_triplet(sum: &mut u32, counts: &mut [u8; 64], triplet: u8) {
@@ -690,11 +559,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:287-289
-    /// ```c
-    /// void rem_triplet_info(
-    ///         Uint4 & r, counts_type & c, triplet_type t )
-    /// { --c[t]; r -= c[t]; }
-    /// ```
     /// The same two steps in the same order.
     #[inline(always)]
     fn rem_triplet(sum: &mut u32, counts: &mut [u8; 64], triplet: u8) {
@@ -704,14 +568,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:251-256
-    /// ```c
-    /// bool needs_processing() const
-    /// {
-    ///   Uint4 count = stop_ - L;
-    ///   return count < triplet_list_.size() &&
-    ///          10*r_w > thresholds_[count];
-    /// }
-    /// ```
     /// The same test. The three conditions are combined without short-circuit, which is
     /// safe because the table is read at a clamped index and that value is then ignored.
     /// The three tests of `TripletWindow::needs_processing` as one
@@ -727,22 +583,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:76-114
-    /// ```c
-    ///     if( triplet_list_.size() >= max_size_ ) {
-    ///         if( num_diff <= 1 ) {
-    ///             return shift_high( t );
-    ///         }
-    /// ...
-    ///         if( L == start_ ) {
-    ///             ++L;
-    ///             rem_triplet_info( r_v, c_v, s );
-    ///         }
-    /// ...
-    ///     if( c_v[t] > low_k_ ) {
-    ///         Uint4 off = triplet_list_.size() - (L - start_) - 1;
-    /// ...
-    ///     if( triplet_list_.size() >= max_size_ && num_diff <= 1 ) {
-    /// ```
     /// The same steps in the same order on the same integers. The two `if`s that depend on
     /// the sequence (`c_w[s] == 0` and `L == start_`) are written as arithmetic on the 0/1
     /// value of the condition, which gives the same values.
@@ -804,18 +644,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:52-69
-    /// ```c
-    /// bool CSymDustMasker::triplets::shift_high( triplet_type t )
-    /// {
-    ///     triplet_type s = triplet_list_.back();
-    ///     triplet_list_.pop_back();
-    ///     rem_triplet_info( r_w, c_w, s );
-    ///     if( c_w[s] == 0 ) --num_diff;
-    ///     ++start_;
-    /// ...
-    ///     if( num_diff <= 1 ) {
-    ///         P.insert( P.begin(), perfect( start_, stop_ + 1, 0, 0 ) );
-    /// ```
     /// The same steps in the same order.
     #[inline(never)]
     fn shift_high(&mut self, triplet: u8, perfect_list: &mut VecDeque<PerfectInterval>) -> bool {
@@ -842,19 +670,6 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-141,161-163
-    /// ```c
-    ///     Uint4 count = stop_ - L; // count is the suffix length
-    /// ...
-    ///     Uint4 score = r_v; // and of the partial sum
-    ///     perfect_iter_type perfect_iter = P.begin();
-    /// ...
-    ///     for( ; it != iend; ++it, ++count, --pos ) {
-    ///         Uint1 cnt = counts[*it];
-    /// ...
-    ///                 perfect_iter = P.insert(
-    ///                         perfect( pos, stop_ + 1,
-    ///                         max_perfect_score, count ) );
-    /// ```
     /// The one-pass merge of `TripletWindow::find_perfect` (see there), reading the
     /// triplets from the ring.
     #[inline(never)]
@@ -924,13 +739,7 @@ impl<'a> XTripletWindow<'a> {
 
 /// Triplet window tracker for DUST algorithm
 /// Uses VecDeque to match NCBI BLAST's deque with push_front/pop_back semantics
-// NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:40-45
-// ```c
-// CSymDustMasker::triplets::triplets(
-//     size_type window, Uint1 low_k,
-//     perfect_list_type & perfect_list, thres_table_type & thresholds )
-//     : ... P( perfect_list ), thresholds_( thresholds ) ...
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:40-45
 struct TripletWindow<'a> {
     triplet_list: VecDeque<u8>,
     start: usize,
@@ -1079,52 +888,13 @@ impl<'a> TripletWindow<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-166
-    // ```c
-    // Uint4 count = stop_ - L; // count is the suffix length
-    // ...
-    // perfect_iter_type perfect_iter = P.begin();
-    // ...
-    // for( ; it != iend; ++it, ++count, --pos ) {
-    //     Uint1 cnt = counts[*it];
-    //     add_triplet_info( score, counts, *it );
-    //     if( cnt > 0 && score*10 > thresholds_[count] ) {
-    // ...
-    //         if(    max_perfect_score == 0
-    //             || score*max_len >= max_perfect_score*count ) {
-    // ```
     // Same walk over the triplets with the same tests and the same integer updates. Only
     // the list update differs: NCBI inserts into a `std::list`; here the old list and the
     // new elements are merged into a new vector in the order the inserts would give. The
     // argument is in the comment below. (Was LOSAT_X_DUSTFAST; the literal std::list port
     // that it replaced was deleted when the merge graduated.)
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:137-166
-    // ```c
-    // for( impl_citer_type it( triplet_list_.begin() + count ),
-    //      iend( triplet_list_.end() ); it != iend; ++it, ++count, --pos ) {
-    //     Uint1 cnt( counts[*it] );
-    //     add_triplet_info( score, counts, *it );
-    //     if( cnt > 0 && score*10 > thresholds_[count] ) {
-    //         while(    perfect_iter != P.end()
-    //                && pos <= perfect_iter->bounds_.first ) {
-    //             if(    max_perfect_score == 0
-    //                 || max_len*perfect_iter->score_
-    //                    > max_perfect_score*perfect_iter->len_ ) {
-    //                 max_perfect_score = perfect_iter->score_;
-    //                 max_len = perfect_iter->len_;
-    //             }
-    //             ++perfect_iter;
-    //         }
-    //         if( max_perfect_score == 0 || score*max_len >= max_perfect_score*count ) {
-    //             max_perfect_score = score;
-    //             max_len = count;
-    //             perfect_iter = P.insert(
-    //                     perfect_iter, perfect( pos, stop_ + 1,
-    //                     max_perfect_score, count ) );
-    //         }
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:137-166
     // NCBI's P is a std::list, so the insert is O(1); a VecDeque insert moves
     // every later element. Insert positions never move backwards during one
     // call, and stepping over an element this call inserted leaves
@@ -1196,221 +966,5 @@ impl<'a> TripletWindow<'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_simple_repeat() {
-        let masker = DustMasker::with_defaults();
-
-        // Simple repeat sequence should be masked
-        let seq = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        let intervals = masker.mask_sequence(seq);
-
-        // Should have at least one masked interval
-        assert!(!intervals.is_empty(), "Poly-A sequence should be masked");
-    }
-
-    #[test]
-    fn test_complex_sequence() {
-        let masker = DustMasker::with_defaults();
-
-        // Use a de Bruijn sequence B(4,3) over A/C/G/T: each 3-mer appears exactly once.
-        // This is a more appropriate \"high complexity\" control than a short periodic repeat.
-        fn debruijn_acgt_k3() -> Vec<u8> {
-            fn db(t: usize, p: usize, k: usize, n: usize, a: &mut [usize], seq: &mut Vec<usize>) {
-                if t > n {
-                    if n.is_multiple_of(p) {
-                        for i in 1..=p {
-                            seq.push(a[i]);
-                        }
-                    }
-                } else {
-                    a[t] = a[t - p];
-                    db(t + 1, p, k, n, a, seq);
-                    for j in (a[t - p] + 1)..k {
-                        a[t] = j;
-                        db(t + 1, t, k, n, a, seq);
-                    }
-                }
-            }
-
-            let alphabet: [u8; 4] = [b'A', b'C', b'G', b'T'];
-            let k = alphabet.len();
-            let n = 3usize;
-            let mut a = vec![0usize; k * n + 1];
-            let mut idx_seq: Vec<usize> = Vec::new();
-            db(1, 1, k, n, &mut a, &mut idx_seq);
-
-            let mut out: Vec<u8> = idx_seq.into_iter().map(|i| alphabet[i]).collect();
-            // Linearize the cyclic de Bruijn sequence by appending the first n-1 symbols.
-            let prefix: Vec<u8> = out[..(n - 1)].to_vec();
-            out.extend_from_slice(&prefix);
-            out
-        }
-
-        let seq = debruijn_acgt_k3();
-        let intervals = masker.mask_sequence(&seq);
-
-        // Complex sequence should have few or no masked regions
-        let total_masked: usize = intervals.iter().map(|i| i.end - i.start).sum();
-        assert!(
-            total_masked < seq.len() / 2,
-            "Complex sequence should not be heavily masked"
-        );
-    }
-
-    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:214-216,229-233
-    /// ```c
-    /// CSymDustMasker::operator()( const sequence_type & seq,
-    ///                             size_type start, size_type stop )
-    /// ...
-    /// while( stop > 2 + start )    // there must be at least one triplet
-    /// {
-    ///     // initializations
-    ///     P.clear();
-    ///     triplets w( window_, low_k_, P, thresholds_ );
-    /// ```
-    /// The test compares the ring-buffer masker with the port of this function on random
-    /// sequences, levels, windows and ranges.
-    /// The ring-buffer window must give the reference intervals on random
-    /// sequences of every kind the masker distinguishes: plain, biased,
-    /// tandem repeats of every short period, homopolymer runs and Ns.
-    #[test]
-    fn x_ring_buffer_dust_matches_reference_on_random_sequences() {
-        struct Rng(u64);
-        impl Rng {
-            fn next(&mut self) -> u64 {
-                self.0 ^= self.0 << 13;
-                self.0 ^= self.0 >> 7;
-                self.0 ^= self.0 << 17;
-                self.0
-            }
-            fn below(&mut self, n: u64) -> u64 {
-                self.next() % n
-            }
-        }
-        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(3000);
-        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-        let bases = b"ACGT";
-        let mut masked_cases = 0usize;
-        for case in 0..cases {
-            let len = 1 + rng.below(1500) as usize;
-            let mut seq = Vec::with_capacity(len);
-            while seq.len() < len {
-                let piece = 1 + rng.below(200) as usize;
-                match rng.below(7) {
-                    0 | 1 => {
-                        for _ in 0..piece {
-                            seq.push(bases[rng.below(4) as usize]);
-                        }
-                    }
-                    2 => {
-                        // biased composition
-                        let major = bases[rng.below(4) as usize];
-                        for _ in 0..piece {
-                            seq.push(if rng.below(5) == 0 {
-                                bases[rng.below(4) as usize]
-                            } else {
-                                major
-                            });
-                        }
-                    }
-                    3 => {
-                        // tandem repeat with a few substitutions
-                        let period = 1 + rng.below(7) as usize;
-                        let unit: Vec<u8> =
-                            (0..period).map(|_| bases[rng.below(4) as usize]).collect();
-                        for i in 0..piece {
-                            seq.push(if rng.below(25) == 0 {
-                                bases[rng.below(4) as usize]
-                            } else {
-                                unit[i % period]
-                            });
-                        }
-                    }
-                    4 => {
-                        let base = bases[rng.below(4) as usize];
-                        seq.extend(std::iter::repeat_n(base, piece));
-                    }
-                    5 => {
-                        let n = 1 + rng.below(12) as usize;
-                        seq.extend(std::iter::repeat_n(b'N', n));
-                    }
-                    _ => {
-                        // other IUPAC letters and lower case
-                        for _ in 0..piece.min(20) {
-                            seq.push(b"acgtRYKMSWnBDHV"[rng.below(15) as usize]);
-                        }
-                    }
-                }
-            }
-            seq.truncate(len);
-            let (level, window, linker) = match case % 4 {
-                0 => (20, 64, 1),
-                1 => (
-                    10 + rng.below(40) as u32,
-                    8 + rng.below(57) as usize,
-                    1 + rng.below(32) as usize,
-                ),
-                2 => (20, 64, 1),
-                _ => (2 + rng.below(63) as u32, 64, 1),
-            };
-            let masker = DustMasker::new(level, window, linker);
-            let start = if case % 5 == 0 {
-                rng.below(len as u64) as usize
-            } else {
-                0
-            };
-            // `stop` is the last position, `start` at most `stop` (as `mask_range` makes them).
-            let stop = if case % 7 == 0 {
-                rng.below(len as u64) as usize
-            } else {
-                len - 1
-            };
-            let start = start.min(stop);
-            let reference =
-                masker.mask_range_reference(&seq, start, stop, &mut NcbiLfgRandom::new());
-            let fast = masker.x_mask_range(&seq, start, stop, &mut NcbiLfgRandom::new());
-            assert_eq!(
-                fast, reference,
-                "case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"
-            );
-            if !reference.is_empty() {
-                masked_cases += 1;
-            }
-        }
-        // the generator must actually exercise the masking paths
-        assert!(
-            masked_cases * 2 > cases,
-            "only {masked_cases} of {cases} cases masked anything"
-        );
-    }
-
-    #[test]
-    fn test_short_sequence() {
-        let masker = DustMasker::with_defaults();
-
-        // Very short sequences should return empty
-        let seq = b"AC";
-        let intervals = masker.mask_sequence(seq);
-        assert!(intervals.is_empty());
-    }
-
-    #[test]
-    fn test_params_validation() {
-        // Test parameter validation
-        let params = DustParams::new(1, 5, 0);
-        assert_eq!(params.level, 20); // Should default to 20 (out of range)
-        assert_eq!(params.window, 64); // Should default to 64 (out of range)
-        assert_eq!(params.linker, 1); // Should default to 1 (out of range)
-
-        let params = DustParams::new(30, 32, 16);
-        assert_eq!(params.level, 30);
-        assert_eq!(params.window, 32);
-        assert_eq!(params.linker, 16);
-    }
-}
+#[path = "dust_tests.rs"]
+mod tests;

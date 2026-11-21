@@ -4,24 +4,10 @@
 //! ARGS -num_threads 1`, run from LOSAT/ with an empty pipe as standard input). LOSAT prints them
 //! at 1, 4, 8 and 16 threads.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
 //! `Blast_ScoreBlkMatrixFill` returns -1, one message per query of the batch)
-//! ```c
-//!     default:
-//!         {
-//!             char buf[512];
-//!             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
-//! ```
 //! and c++/src/algo/blast/format/data4xmlformat.cpp:211-218 (the XML reports, when the first
 //! report is made: a name that is not spelled as the table's)
-//! ```c++
-//!     else {
-//!         string prog_name = Blast_ProgramNameFromType(
-//!                                            m_Options.GetProgramType());
-//!         if (prog_name != "blastn" && prog_name != "megablast") {
-//!             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-//!                         "unsupported score matrix");
-//! ```
 
 use std::fs;
 use std::io::Write;
@@ -106,8 +92,8 @@ fn equals_ncbi(case: &str, args: &[&str], status: i32) {
 /// `equals_ncbi` with `stdin` on the pipe (the standard input of NCBI's run).
 fn equals_ncbi_with_stdin(case: &str, args: &[&str], stdin: &[u8], status: i32) {
     let (out, err) = (
-        fixture(&format!("{case}.out")),
-        fixture(&format!("{case}.err")),
+        temp_support::expected_losat_bytes(fixture(&format!("{case}.out"))),
+        temp_support::expected_losat_bytes(fixture(&format!("{case}.err"))),
     );
     for threads in ["1", "4", "8", "16"] {
         let output = run_with_stdin(args, threads, stdin);

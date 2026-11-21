@@ -47,13 +47,7 @@ fn search(program: &str, db: &str, query: &str, words: &[&str]) -> (Vec<u8>, Vec
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:231-234
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-250
 // NCBI 2.17.0 (the conda build) writes `Error: NCBI C++ Exception:\n    T0 "/opt/conda/conda-bld/
 // blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754: Error:
 // (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the
@@ -81,17 +75,16 @@ fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
         let err = String::from_utf8_lossy(&err);
         assert_eq!(rc, 255, "{program}: {err}");
         assert!(out.is_empty(), "{program}");
-        assert!(
-            err.starts_with("Error: NCBI C++ Exception:\n    T0 \""),
-            "{program}: {err}"
-        );
-        assert!(
-            err.ends_with(
-                "/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
+        // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8; the mapping leaves
+        // out NCBI's build tree, which the test did not compare either).
+        assert_eq!(
+            err,
+            losat::wording::losat_text(
+                "Error: NCBI C++ Exception:\n    T0 \"/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
                  ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: \
                  ''\n\n"
             ),
-            "{program}: {err}"
+            "{program}"
         );
         let (_, err, rc) = search(
             program,
@@ -235,14 +228,6 @@ fn run_with_out(program: &str, argv: &[&str]) -> (String, i32) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
-// ```c++
-//     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
-//         m_InputStream == NULL) {
-// ...
-//     else {
-//         m_OutputStream = &args[kArgOutput].AsOutputFile();
-//     }
-// ```
 // `CStdCmdLineArgs` comes after the handler of the database arguments, which reads the list: a
 // list error stops the run before the query and the output are opened (probe E01-E20).
 #[test]

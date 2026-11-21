@@ -72,7 +72,9 @@ The proposed recipe deliberately stays small:
 - build from the tagged LOSAT source archive;
 - use the Bioconda/conda-forge Rust compiler toolchain;
 - install the CLI with `cargo install --locked`;
-- generate third-party license metadata with `cargo-bundle-licenses`;
+- generate third-party license metadata with `cargo-bundle-licenses`, and ship it
+  with `LICENSE` and `THIRD_PARTY_NOTICES` (the code from other projects in LOSAT's
+  source);
 - smoke-test `losat --version`, top-level help, the help of the eight search
   programs, and `-version` through each of NCBI's program names;
 - opt in to `linux-aarch64` and `osx-arm64` in addition to Bioconda's default

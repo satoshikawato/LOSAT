@@ -62,8 +62,8 @@
 //! loops nothing changes. `LOSAT_X_CHAINRUN=0` runs the copy before.
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
-//! returned count are not part of the result. `presence` depends on the lookup table only; each
-//! thread builds it once per table (`presence_bytes`).
+//! returned count are not part of the result. `presence` depends on the lookup table only; the
+//! first thread that asks for a table builds it once and every thread reads it (`presence_bytes`).
 //!
 //! Probe and source of the form: line F s3 P3 V2 (candidates) and s5 P3b arm 7 (copy),
 //! `exp/f2-tbn-scan` ff918e61: HsG_p1 x hsap_dna `-db` n1 whole-run cycles x0.703 of dev, with
@@ -212,11 +212,6 @@ impl std::ops::Deref for XPresence {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
-// ```c
-// #define PV_TEST(lookup, index, shift)                   \
-//       ( lookup[(index) >> (shift)] &                    \
-//         ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
-// ```
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence vector of `lookup` with one byte per index of
 /// the 15-bit space: 1 where `pv` has the bit and the backbone has the cell, 0 elsewhere (a bit is
 /// set only for a cell with hits, so this is `pv`; the second test keeps every candidate's cell
@@ -238,20 +233,31 @@ fn build_presence(lookup: &BlastAaLookupTable) -> XPresence {
     XPresence(bytes.try_into().expect("one byte per index"))
 }
 
-/// The table `presence_bytes` built last on this thread, its bytes and whether it is sparse. The
-/// `Weak` keeps the table's allocation, so no other table can have its address while the entry is
-/// kept.
-type KeptPresence = Option<(std::sync::Weak<BlastAaLookupTable>, XPresence, bool)>;
+/// A table, its presence bytes and whether it is sparse. The `Weak` keeps the table's allocation,
+/// so no other table can have its address while the entry is kept.
+type PresenceEntry = (std::sync::Weak<BlastAaLookupTable>, XPresence, bool);
+
+/// The entry `presence_bytes` gave last on this thread (its bytes are those of `SHARED`).
+type KeptPresence = Option<PresenceEntry>;
 
 thread_local! {
-    /// The presence bytes this thread built last (`KeptPresence`).
+    /// The presence bytes this thread read last (`KeptPresence`).
     static PRESENCE: std::cell::RefCell<KeptPresence> = const { std::cell::RefCell::new(None) };
 }
 
-// No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built
-/// on this thread when it last saw another table. The table must `fit`.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:95-140
+// NCBI's presence vector is part of its table, one array that every search thread reads. These
+// are the presence bytes of the live tables, one array per table that every thread reads: an
+// entry whose table is gone goes when a thread next looks up a table. It does not change any value
+// NCBI computes.
+static SHARED: std::sync::Mutex<Vec<PresenceEntry>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: the presence vector in another layout, made once per table; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`) and
+/// whether it is sparse, built by the first thread that asks for this table and read by every
+/// thread after it (`SHARED`); a thread asks again only when it saw another table last. The table
+/// must `fit`.
 pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
     PRESENCE.with(|kept| {
         let mut kept = kept.borrow_mut();
@@ -260,18 +266,87 @@ pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bo
                 return (bytes.clone(), *sparse);
             }
         }
-        let bytes = build_presence(lookup);
-        let sparse = sparse(&bytes, lookup);
+        let (bytes, sparse) = shared_presence(lookup);
         *kept = Some((Arc::downgrade(lookup), bytes.clone(), sparse));
         (bytes, sparse)
     })
+}
+
+// No NCBI counterpart: finds or makes the entry of `SHARED`; it does not change any value NCBI
+// computes.
+/// The `SHARED` entry of `lookup`, made now if there is none; the entries of tables that are gone
+/// go first.
+fn shared_presence(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
+    let mut shared = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    shared.retain(|(table, _, _)| table.strong_count() > 0);
+    if let Some((_, bytes, sparse)) = shared
+        .iter()
+        .find(|(table, _, _)| table.as_ptr() == Arc::as_ptr(lookup))
+    {
+        return (bytes.clone(), *sparse);
+    }
+    let bytes = build_presence(lookup);
+    let sparse = sparse(&bytes, lookup);
+    shared.push((Arc::downgrade(lookup), bytes.clone(), sparse));
+    (bytes, sparse)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
 /// Whether at most `X_SPARSE_TENTHS` tenths of the backbone cells of `lookup` have hits.
 fn sparse(presence: &[u8; X_MASK + 1], lookup: &BlastAaLookupTable) -> bool {
     let ones = presence.iter().filter(|&&b| b == 1).count();
+    sparse_ones(ones, lookup)
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// `sparse` for a table whose presence bytes hold `ones` ones.
+fn sparse_ones(ones: usize, lookup: &BlastAaLookupTable) -> bool {
     ones * 10 <= lookup.backbone.len() * X_SPARSE_TENTHS
+}
+
+// No NCBI counterpart: counts the presence bits of `lookup`; it does not change any value NCBI
+// computes.
+/// The ones `build_presence` would write for `lookup`: the bits of `pv` at the indexes of the
+/// 15-bit space inside the backbone.
+fn presence_ones(lookup: &BlastAaLookupTable) -> usize {
+    let end = lookup.backbone.len().min(X_MASK + 1);
+    lookup
+        .pv
+        .iter()
+        .enumerate()
+        .map(|(w, &word)| {
+            let first = w << PV_ARRAY_BTS;
+            let bits = end.saturating_sub(first).min(PV_ARRAY_MASK + 1);
+            let mask = if bits > PV_ARRAY_MASK {
+                u32::MAX
+            } else {
+                (1u32 << bits) - 1
+            };
+            (word & mask).count_ones() as usize
+        })
+        .sum()
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): whether `mode` scans `lookup` on presence bytes (it is on, the
+/// table `fits`, and it is sparse if `mode` asks), decided from `pv` without the bytes: the
+/// same answer as `x_kept_presence(mode, &x_table_presence(lookup)).is_some()`, for a caller that
+/// builds the bytes when a scan first needs them (`x_build_presence`; tblastx's unit-group tables).
+pub(crate) fn x_table_takes(mode: XScanByte, lookup: &BlastAaLookupTable) -> bool {
+    mode.on()
+        && fits(lookup)
+        && (mode != XScanByte::Sparse || sparse_ones(presence_ones(lookup), lookup))
+}
+
+// No NCBI counterpart: the presence vector in another layout; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table that `fits` (`build_presence`),
+/// for a caller that decided with `x_table_takes`.
+pub(crate) fn x_build_presence(lookup: &BlastAaLookupTable) -> XPresence {
+    debug_assert!(fits(lookup), "presence bytes of a table that does not fit");
+    build_presence(lookup)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
@@ -348,7 +423,7 @@ fn x_scan_byte_if_read() -> Option<XScanByte> {
     (COUNTS[0].load(Ordering::Relaxed) > 0).then(x_scan_byte)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (quoted at `scan`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (cited at `scan`).
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): `s_blast_aa_scan_subject_one_range` for a table that `fits`
 /// (see the module text). Same arguments, same result, same `s_range`; `presence` is
 /// `presence_bytes(lookup)` and `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
@@ -376,7 +451,7 @@ pub(crate) fn x_scan_one_range_byte(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (quoted at `scan`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (cited at `scan`).
 /// EXPERIMENT (LOSAT_X_TBNSCANRESUME): `x_scan_one_range_byte` that keeps in `held` the block of a
 /// call that stops on a full offset array, and copies the rest of it when the next call is that
 /// call's resumption (the same subject and `s_range[2]`, `s_range[1]` the word that did not fit).
@@ -457,19 +532,6 @@ fn x_chain_run() -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-127
-// ```c
-//     for (s = s_first; s <= s_last; s++) {
-// ...
-//         if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//             numhits = bbc[index].num_used;
-// ...
-//             if (numhits <= (array_size - totalhits))
-// ...
-//                 s_range[1] = (Int4)(s - subject->sequence);
-//                 return totalhits;
-// ...
-//     s_range[1] = (Int4)(s - subject->sequence);
-// ```
 /// The scan of one call (module text), with the AVX2 forms when `avx2` (and their chain runs when
 /// `run`, LOSAT_X_CHAINRUN); the block where it stops is kept in `held`, and copied on from there
 /// when this call resumes it.
@@ -550,13 +612,6 @@ fn scan(
         };
         if let Some(s_off) = stop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:118-123
-            // ```c
-            //             } else
-            //             {
-            //                 s_range[1] = (Int4)(s - subject->sequence);
-            //                 return totalhits;
-            //             }
-            // ```
             s_range[1] = s_off as i32;
             // The word's place among the block's candidates (which ascend), for the next call.
             // SAFETY: `cand[..n]` was written by the candidate stage.
@@ -573,17 +628,12 @@ fn scan(
     }
     held.n = 0;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:125-127
-    // ```c
-    //     } /* end for */
-    //     s_range[1] = (Int4)(s - subject->sequence);
-    //     } /* end while */
-    // ```
     s_range[1] = (s_last + 1) as i32;
     totalhits
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107,121-127,55-57
-// (quoted at `candidates`).
+// (cited at `candidates`).
 /// The candidate stage of a block (`candidates`, or `candidates_avx2` when `avx2`).
 #[inline(always)]
 fn candidates_any(
@@ -670,17 +720,6 @@ struct Table {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107,121-127,55-57
-// ```c
-// static NCBI_INLINE Int4 ComputeTableIndex(Int4 wordsize,
-//   for(i = 0; i < wordsize; i++) {
-//     index = (index << charsize) | word[i];
-//   }
-// static NCBI_INLINE Int4 ComputeTableIndexIncremental(Int4 wordsize,
-//   return ((index << charsize) | word[wordsize - 1]) & mask;
-// #define PV_TEST(lookup, index, shift)                   \
-//       ( lookup[(index) >> (shift)] &                    \
-//         ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
-// ```
 /// The plain-loop candidate stage: writes the index of every word of the block (word `k` has the
 /// letters `letters[k..k + 3]`; `letters` holds the block's words and two letters more) to `index`
 /// and lists the positions (from the block's first word) of the words whose presence byte is 1;
@@ -712,16 +751,7 @@ fn candidates(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83,90
-// ```c
-//     for (s = s_first; s <= s_last; s++) {
-//         if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
-// ```c
-// #define PV_TEST(lookup, index, shift)                   \
-//       ( lookup[(index) >> (shift)] &                    \
-//         ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
-// ```
 /// NCBI's `PV_TEST` of every word of a block, without a branch: the positions of the words of
 /// `index` whose presence byte is 1, in `cand`, and how many. Each word's position is written at
 /// the next free entry, which moves on by the word's presence byte (one add per word; the Wasm
@@ -755,11 +785,7 @@ unsafe fn list(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107,121-127,55-57
-// (quoted at `candidates`)
-// ```c
-//     index = (index << charsize) | word[i];
-//   return ((index << charsize) | word[wordsize - 1]) & mask;
-// ```
+// (cited at `candidates`)
 /// The AVX2 candidate stage: `candidates` with the indexes made 16 at a time (three shifted loads
 /// of 16 letters each); the same values.
 #[cfg(target_arch = "x86_64")]
@@ -799,10 +825,6 @@ unsafe fn candidates_avx2(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:96,100
-// ```c
-//             if (numhits <= (array_size - totalhits))
-//                 if (numhits <= AA_HITS_PER_CELL)
-// ```
 /// Whether three hits for each of the `left` candidates fit after `totalhits` (then no candidate
 /// of up to `AA_HITS_PER_CELL` hits can stop the scan): NCBI's test of the copy stage made once
 /// for the cells of up to `AA_HITS_PER_CELL` hits that follow. `0 <= totalhits <= array_size` (a
@@ -912,41 +934,6 @@ unsafe fn copy_avx2_run(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:91-123
-// ```c
-//             numhits = bbc[index].num_used;
-//
-//             ASSERT(numhits != 0);
-//
-//             /* ...and there is enough space in the destination array, */
-//             if (numhits <= (array_size - totalhits))
-//                 /* ...then copy the hits to the destination */
-//             {
-//                 Int4 *src;
-//                 if (numhits <= AA_HITS_PER_CELL)
-//                     /* hits live in thick_backbone */
-//                     src = bbc[index].payload.entries;
-//                 else
-//                     /* hits live in overflow array */
-//                     src = &(ovfl[bbc[index].payload.overflow_cursor]);
-//
-//                 /* copy the hits. */
-//                 {
-//                     Int4 i;
-//                     Int4 s_off = (Int4)(s - subject->sequence);
-//                     for (i = 0; i < numhits; i++) {
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//                     }
-//                 }
-//
-//                 totalhits += numhits;
-//             } else
-//                 /* not enough space in the destination array; return early */
-//             {
-//                 s_range[1] = (Int4)(s - subject->sequence);
-//                 return totalhits;
-//             }
-// ```
 /// The copy stage for the candidates `cand[first..n]` of the block that starts at `block_first`
 /// (NCBI's statements above, in NCBI's order): the new total, and the subject offset of the word
 /// at which the offset array has no room, if one has none. While three hits for every candidate
@@ -998,14 +985,6 @@ unsafe fn copy_block<const AVX2: bool, const RUN: bool>(
             };
             let s_off = (block_first + k) as u32;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:96,118-123
-            // ```c
-            //             if (numhits <= (array_size - totalhits))
-            //             } else
-            //             {
-            //                 s_range[1] = (Int4)(s - subject->sequence);
-            //                 return totalhits;
-            //             }
-            // ```
             if numhits > array_size - totalhits {
                 return (totalhits, Some(s_off));
             }
@@ -1018,7 +997,7 @@ unsafe fn copy_block<const AVX2: bool, const RUN: bool>(
             let numhits = (*cell).num_used;
             let s_off = (block_first + k) as u32;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:96,118-123
-            // (quoted above)
+            // (cited above)
             if numhits > array_size - totalhits {
                 return (totalhits, Some(s_off));
             }
@@ -1043,14 +1022,6 @@ fn pair_bits(q_off: u32, s_off: u32) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:100-105
-// ```c
-//                 if (numhits <= AA_HITS_PER_CELL)
-//                     /* hits live in thick_backbone */
-//                     src = bbc[index].payload.entries;
-//                 else
-//                     /* hits live in overflow array */
-//                     src = &(ovfl[bbc[index].payload.overflow_cursor]);
-// ```
 /// Writes the `numhits` hits of `cell` (its `num_used`; subject offset `s_off`) at `d`: a cell of
 /// up to `AA_HITS_PER_CELL` hits by `write_cell`, a larger one by `write_chain`.
 ///
@@ -1072,16 +1043,6 @@ unsafe fn write<const AVX2: bool, const RUN: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:100-102,110-114
-// ```c
-//                 if (numhits <= AA_HITS_PER_CELL)
-//                     /* hits live in thick_backbone */
-//                     src = bbc[index].payload.entries;
-//                     Int4 s_off = (Int4)(s - subject->sequence);
-//                     for (i = 0; i < numhits; i++) {
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//                     }
-// ```
 /// Writes the hits of `cell`, a cell of up to `AA_HITS_PER_CELL` hits (subject offset `s_off`), at
 /// `d` as `AA_HITS_PER_CELL` pairs (with AVX2 `AA_HITS_PER_CELL + 1` in one store), of which the
 /// first `num_used` are the hits; the others are not part of the result.
@@ -1107,16 +1068,6 @@ unsafe fn write_cell<const AVX2: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:103-105,110-114
-// ```c
-//                 else
-//                     /* hits live in overflow array */
-//                     src = &(ovfl[bbc[index].payload.overflow_cursor]);
-//                     Int4 s_off = (Int4)(s - subject->sequence);
-//                     for (i = 0; i < numhits; i++) {
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//                     }
-// ```
 /// Writes the `numhits` hits of `cell`, a cell of more than `AA_HITS_PER_CELL` (its `num_used`;
 /// subject offset `s_off`), at `d` from the overflow array, four pairs at a time. The pairs past
 /// the cell's hits are not part of the result; it writes at most three of them (with `RUN` and
@@ -1181,13 +1132,8 @@ fn chain_whole(table: &Table, cursor: usize, numhits: usize) -> usize {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:100-102,110-114 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:100-102,110-114 (cited at
 // `write_cell`)
-// ```c
-//                     src = bbc[index].payload.entries;
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-// ```
 /// `write_cell` with AVX2: one 32-byte store (`[e0, s, e1, s, e2, s, e2, s]` from the cell
 /// `[num_used, e0, e1, e2]`).
 ///
@@ -1208,13 +1154,8 @@ unsafe fn write_cell_avx2(d: *mut BlastOffsetPair, cell: *const BackboneCell, s_
     _mm256_storeu_si256(d as *mut __m256i, v);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:103-105,110-114 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:103-105,110-114 (cited at
 // `write_chain`)
-// ```c
-//                     src = &(ovfl[bbc[index].payload.overflow_cursor]);
-//                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-// ```
 /// `write_chain` with AVX2: 32-byte stores of four query offsets widened to 64 bits with `s_off`
 /// in the high halves. With `RUN` (LOSAT_X_CHAINRUN), a chain that has `X_CHAIN_RUN` query
 /// offsets inside the overflow array from its start writes its first `X_CHAIN_RUN` pairs without
@@ -1266,681 +1207,5 @@ unsafe fn write_chain_avx2<const RUN: bool>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
-    use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
-    use crate::algorithm::tblastx::translation::QueryFrame;
-    use crate::config::ScoringMatrix;
-    use crate::stats::lookup_protein_params_ungapped;
-
-    struct XorShift(u64);
-
-    impl XorShift {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n as u64) as usize
-        }
-    }
-
-    const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
-
-    // The frame tblastn's `encode_tblastn_lookup_query(query, None, false)` gives a query of the
-    // 20 common letters (blastp's `encode_protein_query_frame_with_seg` without SEG), built here
-    // so that the tests stay below tblastn (the layering of `tests/check_program_edges.py`).
-    fn protein_frame(query: &[u8]) -> QueryFrame {
-        let mut aa_seq = Vec::with_capacity(query.len() + 2);
-        aa_seq.push(0);
-        aa_seq.extend(
-            query
-                .iter()
-                .map(|&a| crate::utils::matrix::aa_char_to_ncbistdaa(a)),
-        );
-        aa_seq.push(0);
-        QueryFrame {
-            frame: 0,
-            aa_seq,
-            aa_seq_nomask: None,
-            aa_len: query.len(),
-            orig_len: query.len(),
-            seg_masks: Vec::new(),
-        }
-    }
-
-    fn lookup_for(queries: &[Vec<u8>], threshold: i32) -> BlastAaLookupTable {
-        let frames: Vec<_> = queries
-            .iter()
-            .map(|query| vec![protein_frame(query)])
-            .collect();
-        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        build_ncbi_lookup_for_profile(
-            &frames,
-            threshold,
-            &karlin,
-            false,
-            ScoringMatrix::Blosum62,
-            3,
-        )
-        .0
-    }
-
-    /// The scan calls of one range as `x_scan_unit` makes them: (offset pairs, s_range[1]) after
-    /// each call; `avx2` = `None` for NCBI's loop. `RESUMED` counts the calls that resume the
-    /// block held by the call before: a block is held and was kept for this call's subject and
-    /// `s_range` (`resume`: one `XScanHeld` for the range, as `LOSAT_X_TBNSCANRESUME` keeps it;
-    /// else a new one per call).
-    fn calls(
-        lookup: &BlastAaLookupTable,
-        presence: &XPresence,
-        subject: &[u8],
-        range: (i32, i32),
-        array_size: usize,
-        form: Option<(bool, bool)>,
-    ) -> Vec<(Vec<(u32, u32)>, i32)> {
-        calls_held(lookup, presence, subject, range, array_size, form, false)
-    }
-
-    thread_local! {
-        static RESUMED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
-    /// `calls`, with one `XScanHeld` for the range when `resume`. `form` = `scan`'s `(avx2, run)`;
-    /// `None` = NCBI's scan.
-    fn calls_held(
-        lookup: &BlastAaLookupTable,
-        presence: &XPresence,
-        subject: &[u8],
-        range: (i32, i32),
-        array_size: usize,
-        form: Option<(bool, bool)>,
-        resume: bool,
-    ) -> Vec<(Vec<(u32, u32)>, i32)> {
-        let mut held = XScanHeld::new();
-        // Guard entries after the slack: no form may write past `array_size + X_SCAN_BYTE_SLACK`.
-        let guard = BlastOffsetPair {
-            q_off: 0xdead_beef,
-            s_off: 0xfeed_f00d,
-        };
-        let end = array_size + X_SCAN_BYTE_SLACK;
-        let mut pairs = vec![BlastOffsetPair::default(); end];
-        pairs.resize(end + 2 * X_SCAN_BYTE_SLACK, guard);
-        let mut scan_range = [0, range.0, range.1];
-        let mut out = Vec::new();
-        while scan_range[1] <= scan_range[2] {
-            let hits = match form {
-                Some((avx2, run)) => {
-                    let at = (subject.as_ptr() as usize, subject.len());
-                    if !resume {
-                        held = XScanHeld::new();
-                    } else if held.next < held.n
-                        && held.at == (at.0, at.1, scan_range[1], scan_range[2])
-                    {
-                        RESUMED.with(|r| r.set(r.get() + 1));
-                    }
-                    scan(
-                        avx2,
-                        run,
-                        lookup,
-                        presence,
-                        subject,
-                        &mut pairs,
-                        array_size as i32,
-                        &mut scan_range,
-                        &mut held,
-                    )
-                }
-                None => s_blast_aa_scan_subject_one_range(
-                    lookup,
-                    subject,
-                    &mut pairs,
-                    array_size as i32,
-                    &mut scan_range,
-                ),
-            };
-            let got = pairs[..hits as usize]
-                .iter()
-                .map(|pair| (pair.q_off, pair.s_off))
-                .collect();
-            out.push((got, scan_range[1]));
-            assert!(
-                pairs[end..]
-                    .iter()
-                    .all(|pair| (pair.q_off, pair.s_off) == (guard.q_off, guard.s_off)),
-                "write past the slack (array_size {array_size}, form {form:?})"
-            );
-            assert!(out.len() < 1_000_000, "scan does not advance");
-        }
-        out
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (the function
-    // compared against, as `s_blast_aa_scan_subject_one_range`). Not a port of an NCBI unit case:
-    // the pairs and the `s_range[1]` of every call must equal the reference's, with offset arrays
-    // that stop the scan after a few words (as aascan_unit_test.cpp's ScanOffsetTest scans), cells
-    // past `AA_HITS_PER_CELL` hits, every letter value of ncbistdaa, and block ends at every
-    // alignment.
-    #[test]
-    fn x_scan_byte_equals_ncbi_scan_on_random_subjects() {
-        RESUMED.with(|r| r.set(0));
-        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
-        // (avx2, run): the plain loops, the AVX2 forms, and those with the chain runs
-        // (LOSAT_X_CHAINRUN).
-        let forms: Vec<(bool, bool)> = if avx2_detected() {
-            vec![(false, false), (true, false), (true, true)]
-        } else {
-            vec![(false, false)]
-        };
-        let mut compared = 0usize;
-        let mut stops = 0usize;
-        let mut big_cells = 0usize;
-        // Chains longer than a run, and chains too near the overflow array's end for one.
-        let mut past_run = 0usize;
-        let mut near_end = 0usize;
-        for case in 0..24 {
-            let num_queries = [1, 1, 3, 12][case % 4];
-            let queries: Vec<Vec<u8>> = (0..num_queries)
-                .map(|_| {
-                    let len = 20 + rng.below(380);
-                    (0..len).map(|_| AMINO[rng.below(AMINO.len())]).collect()
-                })
-                .collect();
-            let threshold = [11, 13, 15][case % 3];
-            let lookup = lookup_for(&queries, threshold);
-            assert!(fits(&lookup), "tblastn's table must fit");
-            let presence = build_presence(&lookup);
-            big_cells += lookup
-                .backbone
-                .iter()
-                .filter(|cell| cell.num_used as usize > AA_HITS_PER_CELL)
-                .count();
-            for cell in &lookup.backbone {
-                if cell.num_used as usize > AA_HITS_PER_CELL {
-                    past_run += usize::from(cell.num_used as usize > X_CHAIN_RUN);
-                    near_end += usize::from(cell.cursor() + X_CHAIN_RUN > lookup.overflow.len());
-                }
-            }
-            let longest = lookup.longest_chain.max(1) as usize;
-            // A frame in ncbistdaa (0..=27; a translated subject has 1..=25), sentinel 0 after it.
-            let len = [3, 4, 255, 256, 257, 271, 1_000, 20_000][case % 8];
-            let mut subject: Vec<u8> = (0..len).map(|_| rng.below(28) as u8).collect();
-            subject.push(0);
-            let last = len - 3;
-            let ranges = [
-                (0, last.max(0)),
-                (1.min(last.max(0)), last.max(0)),
-                (len / 3, last.max(len / 3)),
-                (5.min(last.max(0)), (last - 7).max(5.min(last.max(0)))),
-            ];
-            for &range in &ranges {
-                for array_size in [
-                    longest,
-                    longest + 1,
-                    longest + 2,
-                    3 * longest,
-                    3 * longest + 1,
-                    4096 + longest,
-                    32768 + longest,
-                    longest * 1024,
-                ] {
-                    let want = calls(&lookup, &presence, &subject, range, array_size, None);
-                    for &form in &forms {
-                        for resume in [false, true] {
-                            let got = calls_held(
-                                &lookup,
-                                &presence,
-                                &subject,
-                                range,
-                                array_size,
-                                Some(form),
-                                resume,
-                            );
-                            assert_eq!(
-                                got, want,
-                                "case {case} range {range:?} array_size {array_size} form {form:?} \
-                                 resume {resume}"
-                            );
-                        }
-                    }
-                    compared += want.iter().map(|(pairs, _)| pairs.len()).sum::<usize>();
-                    stops += want.len().saturating_sub(1);
-                }
-            }
-        }
-        // The cases above must reach the capacity stop (each one resumed in its block with
-        // `resume`), many hits and cells of the overflow.
-        assert!(compared > 100_000, "{compared} pairs compared");
-        assert!(stops > 100, "{stops} capacity stops");
-        assert_eq!(
-            RESUMED.with(|r| r.get()),
-            stops * forms.len(),
-            "every stop resumed in its block"
-        );
-        assert!(big_cells > 0, "no cell past {AA_HITS_PER_CELL} hits");
-        assert!(past_run > 0, "no chain past a run of {X_CHAIN_RUN} hits");
-        assert!(
-            near_end > 0,
-            "no chain too near the overflow array's end for a run"
-        );
-    }
-
-    // No NCBI counterpart: the index made from the letters is the rolled one
-    // (`ComputeTableIndexIncremental` from `ComputeTableIndex`) for every byte value, and the
-    // presence bytes are the bits of `pv`.
-    #[test]
-    fn indexes_and_presence_equal_the_rolled_index_and_pv() {
-        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
-        let letters: Vec<u8> = (0..X_BLOCK + 2).map(|_| rng.next() as u8).collect();
-        let lookup = lookup_for(&[b"MKTAYIAKQRQISFVKSHFSRQ".to_vec()], 11);
-        let presence = build_presence(&lookup);
-        assert_eq!(presence.len(), X_MASK + 1);
-        for ix in 0..=X_MASK {
-            let bit = lookup
-                .pv
-                .get(ix >> PV_ARRAY_BTS)
-                .is_some_and(|w| (w >> (ix & PV_ARRAY_MASK)) & 1 == 1);
-            assert_eq!(presence[ix] == 1, bit, "index {ix}");
-            assert!(
-                presence[ix] == 0 || ix < lookup.backbone.len(),
-                "index {ix}"
-            );
-        }
-        for words in [1, 15, 16, 17, 31, 32, 33, 100, X_BLOCK] {
-            let block = &letters[..words + 2];
-            let mut forms = vec![false];
-            if avx2_detected() {
-                forms.push(true);
-            }
-            for avx2 in forms {
-                let mut index = [0u16; X_BLOCK];
-                let mut cand = [MaybeUninit::<u16>::uninit(); X_BLOCK];
-                let n = run_candidates(avx2, block, &presence, &mut index, &mut cand);
-                let mut rolled = ((block[0] as usize) << 5 | block[1] as usize) & X_MASK;
-                let mut want = Vec::new();
-                for k in 0..words {
-                    rolled = ((rolled << 5) | block[k + 2] as usize) & X_MASK;
-                    assert_eq!(
-                        index[k] as usize, rolled,
-                        "word {k} of {words}, avx2 {avx2}"
-                    );
-                    if presence[rolled] == 1 {
-                        want.push(k as u16);
-                    }
-                }
-                // SAFETY: the first `n` entries were written.
-                let got: Vec<u16> = cand[..n]
-                    .iter()
-                    .map(|c| unsafe { c.assume_init() })
-                    .collect();
-                assert_eq!(got, want, "{words} words, avx2 {avx2}");
-            }
-        }
-    }
-
-    /// `candidates_avx2` when `avx2` (detected by the caller), else `candidates`.
-    fn run_candidates(
-        avx2: bool,
-        letters: &[u8],
-        presence: &[u8; X_MASK + 1],
-        index: &mut [u16; X_BLOCK],
-        cand: &mut [MaybeUninit<u16>; X_BLOCK],
-    ) -> usize {
-        #[cfg(target_arch = "x86_64")]
-        if avx2 {
-            // SAFETY: AVX2 was detected.
-            return unsafe { candidates_avx2(letters, presence, index, cand) };
-        }
-        assert!(!avx2, "AVX2 off x86-64");
-        candidates(letters, presence, index, cand)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:99-115 (the copy of an
-    // overflow chain).
-    // ```c
-    //                     src = &(ovfl[bbc[index].payload.overflow_cursor]);
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    //                         offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-    //                     }
-    // ```
-    // Not a port of an NCBI unit case: the chain that ends the overflow array, of a length that is
-    // not a multiple of four, is copied exactly (the AVX2 form then writes its last pairs one by
-    // one instead of reading past the array), with offset arrays from the longest chain up (as
-    // `x_scan_unit`'s: a smaller one would never hold the longest cell, and NCBI's loop would stop
-    // at that word on every call).
-    #[test]
-    fn the_last_overflow_chain_is_copied_exactly() {
-        let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
-        let mut tails = 0usize;
-        for case in 0..64 {
-            let queries: Vec<Vec<u8>> = (0..1 + case % 5)
-                .map(|_| {
-                    let len = 30 + rng.below(600);
-                    (0..len).map(|_| AMINO[rng.below(AMINO.len())]).collect()
-                })
-                .collect();
-            let lookup = lookup_for(&queries, [11, 12, 13][case % 3]);
-            let Some((ix, cell)) = lookup
-                .backbone
-                .iter()
-                .enumerate()
-                .filter(|(_, cell)| cell.num_used as usize > AA_HITS_PER_CELL)
-                .max_by_key(|(_, cell)| cell.cursor())
-            else {
-                continue;
-            };
-            let hits = cell.num_used as usize;
-            let cursor = cell.cursor();
-            if cursor + hits != lookup.overflow.len() || hits.is_multiple_of(4) {
-                continue;
-            }
-            tails += 1;
-            let presence = build_presence(&lookup);
-            // The chain's word three times, then the sentinel.
-            let word = [(ix >> 10) as u8, ((ix >> 5) & 31) as u8, (ix & 31) as u8];
-            let mut subject: Vec<u8> = word.repeat(3);
-            subject.push(0);
-            let longest = lookup.longest_chain.max(1) as usize;
-            for array_size in [
-                longest,
-                longest + 1,
-                longest + hits,
-                3 * longest,
-                4096 + longest,
-                32768 + longest,
-                longest * 1024,
-            ] {
-                let range = (0, subject.len() as i32 - 4);
-                let want = calls(&lookup, &presence, &subject, range, array_size, None);
-                assert!(
-                    want[0].0.len() >= hits,
-                    "case {case}: the chain was not copied"
-                );
-                let mut forms = vec![(false, false)];
-                if avx2_detected() {
-                    forms.extend([(true, false), (true, true)]);
-                }
-                for form in forms {
-                    for resume in [false, true] {
-                        let got = calls_held(
-                            &lookup,
-                            &presence,
-                            &subject,
-                            range,
-                            array_size,
-                            Some(form),
-                            resume,
-                        );
-                        assert_eq!(
-                            got, want,
-                            "case {case} array_size {array_size} form {form:?} resume {resume}"
-                        );
-                    }
-                }
-            }
-        }
-        assert!(tails >= 4, "{tails} tables whose last chain ends the array");
-    }
-
-    /// Where `copy_block` leaves the cells of up to `AA_HITS_PER_CELL` hits for a candidate of
-    /// `cand[first..n]` (the room of `room_for_rest`, computed at the start and again after every
-    /// larger cell or tested candidate): `[ran out, larger cell fit and room held, larger cell fit
-    /// and room lost, larger cell did not fit]`. A statement of the rule, made from the
-    /// candidates' hit counts, to show which exits a case reaches.
-    fn copy_exits(
-        hits: &[i32],
-        first: usize,
-        totalhits: i32,
-        array_size: i32,
-        exits: &mut [usize; 4],
-    ) {
-        let left = |t: i32, i: usize| t as usize + AA_HITS_PER_CELL * (hits.len() - i);
-        let (mut i, mut t) = (first, totalhits);
-        while i < hits.len() {
-            if left(t, i) <= array_size as usize {
-                while i < hits.len() && hits[i] as usize <= AA_HITS_PER_CELL {
-                    t += hits[i];
-                    i += 1;
-                }
-                if i == hits.len() {
-                    exits[0] += 1;
-                    return;
-                }
-                if hits[i] > array_size - t {
-                    exits[3] += 1;
-                    return;
-                }
-                t += hits[i];
-                i += 1;
-                if i < hits.len() {
-                    exits[if left(t, i) <= array_size as usize {
-                        1
-                    } else {
-                        2
-                    }] += 1;
-                }
-            } else {
-                if hits[i] > array_size - t {
-                    return;
-                }
-                t += hits[i];
-                i += 1;
-            }
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:91-123 (the statements
-    // compared against, quoted at `copy_block`). Not a port of an NCBI unit case: the copy stage of
-    // every form, called on hand-made tables and blocks (cells of 1-3 hits, chains of 4-40 hits,
-    // the last chain ending the overflow array, blocks of 1-256 words, offset arrays that stop the
-    // copy, resumed blocks), returns NCBI's total and stopping word and writes NCBI's pairs, and
-    // nothing before `totalhits` or past the slack; the cases reach every exit of the loop of the
-    // small cells (`copy_exits`), chains past a run and chains too near the overflow array's end.
-    #[test]
-    fn the_copy_stage_equals_ncbis_statements_at_every_exit() {
-        let mut rng = XorShift(0x4f1b_bcdc_bfa5_3e0b);
-        let forms: Vec<(bool, bool)> = if avx2_detected() {
-            vec![(false, false), (true, false), (true, true)]
-        } else {
-            vec![(false, false)]
-        };
-        let mut exits = [0usize; 4];
-        let (mut stops, mut chains, mut past_run, mut near_end, mut full_blocks) = (0, 0, 0, 0, 0);
-        for case in 0..3000 {
-            // A table of 48 cells: 1-3 hits, or a chain of 4-40 hits in the overflow array (the
-            // last one ends it in every other case).
-            let small_tenths = [9, 7, 5, 2][case % 4];
-            let mut backbone = vec![BackboneCell::default(); 48];
-            let mut overflow: Vec<i32> = Vec::new();
-            for cell in &mut backbone {
-                if rng.below(10) < small_tenths {
-                    cell.num_used = 1 + rng.below(AA_HITS_PER_CELL) as i32;
-                    for e in &mut cell.entries {
-                        *e = rng.below(100_000) as i32;
-                    }
-                } else {
-                    cell.num_used = 4 + rng.below(37) as i32;
-                    cell.set_cursor(overflow.len());
-                    overflow.extend((0..cell.num_used).map(|_| rng.below(100_000) as i32));
-                }
-            }
-            if case % 2 == 0 {
-                overflow.extend(std::iter::repeat_n(-1, rng.below(8)));
-            }
-            let table = Table {
-                backbone: backbone.as_ptr(),
-                overflow: overflow.as_ptr(),
-                overflow_len: overflow.len(),
-            };
-            // A block: the cell of each word, and the words that are candidates, ascending.
-            let words = if case % 5 == 0 {
-                X_BLOCK
-            } else {
-                1 + rng.below(X_BLOCK)
-            };
-            full_blocks += usize::from(words == X_BLOCK);
-            let mut held = XScanHeld::new();
-            for k in 0..words {
-                held.index[k] = rng.below(backbone.len()) as u16;
-            }
-            let density = 1 + rng.below(100);
-            let mut n = 0;
-            for k in 0..words {
-                if rng.below(100) < density || k + 1 == words {
-                    held.cand[n] = MaybeUninit::new(k as u16);
-                    n += 1;
-                }
-            }
-            held.n = n;
-            let cand: Vec<usize> = held.cand[..n]
-                .iter()
-                .map(|c| unsafe { c.assume_init() } as usize)
-                .collect();
-            let cells: Vec<&BackboneCell> = cand
-                .iter()
-                .map(|&k| &backbone[held.index[k] as usize])
-                .collect();
-            let hits: Vec<i32> = cells.iter().map(|cell| cell.num_used).collect();
-            let longest = *hits.iter().max().unwrap() as usize;
-            // Offset arrays from none to more than the block needs; in every fifth case room for
-            // three hits of each of the last few candidates and a few more (a larger cell may then
-            // not fit).
-            let mut first = if case % 3 == 0 { rng.below(n) } else { 0 };
-            let (array_size, totalhits) = if case % 5 == 1 {
-                first = n - 1 - rng.below(n.min(8));
-                let totalhits = rng.below(64);
-                let room = AA_HITS_PER_CELL * (n - first) + rng.below(24);
-                ((totalhits + room) as i32, totalhits as i32)
-            } else {
-                let array_size = match rng.below(4) {
-                    0 => rng.below(4),
-                    1 => rng.below(64),
-                    2 => 64 + rng.below(1024),
-                    _ => 3 * X_BLOCK + longest + rng.below(4096),
-                };
-                (array_size as i32, rng.below(array_size + 1) as i32)
-            };
-            let block_first = rng.below(1 << 20);
-            // NCBI's statements (blast_aascan.c:91-123) from candidate `first`.
-            let (mut want, mut total, mut stop) = (Vec::new(), totalhits, None);
-            for (i, cell) in cells.iter().enumerate().skip(first) {
-                let s_off = (block_first + cand[i]) as u32;
-                let numhits = cell.num_used;
-                if numhits > array_size - total {
-                    stop = Some(s_off);
-                    break;
-                }
-                for j in 0..numhits as usize {
-                    let q_off = if numhits as usize <= AA_HITS_PER_CELL {
-                        cell.entries[j]
-                    } else {
-                        overflow[cell.cursor() + j]
-                    };
-                    want.push((q_off as u32, s_off));
-                }
-                if numhits as usize > AA_HITS_PER_CELL {
-                    chains += 1;
-                    past_run += usize::from(numhits as usize > X_CHAIN_RUN);
-                    near_end += usize::from(cell.cursor() + X_CHAIN_RUN > overflow.len());
-                }
-                total += numhits;
-            }
-            stops += usize::from(stop.is_some());
-            copy_exits(&hits, first, totalhits, array_size, &mut exits);
-            let before = BlastOffsetPair {
-                q_off: 0x0bad_cafe,
-                s_off: 0x0dd_ba11,
-            };
-            let guard = BlastOffsetPair {
-                q_off: 0xdead_beef,
-                s_off: 0xfeed_f00d,
-            };
-            let end = array_size as usize + X_SCAN_BYTE_SLACK;
-            for &(avx2, run) in &forms {
-                let mut pairs = vec![before; end];
-                pairs.resize(end + 2 * X_SCAN_BYTE_SLACK, guard);
-                // SAFETY: every candidate's cell is in `backbone`; `pairs` has `array_size +
-                // X_SCAN_BYTE_SLACK` entries; AVX2 only where it was detected.
-                let got = unsafe {
-                    copy_any(
-                        avx2,
-                        run,
-                        &table,
-                        pairs.as_mut_ptr(),
-                        &held,
-                        first,
-                        block_first,
-                        totalhits,
-                        array_size,
-                    )
-                };
-                let what = format!("case {case} form {:?}", (avx2, run));
-                assert_eq!(got, (total, stop), "{what}");
-                let written: Vec<(u32, u32)> = pairs[totalhits as usize..total as usize]
-                    .iter()
-                    .map(|pair| (pair.q_off, pair.s_off))
-                    .collect();
-                assert_eq!(written, want, "{what}");
-                let is = |p: &BlastOffsetPair, q: BlastOffsetPair| {
-                    (p.q_off, p.s_off) == (q.q_off, q.s_off)
-                };
-                assert!(
-                    pairs[..totalhits as usize].iter().all(|p| is(p, before)),
-                    "{what}"
-                );
-                assert!(pairs[end..].iter().all(|p| is(p, guard)), "{what}");
-            }
-        }
-        // Every exit of the loop of the small cells, stops, and chains of every kind.
-        assert!(exits.iter().all(|&e| e >= 100), "exits {exits:?}");
-        assert!(stops >= 500, "{stops} stops");
-        assert!(chains >= 10_000, "{chains} chains");
-        assert!(past_run >= 2_000, "{past_run} chains past a run");
-        assert!(near_end >= 300, "{near_end} chains near the overflow end");
-        assert!(full_blocks >= 300, "{full_blocks} blocks of X_BLOCK words");
-    }
-
-    // No NCBI counterpart: the kept presence bytes follow the table (a new table, also one at a
-    // freed table's address, gets its own).
-    #[test]
-    fn presence_bytes_are_rebuilt_for_another_table() {
-        let one = Arc::new(lookup_for(&[b"MKTAYIAKQRQISFVKSHFSRQ".to_vec()], 11));
-        let two = Arc::new(lookup_for(&[b"WWWWCCCCHHHHMMMM".to_vec()], 11));
-        assert_eq!(*presence_bytes(&one).0, *build_presence(&one));
-        assert_eq!(*presence_bytes(&two).0, *build_presence(&two));
-        assert_eq!(*presence_bytes(&one).0, *build_presence(&one));
-        drop(one);
-        let three = Arc::new(lookup_for(&[b"PPPPGGGGAAAA".to_vec()], 11));
-        assert_eq!(*presence_bytes(&three).0, *build_presence(&three));
-    }
-
-    // No NCBI counterpart: a table is sparse when at most three tenths of its backbone cells have
-    // hits; the table of one random protein of 400 letters is (0.21 at threshold 13), that of 64 is
-    // not (0.54), and `XScanByte::Sparse` scans only the sparse one this way.
-    #[test]
-    fn one_protein_makes_a_sparse_table_and_many_do_not() {
-        let mut rng = XorShift(0x0bad_5eed_1234_5678);
-        let mut protein =
-            || -> Vec<u8> { (0..400).map(|_| AMINO[rng.below(AMINO.len())]).collect() };
-        let one = Arc::new(lookup_for(&[protein()], 13));
-        let many = Arc::new(lookup_for(
-            &(0..64).map(|_| protein()).collect::<Vec<_>>(),
-            11,
-        ));
-        for (table, want) in [(&one, true), (&many, false)] {
-            let bytes = build_presence(table);
-            let ones = bytes.iter().filter(|&&b| b == 1).count();
-            let cells = table.backbone.len();
-            assert_eq!(sparse(&bytes, table), ones * 10 <= cells * X_SPARSE_TENTHS);
-            assert_eq!(presence_bytes(table).1, want, "{ones} of {cells} cells");
-            assert_eq!(x_presence(XScanByte::Sparse, table).is_some(), want);
-            let mode = XScanByte::On { avx2: false };
-            assert!(x_presence(mode, table).is_some(), "{mode:?}");
-            assert!(x_presence(XScanByte::Off, table).is_none());
-        }
-    }
-}
+#[path = "x_scan_byte_tests.rs"]
+mod tests;

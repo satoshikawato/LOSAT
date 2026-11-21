@@ -20,22 +20,11 @@ use crate::seqid::{label, ParsedSeqId};
 // platform: `super::platform::Platform`.
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:46-48
-// ```c++
-// #define DEFAULT_MAX_ENTRY_PER_TXN 40000
-// #define DEFAULT_MIN_SPLIT_SORT_SIZE 500000000
-// #define DEFAULT_MIN_SPLIT_CHUNK_SIZE 25000000
-// ```
 const DEFAULT_MAX_ENTRY_PER_TXN: u32 = 40_000;
 const DEFAULT_MIN_SPLIT_SORT_SIZE: u32 = 500_000_000;
 const DEFAULT_MIN_SPLIT_CHUNK_SIZE: u32 = 25_000_000;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdb_lmdb.hpp:196-199
-// ```c++
-// const string volinfo_str = "volinfo";
-// const string volname_str = "volname";
-// const string acc2oid_str = "acc2oid";
-// const string taxid2offset_str = "taxid2offset";
-// ```
 const VOLINFO_STR: &str = "volinfo";
 const VOLNAME_STR: &str = "volname";
 const ACC2OID_STR: &str = "acc2oid";
@@ -73,16 +62,6 @@ impl LmdbEnvSettings {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1136-1144
-// ```c++
-//     if(m_DbVersion == eBDB_Version5 && m_Lmdbdb.Empty()) {
-//         const string lmdb_fname_w_path = BuildLMDBFileName(m_Dbname, m_Protein);
-//         Uint8 map_size = 0;
-//         char* map_sz_str = getenv("BLASTDB_LMDB_MAP_SIZE");
-//         if (map_sz_str) {
-//         	map_size = NStr::StringToUInt8(map_sz_str);
-//         }
-//         if(map_size > 0){
-// ```
 /// `BLASTDB_LMDB_MAP_SIZE` as `CWriteDB_Impl::x_Publish` reads it: 0 when unset (the
 /// writers then take their default map sizes).
 pub(crate) fn lmdb_map_size_from_env() -> Result<u64, WriteDbError> {
@@ -94,13 +73,6 @@ pub(crate) fn lmdb_map_size_from_env() -> Result<u64, WriteDbError> {
 
 /// `m_MaxEntryPerTxn` from `MAX_LMDB_TXN_ENTRY`.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:58-62
-// ```c++
-// 	char* max_entry_str = getenv("MAX_LMDB_TXN_ENTRY");
-// 	if (max_entry_str) {
-// 		m_MaxEntryPerTxn = NStr::StringToInt(max_entry_str);
-// 	    _TRACE("DEBUG: LMDB TXN Max Entry " << m_MaxEntryPerTxn);
-//     }
-// ```
 // `m_MaxEntryPerTxn` is an `unsigned int`: a negative value wraps.
 fn max_entry_per_txn(settings: &LmdbEnvSettings) -> Result<u32, WriteDbError> {
     match &settings.max_lmdb_txn_entry {
@@ -112,34 +84,8 @@ fn max_entry_per_txn(settings: &LmdbEnvSettings) -> Result<u32, WriteDbError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:103-110
-// ```c++
-//         try {
-//             m_Env.open(m_Filename.c_str(), MDB_NOSUBDIR , 0664);
-//         }
-//         catch (lmdb::error& e) {
-//             NCBI_THROW(CSeqDBException, eFileErr, "LMDB runtime error: " + (string)e.what());
-//         }
-// ```
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:356-365
-// ```c++
-// static inline void
-// lmdb::env_open(MDB_env* const env,
-//                const char* const path,
-//                const unsigned int flags,
-//                const mode mode) {
-//   const int rc = ::mdb_env_open(env, path, flags, mode);
-//   if (rc != MDB_SUCCESS) {
-//     error::raise("mdb_env_open", rc);
-//   }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:130-139
-// ```c++
-//   virtual const char* what() const LMDB_NOEXCEPT {
-//   ...
-// 	 LMDB_SNPRINTF(buffer, sizeof(buffer),
-// 		"%s: %s", origin(), ::mdb_strerror(code()));
-// ```
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:356-365
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:130-139
 // Every failure of `mdb_env_open` (the lock file or the data file that cannot be created, the
 // map) is this `CSeqDBException`. makeblastdb 2.17.0 with an output name of 247 to 251 bytes:
 // `BLAST Database error: LMDB runtime error: mdb_env_open: File name too long` (exit status 2)
@@ -169,15 +115,6 @@ fn lmdb_error(e: LmdbError) -> WriteDbError {
 
 /// `GetFileNameFromExistingLMDBFile`: the LMDB file name with its last two letters replaced.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:763-788
-// ```c++
-// 	string filename (lmdb_filename, 0, lmdb_filename.size() - 2);
-// 	switch (file_type) {
-// 		case eLMDB : filename += "db"; break;
-// 		case eOid2SeqIds : filename +="os"; break;
-// 		case eOid2TaxIds : filename +="ot"; break;
-// 		case eTaxId2Offsets : filename += "tf"; break;
-// 		case eTaxId2Oids : filename += "to"; break;
-// ```
 pub(crate) fn lmdb_file_name(lmdb_filename: &Path, suffix: &str) -> PathBuf {
     let mut s = lmdb_filename
         .as_os_str()
@@ -200,17 +137,6 @@ fn c_str(b: &[u8]) -> &[u8] {
 /// Run the batches of `x_CommitTransaction`: `[i, j)` with
 /// `j = i + m_MaxEntryPerTxn` in `unsigned int` arithmetic, clipped to the list size.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:312-321
-// ```c++
-//     unsigned int j=0;
-//     while (j < m_list.size()){
-//     	lmdb::txn txn = lmdb::txn::begin(m_Env);
-//     	...
-//     	unsigned int i = j;
-//     	j= i+m_MaxEntryPerTxn;
-//     	if(j > m_list.size()) {
-//     		j = m_list.size();
-//     	}
-// ```
 // `MAX_LMDB_TXN_ENTRY=0` makes makeblastdb loop for ever (no batch ever ends the list), and a
 // batch end that wraps past 4294967295 sends its loop back over entries already put: LOSAT
 // refuses both.
@@ -244,27 +170,6 @@ fn txn_batches(len: usize, max: u32) -> Result<Vec<(usize, usize)>, WriteDbError
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_lmdb.hpp:111-129
-// ```c++
-//     struct SKeyValuePair {
-//     	string id;
-//     	blastdb::TOid oid;
-//     	bool saveToOidList;
-//     	SKeyValuePair() : id(kEmptyStr), oid(kSeqDBEntryNotFound), saveToOidList(false) {}
-//     	static bool cmp_key(const SKeyValuePair & v, const SKeyValuePair & k) {
-//    			if(v.id == k.id) {
-// 				blastdb::TOid mask = 0xFF;
-//    				for(unsigned int i=0; i < sizeof(blastdb::TOid); i++) {
-//    					if( (v.oid & mask) != (k.oid & mask)) {
-//    						return (v.oid & mask) < (k.oid & mask);
-//    					}
-//    					mask =  mask << 8;
-//    				}
-//    			}
-//     	    return v.id < k.id;
-//     	}
-//     };
-//     vector<SKeyValuePair> m_list;
-// ```
 // NCBI's element is a `std::string` (32 bytes, its characters on the heap past 15 of them)
 // beside the OID and the flag: 40 bytes plus the heap block, about 72 bytes for an id of
 // 16-24 characters, kept for every key of the database until `~CWriteDB_LMDB`. LOSAT keeps
@@ -379,21 +284,7 @@ fn kv_cmp(ids: &[u8], a: KeyValuePair, b: KeyValuePair) -> std::cmp::Ordering {
     id_cmp(ids, a, b).then_with(|| a.oid().to_le_bytes().cmp(&b.oid().to_le_bytes()))
 }
 
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:850-861
-// ```c++
-// static inline bool
-// lmdb::dbi_put(MDB_txn* const txn,
-//               const MDB_dbi dbi,
-//               const MDB_val* const key,
-//               const MDB_val* const data,
-//               const unsigned int flags = 0) {
-//   const int rc = ::mdb_put(txn, dbi, const_cast<MDB_val*>(key), const_cast<MDB_val*>(data), flags);
-//   if (rc != MDB_SUCCESS && rc != MDB_KEYEXIST) {
-//     error::raise("mdb_put", rc);
-//   }
-//   return (rc == MDB_SUCCESS);
-// }
-// ```
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:850-861
 // The error of a put in `x_CommitTransaction` (an id of more than 511 bytes, which LMDB refuses
 // with MDB_BAD_VALSIZE) is raised in `~CWriteDB_LMDB`, where it ends makeblastdb 2.17.0 with
 // SIGABRT after its `.pos` file (S3c x_key512). LOSAT ends with lmdb++'s text and the key it
@@ -425,16 +316,6 @@ pub(crate) struct WriteDbLmdb {
 
 impl WriteDbLmdb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:51-63
-    // ```c++
-    // CWriteDB_LMDB::CWriteDB_LMDB(const string& dbname,  Uint8 map_size, Uint8 capacity): m_Db(dbname),
-    //                              m_Env(CBlastLMDBManager::GetInstance().GetWriteEnv(dbname, map_size)),
-    //                              m_ListCapacity(capacity),
-    //                              m_MaxEntryPerTxn(DEFAULT_MAX_ENTRY_PER_TXN),
-    //                              m_TotalIdsLength(0)
-    // {
-    // 	m_list.reserve(m_ListCapacity);
-    // 	char* max_entry_str = getenv("MAX_LMDB_TXN_ENTRY");
-    // ```
     // `m_list.reserve` (and `x_Resize`, which doubles the reserve) changes no output; LOSAT's
     // list grows as it is filled.
     /// Create the LMDB file `dbname` (`<db>.pdb`/`<db>.ndb`) with the map size `map_size`
@@ -489,17 +370,6 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:108-117
-    // ```c++
-    // int CWriteDB_LMDB::InsertEntries(const vector<CRef<CSeq_id>> & seqids, const blastdb::TOid oid)
-    // {
-    //     int count = 0;
-    //     ITERATE(vector<CRef<CSeq_id>>, itr, seqids) {
-    //        x_InsertEntry((*itr), oid);
-    //     	count++;
-    //     }
-    //     return count;
-    // }
-    // ```
     /// `InsertEntries(m_Ids, oid)`: the keys of the Seq-ids of the sequence of OID `oid`.
     /// Returns how many elements were added to `m_list` (0 when every id is a GI).
     pub(crate) fn insert_entries(
@@ -515,94 +385,7 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:119-196
-    // ```c++
-    // void CWriteDB_LMDB::x_InsertEntry(const CRef<CSeq_id> &seqid, const blastdb::TOid oid)
-    // {
-    //     if(seqid->IsGi()) {
-    //     	return;
-    //     }
-    //
-    //     x_Resize();
-    //
-    //     if(seqid->IsPir() || seqid->IsPrf()) {
-    //     	SKeyValuePair kv_pir;
-    //     	kv_pir.id = seqid->AsFastaString();
-    //     	kv_pir.oid = oid;
-    //     	kv_pir.saveToOidList = true;
-    //     	m_list.push_back(kv_pir);
-    //     	return;
-    //     }
-    //
-    //     if(seqid->IsPdb()) {
-    //     	SKeyValuePair kv_pdb_mol;
-    //     	kv_pdb_mol.id = seqid->GetPdb().GetMol().Get();
-    //     	kv_pdb_mol.oid = oid;
-    //     	m_list.push_back(kv_pdb_mol);
-    //     	// mol code should be case insensitive but c++ tooklit
-    //     	// is not converting it all to uppercase now
-    //     	string id_upper = kv_pdb_mol.id;
-    //     	NStr::ToUpper(id_upper);
-    //     	if(kv_pdb_mol.id != id_upper) {
-    //     		SKeyValuePair kv_u;
-    //        		kv_u.id = id_upper;
-    //        		kv_u.oid = oid;
-    //        		m_list.push_back(kv_u);
-    //        	}
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(true);
-    //     	kv.oid = oid;
-    //     	kv.saveToOidList = true;
-    //     	m_list.push_back(kv);
-    //     	return;
-    //     }
-    //
-    //     if(seqid->GetTextseq_Id() != NULL) {
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(false);
-    //     	kv.oid = oid;
-    //     	string id_v = seqid->GetSeqIdString(true);
-    //     	if( kv.id != id_v) {
-    //     		m_list.push_back(kv);
-    //     		SKeyValuePair kv_v;
-    //     		kv_v.id = id_v;
-    //     		kv_v.oid = oid;
-    //     		kv_v.saveToOidList = true;
-    //     		m_list.push_back(kv_v);
-    //     	}
-    //     	else {
-    //     		kv.saveToOidList = true;
-    //     		m_list.push_back(kv);
-    //     	}
-    //    	}
-    //     else {
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(true);
-    //     	kv.oid = oid;
-    //     	kv.saveToOidList = true;
-    //     	m_list.push_back(kv);
-    //     	string id_upper = kv.id;
-    //     	NStr::ToUpper(id_upper);
-    //     	if(kv.id != id_upper) {
-    //     		SKeyValuePair kv_u;
-    //     		kv_u.id = id_upper;
-    //     		kv_u.oid = oid;
-    //     		m_list.push_back(kv_u);
-    //
-    //     	}
-    //
-    //     }
-    //     return;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1949-1954
-    // ```c++
-    //         if ( !str.empty() ) {
-    //             if ( (flags & CSeq_id::fLabel_Version)  &&  tsid->IsSetVersion()) {
-    //                 str += "." + NStr::IntToString(tsid->GetVersion());
-    //             }
-    //         }
-    //         *label += str;
-    // ```
     // `NStr::ToUpper` changes the letters a-z only (the C locale; the ids of the FASTA reader
     // hold no byte past 0x7f, makedb-v5 DECISIONS 28), so a copy differs exactly when the id
     // has such a letter. Each Seq-id's bytes are stored once (`KeyValuePair`): the id with the
@@ -670,28 +453,6 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:74-94
-    // ```c++
-    // void CWriteDB_LMDB::InsertVolumesInfo(const vector<string> & vol_names, const vector<blastdb::TOid> & vol_num_oids)
-    // {
-    // 	x_IncreaseEnvMapSize(vol_names, vol_num_oids);
-    //     lmdb::txn txn = lmdb::txn::begin(m_Env);
-    //     lmdb::dbi volinfo = lmdb::dbi::open(txn, blastdb::volinfo_str.c_str(), MDB_CREATE | MDB_INTEGERKEY);
-    //     lmdb::dbi volname = lmdb::dbi::open(txn, blastdb::volname_str.c_str(), MDB_CREATE | MDB_INTEGERKEY);
-    // 	for (unsigned int i =0; i < vol_names.size(); i++) {
-    // 		const lmdb::val key{&i, sizeof(i)};
-    // 		lmdb::val value{vol_names[i].c_str(), strlen(vol_names[i].c_str())};
-    // 		bool rc =lmdb::dbi_put(txn, volname.handle(), key, value);
-    // 		if (!rc) {
-    // 			NCBI_THROW( CSeqDBException, eArgErr, "VolNames error ");
-    // 		}
-    // 		rc = volinfo.put(txn, i, vol_num_oids[i]);
-    // 		if (!rc) {
-    // 			NCBI_THROW( CSeqDBException, eArgErr, "VolInfo error ");
-    // 		}
-    // 	}
-    // 	txn.commit();
-    // }
-    // ```
     /// `InsertVolumesInfo`: the names of the volumes (`CDirEntry(volume name).GetName()`) and
     /// the number of OIDs in each.
     pub(crate) fn insert_volumes_info(
@@ -756,25 +517,6 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:198-225
-    // ```c++
-    // 	// 2 meta pages
-    // 	const size_t MIN_PAGES = 3;
-    // 	const size_t BRANCH_PAGES = 2;
-    // 	// Each entry has 8 byte overhead + size of (key + entry)
-    // 	size_t vol_name_size = (vol_names.front().size() + 24)* vol_names.size();
-    // 	size_t vol_info_size = 24* vol_names.size();
-    // 	...
-    // 	size_t page_size = stat.ms_psize;
-    // 	// For each page 16 byte header
-    // 	size_t page_max_size = page_size -16;
-    // 	size_t last_page_num = info.me_last_pgno;
-    // 	size_t max_num_pages = info.me_mapsize/page_size;
-    // 	size_t leaf_pages_needed = vol_name_size/page_max_size + vol_info_size/page_max_size + 2;
-    // 	size_t total_pages_needed = MIN_PAGES + BRANCH_PAGES + leaf_pages_needed;
-    // 	if( (total_pages_needed + last_page_num) > max_num_pages ) {
-    // 		size_t newMapSize = (total_pages_needed + last_page_num) * page_size;
-    // 		m_Env.set_mapsize(newMapSize);
-    // ```
     fn increase_env_map_size_volumes(&mut self, vol_names: &[String]) -> Result<(), WriteDbError> {
         let front = vol_names.first().map_or(0, |n| n.len()) as u64;
         let vol_name_size = (front + 24) * vol_names.len() as u64;
@@ -785,15 +527,6 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:227-250
-    // ```c++
-    // 	size_t size = m_TotalIdsLength  + m_list.size() * 16;
-    // 	size_t avg_id_length = m_TotalIdsLength/m_list.size();
-    // 	...
-    // 	size_t leaf_pages_needed = size/page_max_size + 1;
-    // 	size_t dup_pages = (leaf_pages_needed > 200) ? 14: 7;
-    // 	size_t branch_pages_needed = (avg_id_length + 16)* leaf_pages_needed/page_max_size + 1;
-    // 	size_t total_pages_needed = leaf_pages_needed + branch_pages_needed + dup_pages;
-    // ```
     fn increase_env_map_size(&mut self) -> Result<(), WriteDbError> {
         let size = self.total_ids_length as u64 + self.list.len() as u64 * 16;
         let avg_id_length = self.total_ids_length as u64 / self.list.len() as u64;
@@ -806,60 +539,6 @@ impl WriteDbLmdb {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:273-342
     // (x_CommitTransaction)
-    // ```c++
-    // 	if(m_list.size() == 0) {
-    // 		return;
-    // 	}
-    // #ifdef _OPENMP
-    // 	unsigned int min_split_size = DEFAULT_MIN_SPLIT_SORT_SIZE;
-    // 	unsigned int chunk_size = DEFAULT_MIN_SPLIT_CHUNK_SIZE;
-    // 	char* min_split_str = getenv("LMDB_MIN_SPLIT_SIZE");
-    // 	char* chunk_str = getenv("LMDB_SPLIT_CHUNK_SIZE");
-    // 	if (chunk_str) {
-    // 		chunk_size = NStr::StringToUInt(chunk_str);
-    // 	}
-    // 	if (min_split_str) {
-    // 		min_split_size = NStr::StringToUInt(min_split_str);
-    // 	}
-    // 	if((m_list.size() < min_split_size) || (m_list.size() < 2*chunk_size)) {
-    // 		std::sort (m_list.begin(), m_list.end(), SKeyValuePair::cmp_key);
-    // 	}
-    // 	else {
-    // 		... (x_Split: nth_element and OpenMP tasks that sort chunks)
-    // 	}
-    // #else
-    // 	std::sort (m_list.begin(), m_list.end(), SKeyValuePair::cmp_key);
-    // #endif
-    // 	x_IncreaseEnvMapSize();
-    //     unsigned int j=0;
-    //     while (j < m_list.size()){
-    //     	lmdb::txn txn = lmdb::txn::begin(m_Env);
-    //     	lmdb::dbi dbi = lmdb::dbi::open(txn, blastdb::acc2oid_str.c_str(),
-    //     			                        MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED);
-    //     	unsigned int i = j;
-    //     	j= i+m_MaxEntryPerTxn;
-    //     	if(j > m_list.size()) {
-    //     		j = m_list.size();
-    //     	}
-    //     	for(; i < j; i++){
-    //     		if( i > 0) {
-    //     			if ((m_list[i-1].id == m_list[i].id) &&
-    //     				(m_list[i-1].oid == m_list[i].oid)){
-    //     				continue;
-    //     			}
-    //     		}
-    //     		blastdb::TOid & oid = m_list[i].oid;
-    //     		string & id = m_list[i].id;
-    // 			lmdb::val value{&oid, sizeof(oid)};
-    // 			lmdb::val key{id.c_str(), strlen(id.c_str())};
-    // 			bool rc = lmdb::dbi_put(txn, dbi.handle(), key, value, MDB_APPENDDUP);
-    // 			if (!rc) {
-    // 		 		NCBI_THROW( CSeqDBException, eArgErr, "acc2oid error for id " + id);
-    // 			}
-    // 		}
-    //     	txn.commit();
-    //     }
-    // ```
     // makeblastdb 2.17.0 (bioconda) is built with OpenMP: it reads both variables. The split
     // sort gives the order `std::sort` gives (`cmp_key` orders by id, then by the bytes of the
     // OID; ties are equal in both), but with a chunk size of 0 or 1 `x_Split` recurses without
@@ -952,74 +631,6 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:344-415
-    // ```c++
-    // Uint4 s_WirteIds(CNcbiOfstream & os, vector<string> & ids)
-    // {
-    // 	const unsigned char byte_max = 0xFF;
-    // 	Uint4 diff =0;
-    // 	sort(ids.begin(), ids.end());
-    // 	for(unsigned int j =0; j < ids.size(); j++) {
-    // 		Uint4 id_len = ids[j].size();
-    // 		if(id_len >= byte_max) {
-    // 			os.write((char *)&byte_max, 1);
-    // 			os.write((char *)&id_len, 4);
-    // 			diff += 5;
-    // 		}
-    // 		else {
-    // 			char l = byte_max & id_len;
-    // 			os.write(&l,1);
-    // 			diff += 1;
-    // 		}
-    // 		os.write(ids[j].c_str(), id_len);
-    // 		diff += id_len;
-    // 	}
-    // 	return diff;
-    // }
-    // void CWriteDB_LMDB::x_CreateOidToSeqidsLookupFile()
-    // {
-    // 	if(m_list.size() == 0) {
-    // 		return;
-    // 	}
-    // 	Uint8 total_num_oids = m_list.back().oid + 1;
-    // 	string filename = GetFileNameFromExistingLMDBFile(m_Db, ELMDBFileType::eOid2SeqIds);
-    // 	Uint8 offset = 0;
-    // 	CNcbiOfstream os(filename.c_str(), IOS_BASE::out | IOS_BASE::binary);
-    // 	vector<Uint4> offsets(total_num_oids, 0);
-    // 	os.write((char *)&total_num_oids, 8);
-    // 	for(unsigned int i=0; i < total_num_oids; i++) {
-    // 		os.write((char *) &offset, 8);
-    // 	}
-    // 	os.flush();
-    // 	blastdb::TOid count = 0;
-    // 	vector<string> tmp_ids;
-    // 	for(unsigned int i = 0; i < m_list.size(); i++) {
-    // 		if(i > 0 && m_list[i].oid != m_list[i-1].oid ) {
-    // 			if((m_list[i].oid - m_list[i-1].oid) != 1) {
-    // 		 		NCBI_THROW( CSeqDBException, eArgErr, "Input id list not in ascending oid order");
-    // 			}
-    // 			offsets[count] = s_WirteIds(os, tmp_ids);
-    // 			count++;
-    // 			tmp_ids.clear();
-    // 		}
-    // 		m_TotalIdsLength +=m_list[i].id.size();
-    // 		if(!m_list[i].saveToOidList) {
-    // 			continue;
-    // 		}
-    // 		tmp_ids.push_back(m_list[i].id);
-    // 	}
-    // 	offsets[count] = s_WirteIds(os, tmp_ids);
-    // 	_ASSERT(count == m_list.back().oid);
-    // 	os.flush();
-    // 	os.seekp(8);
-    // 	for(unsigned int i = 0; i < total_num_oids; i++) {
-    // 		offset += offsets[i];
-    // 		os.write((char *) &offset, 8);
-    // 	}
-    //
-    // 	os.flush();
-    // 	os.close();
-    // }
-    // ```
     // The stream is not tested (`super::ofstream`): a `.pos` that cannot be opened or written
     // leaves the build going on. The exception of a gap in the OIDs leaves the stream to its
     // destructor, which writes what it holds.
@@ -1100,15 +711,6 @@ impl WriteDbLmdb {
     /// `~CWriteDB_LMDB`: the `.pos` file, the `acc2oid` transactions, the environment closed
     /// and the lock file removed.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72
-    // ```c++
-    // CWriteDB_LMDB::~CWriteDB_LMDB()
-    // {
-    // 	x_CreateOidToSeqidsLookupFile();
-    // 	x_CommitTransaction();
-    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
-    //     CFile(m_Db+"-lock").Remove();
-    // }
-    // ```
     pub(crate) fn close(mut self) -> Result<(), WriteDbError> {
         self.create_oid_to_seqids_lookup_file()?;
         self.commit_transaction()?;
@@ -1129,16 +731,6 @@ pub(crate) struct WriteDbTaxId {
 
 impl WriteDbTaxId {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:425-435
-    // ```c++
-    // CWriteDB_TaxID::CWriteDB_TaxID(const string& dbname,  Uint8 map_size, Uint8 capacity): m_Db(dbname),
-    //                                m_Env(CBlastLMDBManager::GetInstance().GetWriteEnv(dbname, map_size)),
-    //                                m_ListCapacity(capacity), m_MaxEntryPerTxn(DEFAULT_MAX_ENTRY_PER_TXN)
-    // {
-    // 	m_TaxId2OidList.reserve(m_ListCapacity);
-    // 	char* max_entry_str = getenv("MAX_LMDB_TXN_ENTRY");
-    // 	if (max_entry_str) {
-    // 		m_MaxEntryPerTxn = NStr::StringToInt(max_entry_str);
-    // ```
     /// Create the LMDB file `dbname` (`<db>.ptf`/`<db>.ntf`) on the platform `platform`.
     pub(crate) fn new(
         dbname: &Path,
@@ -1158,25 +750,6 @@ impl WriteDbTaxId {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:446-464
-    // ```c++
-    // int CWriteDB_TaxID::InsertEntries(const set<TTaxId> & tax_ids, const blastdb::TOid oid)
-    // {
-    //     int count = 0;
-    //     if(tax_ids.size() == 0) {
-    //     	x_Resize();
-    //     	SKeyValuePair<blastdb::TOid>  kv(ZERO_TAX_ID, oid);
-    //     	m_TaxId2OidList.push_back(kv);
-    //     	return 1;
-    //     }
-    //     ITERATE(set<TTaxId>, itr, tax_ids) {
-    //     	x_Resize();
-    //     	SKeyValuePair<blastdb::TOid> kv(*itr, oid);
-    //     	m_TaxId2OidList.push_back(kv);
-    //     	count++;
-    //     }
-    //     return count;
-    // }
-    // ```
     /// `InsertEntries`: the tax ids of OID `oid` in the order of a `set<TTaxId>` (ascending,
     /// each once). Called in OID order.
     pub(crate) fn insert_entries(&mut self, tax_ids: &[i32], oid: u32) {
@@ -1191,56 +764,6 @@ impl WriteDbTaxId {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:523-576
-    // ```c++
-    // Uint4 s_WirteTaxIds(CNcbiOfstream & os, vector<TTaxId> & tax_ids)
-    // {
-    // 	for(unsigned int j =0; j < tax_ids.size(); j++) {
-    //         Int4 tid = TAX_ID_TO(Int4, tax_ids[j]);
-    // 		os.write((char *)&tid, 4);
-    // 	}
-    // 	return tax_ids.size();
-    // }
-    // void CWriteDB_TaxID::x_CreateOidToTaxIdsLookupFile()
-    // {
-    // 	if(m_TaxId2OidList.size() == 0) {
-    //  		NCBI_THROW( CSeqDBException, eArgErr, "No tax info for any oid");
-    // 	}
-    // 	Uint8 total_num_oids = m_TaxId2OidList.back().value + 1;
-    // 	string filename = GetFileNameFromExistingLMDBFile(m_Db, ELMDBFileType::eOid2TaxIds);
-    // 	Uint8 offset = 0;
-    // 	CNcbiOfstream os(filename.c_str(), IOS_BASE::out | IOS_BASE::binary);
-    // 	vector<Uint4> offsets(total_num_oids, 0);
-    // 	os.write((char *)&total_num_oids, 8);
-    // 	for(unsigned int i=0; i < total_num_oids; i++) {
-    // 		os.write((char *) &offset, 8);
-    // 	}
-    // 	os.flush();
-    // 	blastdb::TOid count = 0;
-    // 	vector<TTaxId> tmp_tax_ids;
-    // 	for(unsigned int i = 0; i < m_TaxId2OidList.size(); i++) {
-    // 		if(i > 0 && m_TaxId2OidList[i].value != m_TaxId2OidList[i-1].value ) {
-    // 			if((m_TaxId2OidList[i].value - m_TaxId2OidList[i-1].value) != 1) {
-    // 		 		NCBI_THROW( CSeqDBException, eArgErr, "Input id list not in ascending oid order");
-    // 			}
-    // 			offsets[count] = s_WirteTaxIds(os, tmp_tax_ids);
-    // 			count++;
-    // 			tmp_tax_ids.clear();
-    // 		}
-    // 		tmp_tax_ids.push_back(m_TaxId2OidList[i].tax_id);
-    // 	}
-    // 	offsets[count] = s_WirteTaxIds(os, tmp_tax_ids);
-    // 	_ASSERT(count == m_TaxId2OidList.back().value);
-    // 	os.flush();
-    // 	os.seekp(8);
-    // 	for(unsigned int i = 0; i < total_num_oids; i++) {
-    // 		offset += offsets[i];
-    // 		os.write((char *) &offset, 8);
-    // 	}
-    //
-    // 	os.flush();
-    // 	os.close();
-    // }
-    // ```
     // The stream is not tested (`super::ofstream`), as for the `.pos` file.
     fn create_oid_to_taxids_lookup_file(&mut self) -> Result<(), WriteDbError> {
         if self.taxid2oid.is_empty() {
@@ -1290,41 +813,6 @@ impl WriteDbTaxId {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:578-613
-    // ```c++
-    // Uint4 s_WirteOids(CNcbiOfstream & os, vector<blastdb::TOid> & oids)
-    // {
-    // 	blastdb::SortAndUnique <blastdb::TOid> (oids);
-    // 	Uint4 num_oids = oids.size();
-    // 	os.write((char *)&num_oids, 4);
-    // 	for(unsigned int j =0; j < num_oids; j++) {
-    // 		os.write((char *)&oids[j], 4);
-    // 	}
-    // 	return ((num_oids +1) * 4);
-    // }
-    // void CWriteDB_TaxID::x_CreateTaxIdToOidsLookupFile()
-    // {
-    //     sort (m_TaxId2OidList.begin(), m_TaxId2OidList.end(), SKeyValuePair<blastdb::TOid>::cmp_key);
-    // 	string filename = GetFileNameFromExistingLMDBFile(m_Db, ELMDBFileType::eTaxId2Oids);
-    // 	CNcbiOfstream os(filename.c_str(), IOS_BASE::out | IOS_BASE::binary);
-    // 	Uint8 offset =0;
-    // 	vector<blastdb::TOid> tmp_oids;
-    // 	for(unsigned int i = 0; i < m_TaxId2OidList.size(); i++) {
-    // 		if(i > 0 && m_TaxId2OidList[i].tax_id != m_TaxId2OidList[i-1].tax_id ) {
-    // 			SKeyValuePair<Uint8> p(m_TaxId2OidList[i-1].tax_id, offset);
-    // 			offset += s_WirteOids(os, tmp_oids);
-    // 			m_TaxId2OffsetsList.push_back(p);
-    // 			tmp_oids.clear();
-    // 		}
-    // 		tmp_oids.push_back(m_TaxId2OidList[i].value);
-    // 	}
-    //    	SKeyValuePair<Uint8> kv(m_TaxId2OidList.back().tax_id, offset);
-    //    	s_WirteOids(os, tmp_oids);
-    // 	m_TaxId2OffsetsList.push_back(kv);
-    //
-    // 	os.flush();
-    // 	os.close();
-    // }
-    // ```
     // The stream is not tested (`super::ofstream`), as for the `.pos` file.
     // `cmp_key` orders by tax id (signed), then by OID; the pairs that tie are equal.
     fn create_taxid_to_oids_lookup_file(&mut self) -> Result<(), WriteDbError> {
@@ -1360,51 +848,6 @@ impl WriteDbTaxId {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:466-521
-    // ```c++
-    // void CWriteDB_TaxID::x_IncreaseEnvMapSize()
-    // {
-    // 	const size_t MIN_PAGES = 4;
-    // 	...
-    // 	size_t size = m_TaxId2OffsetsList.size()*32;
-    // 	size_t page_size = stat.ms_psize;
-    // 	size_t page_max_size = stat.ms_psize - 16;
-    // 	size_t last_page_num = info.me_last_pgno;
-    // 	size_t max_num_pages = info.me_mapsize/page_size;
-    // 	size_t leaf_pages_needed = size/page_max_size + 1;
-    // 	size_t branch_pages_needed = 24 * leaf_pages_needed/page_max_size + 1;
-    // 	size_t total_pages_needed = leaf_pages_needed + branch_pages_needed + MIN_PAGES;
-    // 	if( (total_pages_needed + last_page_num) > max_num_pages) {
-    // 		size_t newMapSize = (total_pages_needed + last_page_num) * page_size;
-    // 		m_Env.set_mapsize(newMapSize);
-    // ...
-    // void CWriteDB_TaxID::x_CommitTransaction()
-    // {
-    // 	_ASSERT(m_TaxId2OffsetsList.size());
-    //     sort (m_TaxId2OffsetsList.begin(), m_TaxId2OffsetsList.end(), SKeyValuePair<Uint8>::cmp_key);
-    //     x_IncreaseEnvMapSize();
-    //     unsigned int j=0;
-    //     while (j < m_TaxId2OffsetsList.size()){
-    //     	lmdb::txn txn = lmdb::txn::begin(m_Env);
-    //     	lmdb::dbi dbi = lmdb::dbi::open(txn, blastdb::taxid2offset_str.c_str(),
-    //     			                        MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED);
-    //     	unsigned int i = j;
-    //     	j= i+m_MaxEntryPerTxn;
-    //     	if(j > m_TaxId2OffsetsList.size()) {
-    //     		j = m_TaxId2OffsetsList.size();
-    //     	}
-    //     	for(; i < j; i++){
-    //     		Uint8 & offset = m_TaxId2OffsetsList[i].value;
-    //             TTaxId & tax_id = m_TaxId2OffsetsList[i].tax_id;
-    // 			lmdb::val value{&offset, sizeof(offset)};
-    // 			lmdb::val key{&tax_id, sizeof(tax_id)};
-    // 			bool rc = lmdb::dbi_put(txn, dbi.handle(), key, value, MDB_APPENDDUP);
-    // 			if (!rc) {
-    // 		 		NCBI_THROW( CSeqDBException, eArgErr, "taxid2offset error for tax id " + NStr::NumericToString(tax_id));
-    // 			}
-    // 		}
-    //     	txn.commit();
-    //     }
-    // ```
     fn commit_transaction(&mut self) -> Result<(), WriteDbError> {
         self.taxid2offsets.sort_unstable();
         // NCBI's `size_t` arithmetic in `u64`, as in `WriteDbLmdb::grow_map`.
@@ -1459,16 +902,6 @@ impl WriteDbTaxId {
     /// `~CWriteDB_TaxID`: the `.pot` and `.pto` files, the `taxid2offset` transactions, the
     /// environment closed and the lock file removed.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:437-444
-    // ```c++
-    // CWriteDB_TaxID::~CWriteDB_TaxID()
-    // {
-    // 	x_CreateOidToTaxIdsLookupFile();
-    // 	x_CreateTaxIdToOidsLookupFile();
-    // 	x_CommitTransaction();
-    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
-    //     CFile(m_Db+"-lock").Remove();
-    // }
-    // ```
     pub(crate) fn close(mut self) -> Result<(), WriteDbError> {
         self.create_oid_to_taxids_lookup_file()?;
         self.create_taxid_to_oids_lookup_file()?;

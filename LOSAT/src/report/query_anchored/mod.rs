@@ -9,25 +9,6 @@
 //! module writes only what `DisplaySeqalign` writes in place of outfmt 0's alignments.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:633-649 (`s_SetFlags`)
-//! ```c++
-//!     if (format_type >= CFormattingArgs::eQueryAnchoredIdentities &&
-//!         format_type <= CFormattingArgs::eFlatQueryAnchoredNoIdentities) {
-//!         flags |= CDisplaySeqalign::eMergeAlign;
-//!     }
-//!     else {
-//!         flags |= CDisplaySeqalign::eShowBlastStyleId |
-//!                  CDisplaySeqalign::eShowMiddleLine;
-//!     }
-//!
-//!     if (format_type == CFormattingArgs::eQueryAnchoredIdentities ||
-//!         format_type == CFormattingArgs::eFlatQueryAnchoredIdentities) {
-//!         flags |= CDisplaySeqalign::eShowIdentity;
-//!     }
-//!     if (format_type == CFormattingArgs::eQueryAnchoredIdentities ||
-//!         format_type == CFormattingArgs::eQueryAnchoredNoIdentities) {
-//!         flags |= CDisplaySeqalign::eMasterAnchored;
-//!     }
-//! ```
 //!
 //! What the programs' Seq-aligns reach (lines RG T3a, T3b and T3c): Dense-segs of two rows
 //! (BLASTN's minus-strand HSPs with the query on the minus strand; the Dense-diag of an ungapped
@@ -88,7 +69,7 @@ pub(crate) struct HspStrands {
 }
 
 impl HspStrands {
-    /// `m_StrandsDiffer` of the HSP's matches (alnmatch.cpp:241-251, quoted at `aln_mix::Mix::add`):
+    /// `m_StrandsDiffer` of the HSP's matches (alnmatch.cpp:241-251, cited at `aln_mix::Mix::add`):
     /// one row on the minus strand and the other not (a protein row has no strand, read as plus).
     pub(crate) fn differ(self) -> bool {
         self.query_minus != self.subject_minus
@@ -218,61 +199,8 @@ impl Hsps {
     /// group of the query's frame when the query is translated (BLASTX: the Dense-seg's first
     /// width is 3; TBLASTX: `eTranslateNucToNucAlignment`), else the first group.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2010-2041
-    /// ```c++
-    ///                 if((*alnIter)->GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
-    ///                     CTypeConstIterator<CStd_seg> ss = ConstBegin(**alnIter);
-    ///                     CRef<CSeq_align> convertedDs =
-    ///                         (*alnIter)->CreateDensegFromStdseg();
-    ///                     if((convertedDs->GetSegs().GetDenseg().IsSetWidths()
-    ///                         && convertedDs->GetSegs().GetDenseg().GetWidths()[0] == 3)
-    ///                        || m_AlignOption & eTranslateNucToNucAlignment){
-    ///                         //only do this for translated master
-    ///                         int frame = s_GetStdsegMasterFrame(*ss, m_Scope);
-    ///                         switch(frame){
-    ///                         case 1:
-    ///                             alnVector[0]->Set().push_back(convertedDs);
-    ///                             break;
-    ///                         ...
-    ///                         case -3:
-    ///                             alnVector[5]->Set().push_back(convertedDs);
-    ///                             break;
-    ///                         default:
-    ///                             break;
-    ///                         }
-    ///                     }
-    ///                     else {
-    ///                         alnVector[0]->Set().push_back(convertedDs);
-    ///                     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2006-2041
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-450
-    /// ```c++
-    /// static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
-    ///                        CScope& sp)
-    /// {
-    ///     int frame = 0;
-    ///     if (strand == eNa_strand_plus) {
-    ///         frame = (start % 3) + 1;
-    ///     } else if (strand == eNa_strand_minus) {
-    ///         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
-    ///                   % 3 + 1);
-    ///
-    ///     }
-    ///     return frame;
-    /// }
-    /// ...
-    /// static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
-    /// {
-    ///     const CRef<CSeq_loc> slc = ss.GetLoc().front();
-    ///     ENa_strand strand = GetStrand(*slc);
-    ///     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
-    ///                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
-    ///                            strand ==  eNa_strand_plus ?
-    ///                            eNa_strand_plus : eNa_strand_minus,
-    ///                            *(ss.GetIds().front()), scope);
-    ///     return frame;
-    /// }
-    /// ```
     /// The query's first Std-seg holds the HSP's first letter on the query's strand: its frame is
     /// that of the HSP in the query's record (`HspStrands::query_frame`, which the program gives).
     /// A BLASTX Dense-seg without widths (`HspStrands::no_widths`, an HSP of length 0) is in the
@@ -303,41 +231,8 @@ impl Hsps {
 
     /// The flag that `DisplaySeqalign` adds HSP `strands`' Dense-seg with.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2062-2072
-    /// ```c++
-    ///                     if (m_AlignOption & eTranslateNucToNucAlignment) {
-    ///                         mix[i]->Add(*ds, CAlnMix::fForceTranslation);
-    ///                     } else {
-    ///                         if (ds->IsSetWidths() &&
-    ///                             ds->GetWidths()[0] == 3 &&
-    ///                             ds->IsSetStrands() &&
-    ///                             ds->GetStrands().front()==eNa_strand_minus){
-    ///                             mix[i]->Add(*ds, CAlnMix::fNegativeStrand);
-    ///                         } else {
-    ///                             mix[i]->Add(*ds, CAlnMix::fPreserveRows);
-    ///                         }
-    ///                     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmix.hpp:74-103
-    /// ```c++
-    ///     enum EAddFlags {
-    ///         // Determine score of each aligned segment in the process of mixing
-    ///         // (only makes sense if scope was provided at construction time)
-    ///         fCalcScore            = 0x01,
-    ///
-    ///         // Force translation of nucleotide rows
-    ///         // This will result in an output Dense-seg that has Widths,
-    ///         // no matter if the whole alignment consists of nucleotides only.
-    ///         fForceTranslation     = 0x02,
-    ///
-    ///         // Used for mapping sequence to itself
-    ///         fPreserveRows         = 0x04
-    ///     };
-    ///     ...
-    ///     enum EMergeFlags {
-    ///         fGen2EST              = 0x0001, // otherwise Nucl2Nucl
-    ///         fNegativeStrand       = 0x0002,
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2061-2072
+    /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmix.hpp:69-103
     /// `fNegativeStrand` is a merge flag: as the add flag of a BLASTX HSP in a minus query frame
     /// (the Dense-seg's first width is 3 and its first strand minus) it is `fForceTranslation`. A
     /// Dense-seg without widths (`HspStrands::no_widths`) is added with `fPreserveRows`.
@@ -356,9 +251,6 @@ impl Hsps {
 const K_NUM_FRAME: usize = 6;
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:86
-/// ```c++
-/// static const char* k_FrameConversion[k_NumFrame] = {"+1", "+2", "+3", "-1", "-2", "-3"};
-/// ```
 const K_FRAME_CONVERSION: [&str; K_NUM_FRAME] = ["+1", "+2", "+3", "-1", "-2", "-3"];
 
 /// The add flags that `DisplaySeqalign` gives `CAlnMix::Add` (`Hsps::add_flags`): `fPreserveRows`
@@ -389,57 +281,12 @@ pub(crate) struct Denseg {
 /// Kept from HSP to HSP to reuse its vectors (`report::pairwise` keeps one per thread).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1823-1861
-/// ```c++
-///     if (align.GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
-///         CRef<CSeq_align> densegAln = align.CreateDensegFromStdseg();
-///         if (m_AlignOption & eTranslateNucToNucAlignment) {
-///             finalAln = densegAln->CreateTranslatedDensegFromNADenseg();
-///         } else {
-///             finalAln = densegAln;
-///         }
-///     } else if(align.GetSegs().Which() ==
-///               CSeq_align::C_Segs::e_Denseg){
-///         if (m_AlignOption & eTranslateNucToNucAlignment) {
-///             finalAln = align.CreateTranslatedDensegFromNADenseg();
-///         } else {
-///             finalAln = &align;
-///         }
-///     } else if(align.GetSegs().Which() ==
-///               CSeq_align::C_Segs::e_Dendiag){
-///         CRef<CSeq_align> densegAln =
-///             CAlignFormatUtil::CreateDensegFromDendiag(align);
-///     ...
-///     CRef<CDense_seg> finalDenseg(new CDense_seg);
-///     const CTypeConstIterator<CDense_seg> ds = ConstBegin(*finalAln);
-///     if((ds->IsSetStrands()
-///         && ds->GetStrands().front()==eNa_strand_minus)
-///        && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
-///         //show plus strand if master is minus for non-translated case
-///         finalDenseg->Assign(*ds);
-///         finalDenseg->Reverse();
-///         avRef = new CAlnVec(*finalDenseg, m_Scope);
-///     } else {
-///         avRef = new CAlnVec(*ds, m_Scope);
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:979-992
 /// (`CreateTranslatedDensegFromNADenseg`)
-/// ```c++
-///     for (CDense_seg::TNumseg numseg = 0; numseg < ds.GetNumseg(); numseg++) {
-///         if (orig_lens[numseg] % 3) {
-///     ...
-///         } else {
-///             lens[numseg] = orig_lens[numseg] / 3;
-///         }
-///     }
-///
-///     // add the widths
-///     ds.SetWidths().resize(ds.GetDim(), 3);
-/// ```
 /// The HSP's segments are those of its Seq-align (`report::serial::seqalign`: the starts in the
 /// records, the lengths in residues, `CreateDensegFromStdseg`'s for a Std-seg) with the strands
 /// that `s_CollectSeqAlignData` gives them, the Dense-seg's (`CAlnMap::IsPositiveStrand` reads a
-/// row's strand of the first segment, alnmap.hpp:599-603, quoted at `AlnMap::width`). TBLASTX's
+/// row's strand of the first segment, alnmap.hpp:599-603, cited at `AlnMap::width`). TBLASTX's
 /// Std-seg of two nucleotide rows becomes one of widths 3 with the lengths in residues
 /// (`CreateTranslatedDensegFromNADenseg`), which the segments already have. The Dense-diag of an
 /// ungapped BLASTN HSP (`CreateDensegFromDendiag`) is the Dense-seg of its one segment.
@@ -493,15 +340,7 @@ impl HspAlnVec {
     /// per-line coordinates for lines of `line_length` columns (`(int)m_LineLen`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1281-1283
-    /// ```c++
-    ///         m_AV->GetWholeAlnSeqString(row, sequence[row], &insertAlnStart[row],
-    ///                                    &insertStart[row], &insertLength[row],
-    ///                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1272
-    /// ```c++
-    ///         rowRng[row] = m_AV->GetSeqAlnRange(row);
-    /// ```
     pub(crate) fn set(
         &mut self,
         starts: &[i32],
@@ -558,23 +397,6 @@ impl HspAlnVec {
     /// (`pop_front`), so the fronts of line `line` are the row's `line`-th entries.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1504,1544-1549
-    /// ```c++
-    ///     for (int row=0; row<rowNum; row++) {
-    ///         bool hasSequence = true;
-    ///         if (!(m_AlignOption & eShowGapOnlyLines)) {
-    ///             hasSequence = curRange.IntersectingWith(alnRoInfo->rowRng[row]);
-    ///         }
-    ///         //only output rows that have sequence
-    ///         if (hasSequence){
-    ///             int end = alnRoInfo->seqStops[row].front() + 1;
-    ///     ...
-    ///         if(!alnRoInfo->seqStarts[row].empty()){ //shouldn't need this check
-    ///                 alnRoInfo->seqStarts[row].pop_front();
-    ///         }
-    ///         if(!alnRoInfo->seqStops[row].empty()){
-    ///                 alnRoInfo->seqStops[row].pop_front();
-    ///         }
-    /// ```
     /// (A row has an entry for each line: its screens are at most as wide as the lines.)
     #[inline(always)]
     pub(crate) fn line(
@@ -601,28 +423,6 @@ impl Denseg {
     /// (here the rows' strands are the caller's, `HspAlnVec::set`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:661-680
-    /// ```c++
-    ///     //reverse list o' lengths
-    ///     {
-    ///         CDense_seg::TLens::iterator f = SetLens().begin();
-    ///         CDense_seg::TLens::iterator r = SetLens().end();
-    ///         while (f < r) {
-    ///             swap(*(f++), *(--r));
-    ///         }
-    ///     }
-    ///
-    ///     //reverse list o' starts
-    ///     CDense_seg::TStarts &starts = SetStarts();
-    ///     int f = 0;
-    ///     int r = (GetNumseg() - 1) * GetDim();
-    ///     while (f < r) {
-    ///         for (int i = 0;  i < GetDim();  ++i) {
-    ///             swap(starts[f+i], starts[r+i]);
-    ///         }
-    ///         f += GetDim();
-    ///         r -= GetDim();
-    ///     }
-    /// ```
     fn reverse(&mut self) {
         let dim = self.ids.len();
         self.lens.reverse();
@@ -743,50 +543,7 @@ impl Sequences for OfQuery<'_> {
 /// its ordinal id `n` (the tag of a `general` id): the callers write those.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4545-4572
-/// ```c++
-///     } else {
-///         if(m_AlignOption&eShowGi){
-///             TGi gi = ZERO_GI;
-///             if(m_AV->GetSeqId(row).Which() == CSeq_id::e_Gi){
-///                 gi = m_AV->GetSeqId(row).GetGi();
-///             }
-///             if(!(gi > ZERO_GI)){
-///                 gi = CAlignFormatUtil::GetGiForSeqIdList(m_AV->GetBioseqHandle(row).\
-///                                          GetBioseqCore()->GetId());
-///             }
-///             if(gi > ZERO_GI){
-///                 id=NStr::NumericToString(gi);
-///             } else {
-///                 const CRef<CSeq_id> wid
-///                     = FindBestChoice(m_AV->GetBioseqHandle(row).\
-///                                      GetBioseqCore()->GetId(),
-///                                      CSeq_id::WorstRank);
-///                 id = CAlignFormatUtil::GetLabel(wid,CSeq_id::eContent).c_str();
-///             }
-///         } else {
-///             const CRef<CSeq_id> wid
-///                 = FindBestChoice(m_AV->GetBioseqHandle(row).\
-///                                  GetBioseqCore()->GetId(),
-///                                  CSeq_id::WorstRank);
-///             id = CAlignFormatUtil::GetLabel(wid,CSeq_id::eContent).c_str();
-///         }
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:919-930
-/// ```c++
-/// string CAlignFormatUtil::GetLabel(CConstRef<CSeq_id> id,bool with_version)
-/// {
-///     string retval = "";
-///     if (id->Which() == CSeq_id::e_General){
-///         const CDbtag& dtg = id->GetGeneral();
-///         retval = dtg.GetTag().GetStr();
-///     }
-///     if(retval == "")
-///       retval = id->GetSeqIdString(with_version);
-///
-///     return retval;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:914-930
 /// (`CSeq_id::eContent` is 1, passed as `with_version` true; `seqid::label::format_label`.)
 pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out: &mut Vec<u8>) {
     if show_gis {
@@ -801,23 +558,24 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     }
 }
 
-/// Appends the searched letters `from..=to` (positions in the records, upper case) of the query
-/// `record`, whose searched letters start at the record position `shift` (the `-query_loc`
-/// interval's start; `Placements::offset`): the letters that the sections of BLASTN's and
-/// TBLASTN's reports read (`ReportSequences::query_letters`), as far as the record has them.
+/// Appends the searched letters `from..=to` (positions in the records) of a query whose letters
+/// are `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
+/// `row_letters::QueryLetters::get`) and whose searched letters start at the record position
+/// `shift` (the `-query_loc` interval's start; `Placements::offset`): the letters that the
+/// sections of BLASTN's, TBLASTN's and TBLASTX's reports read (`ReportSequences::query_letters`),
+/// as far as the record has them.
 pub(crate) fn query_record_letters(
-    record: &crate::blastinput::fasta_reader::FastaRecord,
+    letters: crate::report::row_letters::QueryLetters<'_>,
     shift: usize,
     from: u32,
     to: u32,
     out: &mut Vec<u8>,
 ) {
-    let letters = record.seq();
     for position in from as usize - shift..=to as usize - shift {
-        let Some(&letter) = letters.get(position) else {
+        let Some(letter) = letters.get(position) else {
             break;
         };
-        out.push(letter.to_ascii_uppercase());
+        out.push(letter);
     }
 }
 
@@ -852,14 +610,6 @@ pub(crate) fn seq_id_label(
 /// `report::record::SubjectNames::Database`; review 3 of line RG T3a, D2).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
-/// ```c++
-///                 if (seqid.Which() == CSeq_id::e_General) {
-///                     CDbtag & dbt = seqid.SetGeneral();
-///
-///                     if (dbt.GetDb() == "BL_ORD_ID") {
-///                         int vol_oid = dbt.GetTag().GetId();
-///                         dbt.SetTag().SetId(m_VolStart + vol_oid);
-/// ```
 pub(crate) fn database_label(
     parsed: Option<&crate::report::db_subject::ParsedSubject>,
     oid: crate::seqdb::Oid,
@@ -923,78 +673,7 @@ fn internal(what: &str) -> io::Error {
 /// returns before its first byte for an empty Seq-align set; `-num_alignments 0`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1918
-/// ```c++
-/// void CDisplaySeqalign::DisplaySeqalign(CNcbiOstream& out)
-/// {
-///     CSeq_align_set actual_aln_list;
-///     CAlignFormatUtil::ExtractSeqalignSetFromDiscSegs(actual_aln_list,
-///                                                      *m_SeqalignSetRef);
-///     if (actual_aln_list.Get().empty()){
-///         return;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2055-2111
-/// ```c++
-///         for(int i = 0; i < (int)alnVector.size(); i ++){
-///             bool hasAln = false;
-///             for(CTypeConstIterator<CSeq_align>
-///                     alnRef = ConstBegin(*alnVector[i]); alnRef; ++alnRef){
-///                 CTypeConstIterator<CDense_seg> ds = ConstBegin(*alnRef);
-///                 //*out2 << *ds;
-///                 try{
-///                     if (m_AlignOption & eTranslateNucToNucAlignment) {
-///                         mix[i]->Add(*ds, CAlnMix::fForceTranslation);
-///                     } else {
-///                         if (ds->IsSetWidths() &&
-///                             ds->GetWidths()[0] == 3 &&
-///                             ds->IsSetStrands() &&
-///                             ds->GetStrands().front()==eNa_strand_minus){
-///                             mix[i]->Add(*ds, CAlnMix::fNegativeStrand);
-///                         } else {
-///                             mix[i]->Add(*ds, CAlnMix::fPreserveRows);
-///                         }
-///                     }
-///                 } catch (const CException& e){
-///                     _TRACE("Warning: " << e.what());
-///                     continue;
-///                 }
-///                 hasAln = true;
-///             }
-///             if(hasAln){
-///                 //    *out2<<*alnVector[i];
-///                 mix[i]->Merge(CAlnMix::fMinGap
-///                               | CAlnMix::fQuerySeqMergeOnly
-///                               | CAlnMix::fFillUnalignedRegions);
-///                 //*out2<<mix[i]->GetDenseg();
-///             }
-///         }
-///
-///         int numDistinctFrames = 0;
-///         for(int i = 0; i < (int)alnVector.size(); i ++){
-///             if(!alnVector[i]->Get().empty()){
-///                 numDistinctFrames ++;
-///             }
-///         }
-///         out<<"\n";
-///         for(int i = 0; i < k_NumFrame; i ++){
-///             try{
-///                 CRef<CAlnVec> avRef (new CAlnVec (mix[i]->GetDenseg(),
-///                                                   m_Scope));
-///                 avRef->SetAaCoding(CSeq_data::e_Ncbieaa);
-///                 avRef->SetGenCode(m_SlaveGeneticCode);
-///                 avRef->SetGenCode(m_MasterGeneticCode, 0);
-///                 m_AV = avRef;
-///
-///                 if(numDistinctFrames > 1){
-///                     out << "For reading frame " << k_FrameConversion[i]
-///                         << " of query sequence:\n\n";
-///                 }
-///                 x_DisplayAlnvec(out);
-///             } catch (CException e){
-///                 continue;
-///             }
-///         }
-/// ```
 /// Each group's HSPs are added in order (`aln_mix::merge`; an HSP whose `Add` throws is left
 /// out) and merged; `numDistinctFrames` counts the groups with HSPs, also one whose HSPs all
 /// threw (none can: a sequence's first match never meets another strand). A group without a
@@ -1045,11 +724,6 @@ pub(crate) fn write_section<W: Write + ?Sized>(
             writer.write_all(b" of query sequence:\n\n")?;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1206-1208
-        // ```c++
-        //     if(m_AlignOption & eMasterAnchored){
-        //         m_AV->SetAnchor(0);
-        //     }
-        // ```
         if view.anchored {
             map.set_anchor(0).map_err(internal)?;
         }
@@ -1060,7 +734,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
             0
         };
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2092-2109
-        // (quoted at this function)
+        // (cited at this function)
         // A row that `x_PrepareRowData` cannot translate (`aln_vec::UnknownGeneticCode`) throws
         // inside the `try` of the group, after its heading and before any line of it: NCBI
         // writes nothing more of the group.
@@ -1111,7 +785,7 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
 
 /// Whether NCBI BLAST+'s merge of the section of `hsps` frees a segment that it still reads
 /// (`aln_mix::MixError::NcbiFreesSegment`): with a BLASTX HSP of length 0
-/// (`HspStrands::no_widths`, in the first group), the merge's split of a segment of letters of
+/// (`HspStrands::no_widths`, in the first group) or a BLASTP one (a segment of length 0), the merge's split of a segment of letters of
 /// its query row at a length of 0 (`aln_mix::Mix::place`), or `FillUnalignedRegions` replacing
 /// the last reference to a segment of length 0 that `m_Segments` lists
 /// (`aln_mix::Mix::fill_unaligned_regions`). The groups are merged in order, all before the
@@ -1122,10 +796,13 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
 /// flushed.
 pub(crate) fn section_frees(hsps: &Hsps) -> io::Result<bool> {
     for indices in hsps.groups().iter() {
-        if !indices
-            .iter()
-            .any(|&index| hsps.hsp(index).strands.no_widths)
-        {
+        // Only an HSP with a segment of length 0 makes the merge free one: BLASTX's of length 0
+        // (`no_widths`) and BLASTP's `-ungapped` one (`Hsps::push_dense_seg` of a Dense-seg of
+        // one segment of length 0).
+        if !indices.iter().any(|&index| {
+            let hsp = hsps.hsp(index);
+            hsp.strands.no_widths || hsp.segments.iter().any(|segment| segment.len == 0)
+        }) {
             continue;
         }
         match aln_mix::merge(hsps, indices) {
@@ -1161,53 +838,15 @@ struct RowData {
 /// `x_PrepareRowData` for these formats: no features, no statistics, no sequence labels.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1242-1250
-/// ```c++
-///     // Mask locations for queries (first elem) and subjects (all other rows)
-///     vector<TSAlnSeqlocInfoList> masked_regions(rowNum);
-///     x_FillLocList(masked_regions[0], m_Seqloc);
-///
-///     for (int row = 1; row < rowNum; row++) {
-///         const CSeq_id& id = m_AV->GetSeqId(row);
-///         x_FillLocList(masked_regions[row], &m_SubjectMasks[id]);
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1269-1280
-/// ```c++
-///         rowRng[row] = m_AV->GetSeqAlnRange(row);
-///         frame[row] = (m_AV->GetWidth(row) == 3 ?
-///                       ...
-///                                  m_AV->GetSeqId(row), m_Scope) : 0);
-///         //make sequence
-///         m_AV->GetWholeAlnSeqString(row, sequence[row], &insertAlnStart[row],
-///                                    &insertStart[row], &insertLength[row],
-///                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1269-1283
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422 (`s_GetFrame`)
-/// ```c++
-///     int frame = 0;
-///     if (strand == eNa_strand_plus) {
-///         frame = (start % 3) + 1;
-///     } else if (strand == eNa_strand_minus) {
-///         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
-///                   % 3 + 1);
-///
-///     }
-///     return frame;
-/// ```
 /// A row of width 3 has a frame of 1 to 3 or -1 to -3, every other row 0. The query's row of a
 /// translated query (BLASTX, TBLASTX) has the frame of its group (`query_frame`: its first and
 /// last positions are those of the group's HSPs, all in that frame of the record), and shows the
 /// query's masks of that frame. The subjects' masks have none (`Mask`), so `x_OutputSeq`
 /// (`locFrame == frame`) shows none on a subject's row of width 3 (TBLASTN's, TBLASTX's).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1366-1370
-/// ```c++
-///         //make id
-///         x_FillSeqid(seqidArray[row], row);
-///         maxIdLen=max<size_t>(seqidArray[row].size(), maxIdLen);
-///         size_t maxCood=max<size_t>(m_AV->GetSeqStart(row), m_AV->GetSeqStop(row));
-///         maxStartLen = max<size_t>(NStr::SizetToString(maxCood).size(), maxStartLen);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1363-1370
 /// (`maxStartLen` is the width of the largest 0-based position, which the 1-based numbers
 /// printed can exceed by one digit.)
 fn prepare_rows(
@@ -1263,55 +902,6 @@ fn prepare_rows(
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4291-4338
-/// ```c++
-/// void
-/// CDisplaySeqalign::x_FillLocList(TSAlnSeqlocInfoList& loc_list,
-///                         const list< CRef<CSeqLocInfo> >* masks) const
-/// {
-///     if ( !masks ) {
-///         return;
-///     }
-///
-///     ITERATE(TMaskedQueryRegions, iter, *masks) {
-///         CRef<SAlnSeqlocInfo> alnloc(new SAlnSeqlocInfo);
-///         bool has_valid_loc = false;
-///         for (int i=0; i<m_AV->GetNumRows(); i++){
-///         	const CSeq_interval& interval = (*iter)->GetInterval();
-///             TSeqRange loc_range(interval.GetFrom(), interval.GetTo());
-///             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-///                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-///                 int actualAlnStart = 0, actualAlnStop = 0;
-///                 if(m_AV->IsPositiveStrand(i)){
-///                     actualAlnStart =
-///                         m_AV->GetAlnPosFromSeqPos(i,
-///                                                   interval.GetFrom(),
-///                                                           CAlnMap::eBackwards, true);
-///                     actualAlnStop =
-///                         m_AV->GetAlnPosFromSeqPos(i,
-///                                                   interval.GetTo(),
-///                                                   CAlnMap::eBackwards, true);
-///                 } else {
-///                     actualAlnStart =
-///                         m_AV->GetAlnPosFromSeqPos(i,
-///                                                   interval.GetTo(),
-///                                                   CAlnMap::eBackwards, true);
-///                     actualAlnStop =
-///                         m_AV->GetAlnPosFromSeqPos(i,
-///                                                   interval.GetFrom(),
-///                                                   CAlnMap::eBackwards, true);
-///                 }
-///                 alnloc->aln_range.Set(actualAlnStart, actualAlnStop);
-///                 has_valid_loc = true;
-///                 break;
-///             }
-///         }
-///         if (has_valid_loc) {
-///             alnloc->seqloc = *iter;
-///             loc_list.push_back(alnloc);
-///         }
-///     }
-/// }
-/// ```
 /// A mask goes to the columns of the first row of its sequence whose letters it meets (on a
 /// minus-strand row its end is the first column), and `x_OutputSeq` puts those columns in lower
 /// case in every row of that sequence of frame 0: a subject's mask spreads to the same columns of
@@ -1354,20 +944,7 @@ fn fill_loc_list(
 
 /// `x_DisplayRowData`: the lines of `line_length` columns.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1435-1451
-/// ```c++
-/// void CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo,CNcbiOstream& out)
-/// {
-///     size_t aln_stop=m_AV->GetAlnStop();
-///     int rowNum = alnRoInfo->rowNum;
-///     vector<int> prev_stop(rowNum);
-///     ...
-///     for(int j=0; j<=(int)aln_stop; j+=(int)m_LineLen){
-///         ...
-///             string rowdata = x_DisplayRowDataSet(alnRoInfo,j, prev_stop);
-///             ...
-///             out << rowdata;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1428-1468
 /// (`j` stays below 2^31: an alignment of more than 2^30 columns would make NCBI's `int` wrap.
 /// An alignment of no columns, the merge of BLASTX HSPs of length 0 alone, ends at `TSeqPos`
 /// 4294967295, which `(int)` makes -1: no line.)
@@ -1409,67 +986,6 @@ fn add_space(out: &mut Vec<u8>, n: usize) {
 /// `x_DisplayRowDataSet`: one line of every row that has letters on it, then a blank line.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1477-1554
-/// ```c++
-///     //output according to aln coordinates
-///     if(aln_stop-aln_start+1<m_LineLen) {
-///         actualLineLen=aln_stop-aln_start+1;
-///     } else {
-///         actualLineLen=m_LineLen;
-///     }
-///     CAlnMap::TSignedRange curRange(aln_start, aln_start+(int)actualLineLen-1);
-///     alnRoInfo->currPrintSegment = aln_start;
-///     alnRoInfo->currActualLineLen = actualLineLen;
-///     alnRoInfo->currRange = curRange;
-///     //here is each row
-///     for (int row=0; row<rowNum; row++) {
-///         bool hasSequence = true;
-///         if (!(m_AlignOption & eShowGapOnlyLines)) {
-///             hasSequence = curRange.IntersectingWith(alnRoInfo->rowRng[row]);
-///         }
-///         //only output rows that have sequence
-///         if (hasSequence){
-///             int end = alnRoInfo->seqStops[row].front() + 1;
-///             bool has_mismatch = false;
-///             //change the alignment line to identity style
-///             if (row>0 && m_AlignOption & eShowIdentity){//check usage - pairwise - only
-///                 for (int index = aln_start; index < aln_start + (int)actualLineLen &&
-///                          index < (int)alnRoInfo->sequence[row].size(); index ++){
-///                     if (alnRoInfo->sequence[row][index] == alnRoInfo->sequence[0][index] &&
-///                         isalpha((unsigned char) alnRoInfo->sequence[row][index])) {
-///                         alnRoInfo->sequence[row][index] = k_IdentityChar;
-///                     } else if (!has_mismatch) {
-///                         has_mismatch = true;
-///                     }
-///                 }
-///             }
-///             //feature for query
-///             if(row == 0){
-///                 x_PrintFeatures(alnRoInfo, row, master_feat_str, out);
-///             }
-///             if((m_AlignOption & eMergeAlign) || (m_AlignOption & eHyperLinkMasterSeqid) || (m_AlignOption & eHyperLinkSlaveSeqid)) {
-///                 x_DisplaySequenceIDForQueryAnchored(alnRoInfo,row,out);
-///             }
-///             else {
-///                 ...
-///             }
-///             //print out sequence line
-///             x_DisplaySequenceLine(alnRoInfo, row, prev_stop[row], out);
-///             if(m_AlignOption & eMasterAnchored){
-///                 //inserts for anchored view
-///                 x_DisplayInsertsForQueryAnchored(alnRoInfo,row,out);
-///             }
-///             ...
-///             prev_stop[row] = end;
-///         }
-///         if(!alnRoInfo->seqStarts[row].empty()){ //shouldn't need this check
-///                 alnRoInfo->seqStarts[row].pop_front();
-///         }
-///         if(!alnRoInfo->seqStops[row].empty()){
-///                 alnRoInfo->seqStops[row].pop_front();
-///         }
-///     }//end of displaying rows
-///     out<<"\n";
-/// ```
 /// The identity test reads the letters before any mask puts them in lower case (`x_OutputSeq`
 /// masks a copy), so a masked identical letter is a `.`. The label is the whole id
 /// (`x_DisplaySequenceIDForQueryAnchored` without HTML, alignment statistics or sequence
@@ -1546,41 +1062,6 @@ fn display_row_data_set(
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
-/// ```c++
-/// void CDisplaySeqalign::x_DisplaySequenceLine(SAlnRowInfo *alnRoInfo, int row, int prev_stop, CNcbiOstrstream &out)
-/// {
-///     size_t startLen=0;
-///     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
-///     int end = alnRoInfo->seqStops[row].front() + 1;
-///     int j = alnRoInfo->currPrintSegment;
-///     int actualLineLen = alnRoInfo->currActualLineLen;
-///     //print out sequence line
-///     //adjust space between id and start
-///     CAlignFormatUtil::AddSpace(out, alnRoInfo->maxIdLen-alnRoInfo->seqidArray[row].size() + k_IdStartMargin);
-///     //not to display start and stop number for empty row
-///     if ((j > 0 && end == prev_stop)
-///         || (j == 0 && start == 1 && end == 1)) {
-///         startLen = 0;
-///     } else {
-///         out << start;
-///         startLen=NStr::IntToString(start).size();
-///     }
-///
-///     CAlignFormatUtil::AddSpace(out, alnRoInfo->maxStartLen-startLen + k_StartSequenceMargin);
-///     x_OutputSeq(alnRoInfo->sequence[row], m_AV->GetSeqId(row), j,
-///                 (int)actualLineLen, alnRoInfo->frame[row], row,
-///                 (row > 0 && alnRoInfo->colorMismatch)?true:false,
-///                 alnRoInfo->masked_regions[row], out);
-///     CAlignFormatUtil::AddSpace(out, k_SeqStopMargin);
-///
-///      //not to display stop number for empty row in the middle
-///     if (!(j > 0 && end == prev_stop)
-///         && !(j == 0 && start == 1 && end == 1)) {
-///         out << end;
-///     }
-///     out<<"\n";
-/// }
-/// ```
 /// (`k_IdStartMargin`, `k_StartSequenceMargin` and `k_SeqStopMargin` are 2, showalign.cpp:96-98;
 /// the `size_t` sum `maxStartLen - startLen + 2` is at least 1.)
 #[allow(clippy::too_many_arguments)]
@@ -1624,54 +1105,7 @@ fn display_sequence_line(
 /// (`eHtml`) the columns of each mask on the line in a `<font>` span (`mask_spans`,
 /// `write_styled`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2541
-/// ```c++
-///     _ASSERT((int)sequence.size() > start);
-///     list<CRange<int> > actualSeqloc;
-///     string actualSeq = sequence.substr(start, len);
-///
-///     if(id.Which() != CSeq_id::e_not_set){
-///         /*only do this for sequence but not for others like middle line,
-///           features*/
-///         ITERATE(TSAlnSeqlocInfoList, iter, loc_list) {
-///             int from=(*iter)->aln_range.GetFrom();
-///             int to=(*iter)->aln_range.GetTo();
-///             int locFrame = (*iter)->seqloc->GetFrame();
-///             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-///                && locFrame == frame){
-///                 bool isFirstChar = true;
-///                 CRange<int> eachSeqloc(0, 0);
-///                 //go through each residule and mask it
-///                 for (int i=max<int>(from, start);
-///                      i<=min<int>(to, start+len -1); i++){
-///                     //store seqloc start for font tag below
-///                     if ((m_AlignOption & eHtml) && isFirstChar){
-///                         isFirstChar = false;
-///                         eachSeqloc.Set(i, eachSeqloc.GetTo());
-///                     }
-///                     ...
-///                     } else if (m_SeqLocChar==eLowerCase){
-///                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-///                     }
-///                     //store seqloc start for font tag below
-///                     if ((m_AlignOption & eHtml)
-///                         && i == min<int>(to, start+len)){
-///                         eachSeqloc.Set(eachSeqloc.GetFrom(), i);
-///                     }
-///                 }
-///                 if(!(eachSeqloc.GetFrom()==0&&eachSeqloc.GetTo()==0)){
-///                     actualSeqloc.push_back(eachSeqloc);
-///                 }
-///             }
-///         }
-///     }
-///
-///     if(actualSeqloc.empty()){//no need to add font tag
-///         ...
-///             out<<actualSeq;
-///         }
-///     } else {//now deal with font tag for mask for html display
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2545
 /// (The row's masks are those of its own sequence with its frame, `prepare_rows`. The
 /// mismatch colours of the first branch need `eColorDifferentBases`, which no BLAST program
 /// sets: blast_format.cpp, survey T4 §1.1.)
@@ -1713,7 +1147,7 @@ fn output_seq(
 }
 
 /// `eachSeqloc` of a mask of the columns `from..=to` on the line of columns `start..start + len`
-/// (`x_OutputSeq` under `eHtml`, quoted at `output_seq`): its first column on the line, and its
+/// (`x_OutputSeq` under `eHtml`, cited at `output_seq`): its first column on the line, and its
 /// last where the mask ends on the line, else 0 (the `GetTo()` of `CRange<int>(0, 0)`); `None` for
 /// a mask that does not meet the line and for the range `(0, 0)` that NCBI drops: a mask that
 /// starts at the alignment's first column and does not end on the first line (its letters are in
@@ -1737,62 +1171,8 @@ fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
 /// at the last letter).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2541-2573
-/// ```c++
-///     } else {//now deal with font tag for mask for html display
-///         bool endTag = false;
-///         bool frontTag = false;
-///         string refStr;
-///         string styledSqLocTmpl = CAlignFormatUtil::MapTemplate(k_DefaultMaskSeqLocTempl,"color",color[m_SeqLocColor]);
-///         for (int i = 0; i < (int)actualSeq.size(); i ++){
-///             bool startStyledOutput = false,stopStyledOutput = false;
-///             for (list<CRange<int> >::iterator iter=actualSeqloc.begin();
-///                  iter!=actualSeqloc.end(); iter++){
-///                 int from = (*iter).GetFrom() - start;
-///                 int to = (*iter).GetTo() - start;
-///                 //start tag
-///                 if(from == i){
-///                     frontTag = true;
-///                 }
-///                 if(to == i && to > 0){
-///                     endTag = true;
-///                 }
-///             }
-///             startStyledOutput = frontTag;
-///             stopStyledOutput = endTag && frontTag;
-///             bool isStyled = s_ProcessStyledContent(actualSeq,i,startStyledOutput,stopStyledOutput,styledSqLocTmpl ,refStr,out);
-///             if(!isStyled) out<<actualSeq[i];
-///             if(endTag && frontTag){
-///                 endTag = false;
-///                 frontTag = false;
-///             }
-///         }
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:374-387
-/// ```c++
-/// static bool s_ProcessStyledContent(string& seq, int currIndex, bool startStyledOutput, bool stopStyledOutput, string tmpl,string &styledSeqStr,CNcbiOstream& out)
-/// {
-///     bool isStyled = false;
-///     if(startStyledOutput || (!styledSeqStr.empty() && !stopStyledOutput)){
-/// 	    styledSeqStr += seq[currIndex];
-///         isStyled = true;
-///     }
-///     if(!styledSeqStr.empty() && (stopStyledOutput || currIndex == (int)seq.size() - 1) ) {
-///         styledSeqStr = CAlignFormatUtil::MapTemplate(tmpl,"alndata",styledSeqStr);
-///         out << styledSeqStr;
-///         styledSeqStr = "";
-///     }
-///     return isStyled;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:93,111,163
-/// ```c++
-/// static const char* color[]={"#000000", "#808080", "#FF0000"};
-/// ...
-/// static const char* k_DefaultMaskSeqLocTempl = "<font color=\"<@color@>\"><@alndata@></font>";
-/// ...
-///     m_SeqLocColor = eBlack;
-/// ```
 /// (The letters hold no `<@`, so the template's one replacement is the letters.)
 fn write_styled(out: &mut Vec<u8>, letters: &[u8], start: i64, spans: &[(i64, i64)]) {
     const OPEN: &[u8] = b"<font color=\"#000000\">";
@@ -1843,63 +1223,8 @@ struct Insert {
 /// this line, then for each round of `x_DoFills` a line of bars and a line of letters.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1629-1677
-/// ```c++
-///     list<string> inserts;
-///     string insertPosString;  //the one with "\" to indicate insert
-///     TSInsertInformationList insertList;
-///     int j = alnRoInfo->currPrintSegment;
-///     CAlnMap::TSignedRange curRange = alnRoInfo->currRange;
-///     x_GetInserts(insertList, alnRoInfo->insertAlnStart[row],
-///                                  alnRoInfo->insertStart[row], alnRoInfo->insertLength[row],
-///                                  j + (int)m_LineLen);
-///     x_FillInserts(row, curRange, j, inserts, insertPosString, insertList);
-///     bool insertAlready = false;
-///     for(list<string>::iterator iter = inserts.begin();
-///         iter != inserts.end(); iter ++){
-///         if(!insertAlready){
-///             ...
-///             int base_margin = alnRoInfo->maxIdLen + k_IdStartMargin + alnRoInfo->maxStartLen + k_StartSequenceMargin;
-///             ...
-///             CAlignFormatUtil::AddSpace(out, base_margin);
-///             out << insertPosString<<"\n";
-///         }
-///         ...
-///         int base_margin = alnRoInfo->maxIdLen + k_IdStartMargin + alnRoInfo->maxStartLen + k_StartSequenceMargin;
-///         ...
-///         CAlignFormatUtil::AddSpace(out, base_margin);
-///         out<<*iter<<"\n";
-///         insertAlready = true;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3099-3120
-/// ```c++
-///     while(!insert_aln_start.empty()
-///           && (int)insert_aln_start.front() < line_aln_stop){
-///         CRef<SInsertInformation> insert(new SInsertInformation);
-///         insert->aln_start = insert_aln_start.front() - 1;
-///         //Need to minus one as we are inserting after this position
-///         insert->seq_start = insert_seq_start.front();
-///         insert->insert_len = insert_length.front();
-///         insert_list.push_back(insert);
-///         insert_aln_start.pop_front();
-///         insert_seq_start.pop_front();
-///         insert_length.pop_front();
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3076-3096
-/// ```c++
-///     string line(aln_range.GetLength(), ' ');
-///
-///     ITERATE(TSInsertInformationList, iter, insert_list){
-///         int from = (*iter)->aln_start;
-///         line[from - aln_start + 1] = '\\';
-///     }
-///     insert_pos_string = line;
-///     //this is the line with "\" right after each insert position
-///
-///     //here fills the insert sequence
-///     x_DoFills(row, aln_range, aln_start, insert_list, inserts);
-/// ```
 #[allow(clippy::too_many_arguments)]
 fn display_inserts(
     out: &mut Vec<u8>,
@@ -1959,14 +1284,8 @@ fn display_inserts(
 /// at `index == line.len()`, where NCBI's write changes no byte of the line.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3089 (`x_FillInserts`)
-/// ```c++
-///         line[from - aln_start + 1] = '\\';
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3050 and 3060
 /// (`x_DoFills`, both branches)
-/// ```c++
-///                 bar[curInsertAlnStart-aln_start+1] = '|';
-/// ```
 /// Both strings hold `aln_range.GetLength()` bytes, and `x_GetInserts` takes an insertion whose
 /// alignment start is below the line's end, so the index is at most the length. It is the length
 /// for an insertion after the last column of the alignment's last line: a row that ends with an
@@ -1989,54 +1308,6 @@ fn column(line: &mut [u8], index: i64) -> io::Result<Option<&mut u8>> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3031-3073
-/// ```c++
-/// void CDisplaySeqalign::x_DoFills(int row, CAlnMap::TSignedRange& aln_range,
-///                                  int  aln_start,
-///                                  TSInsertInformationList& insert_list,
-///                                  list<string>& inserts) const {
-///     if(!insert_list.empty()){
-///         string bar(aln_range.GetLength(), ' ');
-///
-///         string seq;
-///         TSInsertInformationList leftOverInsertList;
-///         bool isFirstInsert = true;
-///         int curInsertAlnStart = 0;
-///         int prvsInsertAlnEnd = 0;
-///
-///         //go through each insert and fills the seq if it can
-///         //be filled on the same line.  If not, go to the next line
-///         NON_CONST_ITERATE(TSInsertInformationList, iter, insert_list) {
-///             curInsertAlnStart = (*iter)->aln_start;
-///             //always fill the first insert.  Also fill if there is enough space
-///             if(isFirstInsert || curInsertAlnStart - prvsInsertAlnEnd >= 1){
-///                 bar[curInsertAlnStart-aln_start+1] = '|';
-///                 int seqStart = (*iter)->seq_start;
-///                 int seqEnd = seqStart + (*iter)->insert_len - 1;
-///                 string newInsert;
-///                 newInsert = m_AV->GetSeqString(newInsert, row, seqStart,
-///                                                seqEnd);
-///                 prvsInsertAlnEnd = s_AdjustInsert(seq, newInsert,
-///                                                   curInsertAlnStart, aln_start);
-///                 isFirstInsert = false;
-///             } else { //if no space, save the chunk and go to next line
-///                 bar[curInsertAlnStart-aln_start+1] = '|';
-///                 //indicate insert goes to the next line
-///                 prvsInsertAlnEnd += x_AddBar(seq, curInsertAlnStart, aln_start);
-///                 //May need to add a bar after the current insert sequence
-///                 //to indicate insert goes to the next line.
-///                 leftOverInsertList.push_back(*iter);
-///             }
-///         }
-///         //save current insert.  Note that each insert has a bar and sequence
-///         //below it
-///         inserts.push_back(bar);
-///         inserts.push_back(seq);
-///         //here recursively fill the chunk that don't have enough space
-///         x_DoFills(row, aln_range, aln_start, leftOverInsertList, inserts);
-///     }
-///
-/// }
-/// ```
 /// (The recursion as a loop.) The letters of an insertion are not masked; they are the row's
 /// (`GetSeqString`: reverse-complemented on a minus-strand row, translated on a row of width 3,
 /// whose insertion's length is in nucleotides).
@@ -2081,21 +1352,6 @@ fn do_fills(
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2980-2992
-/// ```c++
-/// static int x_AddBar(string& seq, int insert_alnpos, int aln_start){
-///     int end = (int)seq.size() -1 ;
-///     int barPos = insert_alnpos - aln_start + 1;
-///     string addOn;
-///     if(barPos - end > 1){
-///         string spacer(barPos - end - 1, ' ');
-///         addOn += spacer + "|";
-///     } else if (barPos - end == 1){
-///         addOn += "|";
-///     }
-///     seq += addOn;
-///     return max<int>((barPos - end), 0);
-/// }
-/// ```
 fn add_bar(seq: &mut Vec<u8>, insert_alnpos: i64, aln_start: i64) -> i64 {
     let end = seq.len() as i64 - 1;
     let bar_pos = insert_alnpos - aln_start + 1;
@@ -2109,34 +1365,6 @@ fn add_bar(seq: &mut Vec<u8>, insert_alnpos: i64, aln_start: i64) -> i64 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3003-3029
-/// ```c++
-/// static int s_AdjustInsert(string& cur_insert, string& new_insert,
-///                           int insert_alnpos, int aln_start)
-/// {
-///     int insertEnd = 0;
-///     int curInsertSize = (int)cur_insert.size();
-///     int insertLeftSpace = insert_alnpos - aln_start - curInsertSize + 2;
-///     //plus2 because insert is put after the position
-///     if(curInsertSize > 0){
-///         _ASSERT(insertLeftSpace >= 2);
-///     }
-///     int newInsertSize = (int)new_insert.size();
-///     if(insertLeftSpace - newInsertSize >= 1){
-///         //can insert with the end position right below the bar
-///         string spacer(insertLeftSpace - newInsertSize, ' ');
-///         cur_insert += spacer + new_insert;
-///
-///     } else { //Need to insert beyond the insert postion
-///         if(curInsertSize > 0){
-///             cur_insert += " " + new_insert;
-///         } else {  //can insert right at the firt position
-///             cur_insert += new_insert;
-///         }
-///     }
-///     insertEnd = aln_start + (int)cur_insert.size() -1 ; //-1 back to string position
-///     return insertEnd;
-/// }
-/// ```
 fn adjust_insert(
     cur_insert: &mut Vec<u8>,
     new_insert: &[u8],

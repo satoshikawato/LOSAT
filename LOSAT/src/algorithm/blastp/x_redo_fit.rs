@@ -19,14 +19,6 @@
 //! fitted room, and their HSPs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-356
-//! ```c
-//! for (align = *alignments; NULL != align; align = align->next) {
-//!     GapEditScript * editScript = align->context;
-//!     align->context = NULL;
-//!     status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
-//! }
-//! BlastCompo_AlignmentsFree(alignments, s_FreeEditScript);
-//! ```
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -69,16 +61,5 @@ pub(crate) fn x_bp_redo_fit_print_timing() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_fitted_vector_keeps_its_elements_in_order() {
-        let mut hsps = Vec::with_capacity(4);
-        hsps.extend([3u32, 1, 2]);
-        hsps.remove(1);
-        x_fit_redone_hsps(&mut hsps);
-        assert_eq!(hsps, [3, 2]);
-        assert_eq!(hsps.capacity(), hsps.len());
-    }
-}
+#[path = "x_redo_fit_tests.rs"]
+mod tests;

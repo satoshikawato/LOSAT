@@ -84,7 +84,7 @@ fn calls(
     out
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
 // against, as `s_blast_aa_scan_subject_one_range`). Not a port of an NCBI unit case: the pairs
 // and the `s_range[1]` of every call must equal the reference's, also with offset arrays that
 // stop the scan after a few words (as aascan_unit_test.cpp's ScanOffsetTest scans).

@@ -5,18 +5,10 @@
 //! live here, below every program, because they read only two code buffers and a table of keys.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (the right walk) and
-//! 886-921 (the left walk)
-//! ```c
-//! for (i = 0; i < n; i++) {
-//!     score += matrix[q[i]][s[i]];
-//!     if (score > maxscore) {
-//!         maxscore = score;
-//!         best_i = i;
-//!     }
-//!     if (score <= 0 || (maxscore - score) >= dropoff)
-//!         break;
-//! }
-//! ```
+//! 886-921 (the left walk). A step adds the matrix score of the two codes, a score above the best
+//! becomes the best (a tie keeps the earlier step), and the walk stops once the best minus the
+//! score reaches the X-drop; the right walk also stops at a score of 0 or less.
+//!
 //! The keys: after step `i` (from 0) of a walk the key is `score << 32 - (i + 1)`, before the
 //! first step `maxscore << 32`, and a step adds the matrix's key `(t << 32) - 1` for the score `t`
 //! of the two codes. With `0 < i + 1 < 2^32` (a walk ends at a sentinel of a buffer of fewer than
@@ -66,7 +58,7 @@ impl XQueryCode for u16 {
 /// holds the key of every pair the walk reads at `row | s` (`row` the query code's
 /// [`XQueryCode::row`], `s` the subject code), the sentinel's key against every code that of a
 /// score of -128; `1 <= dropoff <= 127`; and no score wraps up to the nearer sentinel.
-// NCBI reference: aa_ungapped.c:804-883 and 886-921 (module comment).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 and 886-921 (module comment).
 #[inline(always)]
 pub(crate) unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
     keys: *const i64,

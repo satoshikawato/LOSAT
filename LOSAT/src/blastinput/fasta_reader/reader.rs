@@ -16,11 +16,6 @@ use crate::ncbi_str::{
 /// `PostWarning`'s list of ignored problems.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:358-360
-/// ```c++
-///     m_InputReader->IgnoreProblem(ILineError::eProblem_ModifierFoundButNoneExpected);
-///     m_InputReader->IgnoreProblem(ILineError::eProblem_TooLong);
-///     m_InputReader->IgnoreProblem(ILineError::eProblem_TooManyAmbiguousResidues);
-/// ```
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Problem {
     ModifierFoundButNoneExpected,
@@ -68,47 +63,13 @@ pub(crate) enum LinkEvid {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:176-194
-/// ```c++
-///     static const TGapTypeElem sc_gap_type_map[] = {
-///         { "between-scaffolds", { CSeq_gap::eType_contig, eLinkEvid_Required } },
-///         { "centromere", { CSeq_gap::eType_centromere, eLinkEvid_Forbidden } },
-///         { "contamination", { eType_contamination, eLinkEvid_Required } },
-///         { "heterochromatin", { CSeq_gap::eType_heterochromatin, eLinkEvid_Forbidden } },
-///         { "repeat-between-scaffolds", { CSeq_gap::eType_repeat, eLinkEvid_Forbidden } },
-///         { "repeat-within-scaffold", { CSeq_gap::eType_repeat, eLinkEvid_Required } },
-///         { "short-arm", { CSeq_gap::eType_short_arm, eLinkEvid_Forbidden } },
-///         { "telomere", { CSeq_gap::eType_telomere, eLinkEvid_Forbidden } },
-///         { "unknown", { CSeq_gap::eType_unknown, eLinkEvid_UnspecifiedOnly } },
-///         { "within-scaffold", { CSeq_gap::eType_scaffold, eLinkEvid_Forbidden } },
-///     };
-/// ```
 /// `NameToGapTypeInfo` looks the name up after `CanonicalizeString` as a C string: the map
 /// compares `const char*` keys with `strcmp` (`PCase_CStr`), so a value is looked up up to
 /// its first NUL byte and the bytes after it are ignored (audit finding A-1 of session SFc).
 /// The warning for an unknown value still writes the whole value (`gap_mod_warnings`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:157-172
-/// ```c++
-/// const CSeq_gap::SGapTypeInfo *
-/// CSeq_gap::NameToGapTypeInfo(const CTempString & sName)
-/// {
-///     const CSeq_gap::TGapTypeMap & gapTypeMap =
-///         GetNameToGapTypeInfoMap();
-///
-///     TGapTypeMap::const_iterator find_iter =
-///         gapTypeMap.find(CanonicalizeString(sName).c_str());
-///     if (find_iter == gapTypeMap.end()) {
-///         // not found
-///         return NULL;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/include/objects/seq/Seq_gap.hpp:90-93
-/// ```c++
-///     /// Map a gap-type string to its information
-///     /// Note that PCase_CStr, which means direct lookup is
-///     /// NOT insensitive to case, etc.
-///     typedef CStaticArrayMap<const char *, SGapTypeInfo, PCase_CStr> TGapTypeMap;
-/// ```
 /// `Seq_gap.cpp`'s own `CanonicalizeString` (:51-70) maps the bytes as `fasta.cpp`'s
 /// (`canonicalize_string`). The other lookups of a gap line compare whole byte strings:
 /// the keys with `std::string::operator==` and the linkage evidence in a
@@ -138,24 +99,6 @@ pub(crate) fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
 /// (`ENUM_METHOD_NAME(EType)()->NameToValue()`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:383-397
-/// ```asn
-/// Linkage-evidence ::= SEQUENCE {
-///     type INTEGER {
-///         paired-ends(0),
-///         align-genus(1),
-///         align-xgenus(2),
-///         align-trnscpt(3),
-///         within-clone(4),
-///         clone-contig(5),
-///         map(6),
-///         strobe(7),
-///         unspecified(8),
-///         pcr(9),
-///         proximity-ligation(10),
-///         other(255)
-///     }
-/// }
-/// ```
 pub(crate) fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
     Some(match name {
         b"paired-ends" => 0,
@@ -178,26 +121,6 @@ pub(crate) fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
 pub(crate) const LINKAGE_UNSPECIFIED: u8 = 8;
 
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2128-2146
-/// ```c++
-/// string CFastaReader::CanonicalizeString(const TStr & sValue)
-/// {
-///     string newString;
-///     newString.reserve(sValue.length());
-///
-///     ITERATE_0_IDX(ii, sValue.length()) {
-///         const char ch = sValue[ii];
-///         if( isupper(ch) ) {
-///             newString.push_back(tolower(ch));
-///         } else if( ch == ' ' || ch == '_' ) {
-///             newString.push_back('-');
-///         } else {
-///             newString.push_back(ch);
-///         }
-///     }
-///
-///     return newString;
-/// }
-/// ```
 pub(crate) fn canonicalize_string(value: &[u8]) -> Vec<u8> {
     value
         .iter()
@@ -237,89 +160,6 @@ enum CharType {
 /// (`fAssumeProt`) input, without `fParseGaps` (no gap characters).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:854-935
-/// ```c++
-///         case 'A': case 'B': case 'C': case 'D':
-///         case 'G': case 'H':
-///         case 'K':
-///         case 'M':
-///         case 'R': case 'S': case 'T': case 'U': case 'V': case 'W':
-///         case 'Y':
-///             CloseGap(pos == 0);
-///             m_SeqData[m_CurrentPos] = c;
-///             CloseMask();
-///             ++m_CurrentPos;
-///             continue;
-///         case 'a': case 'b': case 'c': case 'd':
-///         case 'g': case 'h':
-///         case 'k':
-///         case 'm':
-///         case 'r': case 's': case 't': case 'u': case 'v': case 'w':
-///         case 'y':
-///             char_type = eCharType_MaskedNonGap;
-///             break;
-///
-///         case 'E': case 'F':
-///         case 'I': case 'J':
-///         case 'L':
-///         case 'O': case 'P': case 'Q':
-///         case 'Z':
-///         case '*':
-///             if( bIsNuc ) {
-///                 char_type = eCharType_Bad;
-///             } else {
-///                 CloseGap(pos == 0);
-///                 m_SeqData[m_CurrentPos] = c;
-///                 CloseMask();
-///                 ++m_CurrentPos;
-///                 continue;
-///             }
-///             break;
-///         case 'e': case 'f':
-///         case 'i': case 'j':
-///         case 'l':
-///         case 'o': case 'p': case 'q':
-///         case 'z':
-///             char_type = (bIsNuc ? eCharType_Bad : eCharType_MaskedNonGap );
-///             break;
-///
-///         case 'N':
-///             char_type = ( bIsNuc && bAllowLetterGaps ?
-///                      eCharType_Gap : eCharType_NormalNonGap );
-///             break;
-///         case 'n':
-///             char_type = ( bIsNuc && bAllowLetterGaps ?
-///                      eCharType_Gap : eCharType_MaskedNonGap );
-///             break;
-///
-///         case 'X':
-///             char_type = ( bIsNuc ? eCharType_Bad :
-///                      bAllowLetterGaps ? eCharType_Gap :
-///                      eCharType_NormalNonGap);
-///             break;
-///         case 'x':
-///             char_type = ( bIsNuc ? eCharType_Bad :
-///                      bAllowLetterGaps ? eCharType_Gap :
-///                      eCharType_MaskedNonGap);
-///             break;
-///
-///         case '-':
-///             char_type = (
-///                 bHyphensAreGaps ? eCharType_Gap :
-///                 bHyphensIgnoreAndWarn ? eCharType_HyphenToIgnoreAndWarn :
-///                 eCharType_NormalNonGap );
-///             break;
-///         case ';':
-///             char_type = eCharType_Comment;
-///             break;
-///
-///         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
-///             continue;
-///
-///         default:
-///             char_type = eCharType_Bad;
-///             break;
-///         }
-/// ```
 /// `bIsNuc` is `fAssumeNuc` (the molecule is not set before `AssembleSeq` with
 /// `fNoParseID`), `bAllowLetterGaps` and `bHyphensAreGaps` are false (no `fParseGaps`),
 /// `bHyphensIgnoreAndWarn` is true. LOSAT looks the type up in a table (speed only).
@@ -437,29 +277,6 @@ enum CheckClass {
 /// white space and digits count for nothing; `;` ends the check; the others are bad.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:730-750
-/// ```c++
-///     for (size_t pos = 0;  pos < len_to_check;  ++pos) {
-///         unsigned char c = s[pos];
-///         if (s_ASCII_IsAlpha(c) ||  c == '*') {
-///             ++good;
-///             if( bIsNuc && s_ASCII_IsAmbigNuc(c) ) {
-///                 ++ambig_nuc;
-///             }
-///         } else if( c == '-' ) {
-///             if( ! bIgnoreHyphens ) {
-///                 ++good;
-///             }
-///             // if bIgnoreHyphens == true, the "hyphens are ignored" warning
-///             // will be triggered elsewhere
-///         } else if (isspace(c)  ||  (c >= '0' && c <= '9')) {
-///             // treat whitespace and digits as neutral
-///         } else if (c == ';') {
-///             break; // comment -- ignore rest of line
-///         } else {
-///             ++bad;
-///         }
-///     }
-/// ```
 const CHECK_CLASSES: [CheckClass; 256] = {
     let mut table = [CheckClass::Bad; 256];
     let mut index = 0;
@@ -535,27 +352,11 @@ pub(crate) type Warn<'a> = &'a mut dyn FnMut(&[u8]) -> std::io::Result<()>;
 
 impl<R: Read> FastaReader<R> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    /// ```c++
-    ///     CRef<CSeqIdGenerator> idgen
-    ///         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
-    ///                              m_Config.GetLocalIdPrefix()));
-    ///     m_InputReader->SetIDGenerator(*idgen);
-    /// ```
     pub(crate) fn new(lines: LineReader<R>, config: ReaderConfig) -> Self {
         Self {
             lines,
             config,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:48-56
-            // ```c++
-            // CBlastInputSourceConfig::CBlastInputSourceConfig
-            //     (const SDataLoaderConfig& dlconfig,
-            //      objects::ENa_strand strand         /* = objects::eNa_strand_other */,
-            //      bool lowercase                     /* = false */,
-            //      bool believe_defline               /* = false */,
-            //      TSeqRange range                    /* = TSeqRange() */,
-            //      bool retrieve_seq_data             /* = true */,
-            //      int local_id_counter               /* = 1 */,
-            // ```
             id_counter: 1,
             seq_data: Vec::new(),
             gaps: Vec::new(),
@@ -581,12 +382,6 @@ impl<R: Read> FastaReader<R> {
     /// that has read nothing counts its lines from `lines` and its local IDs from `next_id`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    /// ```c++
-    ///     CRef<CSeqIdGenerator> idgen
-    ///         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
-    ///                              m_Config.GetLocalIdPrefix()));
-    ///     m_InputReader->SetIDGenerator(*idgen);
-    /// ```
     /// No NCBI counterpart for the start itself: NCBI reads the query file once, with one reader
     /// whose counter starts at the configuration's value (1) and whose line count starts at 0
     /// (`LineReader::new`); a reader of a part starts both where that one reader has them at the
@@ -624,27 +419,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2214
-    /// ```c++
-    /// void CFastaReader::PostWarning(
-    ///             ILineErrorListener * pMessageListener,
-    ///             EDiagSev _eSeverity, size_t _uLineNum, CTempString _MessageStrmOps, CObjReaderParseException::EErrCode _eErrCode, ILineError::EProblem _eProblem, CTempString _sFeature, CTempString _sQualName, CTempString _sQualValue) const
-    /// {
-    ///     if (find(m_ignorable.begin(), m_ignorable.end(), _eProblem) != m_ignorable.end())
-    ///         // this is a problem that should be ignored
-    ///         return;
-    ///
-    ///     string sSeqId = ( m_BestID ? m_BestID->AsFastaString() : kEmptyStr);
-    ///     AutoPtr<CObjReaderLineException> pLineExpt(
-    ///         CObjReaderLineException::Create(
-    ///         (_eSeverity), static_cast<unsigned>(_uLineNum),
-    ///         _MessageStrmOps,
-    ///         (_eProblem),
-    ///         sSeqId, (_sFeature),
-    ///         (_sQualName), (_sQualValue),
-    ///         _eErrCode) );
-    ///     if ( ! pMessageListener && (_eSeverity) <= eDiag_Warning ) {
-    ///         LOG_POST_X(1, Warning << pLineExpt->Message());
-    /// ```
     /// The BLAST input source gives the reader no listener, so a warning is the message
     /// on a line of its own (`LOG_POST` writes no severity).
     fn post_warning(
@@ -660,12 +434,6 @@ impl<R: Read> FastaReader<R> {
     /// `CObjReaderParseException(..., _eErrCode, _MessageStrmOps, _uLineNum, ...)`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2215-2218
-    /// ```c++
-    ///     } else if ( ! pMessageListener || ! pMessageListener->PutError( *pLineExpt ) )
-    ///     {
-    ///         throw CObjReaderParseException(DIAG_COMPILE_INFO, 0, _eErrCode, _MessageStrmOps, _uLineNum, _eSeverity);
-    ///     }
-    /// ```
     fn fasta_error(&self, code: super::ParseErrorCode, message: String) -> ReadError {
         ReadError::Parse {
             code,
@@ -677,41 +445,6 @@ impl<R: Read> FastaReader<R> {
     /// One record (`ReadOneSeq` of `CBlastInputReader`, then of `CFastaReader`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
-    /// ```c++
-    ///     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
-    ///
-    ///         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-    ///         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-    ///             try {
-    ///                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
-    /// 							CSeq_id::fParse_ValidLocal)));
-    /// 		if (id->IsLocal()  &&  !NStr::StartsWith(line, "lcl|") ) {
-    ///                     // Expected to throw an exception.
-    ///                     id.Reset(new CSeq_id(line));
-    /// 		}
-    ///                 CRef<CBioseq> bioseq(x_CreateBioseq(id));
-    ///                 CRef<CSeq_entry> retval(new CSeq_entry());
-    ///                 retval->SetSeq(*bioseq);
-    ///                 return retval;
-    ///             } catch (const CSeqIdException& e) {
-    ///                 if (NStr::Find(e.GetMsg(), "Malformatted ID") != NPOS) {
-    ///                     // This is probably just plain fasta, so just
-    ///                     // defer to CFastaReader
-    ///                 } else {
-    ///                     throw;
-    ///                 }
-    ///             } catch (const exception&) {
-    ///                 throw;
-    ///             } catch (...) {
-    ///                 // in case of other exceptions, just defer to CFastaReader
-    ///             }
-    ///         } // end if ( !line.empty() ...
-    ///
-    ///         // If all fails, fall back to parent's implementation
-    ///         GetLineReader().UngetLine();
-    ///         return CFastaReader::ReadOneSeq(pMessageListener);
-    ///     }
-    /// ```
     /// NCBI reads a line that is a Seq-id as a sequence to fetch with its data loaders
     /// (GenBank over the network, or a BLAST database), which LOSAT does not do: such a
     /// line is an explicit rejection (`seq_id::reject_seq_id_line`). The rejection leaves
@@ -731,114 +464,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:312-440
-    /// ```c++
-    /// CRef<CSeq_entry> CFastaReader::ReadOneSeq(ILineErrorListener * pMessageListener)
-    /// {
-    ///     m_CurrentSeq.Reset(new CBioseq);
-    ///     // m_CurrentMask.Reset();
-    ///     m_SeqData.erase();
-    ///     m_Gaps.clear();
-    ///     m_CurrentPos = 0;
-    ///     m_BestID.Reset();
-    ///     m_MaskRangeStart = kInvalidSeqPos;
-    ///     if ( !TestFlag(fInSegSet) ) {
-    ///         if (m_MaskVec  &&  m_NextMask.IsNull()) {
-    ///             m_MaskVec->push_back(SaveMask());
-    ///         }
-    ///         m_CurrentMask.Reset(m_NextMask);
-    ///         if (m_CurrentMask) {
-    ///             m_CurrentMask->SetNull();
-    ///         }
-    ///         m_NextMask.Reset();
-    ///         m_SegmentBase = 0;
-    ///         m_Offset = 0;
-    ///     }
-    ///     m_CurrentGapLength = m_TotalGapLength = 0;
-    ///     m_CurrentGapChar = '\0';
-    ///     m_CurrentSeqTitles.clear();
-    ///
-    ///     bool need_defline = true;
-    ///     CBadResiduesException::SBadResiduePositions bad_residue_positions;
-    ///     while ( !GetLineReader().AtEOF() ) {
-    ///         char c = GetLineReader().PeekChar();
-    ///         if( LineNumber() % 10000 == 0 && LineNumber() != 0 ) {
-    ///             FASTA_PROGRESS("Processing line " << LineNumber());
-    ///         }
-    ///         if (GetLineReader().AtEOF()) {
-    ///             FASTA_ERROR(LineNumber(),
-    ///                         "CFastaReader: Unexpected end-of-file around line " << LineNumber(),
-    ///                         CObjReaderParseException::eEOF );
-    ///             break;
-    ///         }
-    ///         if (c == '>' ) {
-    ///             CTempString next_line = *++GetLineReader();
-    ///             string strmodified;
-    ///             if( NStr::StartsWith(next_line, ">?_") ) {
-    ///                 CTempString tmp = next_line.substr(3);
-    ///                 strmodified = ">";
-    ///                 strmodified.append(tmp.data(), tmp.length());
-    ///                 next_line = strmodified;
-    ///             }
-    ///             if( NStr::StartsWith(next_line, ">?") ) {
-    ///                 // This is actually a data line. an assembly gap, in particular, which
-    ///                 // we handle farther below
-    ///                 GetLineReader().UngetLine();
-    ///             } else {
-    ///                 if(need_defline) {
-    ///                     ParseDefLine(next_line, pMessageListener);
-    ///                     need_defline = false;
-    ///                     continue;
-    ///                 } else {
-    ///                     GetLineReader().UngetLine();
-    ///                     // start of the next sequence
-    ///                     break;
-    ///                 }
-    ///             }
-    ///         }
-    ///
-    ///         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-    ///
-    ///         if (line.empty()) {
-    ///             continue; // ignore lines containing only whitespace
-    ///         }
-    ///         c = line[0];
-    ///
-    ///         if (c == '!'  ||  c == '#' || c == ';') {
-    ///             // no content, just a comment or blank line
-    ///             continue;
-    ///         } else if (need_defline) {
-    ///             if (TestFlag(fDLOptional)) {
-    ///                 ParseDefLine(">", pMessageListener);
-    ///                 need_defline = false;
-    ///             } else {
-    ///                 ...
-    ///             }
-    ///         }
-    ///
-    ///         if ( !TestFlag(fNoSeqData) ) {
-    ///             try {
-    ///                 string strmodified;
-    ///                 if( NStr::StartsWith(line, ">?_") ) {
-    ///                     CTempString tmp = line.substr(3);
-    ///                     strmodified = ">";
-    ///                     strmodified.append(tmp.data(), tmp.length());
-    ///                     line = strmodified;
-    ///                 }
-    ///                 ParseDataLine(line, pMessageListener);
-    ///             } catch(const CBadResiduesException & e) {
-    ///                 ...
-    ///             }
-    ///         }
-    ///     }
-    ///     ...
-    ///     if (need_defline  &&  GetLineReader().AtEOF()) {
-    ///         FASTA_ERROR(LineNumber(),
-    ///             "CFastaReader: Expected defline around line " << LineNumber(),
-    ///             CObjReaderParseException::eEOF);
-    ///     }
-    ///
-    ///     AssembleSeq(pMessageListener);
-    /// ```
     /// `FASTA_PROGRESS` posts to a listener only, and there is none. `CBadResiduesException`
     /// comes only with `fValidate`, which is not set.
     fn read_fasta_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
@@ -943,75 +568,8 @@ impl<R: Read> FastaReader<R> {
     /// ID (`PostProcessIDs` without IDs).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:146-226
-    /// ```c++
-    ///     const size_t len = defline.length();
-    ///     if (len <= 1 ||
-    ///         NStr::IsBlank(defline.substr(1))) {
-    ///         return;
-    ///     }
-    ///
-    ///     if (defline[0] != '>') {
-    ///         NCBI_THROW2(CObjReaderParseException, eFormat,
-    ///             "Invalid defline. First character is not '>'", 0);
-    ///     }
-    ///
-    ///     // ignore spaces between '>' and the sequence ID
-    ///     size_t start;
-    ///     for(start = 1 ; start < len; ++start ) {
-    ///         if( ! isspace(defline[start]) ) {
-    ///             break;
-    ///         }
-    ///     }
-    ///
-    ///     size_t pos;
-    ///     size_t title_start = NPOS;
-    ///     if ((fFastaFlags & CFastaReader::fNoParseID)) {
-    ///         title_start = start;
-    ///     }
-    ///     ...
-    ///     // trim leading whitespace from title (is this appropriate?)
-    ///     while (title_start < len
-    ///         &&  isspace((unsigned char)defline[title_start])) {
-    ///         ++title_start;
-    ///     }
-    ///
-    ///     if (title_start < len) {
-    ///         for (pos = title_start + 1;  pos < len;  ++pos) {
-    ///             if ((unsigned char)defline[pos] < ' ') {
-    ///             break;
-    ///             }
-    ///         }
-    ///         // Parse the title elsewhere - after the molecule has been deduced
-    ///         data.titles.push_back(
-    ///             SLineTextAndLoc(
-    ///                 defline.substr(title_start, pos - title_start), lineNumber));
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:566-574
-    /// ```c++
-    /// void CFastaReader::ParseDefLine(const TStr& s, ILineErrorListener * pMessageListener)
-    /// {
-    ///     SDefLineParseInfo parseInfo;
-    ///     x_SetDeflineParseInfo(parseInfo);
-    ///
-    ///     CFastaDeflineReader::SDeflineData data;
-    ///     CFastaDeflineReader::ParseDefline(s, parseInfo, data, pMessageListener, m_fIdCheck);
-    ///
-    ///     m_CurrentSeqTitles = std::move(data.titles);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-631
-    /// ```c++
-    /// void CFastaReader::PostProcessIDs(
-    ///     const CBioseq::TId& defline_ids,
-    ///     const string& /*defline*/,
-    ///     const bool has_range,
-    ///     const TSeqPos range_start,
-    ///     const TSeqPos range_end)
-    /// {
-    ///     if (defline_ids.empty()) {
-    ///         GenerateID();
-    ///     }
-    /// ```
     /// The `CFastaReader` user object with the raw defline is not output.
     fn parse_def_line(&mut self, defline: &[u8]) {
         self.titles.clear();
@@ -1140,26 +698,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:466-483
-    /// ```c++
-    /// CRef<CSeq_id> CSeqIdGenerator::GenerateID(const string& defline, const bool advance)
-    /// {
-    ///     CRef<CSeq_id> seq_id(new CSeq_id);
-    ///     auto n = m_Counter.load();
-    ///     if (advance)
-    ///         m_Counter++;
-    ///
-    ///     if (m_Prefix.empty()  &&  m_Suffix.empty()) {
-    ///         seq_id->SetLocal().SetId(n);
-    ///     } else {
-    ///         string& id = seq_id->SetLocal().SetStr();
-    ///         id.reserve(128);
-    ///         id += m_Prefix;
-    ///         id += NStr::IntToString(n);
-    ///         id += m_Suffix;
-    ///     }
-    ///     return seq_id;
-    /// }
-    /// ```
     fn generate_id(&mut self) -> String {
         let n = self.id_counter;
         self.id_counter += 1;
@@ -1167,66 +705,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:713-772
-    /// ```c++
-    ///     // make sure the first data line has at least SOME resemblance to
-    ///     // actual sequence data.
-    ///     if (TestFlag(fSkipCheck)  ||  ! m_SeqData.empty() ) {
-    ///         return;
-    ///     }
-    ///     const bool bIgnoreHyphens = TestFlag(fHyphensIgnoreAndWarn);
-    ///     size_t good = 0, bad = 0;
-    ///     // in case the data has huge sequences all on the first line we do need
-    ///     // a cutoff and "70" seems reasonable since it's the default width of
-    ///     // CFastaOstream (as of 2017-03-09)
-    ///     size_t len_to_check = min(s.length(),
-    ///                               static_cast<size_t>(70));
-    ///     const bool bIsNuc = (
-    ///         ( TestFlag(fAssumeNuc) && TestFlag(fForceType) ) ||
-    ///         ( m_CurrentSeq && m_CurrentSeq->IsSetInst() &&
-    ///           m_CurrentSeq->GetInst().IsSetMol() &&  m_CurrentSeq->IsNa() ) );
-    ///     size_t ambig_nuc = 0;
-    ///     for (size_t pos = 0;  pos < len_to_check;  ++pos) {
-    ///         unsigned char c = s[pos];
-    ///         if (s_ASCII_IsAlpha(c) ||  c == '*') {
-    ///             ++good;
-    ///             if( bIsNuc && s_ASCII_IsAmbigNuc(c) ) {
-    ///                 ++ambig_nuc;
-    ///             }
-    ///         } else if( c == '-' ) {
-    ///             if( ! bIgnoreHyphens ) {
-    ///                 ++good;
-    ///             }
-    ///             // if bIgnoreHyphens == true, the "hyphens are ignored" warning
-    ///             // will be triggered elsewhere
-    ///         } else if (isspace(c)  ||  (c >= '0' && c <= '9')) {
-    ///             // treat whitespace and digits as neutral
-    ///         } else if (c == ';') {
-    ///             break; // comment -- ignore rest of line
-    ///         } else {
-    ///             ++bad;
-    ///         }
-    ///     }
-    ///     if (bad >= good / 3  &&
-    ///         (len_to_check > 3  ||  good == 0  ||  bad > good))
-    ///     {
-    ///         FASTA_ERROR( LineNumber(),
-    ///             "CFastaReader: Near line " << LineNumber()
-    ///             << ", there's a line that doesn't look like plausible data, "
-    ///             "but it's not marked as defline or comment.",
-    ///             CObjReaderParseException::eFormat);
-    ///     }
-    ///     // warn if more than a certain percentage is ambiguous nucleotides
-    ///     const static size_t kWarnPercentAmbiguous = 40; // e.g. "40" means "40%"
-    ///     const size_t percent_ambig = (good == 0)?100:((ambig_nuc * 100) / good);
-    ///     if( len_to_check > 3 && percent_ambig > kWarnPercentAmbiguous ) {
-    ///         FASTA_WARNING(LineNumber(),
-    ///             "FASTA-Reader: Start of first data line in seq is about "
-    ///             << percent_ambig << "% ambiguous nucleotides (shouldn't be over "
-    ///             << kWarnPercentAmbiguous << "%)",
-    ///             ILineError::eProblem_TooManyAmbiguousResidues,
-    ///             "first data line");
-    ///     }
-    /// ```
     /// `bIsNuc` is false (no `fForceType`; the molecule is set in `AssembleSeq`), so no
     /// letter counts as ambiguous, and the warning (an ignored problem) needs `good == 0`,
     /// which the error before has already thrown.
@@ -1257,80 +735,7 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-1016 (the
-    /// character switch is quoted at `char_types`)
-    /// ```c++
-    /// void CFastaReader::ParseDataLine(
-    ///     const TStr& s, ILineErrorListener * pMessageListener)
-    /// {
-    ///     if( NStr::StartsWith(s, ">?") ) {
-    ///         ParseGapLine(s, pMessageListener);
-    ///         return;
-    ///     }
-    ///
-    ///     CheckDataLine(s, pMessageListener);
-    ///     ...
-    ///     switch(char_type) {
-    ///     case eCharType_NormalNonGap:
-    ///         CloseGap(pos == 0);
-    ///         m_SeqData[m_CurrentPos] = c;
-    ///         CloseMask();
-    ///         ++m_CurrentPos;
-    ///         break;
-    ///     case eCharType_MaskedNonGap:
-    ///         CloseGap(pos == 0);
-    ///         m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
-    ///         OpenMask();
-    ///         ++m_CurrentPos;
-    ///         break;
-    ///     ...
-    ///     case eCharType_HyphenToIgnoreAndWarn:
-    ///         bIgnorableHyphenSeen = true;
-    ///         break;
-    ///     case eCharType_Comment:
-    ///         // artificially advance pos to the end to break the pos loop
-    ///         pos = s_len;
-    ///         break;
-    ///     case eCharType_Bad:
-    ///         if( bad_pos_line_num < 0 ) {
-    ///             bad_pos_line_num = LineNumber();
-    ///         }
-    ///         bad_pos_vec.push_back(pos);
-    ///         break;
-    ///     default:
-    ///         _TROUBLE;
-    ///     }
-    /// }
-    ///
-    /// m_SeqData.resize(m_CurrentPos);
-    ///
-    /// if( bIgnorableHyphenSeen ) {
-    ///     _ASSERT( bHyphensIgnoreAndWarn );
-    ///     FASTA_WARNING_EX(LineNumber(),
-    ///         "CFastaReader: Hyphens are invalid and will be ignored around line " << LineNumber(),
-    ///         ILineError::eProblem_IgnoredResidue,
-    ///         kEmptyStr, kEmptyStr, "-" );
-    /// }
-    ///
-    /// // before throwing, be sure that we're in a valid state so that callers can
-    /// // parse multiple lines and get the invalid residues in all of them.
-    ///
-    /// if( ! bad_pos_vec.empty() ) {
-    ///     if (TestFlag(fValidate)) {
-    ///         ...
-    ///     } else {
-    ///         stringstream warn_strm;
-    ///         warn_strm << "FASTA-Reader: Ignoring invalid " << x_NucOrProt()
-    ///             << "residues at position(s): ";
-    ///         CBadResiduesException::SBadResiduePositions(
-    ///             m_BestID, bad_pos_vec, bad_pos_line_num ).ConvertBadIndexesToString(warn_strm);
-    ///
-    ///         FASTA_WARNING(0,
-    ///             warn_strm.str(),
-    ///             ILineError::eProblem_InvalidResidue,
-    ///             kEmptyStr );
-    ///     }
-    /// }
-    /// ```
+    /// character switch is cited at `char_types`)
     /// `CloseGap` does nothing (no gap characters without `fParseGaps`, and
     /// `CCustomizedFastaReader::x_CloseGap` is empty); `x_NucOrProt()` is empty, because
     /// the molecule is set only in `AssembleSeq`. The fast copy of `fSkipCheck` is not
@@ -1431,14 +836,11 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// LOSAT's limit: NCBI keeps positions in `TSeqPos` (32 bits) and BLAST's sequence
-    /// lengths in `Int4`; a record longer than that is an explicit rejection.
+    /// lengths in `Int4`; a record longer than that is an explicit rejection
+    /// (`super::record_too_long`).
     fn check_length(&self) -> Result<(), ReadError> {
         if self.seq_data.len() as u64 + self.total_gap_length as u64 > i32::MAX as u64 {
-            return Err(ReadError::Unsupported(anyhow::anyhow!(
-                "a {} record longer than 2147483647 letters is not supported by LOSAT's {}",
-                self.config.role,
-                self.config.program
-            )));
+            return Err(super::record_too_long(&self.config));
         }
         Ok(())
     }
@@ -1447,19 +849,6 @@ impl<R: Read> FastaReader<R> {
     /// (`m_SegmentBase` is 0 without `fInSegSet`).
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:502-516
-    /// ```c++
-    /// inline
-    /// TSeqPos CFastaReader::GetCurrentPos(EPosType pos_type)
-    /// {
-    ///     TSeqPos pos = m_CurrentPos;
-    ///     switch (pos_type) {
-    ///     case ePosWithGapsAndSegs:
-    ///         return pos + m_SegmentBase + m_TotalGapLength;
-    ///     case ePosWithGaps:
-    ///         return pos + m_TotalGapLength;
-    ///     case eRawPos:
-    ///         return pos;
-    /// ```
     fn current_pos_with_gaps(&self) -> u32 {
         self.seq_data.len() as u32 + self.total_gap_length
     }
@@ -1469,23 +858,7 @@ impl<R: Read> FastaReader<R> {
     /// `x_FastaToSeqLoc` calls `SaveMask` before the record is read).
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-499
-    /// ```c++
-    /// inline
-    /// void CFastaReader::OpenMask()
-    /// {
-    ///     if (m_MaskRangeStart == kInvalidSeqPos  &&  m_CurrentMask.NotEmpty()) {
-    ///         x_OpenMask();
-    ///     }
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1083
-    /// ```c++
-    /// void CFastaReader::x_OpenMask(void)
-    /// {
-    ///     _ASSERT(m_MaskRangeStart == kInvalidSeqPos);
-    ///     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
-    /// }
-    /// ```
     /// `x_OpenMask` runs before `++m_CurrentPos`, so the start is the masked residue.
     fn open_mask(&mut self) {
         if self.mask_range_start.is_none() {
@@ -1494,21 +867,7 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:291-292
-    /// ```c++
-    ///     void CloseMask(void)
-    ///         { if (m_MaskRangeStart != kInvalidSeqPos) { x_CloseMask(); } }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1085-1092
-    /// ```c++
-    /// void CFastaReader::x_CloseMask(void)
-    /// {
-    ///     _ASSERT(m_MaskRangeStart != kInvalidSeqPos);
-    ///     m_CurrentMask->SetPacked_int().AddInterval
-    ///         (GetBestID(), m_MaskRangeStart, GetCurrentPos(ePosWithGapsAndSegs) - 1,
-    ///          eNa_strand_plus);
-    ///     m_MaskRangeStart = kInvalidSeqPos;
-    /// }
-    /// ```
     /// In `ParseDataLine` `CloseMask` runs after the residue is stored and before
     /// `++m_CurrentPos`: the interval ends before the residue that closes it (LOSAT has
     /// already pushed that residue, hence the `- 2`). `AssembleSeq` closes it at the end.
@@ -1533,71 +892,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1351-1448
-    /// ```c++
-    /// void CFastaReader::AssembleSeq(ILineErrorListener * pMessageListener)
-    /// {
-    ///     CSeq_inst& inst = m_CurrentSeq->SetInst();
-    ///
-    ///     CloseGap();
-    ///     CloseMask();
-    ///     if (TestFlag(fInSegSet)) {
-    ///         m_SegmentBase += GetCurrentPos(ePosWithGaps);
-    ///     }
-    ///     AssignMolType(pMessageListener);
-    ///
-    ///     // apply source mods *after* figuring out mol type
-    ///     ITERATE(vector<SLineTextAndLoc>, title_ci, m_CurrentSeqTitles) {
-    ///         ParseTitle(*title_ci, pMessageListener);
-    ///     }
-    ///     m_CurrentSeqTitles.clear();
-    ///     ...
-    ///     if ( !TestFlag(fParseGaps)  &&  m_TotalGapLength > 0 ) {
-    ///         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
-    ///         string    new_data;
-    ///         char      gap_char(inst.IsAa() ? 'X' : 'N');
-    ///         SIZE_TYPE pos = 0;
-    ///         new_data.reserve(GetCurrentPos(ePosWithGaps));
-    ///         ITERATE (TGaps, it, m_Gaps) {
-    ///             ...
-    ///             if ((*it)->m_uPos > pos) {
-    ///                 new_data.append(m_SeqData, pos, (*it)->m_uPos - pos);
-    ///                 pos = (*it)->m_uPos;
-    ///             }
-    ///             new_data.append((*it)->m_uLen, gap_char);
-    ///         }
-    ///         if (m_CurrentPos > pos) {
-    ///             new_data.append(m_SeqData, pos, m_CurrentPos - pos);
-    ///         }
-    ///         swap(m_SeqData, new_data);
-    ///         m_Gaps.clear();
-    ///         m_CurrentPos += m_TotalGapLength;
-    ///         m_TotalGapLength = 0;
-    ///         m_CurrentGapChar = '\0';
-    ///     }
-    ///
-    ///     if (m_Gaps.empty() && m_SeqData.empty()) {
-    ///
-    ///         _ASSERT(m_TotalGapLength == 0);
-    ///             inst.SetLength(0);
-    ///             inst.SetRepr(CSeq_inst::eRepr_virtual);
-    ///             // empty sequence triggers warning if seq data was expected
-    ///             if( ! TestFlag(fDisableNoResidues) &&
-    ///                 ! TestFlag(fNoSeqData) ) {
-    ///                 FASTA_ERROR(LineNumber(),
-    ///                     "FASTA-Reader: No residues given",
-    ///                     CObjReaderParseException::eNoResidues);
-    ///             }
-    ///     }
-    ///     else
-    ///     if (m_Gaps.empty() && TestFlag(fNoSplit)) {
-    ///         inst.SetLength(GetCurrentPos(eRawPos));
-    ///         inst.SetRepr(CSeq_inst::eRepr_raw);
-    ///         CRef<CSeq_data> data(new CSeq_data(m_SeqData, format));
-    ///         if ( !TestFlag(fLeaveAsText) ) {
-    ///             CSeqportUtil::Pack(data, inst.GetLength());
-    ///         }
-    ///         inst.SetSeq_data(*data);
-    /// ```
     /// The molecule is the input's (`CCustomizedFastaReader::AssignMolType` below
     /// `m_SeqLenThreshold`, which the BLAST input source sets to `UINT_MAX`), so the gap
     /// residue is `N` for nucleotides and `X` for proteins, and `x_NucOrProt` is not used
@@ -1666,12 +960,6 @@ impl<R: Read> FastaReader<R> {
         };
         if !self.config.protein {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
-            // ```c++
-            //         CRef<CSeq_data> data(new CSeq_data(m_SeqData, format));
-            //         if ( !TestFlag(fLeaveAsText) ) {
-            //             CSeqportUtil::Pack(data, inst.GetLength());
-            //         }
-            // ```
             for residue in sequence.iter_mut() {
                 // A select rather than a conditional store (LOSAT's speed: vectorized).
                 *residue = if *residue == b'U' { b'T' } else { *residue };
@@ -1730,54 +1018,7 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:670-686
-    /// ```c++
-    /// void CFastaReader::ParseTitle(
-    ///     const SLineTextAndLoc & lineInfo, ILineErrorListener * pMessageListener)
-    /// {
-    ///     const static size_t kWarnTitleLength = 1000;
-    ///     if( lineInfo.m_sLineText.length() > kWarnTitleLength ) {
-    ///         FASTA_WARNING(lineInfo.m_iLineNum,
-    ///             "FASTA-Reader: Title is very long: " << lineInfo.m_sLineText.length()
-    ///             << " characters (max is " << kWarnTitleLength << ")",
-    ///             ILineError::eProblem_TooLong, "defline");
-    ///     }
-    ///
-    ///     CreateWarningsForSeqDataInTitle(lineInfo.m_sLineText,lineInfo.m_iLineNum, pMessageListener);
-    ///
-    ///     CTempString title(lineInfo.m_sLineText.data(), lineInfo.m_sLineText.length());
-    ///     x_ApplyMods(title, lineInfo.m_iLineNum, *m_CurrentSeq, pMessageListener);
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2018-2043
-    /// ```c++
-    /// void CFastaReader::x_ApplyMods(
-    ///      const string& title,
-    ///      TSeqPos line_number,
-    ///      CBioseq& bioseq,
-    ///      ILineErrorListener* pMessageListener )
-    /// {
-    ///     string processed_title = title;
-    ///     if (TestFlag(fAddMods)) {
-    ///         x_AddMods(line_number, bioseq, processed_title, pMessageListener);
-    ///     }
-    ///     else
-    ///     if (!TestFlag(fIgnoreMods) &&
-    ///         CTitleParser::HasMods(title)) {
-    ///         FASTA_WARNING(line_number,
-    ///         "FASTA-Reader: Ignoring FASTA modifier(s) found because "
-    ///         "the input was not expected to have any.",
-    ///         ILineError::eProblem_ModifierFoundButNoneExpected,
-    ///         "defline");
-    ///     }
-    ///
-    ///     NStr::TruncateSpacesInPlace(processed_title);
-    ///     if (!processed_title.empty()) {
-    ///         auto pDesc = Ref(new CSeqdesc());
-    ///         pDesc->SetTitle() = processed_title;
-    ///         bioseq.SetDescr().Set().push_back(std::move(pDesc));
-    ///     }
-    /// }
-    /// ```
     /// The long-title and modifier warnings are ignored problems.
     fn parse_title(&mut self, title: LineText, warn: Warn<'_>) -> Result<(), ReadError> {
         self.create_warnings_for_seq_data_in_title(&title.text, warn)?;
@@ -1791,66 +1032,6 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1680
-    /// ```c++
-    ///     // check for nuc or aa sequences at the end of the title
-    ///     const static size_t kWarnNumNucCharsAtEnd = 20;
-    ///     const static size_t kWarnAminoAcidCharsAtEnd = 50;
-    ///
-    ///     const size_t length = sLineText.length();
-    ///     SIZE_TYPE pos_to_check = length-1;
-    ///
-    ///     if((length > kWarnNumNucCharsAtEnd) && !TestFlag(fAssumeProt)) {
-    ///         // find last non-nuc character, within the last kWarnNumNucCharsAtEnd characters
-    ///         const SIZE_TYPE last_pos_to_check_for_nuc = (sLineText.length() - kWarnNumNucCharsAtEnd);
-    ///         for( ; pos_to_check >= last_pos_to_check_for_nuc; --pos_to_check ) {
-    ///             if( ! s_ASCII_IsUnAmbigNuc(sLineText[pos_to_check]) ) {
-    ///                 // found a character which is not an unambiguous nucleotide
-    ///                 break;
-    ///             }
-    ///         }
-    ///         if( pos_to_check < last_pos_to_check_for_nuc ) {
-    ///             FASTA_WARNING(iLineNum,
-    ///                 "FASTA-Reader: Title ends with at least " << kWarnNumNucCharsAtEnd
-    ///                 << " valid nucleotide characters.  Was the sequence "
-    ///                 << "accidentally put in the title line?",
-    ///                 ILineError::eProblem_UnexpectedNucResidues,
-    ///                 "defline"
-    ///                 );
-    ///             return true; // found problem
-    ///         }
-    ///     }
-    ///
-    ///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
-    ///         // check for aa's at the end of the title
-    ///         // for efficiency, continue where the nuc search left off, since
-    ///         // we know that nucs can be amino acids, also
-    ///         const SIZE_TYPE last_pos_to_check_for_amino_acid =
-    ///             ( sLineText.length() - kWarnAminoAcidCharsAtEnd );
-    ///         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
-    ///             // can't just use "isalpha" in case it includes characters
-    ///             // with diacritics (an accent, tilde, umlaut, etc.)
-    ///             const char ch = sLineText[pos_to_check];
-    ///             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
-    ///                 // potential amino acid, so keep going
-    ///             } else {
-    ///                 // non-amino-acid found
-    ///                 break;
-    ///             }
-    ///         }
-    ///
-    ///         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
-    ///             FASTA_WARNING(iLineNum,
-    ///                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
-    ///                 << " valid amino acid characters.  Was the sequence "
-    ///                 << "accidentally put in the title line?",
-    ///                 ILineError::eProblem_UnexpectedAminoAcids,
-    ///                 "defline");
-    ///             return true; // found problem
-    ///         }
-    ///     }
-    ///
-    ///     return false;
-    /// ```
     /// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs, from
     /// the end of the title.
     fn create_warnings_for_seq_data_in_title(
@@ -1872,100 +1053,7 @@ impl<R: Read> FastaReader<R> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
-/// ```c++
-/// bool CFastaReader::ParseGapLine(
-///     const TStr& line, ILineErrorListener * pMessageListener)
-/// {
-///     _ASSERT( NStr::StartsWith(line, ">?") );
-///
-///     // just in case there's a gap before this one,
-///     // even though somewhat unusual
-///     CloseGap();
-///
-///     // sRemainingLine will hold the part of the line left to parse
-///     TStr sRemainingLine = line.substr(2);
-///     NStr::TruncateSpacesInPlace(sRemainingLine);
-///
-///     const TSeqPos uPos = GetCurrentPos(eRawPos);
-///
-///     // check if size is unknown
-///     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
-///     if( NStr::StartsWith(sRemainingLine, "unk") ) {
-///         eIsKnown = SGap::eKnownSize_No;
-///         sRemainingLine = sRemainingLine.substr(3);
-///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-///     }
-///
-///     // extract the gap size
-///     TSeqPos uGapSize = 0;
-///     {
-///         // find how many digits in number
-///         TStr::size_type uNumDigits = 0;
-///         while( uNumDigits != sRemainingLine.size() &&
-///                ::isdigit(sRemainingLine[uNumDigits]) )
-///         {
-///             ++uNumDigits;
-///         }
-///         TStr sDigits = sRemainingLine.substr(
-///             0, uNumDigits);
-///         uGapSize = NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow);
-///         if( uGapSize <= 0 ) {
-///             FASTA_WARNING(LineNumber(),
-///                 "CFastaReader: Bad gap size at line " << LineNumber(),
-///                 ILineError::eProblem_NonPositiveLength,
-///                 "gapline" );
-///             // try to continue the best we can
-///             uGapSize = 1;
-///         }
-///         sRemainingLine = sRemainingLine.substr(sDigits.length());
-///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-///     }
-///
-///     // extract the raw key-value pairs for the gap
-///     typedef multimap<TStr, TStr> TModKeyValueMultiMap;
-///     TModKeyValueMultiMap modKeyValueMultiMap;
-///     while( ! sRemainingLine.empty() ) {
-///         TStr::size_type uOpenBracketPos = TStr::npos;
-///         if ( NStr::StartsWith(sRemainingLine, "[") ) {
-///             uOpenBracketPos = 0;
-///         }
-///         TStr::size_type uPosOfEqualSign = TStr::npos;
-///         if( uOpenBracketPos != TStr::npos ) {
-///             // uses "1" to skip the '['
-///             uPosOfEqualSign = sRemainingLine.find('=', uOpenBracketPos + 1);
-///         }
-///         TStr::size_type uCloseBracketPos = TStr::npos;
-///         if( uPosOfEqualSign != TStr::npos ) {
-///             uCloseBracketPos = sRemainingLine.find(']', uPosOfEqualSign + 1);
-///         }
-///         if( uCloseBracketPos == TStr::npos )
-///         {
-///             FASTA_WARNING(LineNumber(),
-///                 "CFastaReader: Problem parsing gap mods at line "
-///                 << LineNumber(),
-///                 ILineError::eProblem_ParsingModifiers,
-///                 "gapline" );
-///             break; // give up on mod-parsing
-///         }
-///
-///         // extract the key and the value
-///         TStr sKey = NStr::TruncateSpaces_Unsafe(
-///             sRemainingLine.substr(uOpenBracketPos + 1,
-///                 (uPosOfEqualSign - uOpenBracketPos - 1) ) );
-///         TStr sValue = NStr::TruncateSpaces_Unsafe(
-///             sRemainingLine.substr(uPosOfEqualSign + 1,
-///                 uCloseBracketPos - uPosOfEqualSign - 1) );
-///
-///         // remember what we saw
-///         modKeyValueMultiMap.insert(
-///             TModKeyValueMultiMap::value_type(sKey, sValue) );
-///
-///         // prepare for the next loop around
-///         sRemainingLine = sRemainingLine.substr(uCloseBracketPos + 1);
-///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-///     }
-/// ```
-/// The rest of the function (the modifiers, quoted at `gap_mod_warnings`) only warns:
+/// The rest of the function (the modifiers, cited at `gap_mod_warnings`) only warns:
 /// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
 ///
 /// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
@@ -2036,149 +1124,6 @@ pub(crate) fn gap_line_size(
 /// modifiers are ignored, an ignored problem).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
-/// ```c++
-///     // remember if there is a gap-type conflict
-///     bool bConflictingGapTypes = false;
-///     // extract the mods, if any
-///     SGap::TNullableGapType pGapType;
-///     CSeq_gap::ELinkEvid eLinkEvid = CSeq_gap::eLinkEvid_UnspecifiedOnly;
-///     set<CLinkage_evidence::EType> setOfLinkageEvidence;
-///
-///     if (m_gap_type && modKeyValueMultiMap.empty()) // fall back to default values coming from caller
-///     {
-///         ...
-///     }
-///
-///     ITERATE(TModKeyValueMultiMap, modKeyValue_it, modKeyValueMultiMap) {
-///         const TStr & sKey   = modKeyValue_it->first;
-///         const TStr & sValue = modKeyValue_it->second;
-///
-///         string canonicalKey = CanonicalizeString(sKey);
-///         if(  canonicalKey == "gap-type") {
-///
-///             const CSeq_gap::SGapTypeInfo *pGapTypeInfo = CSeq_gap::NameToGapTypeInfo(sValue);
-///             if( pGapTypeInfo ) {
-///                  CSeq_gap::EType eGapType = pGapTypeInfo->m_eType;
-///
-///                 if( ! pGapType ) {
-///                     pGapType.Reset( new SGap::TGapTypeObj(eGapType) );
-///                     eLinkEvid = pGapTypeInfo->m_eLinkEvid;
-///                 } else if( eGapType != *pGapType ) {
-///                     // check if pGapType already set and different
-///                     bConflictingGapTypes = true;
-///                 }
-///             } else {
-///                 FASTA_WARNING_EX(
-///                     LineNumber(),
-///                     "Unknown gap-type: " << sValue,
-///                     ILineError::eProblem_ParsingModifiers,
-///                     "gapline",
-///                     "gap-type",
-///                     sValue );
-///             }
-///             continue;
-///
-///         }
-///
-///         if( canonicalKey == "linkage-evidence") {
-///             // could be semi-colon separated
-///             vector<CTempString> arrLinkageEvidences;
-///             NStr::Split(sValue, ";", arrLinkageEvidences,
-///                         NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-///
-///             ITERATE(vector<CTempString>, link_evid_it, arrLinkageEvidences) {
-///                 CTempString sLinkEvid = *link_evid_it;
-///                 CEnumeratedTypeValues::TNameToValue::const_iterator find_iter =
-///                     linkage_evidence_to_value_map.find(CanonicalizeString(sLinkEvid));
-///                 if( find_iter != linkage_evidence_to_value_map.end() ) {
-///                     setOfLinkageEvidence.insert(
-///                         static_cast<CLinkage_evidence::EType>(
-///                         find_iter->second));
-///                 } else {
-///                     FASTA_WARNING_EX(
-///                         LineNumber(),
-///                         "Unknown linkage-evidence: " << sValue,
-///                         ILineError::eProblem_ParsingModifiers,
-///                         "gapline",
-///                         "linkage-evidence",
-///                         sValue );
-///                 }
-///             }
-///             continue;
-///         }
-///
-///         // unknown mod.
-///         FASTA_WARNING_EX(
-///             LineNumber(),
-///             "Unknown gap modifier name(s): " << sKey,
-///             ILineError::eProblem_UnrecognizedQualifierName,
-///             "gapline", sKey, kEmptyStr );
-///     }
-///
-///     if( bConflictingGapTypes ) {
-///         FASTA_WARNING_EX(LineNumber(),
-///             "There were conflicting gap-types around line " << LineNumber(),
-///             ILineError::eProblem_ContradictoryModifiers,
-///             "gapline", "gap-type", kEmptyStr );
-///     }
-///
-///     // check validation beyond basic parsing problems
-///
-///     // if no gap-type set (but linkage-evidence explicitly set, use "unknown")
-///     if( ! pGapType && ! setOfLinkageEvidence.empty() ) {
-///         pGapType.Reset( new SGap::TGapTypeObj(CSeq_gap::eType_unknown) );
-///     }
-///
-///     // check if linkage-evidence(s) compatible with gap-type
-///     switch( eLinkEvid ) {
-///     case CSeq_gap::eLinkEvid_UnspecifiedOnly:
-///         if( setOfLinkageEvidence.empty() ) {
-///             if( pGapType ) {
-///                 // silently add the required "unspecified"
-///                 setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-///             }
-///         } else if( setOfLinkageEvidence.size() > 1 ||
-///             *setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified )
-///         {
-///             // only "unspecified" is allowed
-///             FASTA_WARNING(
-///                 LineNumber(),
-///                 "FASTA-Reader: Unknown gap-type can have linkage-evidence "
-///                     "of type 'unspecified' only.",
-///                 ILineError::eProblem_ExtraModifierFound,
-///                 "gapline");
-///             setOfLinkageEvidence.clear();
-///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-///         }
-///         break;
-///     case CSeq_gap::eLinkEvid_Forbidden:
-///         if( ! setOfLinkageEvidence.empty() ) {
-///             FASTA_WARNING(LineNumber(),
-///                 "FASTA-Reader: This gap-type cannot have any "
-///                 "linkage-evidence specified, so any will be ignored.",
-///                 ILineError::eProblem_ModifierFoundButNoneExpected,
-///                 "gapline" );
-///             setOfLinkageEvidence.clear();
-///         }
-///         break;
-///     case CSeq_gap::eLinkEvid_Required:
-///         if( setOfLinkageEvidence.empty() ) {
-///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-///         }
-///         if( setOfLinkageEvidence.size() == 1 &&
-///             *setOfLinkageEvidence.begin() == CLinkage_evidence::eType_unspecified)
-///         {
-///             FASTA_WARNING(LineNumber(),
-///                 "CFastaReader: This gap-type should have at least one "
-///                 "specified linkage-evidence.",
-///                 ILineError::eProblem_ExpectedModifierMissing,
-///                 "gapline" );
-///         }
-///         break;
-///         // intentionally omitted "default:" so a compiler warning will
-///         // hopefully let us know if we've forgotten a case
-///     }
-/// ```
 /// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
 /// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
 fn gap_mod_warnings(
@@ -2297,50 +1242,7 @@ fn post_line_warning(problem: Problem, message: &[u8], warn: Warn<'_>) -> Result
 /// `protein` is `fAssumeProt` (else `fAssumeNuc`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1624-1643
-/// ```c++
-///     const static size_t kWarnNumNucCharsAtEnd = 20;
-///     const static size_t kWarnAminoAcidCharsAtEnd = 50;
-///
-///     const size_t length = sLineText.length();
-///     SIZE_TYPE pos_to_check = length-1;
-///
-///     if((length > kWarnNumNucCharsAtEnd) && !TestFlag(fAssumeProt)) {
-///         // find last non-nuc character, within the last kWarnNumNucCharsAtEnd characters
-///         const SIZE_TYPE last_pos_to_check_for_nuc = (sLineText.length() - kWarnNumNucCharsAtEnd);
-///         for( ; pos_to_check >= last_pos_to_check_for_nuc; --pos_to_check ) {
-///             if( ! s_ASCII_IsUnAmbigNuc(sLineText[pos_to_check]) ) {
-///                 // found a character which is not an unambiguous nucleotide
-///                 break;
-///             }
-///         }
-///         if( pos_to_check < last_pos_to_check_for_nuc ) {
-///             FASTA_WARNING(iLineNum,
-///                 "FASTA-Reader: Title ends with at least " << kWarnNumNucCharsAtEnd
-///                 << " valid nucleotide characters.  Was the sequence "
-///                 << "accidentally put in the title line?",
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1651-1673
-/// ```c++
-///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
-///         ...
-///         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
-///             // can't just use "isalpha" in case it includes characters
-///             // with diacritics (an accent, tilde, umlaut, etc.)
-///             const char ch = sLineText[pos_to_check];
-///             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
-///                 // potential amino acid, so keep going
-///             } else {
-///                 // non-amino-acid found
-///                 break;
-///             }
-///         }
-///
-///         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
-///             FASTA_WARNING(iLineNum,
-///                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
-///                 << " valid amino acid characters.  Was the sequence "
-///                 << "accidentally put in the title line?",
-/// ```
 /// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs.
 ///
 /// `assumed_protein` is `Some(true)` for `fAssumeProt`, `Some(false)` for `fAssumeNuc` and
@@ -2373,70 +1275,6 @@ pub(crate) fn seq_data_in_title_warning(
 /// The positions of the bad residues of one line, as ranges of 1-based positions.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_exception.cpp:81-150
-/// ```c++
-/// void CBadResiduesException::SBadResiduePositions::ConvertBadIndexesToString(
-///         CNcbiOstream & out,
-///         unsigned int maxRanges ) const
-/// {
-///     const char *line_prefix = "";
-///     unsigned int iRangesFound = 0;
-///     ITERATE( SBadResiduePositions::TBadIndexMap, index_map_iter, m_BadIndexMap ) {
-///         const int lineNum = index_map_iter->first;
-///         const vector<TSeqPos> & badIndexesOnLine = index_map_iter->second;
-///         ...
-///         TRangeVec rangesFound;
-///
-///         ITERATE( vector<TSeqPos>, idx_iter, badIndexesOnLine ) {
-///             const TSeqPos idx = *idx_iter;
-///
-///             // first one
-///             if( rangesFound.empty() ) {
-///                 rangesFound.push_back(TRange(idx, idx));
-///                 ++iRangesFound;
-///                 continue;
-///             }
-///
-///             const TSeqPos last_idx = rangesFound.back().second;
-///             if( idx == (last_idx+1) ) {
-///                 // extend previous range
-///                 ++rangesFound.back().second;
-///                 continue;
-///             }
-///
-///             if( iRangesFound >= maxRanges ) {
-///                 break;
-///             }
-///
-///             // create new range
-///             rangesFound.push_back(TRange(idx, idx));
-///             ++iRangesFound;
-///         }
-///
-///         // turn the ranges found on this line into a string
-///         out << line_prefix << "On line " << lineNum << ": ";
-///         line_prefix = ", ";
-///
-///         const char *pos_prefix = "";
-///         for( unsigned int rng_idx = 0;
-///             ( rng_idx < rangesFound.size() );
-///             ++rng_idx )
-///         {
-///             out << pos_prefix;
-///             const TRange &range = rangesFound[rng_idx];
-///             out << (range.first + 1); // "+1" because 1-based for user
-///             if( range.first != range.second ) {
-///                 out << "-" << (range.second + 1); // "+1" because 1-based for user
-///             }
-///
-///             pos_prefix = ", ";
-///         }
-///         if (iRangesFound > maxRanges) {
-///             out << ", and more";
-///             return;
-///         }
-///     }
-/// }
-/// ```
 /// `maxRanges` is the default 1000 (fasta_exception.hpp:90-92); `iRangesFound` never
 /// exceeds it, so ", and more" is not written.
 pub(crate) fn convert_bad_indexes_to_string(out: &mut Vec<u8>, line: u64, positions: &[u32]) {

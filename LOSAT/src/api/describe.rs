@@ -7,42 +7,15 @@
 //! §9, reads the same definitions).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
-//! ```c++
-//! string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
-//! {
-//!     CPrintUsage x(*this);
-//!     list<string> arr;
-//!
-//!     // SYNOPSIS
-//!     arr.push_back("USAGE");
-//!     x.AddSynopsis(arr, m_UsageName, "    ");
-//!
-//!     // DESCRIPTION
-//!     arr.push_back(kEmptyStr);
-//!     x.AddDescription(arr, detailed);
-//! ```
 #![warn(missing_docs, unused)]
 
 use clap::CommandFactory;
 
 use super::program::Program;
-use super::search::{file_options, API_OWNED};
+use super::search::{alignment_owned, file_options, API_OWNED};
 use crate::cli::Cli;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
-// ```c++
-//     enum EType {
-//         eString = 0, ///< An arbitrary string
-//         eBoolean,    ///< {'true', 't', 'false', 'f'},  case-insensitive
-//         eInt8,       ///< Convertible into an integer number (Int8 only)
-//         eInteger,    ///< Convertible into an integer number (int or Int8)
-//         eIntId,      ///< Convertible to TIntId (int or Int8 depending on NCBI_INT8_GI
-//         eDouble,     ///< Convertible into a floating point number (double)
-//         eInputFile,  ///< Name of file (must exist and be readable)
-//         eOutputFile, ///< Name of file (must be writable)
-//         eIOFile,     ///< Name of file (must be writable)
-//         eDirectory,  ///< Name of file directory
-// ```
 /// What an option's value is, from the type that the command line's parser makes of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -90,8 +63,10 @@ pub struct Description {
     pub program: Program,
     /// The options that an argv of the library API may hold, in the order of the command
     /// line's help: every option of the program but those the API sets itself (`-query`,
-    /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`) and the search
-    /// strategy file, which it refuses (`search::file_options`).
+    /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`; psiblast's
+    /// `-in_msa`, `search::alignment_owned`) and the search strategy file, which it refuses
+    /// (`search::file_options`). psiblast's `-msa_master_idx` and `-ignore_msa_master` are
+    /// listed: they choose the master of the alignment that `Inputs::msa` gives.
     pub parameters: Vec<Parameter>,
     /// The values that `-query_gencode` accepts; empty for a program without the option.
     pub query_gencodes: Vec<u32>,
@@ -100,12 +75,6 @@ pub struct Description {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1024
-// ```c++
-//         arg_desc.AddDefaultKey(kArgQueryGeneticCode, "int_value",
-//                                "Genetic code to use to translate query (see https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for details)\n",
-//                                CArgDescriptions::eInteger,
-//                                NStr::IntToString(BLAST_GENETIC_CODE));
-// ```
 // NCBI's argument takes any integer and the genetic-code table decides later; LOSAT's parser
 // decides at once, so the accepted values are those the parser takes.
 /// Genetic codes are small integers; every accepted one is below this bound.
@@ -172,6 +141,7 @@ pub fn describe(program: Program) -> Description {
         if matches!(long, "help" | "version")
             || API_OWNED.contains(&long)
             || file_options(program).contains(&long)
+            || alignment_owned(program).contains(&long)
         {
             continue;
         }
@@ -215,107 +185,5 @@ pub fn describe(program: Program) -> Description {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn api_owned_options_are_not_described_and_search_options_are() {
-        for program in Program::ALL {
-            let description = describe(program);
-            assert_eq!(description.program, program);
-            let flags: Vec<&str> = description
-                .parameters
-                .iter()
-                .map(|parameter| parameter.flag.as_str())
-                .collect();
-            for owned in API_OWNED.iter().chain(file_options(program)) {
-                assert!(
-                    !flags.contains(&format!("-{owned}").as_str()),
-                    "{program} lists -{owned}"
-                );
-            }
-            for expected in ["-evalue", "-num_threads", "-max_target_seqs"] {
-                assert!(flags.contains(&expected), "{program} lacks {expected}");
-            }
-            let evalue = description
-                .parameters
-                .iter()
-                .find(|parameter| parameter.flag == "-evalue")
-                .unwrap();
-            assert!(evalue.takes_value);
-            // The help texts are the command line's; some options have none.
-            assert!(description
-                .parameters
-                .iter()
-                .any(|parameter| !parameter.help.is_empty()));
-        }
-    }
-
-    #[test]
-    fn task_choices_are_the_tasks_the_parser_accepts() {
-        let parses = |program: Program, task: &str| {
-            let argv = [
-                "losat",
-                program.name(),
-                "-query",
-                "q",
-                "-subject",
-                "s",
-                "-task",
-                task,
-            ];
-            crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
-        };
-        // Every -task lists its tasks: the default among them, each one accepted.
-        for program in Program::ALL {
-            let description = describe(program);
-            let Some(task) = description
-                .parameters
-                .iter()
-                .find(|parameter| parameter.flag == "-task")
-            else {
-                continue;
-            };
-            let default = task.default.as_deref().unwrap();
-            assert!(
-                task.choices.iter().any(|choice| choice == default),
-                "{program}"
-            );
-            for choice in &task.choices {
-                assert!(parses(program, choice), "{program} -task {choice}");
-            }
-        }
-        let blastn = describe(Program::Blastn);
-        let task = blastn
-            .parameters
-            .iter()
-            .find(|parameter| parameter.flag == "-task")
-            .unwrap();
-        assert_eq!(
-            task.choices,
-            ["megablast", "dc-megablast", "blastn", "blastn-short"]
-        );
-        // NCBI's rmblastn stays a refusal and is not offered.
-        assert!(!parses(Program::Blastn, "rmblastn"));
-    }
-
-    #[test]
-    fn genetic_codes_are_listed_for_the_translated_programs_only() {
-        let tblastx = describe(Program::Tblastx);
-        assert!(tblastx.query_gencodes.contains(&1));
-        assert!(tblastx.query_gencodes.contains(&11));
-        assert!(!tblastx.query_gencodes.contains(&0));
-        assert!(!tblastx.subject_gencodes.is_empty());
-        let blastx = describe(Program::Blastx);
-        assert!(!blastx.query_gencodes.is_empty());
-        assert!(blastx.subject_gencodes.is_empty());
-        let tblastn = describe(Program::Tblastn);
-        assert!(tblastn.query_gencodes.is_empty());
-        assert!(!tblastn.subject_gencodes.is_empty());
-        for program in [Program::Blastn, Program::Blastp] {
-            let description = describe(program);
-            assert!(description.query_gencodes.is_empty(), "{program}");
-            assert!(description.subject_gencodes.is_empty(), "{program}");
-        }
-    }
-}
+#[path = "describe_tests.rs"]
+mod tests;

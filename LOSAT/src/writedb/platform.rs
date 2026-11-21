@@ -1,3 +1,35 @@
+// Derived from LMDB 0.9.24 (mdb.c, lmdb.h) as bundled in NCBI BLAST+ 2.17.0,
+// c++/src/util/lmdb/, which carries this notice:
+//
+// Copyright 2011-2019 Howard Chu, Symas Corp.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted only as authorized by the OpenLDAP
+// Public License.
+//
+// A copy of this license is available in the file LICENSE in the
+// top-level directory of the distribution or, alternatively, at
+// <http://www.OpenLDAP.org/license.html>.
+//
+// This code is derived from btree.c written by Martin Hedenfalk.
+//
+// Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
+//
+// Permission to use, copy, modify, and distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2 (LMDB).)
+
 //! The properties of the platform that reach the bytes makeblastdb writes.
 //!
 //! makeblastdb writes the same files on every platform except where NCBI's source asks the
@@ -54,37 +86,8 @@ pub(crate) enum NcbiOs {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_lmdb.hpp:51-57
-// ```c++
-// #ifdef NCBI_OS_MSWIN
-// #define DEFAULT_LMDB_MAP_SIZE 500000
-// #define DEFAULT_TAXID_MAP_SIZE 500000
-// #else
-// #define DEFAULT_LMDB_MAP_SIZE 700000000
-// #define DEFAULT_TAXID_MAP_SIZE 300000000
-// #endif
-// ```
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
-// ```c
-// #ifdef _WIN32
-// 	...
-// 	} else {
-// 		msize = env->me_mapsize;
-// 		...
-// 		/* Windows won't create mappings for zero length files.
-// 		 * and won't map more than the file size.
-// 		 * Just set the maxsize right now.
-// 		 */
-// 		if (!(flags & MDB_WRITEMAP) && (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
-// 			|| !SetEndOfFile(env->me_fd)
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:347-351
-// ```c++
-// int CWriteDB_IndexFile::x_Overhead(const string & T,
-//                                    const string & lmdbName,
-//                                    const string & D)
-// {
-//     return 5 * sizeof(int) + sizeof(long)
-// ```
 /// The platform values NCBI's source gives for the operating system `os` with a C `long` of
 /// `sizeof_long` bytes and a `size_t` of at most `max_map_size`.
 pub(crate) const fn ncbi_platform(
@@ -168,12 +171,7 @@ impl LmdbPlatform {
     };
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:321,395,3969
-// ```c
-// #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
-// #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-// 	GET_PAGESIZE(e->me_os_psize);
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:321,395,3969
 /// LMDB's `GET_PAGESIZE` on the host: `GetSystemInfo` on Windows, `sysconf(_SC_PAGE_SIZE)`
 /// elsewhere. On Linux the C library's `sysconf` returns the kernel's `AT_PAGESZ`, which is
 /// the kernel's page size; LOSAT asks the kernel for that size directly
@@ -276,78 +274,5 @@ pub(crate) fn kernel_page_size() -> std::io::Result<usize> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // What NCBI's source picks for each platform (writedb_lmdb.hpp:51-57, mdb.c:3979-4003,
-    // writedb_files.cpp:346-360), whatever platform the test runs on.
-    #[test]
-    fn ncbi_s_platform_values_by_operating_system() {
-        let windows = ncbi_platform(NcbiOs::Windows, PageSize::Host, 4, u64::MAX);
-        assert_eq!(
-            (
-                windows.default_lmdb_map_size,
-                windows.default_taxid_map_size,
-                windows.file_length_is_map_size,
-                windows.sizeof_long
-            ),
-            (500_000, 500_000, true, 4)
-        );
-        let unix = ncbi_platform(NcbiOs::Unix, PageSize::Fixed(16384), 8, u64::MAX);
-        assert_eq!(
-            (
-                unix.default_lmdb_map_size,
-                unix.default_taxid_map_size,
-                unix.file_length_is_map_size,
-                unix.sizeof_long,
-                unix.page_size
-            ),
-            (700_000_000, 300_000_000, false, 8, PageSize::Fixed(16384))
-        );
-        assert_eq!(
-            Platform::LINUX_X86_64,
-            ncbi_platform(NcbiOs::Unix, PageSize::Fixed(4096), 8, u64::MAX)
-        );
-        assert_eq!(
-            Platform::LINUX_X86_64.lmdb().unwrap(),
-            LmdbPlatform::LINUX_X86_64
-        );
-    }
-
-    // The row `Platform::host` takes on the platform the test runs on.
-    #[test]
-    fn the_host_is_ncbi_s_platform_of_this_target() {
-        let host = Platform::host();
-        #[cfg(windows)]
-        assert_eq!(
-            host,
-            ncbi_platform(NcbiOs::Windows, PageSize::Host, 4, usize::MAX as u64)
-        );
-        #[cfg(all(unix, target_pointer_width = "64"))]
-        assert_eq!(
-            host,
-            ncbi_platform(NcbiOs::Unix, PageSize::Host, 8, u64::MAX)
-        );
-        #[cfg(target_family = "wasm")]
-        assert_eq!(host, Platform::LINUX_X86_64);
-        let page = host.lmdb().unwrap().os_page_size;
-        assert!(page.is_power_of_two() && page >= 4096, "{page}");
-        // Linux x86-64 and Windows x64 have pages of 4 KiB; macOS on Apple silicon 16 KiB.
-        #[cfg(any(
-            all(target_os = "linux", target_arch = "x86_64"),
-            all(windows, target_arch = "x86_64")
-        ))]
-        assert_eq!(page, 4096);
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        assert_eq!(page, 16384);
-    }
-
-    // The kernel's alignment is the `AT_PAGESZ` that `sysconf` returns (read here by rustix
-    // from /proc, which the test machines have).
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[test]
-    fn the_kernel_s_page_size_is_at_pagesz() {
-        assert_eq!(kernel_page_size().unwrap(), rustix::param::page_size());
-        assert_eq!(host_page_size().unwrap(), rustix::param::page_size());
-    }
-}
+#[path = "platform_tests.rs"]
+mod tests;

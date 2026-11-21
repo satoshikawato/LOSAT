@@ -26,7 +26,7 @@ enum Failure {
     /// An NCBI exception that `Run` catches: `cerr << e.what() << endl`, exit status 1.
     Caught(NcbiException),
     /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, "Application's execution failed: "
-    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, quoted at dustmasker's `report`).
+    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, cited at dustmasker's `report`).
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
@@ -83,7 +83,7 @@ fn database_failure(error: BdbError) -> Failure {
             Failure::Refused(unsupported(&format!(
                 "the report of the database error '{}', which names the place in NCBI's source \
                  that throws it,",
-                exception.get_msg()
+                String::from_utf8_lossy(exception.get_msg())
             )))
         }
         BdbError::Ncbi(exception) => Failure::Caught(exception),
@@ -94,50 +94,7 @@ fn database_failure(error: BdbError) -> Failure {
 
 /// `SegMaskerApplication::Run` on `args`; the exit status.
 ///
-/// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:206-249
-/// ```c++
-/// int SegMaskerApplication::Run(void)
-/// {
-///     int retval = 0;
-///     const CArgs& args = GetArgs();
-///
-///     try {
-///
-///         CRef<CObjectManager> objmgr(CObjectManager::GetInstance());
-///
-///         CSegMasker masker(args["window"].AsInteger(),
-///                           args["locut"].AsDouble(),
-///                           args["hicut"].AsDouble());
-///
-///         CRef<CSeq_entry> seq_entry;
-///         unique_ptr<CMaskReader> reader(x_GetReader());
-///         unique_ptr<CMaskWriter> writer(x_GetWriter());
-///
-///         while ( (seq_entry = reader->GetNextSequence()).NotEmpty() ) {
-///
-///         	// Allow skipping of oid
-///         	if(seq_entry->Which() == CSeq_entry::e_not_set)
-///         		continue;
-///
-///             CScope scope(*objmgr);
-///             CSeq_entry_Handle seh = scope.AddTopLevelSeqEntry(*seq_entry);
-///             CBioseq_Handle bioseq_handle = seh.GetSeq();
-///             CSeqVector sequence_data =
-///                 bioseq_handle.GetSeqVector(CBioseq_Handle::eCoding_Ncbi);
-///             unique_ptr<CSegMasker::TMaskList> masks(masker(sequence_data));
-///             writer->Print(bioseq_handle, *masks, GetArgs()["parse_seqids"]);
-///             // writer->Print(bioseq_handle, *masks);
-///
-///         }
-///
-///     } catch (const CException& e) {
-///         cerr << e.what() << endl;
-///         retval = 1;
-///     }
-///
-///     return retval;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:206-250
 /// The writer (`unique_ptr`) is destroyed as an exception leaves the `try` block, before the
 /// `catch` writes: a `maskinfo_*` writer writes its object first (`run_masks`). `cerr` is tied
 /// to `cout`, so the output is flushed before `e.what()`.
@@ -151,7 +108,7 @@ pub(super) fn run(
     match run_masks(args, settings, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
-            diag.cerr(format!("{}\n", exception.what()).as_bytes());
+            diag.cerr(&[exception.what().as_slice(), b"\n"].concat());
             1
         }
         Err(Failure::Std(what)) => {
@@ -208,6 +165,7 @@ fn run_masks(
                 .collect();
             let seq = MaskedBioseq {
                 ids: &record.ids,
+                handle_seq_id: None,
                 title: record.title.as_deref(),
                 taxname: record.taxname.as_ref(),
                 has_source: record.has_source,
@@ -223,18 +181,6 @@ fn run_masks(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52
-// ```c++
-// CSegMasker::CSegMasker(int window /* = kSegWindow */,
-//                        double locut /* = kSegLocut */,
-//                        double hicut /* = kSegHicut */)
-// : m_SegParameters(SegParametersNewAa())
-// {
-//     ...
-//     m_SegParameters->window = window;
-//     m_SegParameters->locut = locut;
-//     m_SegParameters->hicut = hicut;
-// }
-// ```
 /// `CSegMasker(window, locut, hicut)`: `SegParametersNewAa` with the three values as given;
 /// `SeqBufferSeg` checks them (`s_SegParametersCheck`: `SegParams::new`, a window not above 0
 /// is 12) and keeps `overlaps` `FALSE` (`SegMasker::seq_buffer_seg::<false>`). The `maxbogus`
@@ -246,42 +192,9 @@ fn seg_masker(window: i32, locut: f64, hicut: f64) -> SegMasker {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:181-190
-// ```c++
-// string BuildAlgorithmParametersString(const CArgs& args)
-// {
-//     CNcbiOstrstream os;
-//     if (args.Exist("locut") &&
-//         args.Exist("hicut") &&
-//         args.Exist("window")) {
-//         // SEG
-//         os << "window=" << args["window"].AsInteger() << "; "
-//            << "locut=" << args["locut"].AsDouble() << "; "
-//            << "hicut=" << args["hicut"].AsDouble();
-// ```
 /// `x_GetWriter`: the writer of `-outfmt` (whose constraint leaves no other value).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:170-200
-/// ```c++
-///     if (format == "interval") {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterInt(output);
-///     } else if (format == "fasta") {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterFasta(output);
-///     } else if (NStr::StartsWith(format, "seqloc_asn1_binary")) {
-///         ...
-///     } else if (NStr::StartsWith(format, "seqloc_")) {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterSeqLoc(output, format);
-///     } else if (NStr::StartsWith(format, "maskinfo_asn1_bin")) {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile(CArgValue::fBinary);
-///         retval =
-///             new CMaskWriterBlastDbMaskInfo(output, format, 1,
-///                                eBlast_filter_program_seg,
-///                                BuildAlgorithmParametersString(args));
-///     } else if (NStr::StartsWith(format, "maskinfo_")) {
-///         ... (the same)
-/// ```
 /// (`AsOutputFile` opens `-out` in each branch: `run_masks` opens it before this.)
 fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
     let mask_info = |serial| {
@@ -335,16 +248,6 @@ enum Source<'a> {
 /// protein database `-in`.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:152-168
-/// ```c++
-///     if (format == "fasta") {
-///         CNcbiIstream& input = args[kInput].AsInputFile();
-///         retval = new CMaskFastaReader(input, false, args["parse_seqids"]);
-///     } else if (format == "blastdb") {
-///         retval = new CMaskBDBReader(args[kInput].AsString(), false);
-///     } else {
-///         _ASSERT("Unknown input format" == 0);
-///     }
-/// ```
 /// (`-infmt` takes only the two values of its constraint.)
 fn reader<'a>(
     infmt: &str,
@@ -381,20 +284,7 @@ fn read_failure(error: std::io::Error) -> Failure {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1480-1503 (`s_CompOn`)
-// ```c
-// 	Int4 letter;
-// 	char* seq,* seqmax;
-// ...
-// 	while (seq < seqmax) {
-// 		letter = *seq++;
-// 		if (!alphaflag[letter])
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1683-1685 (`s_ShiftWin1`)
-// ```c
-//     if ((Uint1) win->seq[length] == FENCE_SENTRY) {
-//         return FALSE;
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1683-1686 (`s_ShiftWin1`)
 // (`FENCE_SENTRY` is 201, blast_util.h:364.) A database byte of 128 or more indexes NCBI's table
 // before its start (undefined); makeblastdb writes 0 to 27, and 28 to 127 are bogus letters to
 // SEG in both. Review of line RG item K2, M1.

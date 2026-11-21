@@ -83,7 +83,9 @@ needs a result later copies it out first.
   by `outfmt` (§7). The module adds no header and no terminator. An empty report has
   length `0`.
 - The error message is UTF-8 text. Engine errors are the error and its causes joined by
-  `: ` (`engine_error`, `LOSAT/src/web_api.rs:113-115`).
+  `: ` (`engine_error`, `LOSAT/src/web_api.rs:113-115`). Its words are the engine's, as on
+  the CLI: since v0.2.0 LOSAT's words (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12,
+  `LOSAT/src/wording.rs`), and an unknown option ends `use -help to list the options`.
 - A pointer is valid until the next call into the module that writes the same buffer
   (the table above). A host's view of the memory (`memory.buffer` in JavaScript) is
   replaced when the memory grows, and any call that allocates (`losat_web_alloc`
@@ -197,10 +199,10 @@ same request.
 
 | Program | Module | `outfmt` accepted | Extra words accepted |
 |---|---|---|---|
-| `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs:225`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue`, `-searchsp`, `-dbsize` |
-| `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`:548`) | the formats that BLASTP accepts, with field lists for the tabular ones (`check_web_v1_request`, `v1_blastp.rs:121`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback`, `-searchsp`, `-dbsize` |
-| `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`:374`) | `6` only (`tblastx_v1_outfmt`, `LOSAT/src/blastinput/value_parsers.rs:1206`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue`, `-searchsp`, `-dbsize` |
-| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt`, `web.rs:76`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `--version` (`web.rs:14-37`) |
+| `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue`, `-searchsp`, `-dbsize` |
+| `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`LOSAT/src/web_api.rs`) | `0`, `6` and `7`, the number written so (`06` fails with `Unsupported output format: 06. Supported: 0, 6, 7`), with field lists of `V1_TABULAR_FIELDS` and `std` for `6` and `7`; `0` with words fails with `blastp outfmt 0 does not accept custom field lists` (`check_web_v1_request` in `v1_blastp.rs`, and its reader `v1_output_format`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback`, `-searchsp`, `-dbsize` |
+| `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`LOSAT/src/web_api.rs`) | `6` only (`tblastx_v1_outfmt` in `LOSAT/src/blastinput/value_parsers.rs`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue`, `-searchsp`, `-dbsize` |
+| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt` in `web.rs`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `--version` (`parse_args` in `web.rs`) |
 | `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `-version`, `--version` (`parse_args`) |
 
 - For `blastn`, `blastp` and `tblastx` any other word fails with
@@ -257,8 +259,9 @@ same request.
   file, help and version words with `file/help arguments are unsupported for the
   TBLASTN web API`. The shared vector `LOSAT/tests/fixtures/web_v1_tblastn/` (11
   cases: outfmt 0, 6, 7 and 11, a label, blank and comment-only inputs, and errors)
-  holds the CLI's bytes: `LOSAT/tests/web_v1_tblastn.rs` checks the CLI against it, and
-  the `web_api` tests check both exports.
+  holds the CLI's bytes, apart from the line end that the CLI writes after LOSAT's own
+  parser messages since v0.2.0 (`unknown.err`): `LOSAT/tests/web_v1_tblastn.rs` checks the
+  CLI against it, and the `web_api` tests check both exports, which return the vector's bytes.
 - `-num_threads` defaults to `1`. The serial module rejects a value above 1
   (`abi_v2.md` §2); `validate_threads` is in `LOSAT/src/utils/threading.rs:104`.
 - `run_pair_handles` supports only `blastp`, `blastx` and `tblastn`. For `blastn` and `tblastx` it

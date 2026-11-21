@@ -8,6 +8,7 @@ description = "LOSAT, a pure-Rust reimplementation of NCBI BLAST+, as a Python l
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES", "THIRD_PARTY_LICENSES"]
 keywords = ["blast", "bioinformatics", "alignment", "genomics"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -17,7 +18,13 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
+Homepage = "https://github.com/satoshikawato/LOSAT"
+Documentation = "https://satoshikawato.github.io/LOSAT/libraries/python.html"
 Repository = "https://github.com/satoshikawato/LOSAT"
+Changelog = "https://github.com/satoshikawato/LOSAT/blob/main/CHANGELOG.md"
+Issues = "https://github.com/satoshikawato/LOSAT/issues"
 
 [tool.maturin]
 module-name = "pylosat._pylosat"
+# Notes for coding agents are not part of the package.
+exclude = [{ path = "AGENTS.md", format = "sdist" }]

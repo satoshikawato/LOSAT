@@ -4,10 +4,11 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
 autotests = false
-description = "Pure-Rust local BLAST that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions and command-WASI support"
+description = "A pure-Rust reimplementation of NCBI BLAST+ 2.17.0 that runs BLAST+ command lines, as the losat command and the losat::api library"
 license = "MIT"
+homepage = "https://satoshikawato.github.io/LOSAT/"
 repository = "https://github.com/satoshikawato/LOSAT"
-readme = "../README.md"
+readme = "README.md"
 keywords = ["blast", "bioinformatics", "alignment", "wasm", "genomics"]
 categories = ["science::bioinformatics", "command-line-utilities"]
 exclude = [
@@ -17,6 +18,18 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
+    # The source files that only unit tests read (`#[cfg(test)] mod x_tests;`, a table a test
+    # `include!`s): neither a build of the package, nor the one `cargo publish` verifies it with, nor
+    # docs.rs reads them, and they were 0.58 MiB of the 7.84 MiB crate (2026-11-20; crates.io takes
+    # 10 MiB). tests/check_crate_test_files.py (CI) fails when a file the build reads matches one
+    # of these, or when a file only tests read is packaged.
+    "src/**/*_tests.rs",
+    "src/**/tests.rs",
+    "src/**/tests_*.rs",
+    "src/**/*_tests/",
+    "src/utils/test_dir.rs",
+    "src/core/composition_adjustment/blosum62_joint_probs.inc.rs",
+    "src/core/composition_adjustment/blosum62_start_freq_ratios.inc.rs",
 ]
 
 # docs.rs documents the default features for Linux x86-64.
@@ -91,22 +104,9 @@ bzip2 = "0.6"
 ruzstd = "0.9"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-# ```c++
-# #else
-# /// Portable alias for ifstream.
-# typedef IO_PREFIX::ifstream      CNcbiIfstream;
-# #endif
-# ```
 # NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-# ```c++
-#     x_FillBuffer((size_t) m_Sb->in_avail());
-#     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-# ```
-# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395,3969
-# ```c
-# #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-# 	GET_PAGESIZE(e->me_os_psize);
-# ```
+# LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969 (`GET_PAGESIZE`; LMDB's
+# notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB))
 # Rust system calls for the native readable-byte hint (`io`), and for the page size
 # of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
 # (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
@@ -114,20 +114,36 @@ ruzstd = "0.9"
 # the C library), and the read-only mappings of the RPS-BLAST profile files
 # (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
 # test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
-# `writedb::build_db::check_access_write`). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# `writedb::build_db::check_access_write`). `try_close` reports the error of `close(2)` that
+# the output files of makeblastdb can have (`writedb::ofstream`). No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
 # tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
 # like every other dependency: Cargo.lock fixes the exact version for every build from this
 # repository (CI and the release with --locked), and Dependabot moves it.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio", "try_close"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
-# `IsIStreamEmpty` (`input_files::has_stream_position`), and the read-only file mappings of the
+# `IsIStreamEmpty` (`input_files::has_stream_position`), the read-only file mappings of the
 # RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
-# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`); only the features those need.
+# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`), and the system time zone and character types that
+# the C runtime's `localtime` reads (`writedb::windows_zone`: `GetTimeZoneInformation`,
+# `GetStringTypeW`); only the features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time"] }
+
+# The local time zone on every target but Windows (`writedb::local_offset`; Owner 2026-11-20
+# 16:27 JST 「TZ=A」): jiff reads the zone file (TZif) or the POSIX rule that `TZ` gives, and
+# LOSAT finds the zone file where glibc finds it. Only `alloc`: no bundled time zone data and no
+# lookup of jiff's own (`tz-system`, `tzdb-*`), so a target without a zone file (the Web) is UTC.
+# License: Unlicense OR MIT; LOSAT takes MIT.
+[target.'cfg(not(windows))'.dependencies]
+jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
+
+# The unit tests of `writedb::windows_zone` compare UCRT's system zones with the POSIX rules that
+# jiff reads (`writedb::local_offset::offset_from_posix_tz`), on Windows too.
+[dev-dependencies]
+jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
 
 [features]
 default = ["parallel"]
@@ -138,29 +154,13 @@ xstats = []
 # them and says so on stderr. No NCBI counterpart.
 diagnostics = []
 parallel = ["rayon"]
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-# ```c
-# int num_threads = args[kArgNumThreads].AsInteger();
-# if (num_threads > kMaxValue) {
-#     m_NumThreads = kMaxValue;
-# } else {
-#     m_NumThreads = num_threads;
-# }
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 #
 # Standard WASI aliases and packaging select this feature together with the
 # wasm32-wasip1-threads target and a runtime that implements thread spawning.
 # Explicit wasm32-wasip1 and wasm32-unknown-unknown builds remain serial.
 wasm-threads = ["parallel"]
 # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
-# ```c++
-#     /* Use a local diagnostics structure, because the one passed in an input
-#       argument can be shared between multiple threads, so we don't want to pass
-#       it to the engine and have a lot of mutex contention. */
-#     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-#
-#     if ((status =
-# ```
 # Diagnostic-only host clock/worker identity; never read by search or reporting.
 blastx-worker-probe = []
 # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
@@ -199,7 +199,5 @@ explicit_counter_loop = "allow"
 # NCBI's tables keep NCBI's digits so they diff against NCBI's source; each literal rounds to
 # the same f64.
 excessive_precision = "allow"
-# The NCBI C/C++ snippets (AGENTS.md rule 4) are quoted with NCBI's own tabs.
-tabs_in_doc_comments = "allow"
 # Functions that take a list of ranges are given the whole span as one range.
 single_range_in_vec_init = "allow"

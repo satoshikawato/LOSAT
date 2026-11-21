@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type IndexedRecord } from 'losat/domain';
+import { CUSTOM_OUTPUT, type FastaReader, type IndexedRecord } from 'losat/domain';
 import type { Compression, FileInflater, RecordScanner } from 'losat/ports';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { REFUSED_REASON } from '../../src/infra/data/session';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
 
@@ -30,6 +31,9 @@ function service(overrides: Partial<DataServiceDeps> & { store?: MemoryBlockStor
 }
 
 const THREE = '>a one\nACGT\nAC\n>b\nGG\n>c three\nTTT';
+/** The engine's readers of kinds 1 and 2: BLASTN's query and BLASTP's query, with NCBI's data loaders on. */
+const NUCLEOTIDE: FastaReader = { program: 'blastn', role: 'query', dataLoaders: true };
+const PROTEIN: FastaReader = { program: 'blastp', role: 'query', dataLoaders: true };
 
 describe('DataService sources and record tables', () => {
   it('keeps a File reference and builds its record table with per-record SHA-256', async () => {
@@ -37,7 +41,7 @@ describe('DataService sources and record tables', () => {
     const file = new File([THREE], 'three.fa');
     const source = await data.addSource(file);
     expect(source).toEqual({ sourceId: 'token-1', name: 'three.fa', size: file.size });
-    const revision = await data.indexSource(source.sourceId, 1);
+    const revision = await data.indexSource(source.sourceId, NUCLEOTIDE);
     expect(Object.isFrozen(revision)).toBe(true);
     expect(revision.excluded).toEqual([]);
     expect(revision.records.map((r) => [r.id, r.length])).toEqual([
@@ -54,7 +58,7 @@ describe('DataService sources and record tables', () => {
     const { data } = service();
     const text = '>dup First Header\nacgtACGT\n>dup second\nGGCC\n';
     const source = await data.addSource(new File([text], 'dup.fa'));
-    const revision = await data.indexSource(source.sourceId, 1);
+    const revision = await data.indexSource(source.sourceId, NUCLEOTIDE);
     expect(revision.records.map((r) => [r.index, r.id, r.length])).toEqual([
       [0, 'dup', 8],
       [1, 'dup', 4],
@@ -72,18 +76,18 @@ describe('DataService sources and record tables', () => {
     const count = 150_000;
     const text = Array.from({ length: count }, (_, i) => `>r${i}\nA\n`).join('');
     const source = await data.addSource(new File([text], 'many.fa'));
-    const revision = await data.indexSource(source.sourceId, 1);
+    const revision = await data.indexSource(source.sourceId, NUCLEOTIDE);
     const excluded = await data.reviseDataset(revision.revisionId, [0]);
     const input = await data.buildRunInput([excluded.revisionId]);
     expect(input.records).toHaveLength(count - 1);
     expect(input.records[0]).toEqual({ id: 'r1', length: 1 });
-    expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toMatchObject({ ok: true });
+    expect(await data.checkInput(NUCLEOTIDE, [excluded.revisionId])).toMatchObject({ ok: true });
   }, 60_000);
 
   it('rejects a source that the reader cannot read', async () => {
     const { data } = service();
     const source = await data.addSource(new File(['>a\n$$$$\nACGT\n'], 'plain.txt'));
-    await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow("Near line 2, there's a line that doesn't look like plausible data");
+    await expect(data.indexSource(source.sourceId, NUCLEOTIDE)).rejects.toThrow("Near line 2, there's a line that doesn't look like plausible data");
   });
 
   it('rejects a record table whose offsets are not ordered inside the source', async () => {
@@ -96,7 +100,6 @@ describe('DataService sources and record tables', () => {
           sequence_offset: 3,
           end_offset: 999,
           length: 1,
-          line_layout: { kind: 'uniform', width: 1, eol: 1 },
           residue_counts: { A: 1 },
         };
         return { records: [record] };
@@ -104,13 +107,13 @@ describe('DataService sources and record tables', () => {
     };
     const { data } = service({ scanner: broken });
     const source = await data.addSource(new File(['>x\nA\n'], 'x.fa'));
-    await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow('invalid record table');
+    await expect(data.indexSource(source.sourceId, NUCLEOTIDE)).rejects.toThrow('invalid record table');
   });
 
   it('makes a new revision for a new selection and refuses unknown records', async () => {
     const { data } = service();
     const source = await data.addSource(new File([THREE], 'three.fa'));
-    const base = await data.indexSource(source.sourceId, 1);
+    const base = await data.indexSource(source.sourceId, NUCLEOTIDE);
     const revised = await data.reviseDataset(base.revisionId, [2, 0, 2]);
     expect(revised.revisionId).not.toBe(base.revisionId);
     expect(revised.excluded).toEqual([0, 2]);
@@ -122,7 +125,7 @@ describe('DataService sources and record tables', () => {
     const { data } = service();
     const text = `${THREE}\n\n`;
     const source = await data.addSource(new File([text], 'three.fa'));
-    const revision = await data.indexSource(source.sourceId, 1);
+    const revision = await data.indexSource(source.sourceId, NUCLEOTIDE);
     const input = await data.buildRunInput([revision.revisionId]);
     expect(decoder.decode(input.bytes)).toBe(text);
     expect(input.sha256).toBe(sha256(text));
@@ -136,7 +139,7 @@ describe('DataService sources and record tables', () => {
   it('gives the included original records in order when records are left out', async () => {
     const { data } = service();
     const source = await data.addSource(new File([THREE], 'three.fa'));
-    const revision = await data.reviseDataset((await data.indexSource(source.sourceId, 1)).revisionId, [1]);
+    const revision = await data.reviseDataset((await data.indexSource(source.sourceId, NUCLEOTIDE)).revisionId, [1]);
     const input = await data.buildRunInput([revision.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>a one\nACGT\nAC\n>c three\nTTT');
     expect(input.records).toEqual([
@@ -147,8 +150,8 @@ describe('DataService sources and record tables', () => {
 
   it('adds one newline after a source without a final newline when another follows', async () => {
     const { data } = service();
-    const first = await data.indexSource((await data.addSource(new File(['>x\nAC'], 'x.fa'))).sourceId, 1);
-    const second = await data.indexSource((await data.addSource(new File(['>y\nGG\n'], 'y.fa'))).sourceId, 1);
+    const first = await data.indexSource((await data.addSource(new File(['>x\nAC'], 'x.fa'))).sourceId, NUCLEOTIDE);
+    const second = await data.indexSource((await data.addSource(new File(['>y\nGG\n'], 'y.fa'))).sourceId, NUCLEOTIDE);
     const input = await data.buildRunInput([first.revisionId, second.revisionId, first.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>x\nAC\n>y\nGG\n>x\nAC');
     expect(input.records.map((r) => r.id)).toEqual(['x', 'y', 'x']);
@@ -163,13 +166,13 @@ describe('DataService dropSource (SURVEY #15)', () => {
     const { data } = service();
     const dropped = await data.addSource(new File([THREE], 'three.fa'));
     const kept = await data.addSource(new File(['>k\nACGT\n'], 'kept.fa'));
-    const nucleotide = await data.indexSource(dropped.sourceId, 1);
-    const protein = await data.indexSource(dropped.sourceId, 2);
+    const nucleotide = await data.indexSource(dropped.sourceId, NUCLEOTIDE);
+    const protein = await data.indexSource(dropped.sourceId, PROTEIN);
     const selection = await data.reviseDataset(nucleotide.revisionId, [1]);
-    const other = await data.indexSource(kept.sourceId, 1);
+    const other = await data.indexSource(kept.sourceId, NUCLEOTIDE);
     await data.dropSource(dropped.sourceId);
     await expect(data.previewSource(dropped.sourceId, 10)).rejects.toThrow(`unknown source ${dropped.sourceId}`);
-    await expect(data.indexSource(dropped.sourceId, 1)).rejects.toThrow(`unknown source ${dropped.sourceId}`);
+    await expect(data.indexSource(dropped.sourceId, NUCLEOTIDE)).rejects.toThrow(`unknown source ${dropped.sourceId}`);
     for (const revision of [nucleotide, protein, selection]) {
       await expect(data.buildRunInput([revision.revisionId])).rejects.toThrow(`unknown dataset revision ${revision.revisionId}`);
       await expect(data.reviseDataset(revision.revisionId, [])).rejects.toThrow(`unknown dataset revision ${revision.revisionId}`);
@@ -184,7 +187,7 @@ describe('DataService dropSource (SURVEY #15)', () => {
     const { data } = service();
     const tables = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const source = await data.addSource(new File([THREE], 'three.fa'));
-    const base = await data.indexSource(source.sourceId, 1);
+    const base = await data.indexSource(source.sourceId, NUCLEOTIDE);
     await data.reviseDataset(base.revisionId, [0]);
     expect([tables.sources.size, tables.revisions.size]).toEqual([1, 2]);
     await data.dropSource(source.sourceId);
@@ -196,7 +199,8 @@ describe('DataService runs and storage status', () => {
   it('reports the storage it uses, the session bytes and the cleanup state', async () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;
     const { data } = service({
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: REFUSED_REASON,
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       cleanup: new Promise((resolve) => {
         settle = resolve;
       }),
@@ -204,7 +208,8 @@ describe('DataService runs and storage status', () => {
     });
     expect(await data.storageInfo()).toEqual({
       backend: 'memory',
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: REFUSED_REASON,
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       sessionBytes: 0,
       estimate: { usage: 10, quota: 1000 },
       cleanup: { state: 'pending' },
@@ -253,6 +258,42 @@ describe('DataService runs and storage status', () => {
     stray.write(CUSTOM_OUTPUT, encoder.encode('x'));
     stray.end();
     await expect(data.commitRun('run-4')).rejects.toThrow('The engine wrote output stream 4, which this run does not write');
+  });
+
+  // The engine's signal of stream 9 (ABI v2 §5): an output that failed, alone in the search of the others or with its
+  // search in a run of two searches, is empty and named in the result with where its error is, as the engine said,
+  // also where no chunk of it came (line WQA's sweep, D7, 2026-11-19 and 2026-11-20); an empty output that the engine
+  // did not name is not.
+  it('names the outputs that the engine said failed in the result, with where their errors are, and keeps them empty', async () => {
+    const { data } = service();
+    const writer = new RunOutputWriter(await data.openRun('run-1'));
+    writer.write(0, encoder.encode('BLASTN 2.17.0+\n'));
+    writer.write(6, encoder.encode('row\n'));
+    writer.discard(0, 'diagnostics');
+    writer.write(7, encoder.encode('# BLASTN\n'));
+    writer.end();
+    const result = await data.commitRun('run-1');
+    expect(result.failed).toEqual([{ output: 0, error: 'diagnostics' }]);
+    expect(result.byteLengths).toEqual({ 0: 0, 6: 4, 7: 9 });
+    expect(await data.readOutput('run-1', 0)).toEqual(new Uint8Array(0));
+    const tabular = new RunOutputWriter(await data.openRun('run-2'));
+    tabular.discard(7, 'logfile');
+    tabular.discard(6, 'logfile');
+    tabular.write(0, encoder.encode('TBLASTX 2.17.0+\n'));
+    tabular.end();
+    expect((await data.commitRun('run-2')).failed).toEqual([
+      { output: 6, error: 'logfile' },
+      { output: 7, error: 'logfile' },
+    ]);
+    const nowhere = new RunOutputWriter(await data.openRun('run-4'));
+    nowhere.discard(6, 'nowhere');
+    nowhere.end();
+    expect((await data.commitRun('run-4')).failed).toEqual([{ output: 6, error: 'nowhere' }]);
+    const empty = new RunOutputWriter(await data.openRun('run-3'));
+    empty.end();
+    const none = await data.commitRun('run-3');
+    expect(none.byteLengths[0]).toBe(0);
+    expect(none.failed).toEqual([]);
   });
 
   it('refuses a second run with the same id and a commit of an unknown run', async () => {

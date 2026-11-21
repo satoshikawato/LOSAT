@@ -1,0 +1,781 @@
+THIRD-PARTY NOTICES FOR LOSAT
+
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+
+2.17.0. LOSAT's own work is under the MIT License (the file LICENSE). This file lists the
+code in LOSAT's source that comes from other projects, one section each: what it is, the
+files that hold it, its license, and its notices and license text. Section 11 is about data,
+not code: the third-party data in LOSAT's tests.
+
+  1. NCBI BLAST+ 2.17.0 (public domain in the United States)
+  2. LMDB 0.9.24 (OpenLDAP Public License 2.8)
+  3. Boost (Boost Software License 1.0)
+  4. Arm Optimized Routines (MIT License)
+  5. Sun's fdlibm (Sun Microsystems' notice)
+  6. Microsoft's C runtime, UCRT (MIT License)
+  7. The Rust crate bzip2 0.6.1 (MIT License)
+  8. The Rust crate ruzstd 0.9.1 (MIT License)
+  9. Two icons of LOSAT Web, from Heroicons and Feather (MIT License)
+  10. BitMagic 8.0.1 (Apache License 2.0)
+  11. Test data: UniProtKB/Swiss-Prot, FlyBase, SGD, TIGRFAMs and SMART (CC BY 4.0, CC BY-SA 4.0,
+      SMART's terms)
+
+Paths are relative to the losat crate (the directory LOSAT/ of the repository).
+
+The comments also cite two public-domain sources outside NCBI's code, whose authors ask for no
+notice: lmdb++ (lmdb++.h, NCBI's copy of the C++ wrapper of LMDB) and SQLite (btree.c, for the
+file format of the taxonomy database).
+
+The binaries (the losat command, the pylosat wheel and the WebAssembly builds) also contain
+the Rust crates they depend on, the Rust standard library and, in the WebAssembly builds,
+the C library wasi-libc. Their license texts are in the file THIRD_PARTY_LICENSES, which is
+distributed with those binaries.
+
+===============================================================================
+1. NCBI BLAST+ 2.17.0
+===============================================================================
+
+What: most of LOSAT's code is translated from the C and C++ source of NCBI BLAST+ 2.17.0
+(the NCBI C++ Toolkit), and the data files LOSAT carries (scoring matrices, genetic codes,
+help texts) are NCBI's. The comments cite NCBI's files as
+"NCBI reference (598d8ae6): c++/...". The rpsbproc command is translated from NCBI's
+RpsbProc 0.5.1 (the package of 2025-05-13), whose files carry the same notice; the comments
+cite it as "NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/...".
+Files: the files of src/ that cite NCBI's source.
+License: the code and data written by NCBI are in the public domain in the United States.
+NCBI's notice (c++/scripts/projects/blast/LICENSE of the BLAST+ 2.17.0 source):
+
+-------------------------------------------------------------------------------
+                            PUBLIC DOMAIN NOTICE
+               National Center for Biotechnology Information
+
+  This software/database is a "United States Government Work" under the
+  terms of the United States Copyright Act.  It was written as part of
+  the author's official duties as a United States Government employee and
+  thus cannot be copyrighted.  This software/database is freely available
+  to the public for use. The National Library of Medicine and the U.S.
+  Government have not placed any restriction on its use or reproduction.
+
+  Although all reasonable efforts have been taken to ensure the accuracy
+  and reliability of the software and data, the NLM and the U.S.
+  Government do not and cannot warrant the performance or results that
+  may be obtained by using this software or data. The NLM and the U.S.
+  Government disclaim all warranties, express or implied, including
+  warranties of performance, merchantability or fitness for any particular
+  purpose.
+
+  Please cite the author in any work or product based on this material.
+
+-------------------------------------------------------------------------------
+
+===============================================================================
+2. LMDB 0.9.24, as bundled in NCBI BLAST+ 2.17.0 (c++/src/util/lmdb/)
+===============================================================================
+
+What: the writer and the reader of the LMDB files (.ndb, .pdb, .ntf, .ptf) of version 5
+BLAST databases, ported from LMDB's mdb.c, midl.c, midl.h and lmdb.h.
+Files: src/writedb/mdb/mod.rs, src/writedb/mdb/cursor.rs, src/writedb/mdb/page.rs,
+src/writedb/mdb/midl.rs, src/seqdb/lmdb_read.rs, src/writedb/platform.rs,
+src/seqdb/filter.rs.
+License: OpenLDAP Public License 2.8. mdb.c is derived from btree.c by Martin Hedenfalk,
+under the permission notice that follows his copyright line.
+
+Notice of mdb.c and lmdb.h:
+
+-------------------------------------------------------------------------------
+Copyright 2011-2019 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+
+This code is derived from btree.c written by Martin Hedenfalk.
+
+Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+-------------------------------------------------------------------------------
+
+Notice of midl.c and midl.h:
+
+-------------------------------------------------------------------------------
+This work is part of OpenLDAP Software <http://www.openldap.org/>.
+
+Copyright 2000-2019 The OpenLDAP Foundation.
+Portions Copyright 2001-2018 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+-------------------------------------------------------------------------------
+
+COPYRIGHT of LMDB (c++/src/util/lmdb/COPYRIGHT):
+
+-------------------------------------------------------------------------------
+Copyright 2011-2019 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+
+OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+
+Individual files and/or contributed packages may be copyright by
+other parties and/or subject to additional restrictions.
+
+This work also contains materials derived from public sources.
+
+Additional information about OpenLDAP can be obtained at
+<http://www.openldap.org/>.
+-------------------------------------------------------------------------------
+
+The OpenLDAP Public License 2.8 (c++/src/util/lmdb/LICENSE):
+
+-------------------------------------------------------------------------------
+The OpenLDAP Public License
+  Version 2.8, 17 August 2003
+
+Redistribution and use of this software and associated documentation
+("Software"), with or without modification, are permitted provided
+that the following conditions are met:
+
+1. Redistributions in source form must retain copyright statements
+   and notices,
+
+2. Redistributions in binary form must reproduce applicable copyright
+   statements and notices, this list of conditions, and the following
+   disclaimer in the documentation and/or other materials provided
+   with the distribution, and
+
+3. Redistributions must contain a verbatim copy of this document.
+
+The OpenLDAP Foundation may revise this license from time to time.
+Each revision is distinguished by a version number.  You may use
+this Software under terms of this license revision or under the
+terms of any subsequent revision of the license.
+
+THIS SOFTWARE IS PROVIDED BY THE OPENLDAP FOUNDATION AND ITS
+CONTRIBUTORS ``AS IS'' AND ANY EXPRESSED OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT
+SHALL THE OPENLDAP FOUNDATION, ITS CONTRIBUTORS, OR THE AUTHOR(S)
+OR OWNER(S) OF THE SOFTWARE BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+The names of the authors and copyright holders must not be used in
+advertising or otherwise to promote the sale, use or other dealing
+in this Software without specific, written prior permission.  Title
+to copyright in this Software shall at all times remain with copyright
+holders.
+
+OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+
+Copyright 1999-2003 The OpenLDAP Foundation, Redwood City,
+California, USA.  All Rights Reserved.  Permission to copy and
+distribute verbatim copies of this document is granted.
+-------------------------------------------------------------------------------
+
+===============================================================================
+3. Boost, as adapted in NCBI BLAST+ 2.17.0 (c++/src/algo/blast/core/boost_erf.c)
+===============================================================================
+
+What: the complementary error function (ErfC) of the Spouge finite-size correction of
+E-values, and its x87 extended-precision step.
+Files: src/stats/spouge.rs, src/utils/x87.rs.
+License: Boost Software License 1.0. Notice (boost_erf.c):
+
+-------------------------------------------------------------------------------
+(C) Copyright John Maddock 2006.
+Use, modification and distribution are subject to the Boost Software
+License, Version 1.0. (See below or copy at
+http://www.boost.org/LICENSE_1_0.txt)
+-------------------------------------------------------------------------------
+
+The Boost Software License 1.0 (https://www.boost.org/LICENSE_1_0.txt):
+
+-------------------------------------------------------------------------------
+Boost Software License - Version 1.0 - August 17th, 2003
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by
+this license (the "Software") to use, reproduce, display, distribute,
+execute, and transmit the Software, and to prepare derivative works of the
+Software, and to permit third-parties to whom the Software is furnished to
+do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including
+the above license grant, this restriction and the following disclaimer,
+must be included in all copies of the Software, in whole or in part, and
+all derivative works of the Software, unless such copies or derivative
+works are solely in the form of machine-executable object code generated by
+a source language processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
+FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+4. Arm Optimized Routines (commit 11253b0b9d6b)
+===============================================================================
+
+What: the code and tables of exp, log and pow (math/exp.c, exp_data.c, log.c, log_data.c,
+pow.c, pow_log_data.c, math_config.h, math_err.c), built to give the bits of glibc 2.35 on
+x86-64 with FMA. glibc 2.35 carries the same code and tables; musl the same tables.
+Files: src/utils/glibc_fma_libm.rs, src/utils/glibc_fma_libm/tables.rs.
+License: MIT. Notices of those files (math_config.h has the first, the others the second):
+
+-------------------------------------------------------------------------------
+Copyright (c) 2017-2018, Arm Limited.
+SPDX-License-Identifier: MIT
+
+Copyright (c) 2018, Arm Limited.
+SPDX-License-Identifier: MIT
+-------------------------------------------------------------------------------
+
+LICENSE of Arm Optimized Routines at that commit:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 1999-2018, Arm Limited.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+5. Sun's fdlibm
+===============================================================================
+
+What: log10, as in sysdeps/ieee754/dbl-64/e_log10.c of glibc 2.35, which is fdlibm's code
+and carries only Sun's notice.
+Files: src/utils/glibc_fma_libm.rs.
+Notice:
+
+-------------------------------------------------------------------------------
+Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+Developed at SunPro, a Sun Microsystems, Inc. business.
+Permission to use, copy, modify, and distribute this
+software is freely granted, provided that this notice
+is preserved.
+-------------------------------------------------------------------------------
+
+===============================================================================
+6. Microsoft's C runtime (UCRT), Microsoft.Windows.SDK.CRTSource 10.0.22621.3
+===============================================================================
+
+What: the local time zone of makeblastdb on Windows (the date written into a database), as
+UCRT's _tzset and localtime compute it, ported from the UCRT sources that Microsoft
+publishes under the MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource
+10.0.22621.3.
+Files: src/writedb/windows_zone.rs; outside the crate, the repository's
+scripts/ucrt_tz_vectors.py.
+License: MIT. The package's LICENSE:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE
+-------------------------------------------------------------------------------
+
+===============================================================================
+7. The Rust crate bzip2 0.6.1 (https://crates.io/crates/bzip2)
+===============================================================================
+
+What: the loop that reads a file of several bzip2 streams (bufread::MultiBzDecoder).
+Files: src/blastinput/compressed.rs.
+License: MIT OR Apache-2.0; LOSAT uses it under the MIT License. Its LICENSE-MIT:
+
+-------------------------------------------------------------------------------
+Copyright (c) 2014-2025 Alex Crichton and Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+8. The Rust crate ruzstd 0.9.1 (https://crates.io/crates/ruzstd)
+===============================================================================
+
+What: the reading of Zstandard frame and block headers.
+Files: src/blastinput/compressed.rs.
+License: MIT. Its LICENSE:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2019 Moritz Borcherding
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+9. Two icons of LOSAT Web, from Heroicons and Feather
+===============================================================================
+
+What: the shapes of two icons of LOSAT Web's screens. The check mark beside an accepted
+input is the icon "check" of Heroicons version 1 (outline set; https://heroicons.com, the
+npm package heroicons 1.0.6, the last release of version 1). The warning triangle beside
+"Closing or reloading this tab ends the search" is the icon "alert-triangle" of Feather
+(https://feathericons.com, the npm package feather-icons 4.29.2), with its coordinates
+rounded.
+Files (from the repository's root, outside the losat crate): web/app/src/ui/SourceCard.vue
+(Heroicons) and web/app/src/ui/RunStatus.vue (Feather).
+License: MIT, both. The LICENSE of heroicons 1.0.6:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2020 Refactoring UI Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+The LICENSE of feather-icons 4.29.2:
+
+-------------------------------------------------------------------------------
+The MIT License (MIT)
+
+Copyright (c) 2013-2023 Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+10. BitMagic 8.0.1, as bundled in NCBI BLAST+ 2.17.0 (c++/include/util/bitset/)
+===============================================================================
+
+What: the reading of the BitMagic data in the Seq-tables of a PSSM query (the BVector-data
+that psiblast and tblastn -in_pssm read), ported from BitMagic's deserializer (bm.h,
+bmblocks.h, bmconst.h, bmdef.h, bmfunc.h, bmserial.h, bmsimd.h, bmsse2.h, bmsse4.h,
+bmsse_util.h, encoding.h); in the tests, the encoder of encoding.h (bit_out).
+Files: src/algorithm/pssm_search/annot_index/bitmagic.rs,
+src/algorithm/pssm_search/annot_index/bitmagic_tests.rs.
+License: Apache License 2.0. BitMagic's license.txt, then the Apache License 2.0 that it
+names:
+
+-------------------------------------------------------------------------------
+BitMagic Library License
+
+Copyright(c) 2002-2019 Anatoliy Kuznetsov(anatoliy_kuznetsov at yahoo.com)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+For more information please visit:  http://bitmagic.io
+
+**Important!** We ask you to explicitly mention BitMagic project in any derived work or our published
+materials. Proper BitMagic reference on your product/project page is a REQUIREMENT
+for using the Library.
+
+
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+-------------------------------------------------------------------------------
+
+===============================================================================
+11. Test data: UniProtKB/Swiss-Prot, FlyBase, SGD, TIGRFAMs and SMART
+===============================================================================
+
+What: the tests of LOSAT (the directory LOSAT/tests/ of the repository) hold sequences, annotation
+texts and database rows of other projects. They are in the repository and in the source
+archives that GitHub makes from it. They are not in the crate, the pylosat wheel or the release
+archives of the binaries. The file LOSAT/tests/THIRD_PARTY_DATA.md of the repository lists them with
+the files that hold them and the changes made, and says which data need no attribution (Pfam,
+NCBI's own data, INSDC, Ensembl, the Protein Data Bank). The data that do:
+
+- UniProtKB/Swiss-Prot (UniProt Consortium, https://www.uniprot.org/): sequences and
+  definition lines of Swiss-Prot records. Creative Commons Attribution 4.0 International
+  (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/ ; terms:
+  https://www.uniprot.org/help/license . UniProt's statement: "We have chosen to apply the
+  Creative Commons Attribution 4.0 International (CC BY 4.0) License
+  (https://creativecommons.org/licenses/by/4.0/) to all copyrightable parts of our
+  databases. All databases and documents in the UniProt FTP directory may be copied and
+  redistributed freely, without advance permission, provided that this copyright statement
+  is reproduced with each copy." The records are written into test inputs and databases, some
+  with an added second definition line or a shortened title.
+- FlyBase (https://flybase.org/), through Ensembl BDGP6.54: five Drosophila melanogaster
+  cDNA records (FBtr0078009, FBtr0100310, FBtr0083245, FBtr0301286, FBtr0078640). FlyBase
+  distributes the annotations and data it produces under CC BY 4.0
+  (https://wiki.flybase.org/wiki/FlyBase:About).
+- SGD, the Saccharomyces Genome Database (https://www.yeastgenome.org/), through Ensembl
+  R64-1-1: three protein records (YLR106C, YBR142W, YOL075C). CC BY 4.0, as SGD's help pages
+  state it; SGD's own terms page could not be read directly when this was written
+  (2026-11-21).
+- TIGRFAMs, through NCBI's Conserved Domain Database (CDD) v3.22: the description text of 29
+  TIGRFAMs families in 10 excerpts of CDD's cddid.tbl (tests/fixtures/rpsbproc/), taken from
+  NCBI's FTP site on 2026-11-11. The rows are excerpts and otherwise unchanged, except that
+  four of the files cut the description to 24 characters. License: Creative Commons
+  Attribution-ShareAlike 4.0 International (CC BY-SA 4.0),
+  https://creativecommons.org/licenses/by-sa/4.0/ (full text:
+  https://creativecommons.org/licenses/by-sa/4.0/legalcode). NCBI holds the rights since
+  April 2018 and publishes the data under it
+  (https://ftp.ncbi.nlm.nih.gov/hmm/TIGRFAMs/license_and_availability.txt). The TIGRFAMs rows
+  stay under CC BY-SA 4.0. NCBI asks that use of TIGRFAMs cite these articles:
+    Haft DH, Loftus BJ, Richardson DL, Yang F, Eisen JA, Paulsen IT, White O. TIGRFAMs: a
+    protein family resource for the functional identification of proteins. Nucleic Acids Res.
+    2001 Jan 1;29(1):41-3. PMID: 11125044
+    Haft DH, Selengut JD, White O. The TIGRFAMs database of protein families. Nucleic Acids
+    Res. 2003 Jan 1;31(1):371-3. PMID: 12520025
+    Selengut JD, Haft DH, Davidsen T, Ganapathy A, Gwinn-Giglio M, Nelson WC, Richter AR,
+    White O. TIGRFAMs and Genome Properties: tools for the assignment of molecular function
+    and biological process in prokaryotic genomes. Nucleic Acids Res. 2007 Jan;35(Database
+    issue):D260-4. Epub 2006 Dec 6. PMID: 17151080
+    Haft DH, Selengut JD, Richter RA, Harkins D, Basu MK, Beck E. TIGRFAMs and Genome
+    Properties in 2013. Nucleic Acids Res. 2013 Jan;41(Database issue):D387-95. doi:
+    10.1093/nar/gks1234. Epub 2012 Nov 28. PMID: 23197656
+- SMART (https://smart.embl.de/), through CDD v3.22: the description text of 12 SMART
+  families in 8 excerpts of cddid.tbl (same rule as above), and the smart rows of CDD's
+  bitscore_specific.txt. No SMART hidden Markov models or alignments are in the tests. SMART
+  states that its data (hidden Markov models, alignments and thresholds) are available via a
+  license that is free to academics and not to commercial users
+  (https://smart.embl.de/about.cgi); it states no terms for the description text of a family.
+Files: LOSAT/tests/THIRD_PARTY_DATA.md lists them.
+License: the licenses named above; LOSAT's own tests are under the MIT License.

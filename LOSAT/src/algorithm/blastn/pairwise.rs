@@ -239,21 +239,8 @@ impl Rows<'_> {
                 displayed_rows(hsp, query.seq(), subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
                 })?;
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
-            // ```c++
-            //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
-            //                        aln_vec_info->alnRowInfo->sequence[1],
-            //                        aln_vec_info->match,
-            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1798
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2127-2140
-            // ```c++
-            //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
-            //     ...
-            //     for(int i=0; i<min_length; i++){
-            //         if(sequence_standard[i]==sequence[i]){
-            //     ...
-            //             match ++;
-            // ```
             // The identities that outfmt 0 shows are those of the displayed rows (the stored
             // letters in upper case, before the masks' lower case), counted again (series NP,
             // M4a-2b decision H6): with `-db_hard_mask` the engine's `num_ident` counts a masked
@@ -299,6 +286,8 @@ impl Rows<'_> {
                 comp_adjust_method: None,
                 sum_n: None,
                 subject_stored_gaps: Vec::new(),
+                query_stored_gaps: Vec::new(),
+                query_case: Default::default(),
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
                 // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
@@ -310,23 +299,8 @@ impl Rows<'_> {
 
 // The rows of one HSP as NCBI shows them: the query on its plus strand.
 //
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1852-1858
-// ```c++
-//         if((ds->IsSetStrands()
-//             && ds->GetStrands().front()==eNa_strand_minus)
-//            && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
-//             //show plus strand if master is minus for non-translated case
-//             finalDenseg->Reverse();
-// ```
-// NCBI reference: c++/include/algo/blast/core/gapinfo.h:43-61
-// ```c
-// typedef enum EGapAlignOpType {
-//    eGapAlignDel = 0, /**< Deletion: a gap in query */
-//    ...
-//    eGapAlignSub = 3, /**< Substitution */
-//    ...
-//    eGapAlignIns = 6, /**< Insertion: a gap in subject */
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1852-1858
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:43-61
 // The HSP offsets and its edit script are those of the query context (the reverse
 // complement of the query for a minus-strand HSP) against the plus-strand subject.
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
@@ -457,39 +431,8 @@ fn context_rows_into(
     Ok(())
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:878-892
-// ```c++
-//         const TSeqRange kTarget((*query_interval)->GetFrom(),
-//                                 (*query_interval)->GetTo());
-//         ...
-//             TSeqRange range(Map(kTarget, masked_range));
-//             if (range.NotEmpty() && range != kTarget) {
-//                 ...
-//                 CRef<CSeqLocInfo> seqlocinfo
-//                     (new CSeqLocInfo(seqint, CSeqLocInfo::eFrameNotSet));
-// ```
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:825-842
-// ```c++
-// template <class Position>
-// CRange<Position> Map(const CRange<Position>& target,
-//                      const CRange<Position>& range)
-// {
-//     if (target.Empty()) {
-//         throw std::runtime_error("Target range is empty");
-//     }
-//
-//     if (range.Empty() ||
-//         (range.GetFrom() > target.GetTo()) ||
-//         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
-//         return target;
-//     }
-//
-//     CRange<Position> retval;
-//     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
-//     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
-//     return retval;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:878-892
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-842
 // A mask that covers the whole query (its searched interval, `kTarget`) is not reported,
 // so it is not shown. The masks of the search lie in the searched letters (`query_length`
 // of them); `Map` moves them by the start of the query's interval (`offset`, 0 without
@@ -508,59 +451,9 @@ pub(crate) fn shown_query_masks(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
-// ```c++
-//         // Union subject sequence ranges
-//         vector <TSeqRange> ranges;
-//         for (int i=0; i<hsp_list->hspcnt; i++) {
-//             const BlastHSP* hsp = hsp_list->hsp_array[i];
-//             TSeqRange rg;
-//             rg.SetFrom(hsp->subject.offset);
-//             rg.SetTo(hsp->subject.end);
-//             ranges.push_back(rg);
-//         }
-//
-//         // Extract subject masks
-//         TMaskedSubjRegions masks;
-//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
-// ```
-// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
-// ```c++
-// static void
-// s_SeqIntervalToSeqLocInfo(CRef<CSeq_interval> interval,
-//                           const vector <TSeqRange>& target_ranges,
-//                           const CSeqLocInfo::ETranslationFrame frame,
-//                           TMaskedSubjRegions& retval)
-// {
-//     TSeqRange loc(interval->GetFrom(), interval->GetTo());
-//
-//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
-//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
-//            loc.IntersectingWith(target_ranges[ir])) {
-//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
-//            retval.push_back(sli);
-//            return;
-//         }
-//     }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
-// ```c++
-//     CSeqDB::TSequenceRanges ranges;
-//     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
-//     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
-//         for (size_t it=0; it<target.size(); it++) {
-//             if (target[it] != TSeqRange::GetEmpty() &&
-//                 target[it].IntersectingWith(*itr)) {
-//                 CRef<CSeq_interval> si
-//                     (new CSeq_interval(*id, itr->first, itr->second-1));
-//                 CRef<CSeqLocInfo> sli(new CSeqLocInfo(si, kFrame));
-//                 retval.push_back(sli);
-//                 break;
-//             }
-//         }
-//     }
-// ```
 // The subject masks shown with the HSPs of one subject (`GetMasks` of the subject set's
 // `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
 // holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
@@ -605,15 +498,7 @@ fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
     merged
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2495-2521
-// ```c++
-//         if(id.Which() != CSeq_id::e_not_set){
-//             /*only do this for sequence but not for others like middle line,
-//               features*/
-//             ...
-//                 } else if (m_SeqLocChar==eLowerCase){
-//                     actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
 // The row's residue positions start at `first` (1-based) and move by `step`; a residue
 // whose position lies in a mask is shown in lowercase. `masks` are disjoint and in order
 // (`merged`), so the masks that overlap the row's span are found by binary search.
@@ -649,37 +534,9 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// The ungapped Karlin-Altschul block of a blastn query, from its composition; `None`
 /// when NCBI cannot compute it and marks the query invalid.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2778-2792
-/// ```c
-///       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-///       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-///       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2004-2013
-/// ```c
-///    for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
-///    {
-///       ++rcp->comp[(int)(*lp & mask)];
-///    }
-///
-///    /* Don't count ambig. residues. */
-///    for (index=0; index<sbp->ambig_occupy; index++)
-///    {
-///       rcp->comp[sbp->ambiguous_res[index]] = 0;
-///    }
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:346-350
-/// ```c
-///     if (program_number == eBlastTypeBlastn ||
-///         program_number == eBlastTypeMapping) {
-///
-///         BLAST_ScoreSetAmbigRes(sbp, 'N');
-///         BLAST_ScoreSetAmbigRes(sbp, '-');
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2792
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2004-2013
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:346-350
 /// The residues are counted in BLASTNA without `N` and the gap, normalized, and paired
 /// with the standard composition (A, C, G, T at 0.25; `Blast_ResFreqStdComp`) through the
 /// BLASTNA matrix (`BlastScoreFreqCalc`, blast_stat.c:2151-2205). The minus strand of a
@@ -741,189 +598,5 @@ pub(crate) fn query_ungapped_karlin_blastna(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn record(seq: &[u8]) -> FastaRecord {
-        FastaRecord::new("Query_1", b"q", seq)
-    }
-
-    fn hsp(
-        frame: i32,
-        q: (usize, usize),
-        s: (usize, usize),
-        ops: Option<Vec<GapEditOp>>,
-    ) -> BlastnHsp {
-        BlastnHsp {
-            identity: 0.0,
-            length: 0,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: 0,
-            q_end: 0,
-            s_start: 0,
-            s_end: 0,
-            e_value: 0.0,
-            bit_score: 0.0,
-            num_ident: 0,
-            query_frame: frame,
-            query_length: 0,
-            q_idx: 0,
-            s_idx: 0,
-            raw_score: 0,
-            internal_q_offset_0: q.0 as i32,
-            internal_q_end_0: q.1 as i32,
-            internal_s_offset_0: s.0,
-            internal_s_end_0: s.1,
-            internal_query_context_offset: 0,
-            gap_info: ops,
-            num_positives: 0,
-        }
-    }
-
-    // seqinfosrc_seqdb.cpp:121-133 (quoted at `shown_subject_masks`): a stored mask is shown
-    // when it holds a letter and meets the closed range `[offset, end]` of an HSP (the end one
-    // past the HSP); overlapping and nested masks (hand-made masks of the M4a-2 edge databases)
-    // are merged for the display. A subject set's merged lowercase is kept as it is.
-    #[test]
-    fn database_masks_meeting_an_hsp_are_shown() {
-        let masks = [
-            MaskedInterval::new(600, 700),
-            MaskedInterval::new(100, 200),
-            MaskedInterval::new(150, 250),
-            MaskedInterval::new(250, 260),
-            MaskedInterval::new(300, 300),
-            MaskedInterval::new(900, 950),
-        ];
-        // The mask 600-700 holds 600..=699: it meets an HSP from 699 on, not one from 700 on.
-        let hsps = [
-            hsp(1, (0, 10), (199, 250), None),
-            hsp(1, (0, 10), (700, 760), None),
-        ];
-        assert!(shown_subject_masks(&masks[..1], &hsps).is_empty());
-        let hsps = [
-            hsp(1, (0, 10), (199, 250), None),
-            hsp(1, (0, 10), (699, 701), None),
-        ];
-        // 100-200, 150-250 and 250-260 meet the first HSP, 600-700 the second; the empty 300-300
-        // and 900-950 none.
-        assert_eq!(
-            shown_subject_masks(&masks, &hsps),
-            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
-        );
-        // Merged lowercase runs are kept as they are.
-        let runs = merged(&masks);
-        assert_eq!(
-            shown_subject_masks(&runs, &hsps),
-            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
-        );
-        let hsps = [hsp(1, (0, 10), (940, 960), None)];
-        assert_eq!(
-            shown_subject_masks(&runs, &hsps),
-            [MaskedInterval::new(900, 950)]
-        );
-    }
-
-    #[test]
-    fn plus_strand_rows_follow_the_edit_script() {
-        let query = record(b"ACGTTACG");
-        let subject = record(b"ACGTACCG");
-        let ops = vec![GapEditOp::Sub(4), GapEditOp::Ins(1), GapEditOp::Sub(3)];
-        let (q, s) = displayed_rows(
-            &hsp(1, (0, 8), (0, 7), Some(ops)),
-            query.seq(),
-            subject.seq().len(),
-            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
-        )
-        .unwrap();
-        assert_eq!(
-            (q.as_slice(), s.as_slice()),
-            (&b"ACGTTACG"[..], &b"ACGT-ACC"[..])
-        );
-    }
-
-    // A minus-strand HSP is shown with the query on its plus strand: both rows of the
-    // context alignment are reverse-complemented, gaps included.
-    #[test]
-    fn minus_strand_rows_are_reverse_complemented() {
-        let query = record(b"AACCGGTT");
-        let subject = record(b"CCGGT");
-        // Context (reverse complement of the query) AACCGGTT[1..6] = ACCGG against CCGG-.
-        let ops = vec![GapEditOp::Ins(1), GapEditOp::Sub(4)];
-        let (q, s) = displayed_rows(
-            &hsp(-1, (1, 6), (0, 4), Some(ops)),
-            query.seq(),
-            subject.seq().len(),
-            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
-        )
-        .unwrap();
-        assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));
-    }
-
-    // The XML rows are written into buffers that the caller reuses: stale contents are cleared
-    // and the minus-strand reversal in place gives the rows of `displayed_rows`.
-    #[test]
-    fn rows_into_reused_buffers_equal_displayed_rows() {
-        let query = record(b"AACCGGTT");
-        let subject = record(b"CCGGT");
-        let (mut q, mut s) = (b"stale row".to_vec(), b"x".to_vec());
-        for (frame, window, ops) in [
-            (-1, (1, 6), vec![GapEditOp::Ins(1), GapEditOp::Sub(4)]),
-            (1, (0, 5), vec![GapEditOp::Sub(5)]),
-        ] {
-            let hsp = hsp(frame, window, (0, 4 + usize::from(frame > 0)), Some(ops));
-            let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
-            let once = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
-            displayed_rows_into(
-                &hsp,
-                query.seq(),
-                subject.seq().len(),
-                letters,
-                &mut q,
-                &mut s,
-            )
-            .unwrap();
-            assert_eq!((q.clone(), s.clone()), once);
-        }
-    }
-
-    #[test]
-    fn masked_positions_are_lowercase_in_the_row_direction() {
-        let mut row = b"AC-GT".to_vec();
-        lowercase_masked(&mut row, 10, -1, &[MaskedInterval { start: 7, end: 9 }]);
-        assert_eq!(row, b"Ac-gT");
-    }
-
-    // A context in BLASTNA (either letter case, no uppercase copy) gives the block of the
-    // letters it was encoded from.
-    #[test]
-    fn karlin_of_blastna_equals_karlin_of_letters() {
-        for seq in [
-            &b"ACGTACGTTTGA"[..],
-            b"acgtnACGTRYKMSWBDHVnn-",
-            b"NNNN",
-            b"",
-            b"aaaaCCCCggggTTTTUu",
-        ] {
-            let blastna = encode_iupac_to_blastna(seq);
-            let from_letters = query_ungapped_karlin(seq, 2, -3);
-            let from_blastna = query_ungapped_karlin_blastna(&blastna, 2, -3);
-            match (from_letters, from_blastna) {
-                (None, None) => {}
-                (Some(a), Some(b)) => {
-                    assert_eq!(a.lambda.to_bits(), b.lambda.to_bits());
-                    assert_eq!(a.k.to_bits(), b.k.to_bits());
-                    assert_eq!(a.h.to_bits(), b.h.to_bits());
-                }
-                other => panic!("{seq:?}: {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn an_all_n_query_has_no_ungapped_block() {
-        assert!(query_ungapped_karlin(b"NNNN", 2, -3).is_none());
-        let acgt = query_ungapped_karlin(b"ACGTACGTTTGA", 2, -3).unwrap();
-        assert!((acgt.lambda - 0.634).abs() < 5e-4);
-    }
-}
+#[path = "pairwise_tests.rs"]
+mod tests;

@@ -5,14 +5,7 @@
 use super::protein_tables::{ProteinMatrixTable, ProteinTableRow, PROTEIN_MATRIX_TABLES};
 use crate::config::ScoringMatrix;
 
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:437-441
-/// ```c
-/// long BLAST_Nint(double x)
-/// {
-///    x += (x >= 0. ? 0.5 : -0.5);
-///    return (long)x;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
 pub fn blast_nint(x: f64) -> i64 {
     let x = x + if x >= 0.0 { 0.5 } else { -0.5 };
     x as i64
@@ -21,22 +14,7 @@ pub fn blast_nint(x: f64) -> i64 {
 /// The table of the matrix `name` (case-insensitive, `strcasecmp`), IDENTITY only when
 /// `standard_only` is false.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3593-3605
-/// ```c
-///    vnp = head = BlastLoadMatrixValues(standard_only);
-///    while (vnp)
-///    {
-///       matrix_info = vnp->ptr;
-///       if (strcasecmp(matrix_info->name, matrix_name) == 0)
-///       {
-///          values = matrix_info->values;
-///          max_number_values = matrix_info->max_number_values;
-///          found_matrix = TRUE;
-///          break;
-///       }
-///       vnp = vnp->next;
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3593-3605
 pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinMatrixTable> {
     let tables = if standard_only {
         &PROTEIN_MATRIX_TABLES[..PROTEIN_MATRIX_TABLES.len() - 1]
@@ -51,19 +29,7 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
 /// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
 /// its index in `PROTEIN_MATRIX_TABLES` instead of the name.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
-/// ```c
-///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
-///    ListNodeAddPointer(&retval, 0, matrix_info);
-///
-///    matrix_info = MatrixInfoNew("BLOSUM62", blosum62_values, blosum62_prefs, BLOSUM62_VALUES_MAX);
-/// ...
-///    matrix_info = MatrixInfoNew("PAM70", pam70_values, pam70_prefs, PAM70_VALUES_MAX);
-///    ListNodeAddPointer(&retval, 0, matrix_info);
-///
-///    if (!standard_only) {
-///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
 pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTable {
     let index = match matrix {
         ScoringMatrix::Blosum80 => 0,
@@ -81,14 +47,7 @@ pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTabl
 
 /// The first row of `table` with the gap costs, the search of the table loaders.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3612-3616
-/// ```c
-///       for (index=0; index<max_number_values; index++)
-///       {
-///          if (BLAST_Nint(values[index][0]) == gap_open &&
-///             BLAST_Nint(values[index][1]) == gap_extend)
-///          {
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3612-3616
 pub fn gap_costs_row(
     table: &'static ProteinMatrixTable,
     gap_open: i32,
@@ -109,37 +68,7 @@ pub enum TableStatus {
 
 /// The table row of the gap costs of the matrix `name`.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3608-3641
-/// ```c
-///    if (found_matrix)
-///    {
-///                 Boolean found_values=FALSE;
-///            Int4 index;
-///       for (index=0; index<max_number_values; index++)
-///       {
-///          if (BLAST_Nint(values[index][0]) == gap_open &&
-///             BLAST_Nint(values[index][1]) == gap_extend)
-///          {
-/// ...
-///             found_values = TRUE;
-///             break;
-///          }
-///       }
-///
-///       if (found_values == TRUE)
-///       {
-///          status = 0;
-///       }
-///       else
-///       {
-///          status = 2;
-///       }
-///    }
-///    else
-///    {
-///       status = 1;
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3608-3641
 pub fn karlin_blk_gapped_load_from_tables(
     gap_open: i32,
     gap_extend: i32,
@@ -160,28 +89,10 @@ fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &str) -> i32 {
     text.len() as i32
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3760-3788
-/// ```c
-/// #define BUF_SZ_1024 (1024)
-///    int buffer_sz= BUF_SZ_1024 ;
-/// ...
-///    out_sz = snprintf(ptr, (size_t)buffer_sz, "%s is not a supported matrix, supported matrices are:\n", matrix_name);
-///    buffer_sz -= ( 1 + out_sz ); if ( buffer_sz < 0 ) buffer_sz = 0; // decrease out buffer size first, "+1" for null termination , once.
-///
-///    ptr += strlen(ptr);
-///
-///         vnp = head = BlastLoadMatrixValues(standard_only);
-///
-///         while (vnp)
-///         {
-///          matrix_info = vnp->ptr;
-///          out_sz = snprintf(ptr,(size_t)buffer_sz, "%s \n", matrix_info->name);
-/// 	 buffer_sz -= out_sz ; if ( buffer_sz < 0 ) buffer_sz = 0;
-///       ptr += strlen(ptr);
-///       vnp = vnp->next;
-///         }
-/// ```
-pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> String {
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3760-3788
+/// The message's bytes: the buffer can end inside a character of the name (NCBI BLAST+ 2.17.0,
+/// probe R9 of line LIB-B: 1,000 `a` and 30 `é` end with the byte 0xC3).
+pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 1024;
     let out_sz = snprintf(
@@ -199,32 +110,12 @@ pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> String {
         let out_sz = snprintf(&mut buffer, buffer_sz, &format!("{} \n", table.name));
         buffer_sz = (buffer_sz - out_sz).max(0);
     }
-    String::from_utf8_lossy(&buffer).into_owned()
+    buffer
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3792-3839
-/// ```c
-/// #define BUF_SZ_2048 (2048)
-/// ...
-///    out_sz = snprintf(ptr, (size_t)buffer_sz,"Gap existence and extension values of %ld and %ld not supported for %s\nsupported values are:\n",
-///       (long) gap_open, (long) gap_extend, matrix_name);
-///
-///    buffer_sz -= ( 1 + out_sz ); if ( buffer_sz < 0 ) buffer_sz = 0; // decrease out buffer size first, "+1" for null termination , once.
-///    ptr += strlen(ptr);  // advance writing buffer position
-///
-///    vnp = head = BlastLoadMatrixValues(FALSE);
-/// ...
-///       for (index=0; index<max_number_values; index++)
-///       {
-///          if (BLAST_Nint(values[index][2]) == INT2_MAX)
-///             out_sz = snprintf(ptr, (size_t)buffer_sz, "%ld, %ld\n", (long) BLAST_Nint(values[index][0]), (long) BLAST_Nint(values[index][1]));
-///          else
-///             out_sz = snprintf(ptr, (size_t)buffer_sz, "%ld, %ld, %ld\n", (long) BLAST_Nint(values[index][0]), (long) BLAST_Nint(values[index][1]), (long) BLAST_Nint(values[index][2]));
-/// 	 buffer_sz -= out_sz ; if ( buffer_sz < 0 ) buffer_sz = 0; // decrease out buffer size first, "+1" for null termination , once.
-///          ptr += strlen(ptr);
-///       }
-/// ```
-pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -> String {
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3792-3839
+/// The message's bytes ([`print_matrix_message`]).
+pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 2048;
     let out_sz = snprintf(
@@ -251,35 +142,14 @@ pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -
             buffer_sz = (buffer_sz - out_sz).max(0);
         }
     }
-    String::from_utf8_lossy(&buffer).into_owned()
+    buffer
 }
 
 /// The best gap costs of the matrix `name`, the row whose preference is
 /// `BLAST_MATRIX_BEST` after the first (ungapped) row; `None` for a matrix that is not in
 /// the tables (NCBI then leaves its caller's values, 0 and 0).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3374-3396
-/// ```c
-/// Int2 BLAST_GetProteinGapExistenceExtendParams(const char* matrixName,
-///                                        Int4* gap_existence,
-///                                        Int4* gap_extension)
-/// {
-///      Int4* gapOpen_arr,* gapExtend_arr,* pref_flags;
-///      Int4 i; /*loop index*/
-///      Int2 num_values = Blast_GetMatrixValues(matrixName, &gapOpen_arr,
-///        &gapExtend_arr, NULL, NULL, NULL,  NULL, NULL, &pref_flags);
-///
-///      if (num_values <= 0)
-///          return -1;
-///
-///      for(i = 1; i < num_values; i++) {
-///          if(pref_flags[i]==BLAST_MATRIX_BEST) {
-///              (*gap_existence) = gapOpen_arr[i];
-///              (*gap_extension) = gapExtend_arr[i];
-///              break;
-///          }
-///      }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3374-3396
 /// `Blast_GetMatrixValues` converts the costs with `(Int4)` (blast_stat.c:3068-3070).
 pub fn protein_gap_existence_extend_params(name: &str) -> Option<(i32, i32)> {
     let table = matrix_table(name, false)?;
@@ -304,35 +174,7 @@ pub enum SuggestionProgram {
     TranslatedQuery,
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1174-1209
-/// ```c
-/// Int2 BLAST_GetSuggestedThreshold(EBlastProgramType program_number, const char* matrixName, double* threshold)
-/// {
-///
-///     const double kB62_threshold = 11;
-/// ...
-///     if(strcasecmp(matrixName, "BLOSUM62") == 0)
-///         *threshold = kB62_threshold;
-///     else if(strcasecmp(matrixName, "BLOSUM45") == 0)
-///         *threshold = 14;
-///     else if(strcasecmp(matrixName, "BLOSUM62_20") == 0)
-///         *threshold = 100;
-///     else if(strcasecmp(matrixName, "BLOSUM80") == 0)
-///         *threshold = 12;
-///     else if(strcasecmp(matrixName, "PAM30") == 0)
-///         *threshold = 16;
-///     else if(strcasecmp(matrixName, "PAM70") == 0)
-///         *threshold = 14;
-///     else if(strcasecmp(matrixName, "IDENTITY") == 0)
-///         *threshold = 27;
-///     else
-///         *threshold = kB62_threshold;
-///
-///     if (Blast_SubjectIsTranslated(program_number) == TRUE)
-///         *threshold += 2;  /* Covers tblastn, tblastx, psi-tblastn rpstblastn. */
-///     else if (Blast_QueryIsTranslated(program_number) == TRUE)
-///         *threshold += 1;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1209
 pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64 {
     let is = |name: &str| matrix_name.eq_ignore_ascii_case(name);
     let mut threshold = if is("BLOSUM62") {
@@ -360,21 +202,7 @@ pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64
     threshold
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1211-1236
-/// ```c
-///     if(strcasecmp(matrixName, "BLOSUM62") == 0)
-///         *window_size = kB62_windowsize;
-///     else if(strcasecmp(matrixName, "BLOSUM45") == 0)
-///         *window_size = 60;
-///     else if(strcasecmp(matrixName, "BLOSUM80") == 0)
-///         *window_size = 25;
-///     else if(strcasecmp(matrixName, "PAM30") == 0)
-///         *window_size = 15;
-///     else if(strcasecmp(matrixName, "PAM70") == 0)
-///         *window_size = 20;
-///     else
-///         *window_size = kB62_windowsize;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1211-1236
 pub fn suggested_window_size(matrix_name: &str) -> i32 {
     let is = |name: &str| matrix_name.eq_ignore_ascii_case(name);
     if is("BLOSUM45") {
@@ -391,83 +219,5 @@ pub fn suggested_window_size(matrix_name: &str) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI BLAST+ 2.17.0 `blastp -matrix FOO` (BlastScoringOptionsValidate status 1).
-    #[test]
-    fn matrix_message_lists_ncbis_matrices() {
-        assert_eq!(
-            print_matrix_message("FOO", false),
-            "FOO is not a supported matrix, supported matrices are:\nBLOSUM80 \nBLOSUM62 \nBLOSUM50 \nBLOSUM45 \nPAM250 \nBLOSUM90 \nPAM30 \nPAM70 \nIDENTITY \n"
-        );
-        assert!(!print_matrix_message("FOO", true).contains("IDENTITY"));
-        // The 1024-byte buffer: a long name truncates the message.
-        let long = "M".repeat(2000);
-        assert_eq!(print_matrix_message(&long, false).len(), 1023);
-    }
-
-    // NCBI BLAST+ 2.17.0 `blastp -matrix PAM30 -gapopen 1 -gapextend 1` (status 2).
-    #[test]
-    fn allowed_values_list_the_table_in_order() {
-        assert_eq!(
-            print_allowed_values("PAM30", 1, 1),
-            "Gap existence and extension values of 1 and 1 not supported for PAM30\nsupported values are:\n32767, 32767\n7, 2\n6, 2\n5, 2\n10, 1\n9, 1\n8, 1\n15, 3\n14, 2\n14, 1\n13, 3\n"
-        );
-    }
-
-    #[test]
-    fn tables_are_found_without_case_and_with_identity_only_for_nonstandard() {
-        assert!(karlin_blk_gapped_load_from_tables(11, 1, "blosum62", false).is_ok());
-        assert_eq!(
-            karlin_blk_gapped_load_from_tables(11, 1, "IDENTITY", true),
-            Err(TableStatus::UnknownMatrix)
-        );
-        assert_eq!(
-            karlin_blk_gapped_load_from_tables(1, 1, "BLOSUM62", false),
-            Err(TableStatus::UnknownGapCosts)
-        );
-        assert!(karlin_blk_gapped_load_from_tables(32767, 32767, "PAM70", false).is_ok());
-    }
-
-    #[test]
-    fn preferred_gap_costs_are_the_best_rows() {
-        let costs: Vec<_> = [
-            "BLOSUM45", "BLOSUM50", "BLOSUM62", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250",
-            "IDENTITY",
-        ]
-        .iter()
-        .map(|name| protein_gap_existence_extend_params(name).unwrap())
-        .collect();
-        assert_eq!(
-            costs,
-            vec![
-                (14, 2),
-                (13, 2),
-                (11, 1),
-                (10, 1),
-                (10, 1),
-                (9, 1),
-                (10, 1),
-                (15, 2),
-                (15, 2)
-            ]
-        );
-        assert_eq!(protein_gap_existence_extend_params("FOO"), None);
-    }
-
-    #[test]
-    fn suggestions_follow_blast_options_c() {
-        assert_eq!(
-            suggested_threshold(SuggestionProgram::Protein, "pam30"),
-            16.0
-        );
-        assert_eq!(
-            suggested_threshold(SuggestionProgram::TranslatedSubject, "BLOSUM62"),
-            13.0
-        );
-        assert_eq!(suggested_threshold(SuggestionProgram::Protein, "FOO"), 11.0);
-        assert_eq!(suggested_window_size("blosum80"), 25);
-        assert_eq!(suggested_window_size("IDENTITY"), 40);
-    }
-}
+#[path = "protein_options_tests.rs"]
+mod tests;

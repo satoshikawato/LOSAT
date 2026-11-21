@@ -37,7 +37,8 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 ## CASES.tsv
 
 `case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
-the bytes of `refused/<case>.{out,err,rc}`: the refusals of PS16b, PS16c and PS16d below), `stdin` (`-` = empty), `setup`
+the bytes of `refused/<case>.{out,err,rc}`: the refusals of PS16b, PS16c and PS16d below; `widened` and `tied`: LOSAT's
+bytes of `widened/` and `tied/`, below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
 directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
 same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
@@ -243,7 +244,7 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   `arch/bad/a_nan.asn`, the review's `a_nan`) and a hit's `e_value` `NOT-A-NUMBER` (`nan_hit`,
   `arch/bad/a_nanhit.asn`, both edits of `arch/one.asn`), a kept `Hsp_evalue` or `Hsp_bit-score` `nan` (`x.h_evalnan`,
   `x.h_bitnan`), every third `Hsp_evalue` of `x_three` (`x.h_tnan3`), and in `x_ntr67e10` (47 HSPs, 18 and 22 in frames
-  +1 and -1: NCBI's introsort partitions with NaN keys) every third `Hsp_evalue` (`x.h_ntnanthird`), every one
+  +1 and -1, so that NCBI sorts many hits with NaN keys) every third `Hsp_evalue` (`x.h_ntnanthird`), every one
   (`x.h_ntnanall`) and every fourth `Hsp_bit-score` (`x.h_ntbitnan`). NCBI's bytes in the fixture layout, both builds
   the same, cut data = full data.
 - `refused/refuse_x*`: LOSAT's bytes for the hand-made XML that it refuses (PD-LOSAT-NCBI-DEFECTS 1.17): an
@@ -306,3 +307,23 @@ bioconda's gave the same bytes in every case.
   2147483586 (`arch/mse86.asn`) the last segment passes model position 2^31 - 1: NCBI's `MapSegSet` end, an
   `unsigned int` sum stored in an `int`, wraps, two of the eight Zn sites stay unmapped and no SITES line is printed;
   at K = 2147483576 (`arch/mse76.asn`) the SITES line is printed. Both builds the same.
+
+## Tied hits (line LIB, item S1, PD-LOSAT-NCBI-DEFECTS 1.67)
+
+The Owner's decision of 2026-11-20: `losat rpsbproc` sorts with Rust's standard sort. Hits of one query with
+equal E-value and bit score keep their input order, where NCBI's `std::sort` leaves them in an order of its own. A NaN
+E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20). The rows whose output this
+changes are of `use` `tied`:
+
+- `tied/<case>.{out,err,rc}`: LOSAT's bytes (written from LOSAT's output of 2026-11-20 and checked against NCBI's
+  `oracle/` files, which stay): `tie1.std`, `tie1.std.f`, `tie1.full`, `tie1.full.f` and `x.tie1.doms.full` (two
+  `smart00634` hits with E-value 3.15371e-14 and bit score 70.4332 change places), and `x.h_tnan3.full`,
+  `x.h_tnan3.both`, `x.h_ntnanthird.full` and `x.h_ntnanthird.both` (NaN E-values, made by hand, above: the hits with
+  NaN keys come last, and which hits are representative, `Specific` or a superfamily's, with their sites, follows).
+- `tied/CLASSES.tsv`: for each row, the blocks and lines in which LOSAT's standard output differs from NCBI's. The test
+  `tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits` recomputes them from `oracle/` and `tied/`: standard
+  error and exit status are NCBI's; the standard output differs only inside query blocks, in a `tie` block (runs of
+  DOMAINS lines of one query, E-value and bit score, with the same hit types on both sides) or in a `nan` block (a
+  query with a NaN E-value or bit score), and the counts must equal the table's. Lines are counted as a diff counts
+  them: the lines of each block that a longest common subsequence of NCBI's and LOSAT's block leaves out, NCBI's
+  (`ncbi_lines`, removed) and LOSAT's (`losat_lines`, added), so that a changed line after a moved one counts too.

@@ -1,6 +1,6 @@
 //! BLASTP ungapped extension helpers.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use super::x_ungapped_fast;
 use crate::config::ScoringMatrix;
@@ -14,10 +14,7 @@ fn residue_score<const BLOSUM62: bool>(
     q_off: i32,
     s_off: i32,
 ) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-883
-    // ```c
-    // score += matrix[q[i]][s[i]];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
     let query_residue = query[q_off as usize];
     let subject_residue = subject[s_off as usize];
     if BLOSUM62 {
@@ -27,15 +24,7 @@ fn residue_score<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
-// ```c
-// typedef struct BlastUngappedData {
-//    Int4 q_start;
-//    Int4 s_start;
-//    Int4 length;
-//    Int4 score;
-// } BlastUngappedData;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-154
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BlastpUngappedData {
     pub(crate) q_start: i32,
@@ -44,29 +33,14 @@ pub(crate) struct BlastpUngappedData {
     pub(crate) score: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
-// ```c
-// *hsp_q = q_left_off - left_disp;
-// *hsp_s = s_left_off - left_disp;
-// *hsp_len = left_disp + right_disp + init_hit_width;
-// return total_score;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1078-1127
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BlastpOneHitUngappedResult {
     pub(crate) ungapped_data: BlastpUngappedData,
     pub(crate) s_last_off: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
-// ```c
-// *right_extend = FALSE;
-// *s_last_off = s_right_off;
-// ...
-// *hsp_q = q_right_off - left_d;
-// *hsp_s = s_right_off - left_d;
-// *hsp_len = left_d + right_d;
-// return MAX(left_score, right_score);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1124-1158
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BlastpTwoHitUngappedResult {
     pub(crate) ungapped_data: BlastpUngappedData,
@@ -74,28 +48,7 @@ pub(crate) struct BlastpTwoHitUngappedResult {
     pub(crate) s_last_off: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-835
-// ```c
-// static Int4 s_BlastAaExtendRight(Int4 ** matrix,
-//                         const BLAST_SequenceBlk * subject,
-//                         const BLAST_SequenceBlk * query,
-//                         Int4 s_off, Int4 q_off, Int4 dropoff,
-//                         Int4 * length, Int4 maxscore, Int4 * s_last_off)
-// {
-//     Int4 i, n, best_i = -1;
-//     Int4 score = maxscore;
-//     ...
-//     for (i = 0; i < n; i++) {
-//         score += matrix[q[i]][s[i]];
-//         if (score > maxscore) { ... }
-//         if (score <= 0 || (maxscore - score) >= dropoff)
-//             break;
-//     }
-//     *length = best_i + 1;
-//     *s_last_off = s_off + i;
-//     return maxscore;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-865
 fn extend_right<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -128,30 +81,7 @@ fn extend_right<const BLOSUM62: bool>(
     (best_score, best_i + 1, s_off + i)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:853-883
-// ```c
-// static Int4 s_BlastAaExtendLeft(Int4 ** matrix,
-//                        const BLAST_SequenceBlk * subject,
-//                        const BLAST_SequenceBlk * query,
-//                        Int4 s_off, Int4 q_off, Int4 dropoff,
-//                        Int4 * length, Int4 maxscore)
-// {
-//     Int4 i, n, best_i;
-//     Int4 score = maxscore;
-//     ...
-//     n = MIN(s_off, q_off);
-//     best_i = n + 1;
-//     ...
-//     for (i = n; i >= 0; i--) {
-//         score += matrix[q[i]][s[i]];
-//         if (score > maxscore) { ... }
-//         if ((maxscore - score) >= dropoff)
-//             break;
-//     }
-//     *length = n - best_i + 1;
-//     return maxscore;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:853-919
 fn extend_left<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -192,31 +122,7 @@ fn extend_left<const BLOSUM62: bool>(
     (best_score, n - best_i + 1)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
-// ```c
-// static Int4 s_BlastAaExtendOneHit(...)
-// {
-//     ...
-//     for (i = 0; i < word_size; i++) {
-//         sum += matrix[q[q_off + i]][s[s_off + i]];
-//         if (sum > score) {
-//             score = sum;
-//             q_best_left_off = q_left_off;
-//             q_right_off = q_off + i;
-//         } else if (sum <= 0) {
-//             sum = 0;
-//             q_left_off = q_off + i + 1;
-//         }
-//     }
-//     ...
-//     left_score = s_BlastAaExtendLeft(..., s_left_off - 1, q_left_off - 1, ...);
-//     total_score = s_BlastAaExtendRight(..., s_right_off + 1, q_right_off + 1, ...);
-//     *hsp_q = q_left_off - left_disp;
-//     *hsp_s = s_left_off - left_disp;
-//     *hsp_len = left_disp + right_disp + init_hit_width;
-//     return total_score;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1038-1127
 #[allow(dead_code)]
 pub fn extend_one_hit(
     matrix: ScoringMatrix,
@@ -227,13 +133,7 @@ pub fn extend_one_hit(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpOneHitUngappedResult> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
-    // ```c
-    // if (use_pssm)
-    //     sum += matrix[q_off + i][s[s_off + i]];
-    // else
-    //     sum += matrix[q[q_off + i]][s[s_off + i]];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1039-1044
     if matrix == ScoringMatrix::Blosum62 {
         extend_one_hit_impl::<true>(matrix, query, subject, q_off, s_off, dropoff, word_size)
     } else {
@@ -241,13 +141,7 @@ pub fn extend_one_hit(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
-// ```c
-// if (use_pssm)
-//     sum += matrix[q_off + i][s[s_off + i]];
-// else
-//     sum += matrix[q[q_off + i]][s[s_off + i]];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1039-1044
 /// [`extend_one_hit`] of a matrix other than BLOSUM62 (BLASTP's other matrices, item SC2b): the
 /// reference walk with `protein_score`, without the dispatch, so that BLOSUM62's instance keeps the
 /// one caller (`extend_one_hit_blosum62`'s reference) that inlines it.
@@ -264,13 +158,7 @@ pub(crate) fn extend_one_hit_of(
     extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
-// ```c
-// if (use_pssm)
-//     sum += matrix[q_off + i][s[s_off + i]];
-// else
-//     sum += matrix[q[q_off + i]][s[s_off + i]];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1039-1044
 #[inline]
 pub(crate) fn extend_one_hit_blosum62(
     query: &[u8],
@@ -298,18 +186,6 @@ pub(crate) fn extend_one_hit_blosum62(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790,1040-1044
-// ```c
-//                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-//                                               subject_offset, query_offset,
-//                                               cutoffs->x_dropoff,
-//                                               &hsp_q, &hsp_s, &hsp_len,
-//                                               wordsize, use_pssm, &s_last_off);
-// ...
-//         if (use_pssm)
-//             sum += matrix[q_off + i][s[s_off + i]];
-//         else
-//             sum += matrix[q[q_off + i]][s[s_off + i]];
-// ```
 /// `s_BlastAaExtendOneHit` with the score matrix `matrix` (not a PSSM), chosen at each call:
 /// BLOSUM62's walks (`extend_one_hit_blosum62`) or the reference walk of another matrix
 /// (`extend_one_hit_of`). TBLASTN's one-hit word finder (`-window_size 0`) calls it with its matrix
@@ -331,17 +207,7 @@ pub(crate) fn extend_one_hit_for(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
-// ```c
-// static Int4 s_BlastAaExtendOneHit(...)
-// {
-//     ...
-//     sum += matrix[q[q_off + i]][s[s_off + i]];
-//     ...
-//     left_score = s_BlastAaExtendLeft(matrix, subject, query, ...);
-//     total_score = s_BlastAaExtendRight(matrix, subject, query, ...);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1020-1083
 fn extend_one_hit_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -414,32 +280,7 @@ fn extend_one_hit_impl<const BLOSUM62: bool>(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
-// ```c
-// static Int4 s_BlastAaExtendTwoHit(...)
-// {
-//     ...
-//     for (i = 0; i < word_size; i++) {
-//         score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-//         if (score > left_score) {
-//             left_score = score;
-//             right_d = i + 1;
-//         }
-//     }
-//     q_right_off += right_d;
-//     s_right_off += right_d;
-//     ...
-//     left_score = s_BlastAaExtendLeft(..., s_right_off - 1, q_right_off - 1, ...);
-//     if (left_d >= (s_right_off - s_left_off)) {
-//         *right_extend = TRUE;
-//         right_score = s_BlastAaExtendRight(..., s_right_off, q_right_off, ...);
-//     }
-//     *hsp_q = q_right_off - left_d;
-//     *hsp_s = s_right_off - left_d;
-//     *hsp_len = left_d + right_d;
-//     return MAX(left_score, right_score);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1108-1158
 #[allow(dead_code)]
 pub fn extend_two_hit(
     matrix: ScoringMatrix,
@@ -451,13 +292,7 @@ pub fn extend_two_hit(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpTwoHitUngappedResult> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
-    // ```c
-    // if (use_pssm)
-    //     score += matrix[q_right_off + i][s[s_right_off + i]];
-    // else
-    //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1109-1116
     if matrix == ScoringMatrix::Blosum62 {
         extend_two_hit_impl::<true>(
             matrix,
@@ -483,13 +318,7 @@ pub fn extend_two_hit(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
-// ```c
-// if (use_pssm)
-//     score += matrix[q_right_off + i][s[s_right_off + i]];
-// else
-//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1109-1116
 #[inline]
 pub(crate) fn extend_two_hit_blosum62(
     query: &[u8],
@@ -526,13 +355,7 @@ pub(crate) fn extend_two_hit_blosum62(
     .unwrap_or_else(reference)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
-// ```c
-// if (use_pssm)
-//     score += matrix[q_right_off + i][s[s_right_off + i]];
-// else
-//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1109-1116
 /// [`extend_two_hit`] of a matrix other than BLOSUM62 (item SC2b), with the byte-table walks of
 /// the matrix (`x_ungapped_fast::two_hit_of`; `of.1` is the matrix's `matrix_table`): the same
 /// result. The reference runs where the matrix has no table or the walks do not cover the call.
@@ -575,17 +398,7 @@ pub(crate) fn extend_two_hit_table(
         })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
-// ```c
-// static Int4 s_BlastAaExtendTwoHit(...)
-// {
-//     ...
-//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-//     ...
-//     left_score = s_BlastAaExtendLeft(matrix, subject, query, ...);
-//     right_score = s_BlastAaExtendRight(matrix, subject, query, ...);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155
 fn extend_two_hit_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -662,122 +475,5 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::utils::matrix::ncbistdaa;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
-    // ```c
-    // *hsp_q = q_left_off - left_disp;
-    // *hsp_s = s_left_off - left_disp;
-    // *hsp_len = left_disp + right_disp + init_hit_width;
-    // return total_score;
-    // ```
-    #[test]
-    fn test_extend_one_hit_returns_ncbi_blast_ungapped_data_payload() {
-        let query = vec![
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-        ];
-        let subject = query.clone();
-
-        let result = extend_one_hit(ScoringMatrix::Blosum62, &query, &subject, 1, 1, 7, 3)
-            .expect("one-hit ungapped extension");
-
-        assert_eq!(result.ungapped_data.q_start, 0);
-        assert_eq!(result.ungapped_data.s_start, 0);
-        assert_eq!(result.ungapped_data.length, 5);
-        assert_eq!(
-            result.ungapped_data.score,
-            5 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::A, ncbistdaa::A)
-        );
-        assert_eq!(result.s_last_off, 5);
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
-    // ```c
-    // *right_extend = FALSE;
-    // *s_last_off = s_right_off;
-    // ...
-    // if (left_d >= (s_right_off - s_left_off)) {
-    //     *right_extend = TRUE;
-    //     ...
-    // }
-    // ```
-    #[test]
-    fn test_extend_two_hit_returns_ncbi_payload_when_left_reaches_first_hit() {
-        let query = vec![
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-        ];
-        let subject = query.clone();
-
-        let result = extend_two_hit(ScoringMatrix::Blosum62, &query, &subject, 0, 3, 3, 7, 3)
-            .expect("two-hit ungapped extension");
-
-        assert!(result.right_extend);
-        assert_eq!(result.ungapped_data.q_start, 0);
-        assert_eq!(result.ungapped_data.s_start, 0);
-        assert_eq!(result.ungapped_data.length, 6);
-        assert_eq!(
-            result.ungapped_data.score,
-            6 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::A, ncbistdaa::A)
-        );
-        assert_eq!(result.s_last_off, 6);
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
-    // ```c
-    // /* Extend to the right only if left extension reached the first hit. */
-    // if (left_d >= (s_right_off - s_left_off)) {
-    //     *right_extend = TRUE;
-    //     ...
-    // }
-    // *hsp_len = left_d + right_d;
-    // ```
-    #[test]
-    fn test_extend_two_hit_returns_ncbi_payload_when_left_stops_before_first_hit() {
-        let query = vec![
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::D,
-            ncbistdaa::D,
-            ncbistdaa::D,
-            ncbistdaa::C,
-            ncbistdaa::C,
-            ncbistdaa::C,
-        ];
-        let subject = vec![
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::A,
-            ncbistdaa::W,
-            ncbistdaa::W,
-            ncbistdaa::W,
-            ncbistdaa::C,
-            ncbistdaa::C,
-            ncbistdaa::C,
-        ];
-
-        let result = extend_two_hit(ScoringMatrix::Blosum62, &query, &subject, 0, 6, 6, 2, 3)
-            .expect("two-hit ungapped extension");
-
-        assert!(!result.right_extend);
-        assert_eq!(result.ungapped_data.q_start, 6);
-        assert_eq!(result.ungapped_data.s_start, 6);
-        assert_eq!(result.ungapped_data.length, 3);
-        assert_eq!(
-            result.ungapped_data.score,
-            3 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::C, ncbistdaa::C)
-        );
-        assert_eq!(result.s_last_off, 9);
-    }
-}
+#[path = "extension_tests.rs"]
+mod tests;

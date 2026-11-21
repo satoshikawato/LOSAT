@@ -5,7 +5,14 @@ from typing import Any, overload
 
 ENGINE_VERSION: str
 
-class LosatError(Exception): ...
+class LosatError(Exception):
+    """A failure that LOSAT reports. `str(error)` is the command line's message for the same
+    failure as text, with one U+FFFD per maximal ill-formed subpart of its bytes, as
+    `bytes.decode("utf-8", "replace")` gives; `message_bytes` holds the bytes, what the command
+    line writes. Every exception that pylosat raises has `message_bytes`."""
+
+    message_bytes: bytes
+
 class ArgumentError(LosatError): ...
 class InputError(LosatError): ...
 class SearchError(LosatError): ...
@@ -31,10 +38,12 @@ class Hsp:
         """psiblast's round that found the HSP (1-based); 1 in a search without rounds."""
     @property
     def query_id(self) -> str:
-        """`qaccver`."""
+        """`qaccver`, as text: its bytes with one U+FFFD per maximal ill-formed subpart, as
+        `bytes.decode("utf-8", "replace")` gives; `report.bytes[report.spans[hsp.index]]` holds
+        the row with the exact bytes."""
     @property
     def subject_id(self) -> str:
-        """`saccver`."""
+        """`saccver`, as text, as `query_id`."""
     @property
     def raw_score(self) -> int:
         """`score`."""
@@ -120,6 +129,10 @@ class HspTable:
     Any Arrow consumer reads a table without a copy: `pyarrow.table(hsps)`,
     `polars.DataFrame(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. The columns have the names of
     `-outfmt`, the default report's first.
+
+    The ids (`qaccver`, `saccver`) are text, with one U+FFFD per maximal ill-formed subpart of
+    their bytes, as `bytes.decode("utf-8", "replace")` gives; the exact bytes are those of the
+    HSP's row in a report, `report.bytes[report.spans[hsp.index]]`.
     """
 
     def __new__(cls, ipc_stream: bytes) -> HspTable: ...
@@ -141,7 +154,7 @@ class Batches:
         cls,
         program: str,
         argv: list[str],
-        query: tuple[bytes | str, str] | str,
+        query: tuple[bytes | str, str] | str | dict[str, str],
         subject: tuple[bytes | str | None, str],
     ) -> Batches: ...
     @property
@@ -155,7 +168,7 @@ class Batches:
         HspTable,
         list[tuple[int, int, float, float, float] | None],
         list[tuple[list[tuple[int, int, float, float, float] | None], bool]],
-        str,
+        bytes,
     ]: ...
 
 def describe(
@@ -166,7 +179,7 @@ def dry_run(program: str, argv: list[str]) -> bool: ...
 def run(
     program: str,
     argv: list[str],
-    query: tuple[bytes | str, str] | str,
+    query: tuple[bytes | str, str] | str | dict[str, str],
     subject: tuple[bytes | str | None, str],
     formats: list[str],
 ) -> tuple[
@@ -174,18 +187,20 @@ def run(
     HspTable,
     list[tuple[int, int, float, float, float] | None],
     list[tuple[list[tuple[int, int, float, float, float] | None], bool]],
-    str,
+    bytes,
 ]: ...
 def run_to_file(
     program: str,
     argv: list[str],
-    query: tuple[bytes | str, str] | str,
+    query: tuple[bytes | str, str] | str | dict[str, str],
     subject: tuple[bytes | str | None, str],
     outfmt: str,
     path: str,
-) -> str: ...
-def makeblastdb(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
-def blastdbcmd(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
-def dustmasker(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
-def segmasker(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
-def convert2blastmask(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
+) -> bytes: ...
+def makeblastdb(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def blastdbcmd(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def dustmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def segmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def windowmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def convert2blastmask(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def makembindex(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...

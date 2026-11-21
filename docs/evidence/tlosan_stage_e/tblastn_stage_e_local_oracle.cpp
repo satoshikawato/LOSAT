@@ -36,11 +36,11 @@ USING_NCBI_SCOPE;
 USING_SCOPE(objects);
 USING_SCOPE(blast);
 
-// NCBI blast_args.cpp:2538-2557 calls ReadSequencesToBlast for local
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557 calls ReadSequencesToBlast for local
 // subjects. tblastn_app.cpp:200-229 uses CBlastFastaInputSource and
 // CBlastInput for the protein query. The API oracle calls those same
 // readers so identifiers, titles, and formatter flags match the CLI.
-// NCBI c++/src/algo/blast/core/blast_engine.c:1460-1466,762-774:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1460-1466,762-774:
 // the sequence source may provide seq->gen_code_string; the engine uses it
 // for translated subject search. The stock local MultiSeq adapter reconstructs
 // SSeqLoc without genetic_code_id (seqsrc_multiseq.cpp:140-164), so this
@@ -63,17 +63,10 @@ int main(int argc, char** argv) {
     const int fmt = std::stoi(argv[4]);
     if (fmt != 0 && fmt != 6 && fmt != 7) return 2;
 
-    // NCBI c++/src/algo/blast/api/blast_aux.cpp:588-613:
-    //   const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
-    //   CSeqportUtil::Convert(gc_ncbieaa, &gc_ncbistdaa, CSeq_data::e_Ncbistdaa);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-613:
     auto gc = FindGeneticCode(code);
     if (!gc.get()) throw std::runtime_error("NCBI rejected genetic code");
-    // NCBI c++/src/algo/blast/api/blast_aux.cpp:629-646:
-    //   GenCodeSingletonInit();
-    //   if (GenCodeSingletonFind(genetic_code) == NULL) {
-    //       TAutoUint1ArrayPtr gc = FindGeneticCode(genetic_code);
-    //       GenCodeSingletonAdd(genetic_code, gc.get());
-    //   }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:629-646:
     CAutomaticGenCodeSingleton genetic_codes(code);
 
     std::ifstream subject_in(argv[2]);
@@ -91,31 +84,26 @@ int main(int argc, char** argv) {
     CRef<CBlastQueryVector> queries = query_input->GetAllSeqs(*scope);
     CRef<IQueryFactory> qf(new CObjMgr_QueryFactory(*queries));
 
-    // NCBI c++/include/algo/blast/api/local_db_adapter.hpp:73-76:
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_db_adapter.hpp:73-76:
     // CLocalDbAdapter(subject_sequences, opts_handle, dbscan_mode=false)
     // supplies the local -subject-like BlastSeqSrc, including its length.
-    // NCBI c++/src/algo/blast/api/seqsrc_multiseq.cpp:140-164:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:140-164:
     // the stock local adapter reconstructs SSeqLoc; the comparison-only
     // BlastSeqSrc callback below supplies the selected genetic code.
     CRef<IQueryFactory> sf(new CObjMgr_QueryFactory(*subjects));
     CRef<CTBlastnOptionsHandle> options(new CTBlastnOptionsHandle);
-    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:327-343,387-416:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:327-343,387-416:
     //   the CLI defaults SEG to "12 2.2 2.5" and applies those parameters.
     options->SetSegFiltering(true);
     options->SetSegFilteringWindow(12);
     options->SetSegFilteringLocut(2.2);
     options->SetSegFilteringHicut(2.5);
     options->SetMaskAtHash(false);
-    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:1048-1056:
-    //   opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1048-1056:
     options->SetDbGeneticCode(code);
-    // NCBI c++/src/app/blast/blast_app_util.cpp:203-210;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:203-210;
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,290-297;
     // c++/src/algo/blast/core/blast_engine.c:1407,1434-1443:
-    // ```c++
-    // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-    // if (dbscan_mode) m_iTotalLength += (Int8) (*iter)->length;
-    // ```
     // The CLI's local -subject path uses dbscan_mode=true. Its positive
     // TotLen skips BLAST_OneSubjectUpdateParameters for this fixture.
     CRef<CLocalDbAdapter> db(new CLocalDbAdapter(sf, options, true));
@@ -125,19 +113,14 @@ int main(int argc, char** argv) {
     original_get_sequence = _BlastSeqSrcImpl_GetGetSequence(local_source);
     _BlastSeqSrcImpl_SetGetSequence(local_source, GetSelectedCodeSequence);
 
-    // NCBI c++/src/app/blast/tblastn_app.cpp:242-265,275-305,342:
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:242-265,275-305,342:
     //   CBlastFormat formatter(opt, *db_adapter, ... opt.GetDbGeneticCode() ...);
-    //   CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-    //   results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     CLocalBlast search(qf, options, db);
     CRef<CSearchResultSet> results = search.Run();
     CFormattingArgs::EOutputFormat output = fmt == 0 ? CFormattingArgs::ePairwise :
         fmt == 6 ? CFormattingArgs::eTabular : CFormattingArgs::eTabularWithComments;
-    // NCBI c++/src/app/blast/tblastn_app.cpp:242-265:
-    // CBlastFormat(..., GetCmdlineArgs(GetArguments()), GetSubjectFile(args));
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:68-103,790-803:
-    // m_SubjectTag(subjectTag);
-    // dbname = "User specified sequence set (Input: " + m_SubjectTag + ")";
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:242-265:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-103,790-803:
     CBlastFormat formatter(options->GetOptions(), *db, output, false, std::cout,
                            500, 250, *scope, "BLOSUM62", false, false,
                            1, code, options->GetOptions().GetSumStatisticsMode(),

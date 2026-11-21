@@ -203,6 +203,7 @@ pub(super) fn run_formats_with(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: hits.then_some(&mut on_hits as _),
             observer: if observe { Some(&mut observer) } else { None },
         };
@@ -233,20 +234,8 @@ pub(super) fn field(row: &[u8], index: usize) -> String {
     row.split('\t').nth(index).expect("field").to_string()
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 /// Checks the observer ranges of the tabular formats: the outfmt 6 rows (at position
 /// `fmt6` of the request) are in HSP index order and tile the output, one line each;
 /// with `fmt7`, the outfmt 7 rows are its non-comment lines and equal the outfmt 6 rows.
@@ -400,10 +389,7 @@ pub(super) fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], 
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 /// The first and last coordinates on the `label` ("Query" or "Sbjct") lines of one
 /// outfmt 0 alignment section.
 fn alignment_span(section: &str, label: &str) -> (usize, usize) {

@@ -55,7 +55,7 @@ fn real_of(text: &str) -> f64 {
         .lambda
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (quoted at `Reader::real`):
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`):
 // `mantissa * pow(10.0, exp)` with glibc's `pow`, 0 as read, the clamps to DBL_MIN and DBL_MAX
 // of the magnitude, the sign put back after them, and the word forms. The expected bits are the
 // products computed with glibc 2.39's `pow` (Python's `math.pow`).
@@ -116,15 +116,16 @@ fn reals_are_read_with_ncbis_arithmetic() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:845-846 (quoted at `Reader::real`):
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:845-846 (cited at `Reader::real`):
 // `pow((double)10.0, exp)`, which the table of `libm_pow10` stands for.
 #[test]
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn libm_pow10_is_glibcs_pow() {
     use crate::report::serial::asn_text_reader::libm_pow10;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     for exp in -400..=400 {
-        let pow = 10f64.powf(f64::from(exp));
+        let pow = 10f64.glibc_pow(f64::from(exp));
         assert_eq!(libm_pow10(exp).to_bits(), pow.to_bits(), "10^{exp}");
     }
     assert_eq!(libm_pow10(i32::MIN), 0.0);
@@ -258,7 +259,7 @@ const SMALL_PSSM: &str = r#"PssmWithParameters ::= {
 }
 "#;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-778 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-778 (cited at
 // `algorithm::psiblast::pssm::pssm_with_parameters`) and c++/src/objects/scoremat/scoremat.asn
 // (the member order): the members that psiblast sets, in the module's order, the defaults that
 // it sets written, and a quote of the title doubled.
@@ -271,7 +272,7 @@ fn a_pssm_is_written_in_the_modules_order_and_read_back() {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986, 1477-1538 and 207-274
-// (quoted at `Reader::string`, `Reader::octets` and `Reader::skip_white_space`): a string joins
+// (cited at `Reader::string`, `Reader::octets` and `Reader::skip_white_space`): a string joins
 // its lines, an OCTET STRING its hex digits across lines, and comments and white space between
 // the values are skipped.
 #[test]
@@ -475,7 +476,7 @@ fn ncbis_pssm_with_zero_frequency_ratios_reads_and_writes_back() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396 (cited at
 // `report::serial::pssm`): psiblast's `-out_pssm` files from NCBI 2.17.0 (`db.ps.asn.*` rows of
 // LOSAT/tests/db_search_manifest/psiblast.tsv, frozen when 64 KB or less), without the diagnostics of
 // `-out_ascii_pssm` (`rnd`) and with them (`tkrnd`: the second query's), read and written again.

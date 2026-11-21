@@ -27,7 +27,7 @@ jobs:
           python-version: "3.12"
       - name: Install plotting dependency
         run: python -m pip install matplotlib==3.10.3 numpy==2.2.5
-      # NCBI schema reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116.
+      # NCBI schema reference: c++/src/objtools/align_format/format_flags.cpp:38-40,109-116.
       # This job transforms the committed normalized `length` and `pident` data only.
       - name: Test data-only renderer
         run: |

@@ -465,8 +465,8 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
     let fields: Vec<&str> = row.split('\t').collect();
     assert_eq!(fields.len(), 21, "{context}: {row}");
     assert_eq!(
-        (&*hsp.query_id, &*hsp.subject_id),
-        (fields[18], fields[19]),
+        (hsp.query_id.as_bytes(), hsp.subject_id.as_bytes()),
+        (fields[18].as_bytes(), fields[19].as_bytes()),
         "{context}: the ids of {row}"
     );
     assert_eq!(
@@ -628,6 +628,7 @@ fn check_ranges(
     }
 }
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// A protein, and a nucleotide sequence that translates to it.
 const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\
@@ -1128,7 +1129,10 @@ fn parsed_ids_show_as_on_the_command_line() {
         let shown: Vec<String> = outcome
             .hsps
             .iter()
-            .map(|hsp| format!("{}\t{}", hsp.query_id, hsp.subject_id))
+            .map(|hsp| {
+                let (query, subject) = (hsp.query_id.to_str(), hsp.subject_id.to_str());
+                format!("{}\t{}", query.unwrap(), subject.unwrap())
+            })
             .collect();
         assert_eq!(shown, ids, "{program:?}");
         for (position, outfmt) in formats.iter().enumerate() {
@@ -1152,6 +1156,106 @@ fn parsed_ids_show_as_on_the_command_line() {
         assert!(run_batches(&search, plain).is_err());
         let _ = std::fs::remove_file(&query_path);
         let _ = std::fs::remove_file(&subject_path);
+    }
+}
+
+/// The search of `program` with `options` on the FASTA bytes `query` and `subject`: its
+/// `-outfmt 6` report is the command line's, and each HSP's ids are the bytes of its row's first
+/// two columns (`Report::spans`) and those of `query_ids[q_idx]` and `subject_ids[s_idx]`. Returns
+/// the query and subject numbers of the HSPs.
+fn ids_of_the_rows(
+    program: Program,
+    options: &'static [&'static str],
+    (query, subject): (&[u8], &[u8]),
+    (query_ids, subject_ids): (&[&[u8]], &[&[u8]]),
+) -> std::collections::BTreeSet<(usize, usize)> {
+    let context = format!("{program} {options:?}");
+    let (query_path, subject_path) = (temp_path("bytes_q.fa"), temp_path("bytes_s.fa"));
+    std::fs::write(&query_path, query).unwrap();
+    std::fs::write(&subject_path, subject).unwrap();
+    let case = Case {
+        program,
+        query: "",
+        subject: "",
+        options,
+        formats: &[],
+    };
+    let search = validate(program, options).unwrap();
+    let (queries, subjects) = read_inputs(&search, query, subject).unwrap();
+    let outcome = run_collect(&search, Inputs::new(&queries, &subjects), &["6"]).unwrap();
+    let report = &outcome.reports[0];
+    let (cli, _) = cli(&case, &query_path, &subject_path, "6");
+    assert!(
+        report.bytes == cli,
+        "{context}: the report is the command line's"
+    );
+    let mut pairs = std::collections::BTreeSet::new();
+    for hsp in &outcome.hsps {
+        let row = &report.bytes[report.spans[hsp.index].clone().unwrap()];
+        let columns: Vec<&[u8]> = row.split(|&byte| byte == b'\t').collect();
+        assert_eq!(hsp.query_id, columns[0], "{context}");
+        assert_eq!(hsp.subject_id, columns[1], "{context}");
+        assert_eq!(hsp.query_id, query_ids[hsp.q_idx], "{context}");
+        assert_eq!(hsp.subject_id, subject_ids[hsp.s_idx], "{context}");
+        pairs.insert((hsp.q_idx, hsp.s_idx));
+    }
+    let _ = std::fs::remove_file(&query_path);
+    let _ = std::fs::remove_file(&subject_path);
+    pairs
+}
+
+/// FASTA records of `ids`, each with the title `title` and the letters that `program` reads for
+/// `role`.
+fn records_of(program: Program, role: Role, ids: &[&[u8]], title: &[u8]) -> Vec<u8> {
+    let mut fasta = Vec::new();
+    for id in ids {
+        fasta.extend_from_slice(b">");
+        fasta.extend_from_slice(id);
+        fasta.extend_from_slice(title);
+        fasta.extend_from_slice(b"\n");
+        fasta.extend_from_slice(letters_of(program, role).as_bytes());
+        fasta.extend_from_slice(b"\n");
+    }
+    fasta
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
+// The ids are bytes (`std::string`) that the report writes as they are.
+/// Titles whose first word holds bytes that are not UTF-8 (Latin-1's `é`, 0xE9; a continuation
+/// byte alone, 0x80; 0xFF) or UTF-8's own letters of two and three bytes (`é`, `€`): in every
+/// program, each record's id is the bytes of its column in the `-outfmt 6` row of the same run
+/// (`Report::spans`), which is the command line's row.
+#[test]
+fn the_ids_are_the_bytes_of_the_tabular_report() {
+    let query_ids: [&[u8]; 2] = [b"q\xE9", "q\u{e9}".as_bytes()];
+    let subject_ids: [&[u8]; 2] = [b"s\x80\xFF", "s\u{e9}\u{20ac}".as_bytes()];
+    for program in Program::ALL {
+        let query = records_of(program, Role::Query, &query_ids, b" a title");
+        let subject = records_of(program, Role::Subject, &subject_ids, b" a title");
+        let pairs = ids_of_the_rows(program, &[], (&query, &subject), (&query_ids, &subject_ids));
+        assert_eq!(pairs.len(), 4, "{program}: every query hits every subject");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:77-86
+/// With `-parse_deflines`, an id with a byte that is not ASCII (`lcl|q\xE9`, `gb|AB\xE9001.1|`)
+/// stops before it, and the rest of the word goes to the title: NCBI BLAST+ 2.17.0 writes `q` and
+/// `AB` in `qaccver` for these deflines (blastp, probed on 2026-11-20), and so does LOSAT in every
+/// program, in the records too.
+#[test]
+fn a_parsed_id_stops_before_a_byte_that_is_not_ascii() {
+    let deflines: [&[u8]; 2] = [b"lcl|q\xE9", b"gb|AB\xE9001.1|"];
+    let (query_ids, subject_ids): ([&[u8]; 2], [&[u8]; 1]) = ([b"q", b"AB"], [b"s1"]);
+    for program in Program::ALL {
+        let query = records_of(program, Role::Query, &deflines, b" t");
+        let subject = records_of(program, Role::Subject, &[b"s1"], b" t");
+        let pairs = ids_of_the_rows(
+            program,
+            &["-parse_deflines"],
+            (&query, &subject),
+            (&query_ids, &subject_ids),
+        );
+        assert_eq!(pairs.len(), 2, "{program}: both queries hit the subject");
     }
 }
 
@@ -1298,7 +1402,7 @@ fn a_report_in_a_file_has_its_side_files_as_on_the_command_line() {
     // Without a file there is no place for the side files: the command line's message.
     let (query, subject) = (fixture(CASES[0].query), fixture(CASES[0].subject));
     let error = api_error(&CASES[0], &query, &subject, "14");
-    assert!(error.message().contains("provide a file name"), "{error}");
+    assert!(error.to_string().contains("provide a file name"), "{error}");
     // `-` is the command line's standard output, which the library does not write.
     let search = validate(Program::Blastp, &[]).unwrap();
     let error = run_to_file(
@@ -1438,7 +1542,10 @@ fn the_pssm_files_are_the_command_lines() {
     .unwrap();
     let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
     assert!(
-        matches!(&error, Error::Argv(message) if message.starts_with("-out_pssm is not accepted by the library API with formats of two hit list sizes")),
+        matches!(&error, Error::Argv(_))
+            && error.to_string().starts_with(
+                "-out_pssm is not accepted by the library API with formats of two hit list sizes"
+            ),
         "{error}"
     );
     assert!(take_files(&directory).is_empty());
@@ -2156,7 +2263,7 @@ fn a_pssm_query_is_the_command_lines() {
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
             error
-                .message()
+                .to_string()
                 .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
             "{formats:?}: {error}"
         );
@@ -2181,8 +2288,8 @@ fn a_pssm_query_is_the_command_lines() {
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(
-        error.message().trim_end(),
-        String::from_utf8_lossy(&output.stderr).trim_end(),
+        error.message().trim_ascii_end(),
+        output.stderr.trim_ascii_end(),
         "{error}"
     );
     let ranged = validate(Program::Tblastn, &["-query_loc", "1-10"]).unwrap();
@@ -2204,12 +2311,245 @@ fn a_pssm_query_is_the_command_lines() {
         let error = run_collect(&search, Inputs::pssm(&pssm, &subjects), &["6"]).unwrap_err();
         assert!(
             error
-                .message()
+                .to_string()
                 .contains("a query and a subject record have the Seq-id gi|4504347"),
             "{program}: {error}"
         );
     }
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// A query alignment (line LIB item 1.6): `Inputs::msa` and `Inputs::msa_database`, the command
+/// line's `-in_msa` of psiblast, against records and a database. The PS6 alignments are those
+/// `tests/db_search_manifest/psiblast.tsv` freezes from NCBI 2.17.0; the whole set of them
+/// through the API is `tests/db_search_fixtures.py check --library` (rows `db.ps.inmsa.*`).
+struct MsaCase {
+    /// Under `tests/fixtures/msa`.
+    alignment: &'static str,
+    /// Under `tests/`: a FASTA subject set (`-subject`), or a database (`-db`).
+    subject: &'static str,
+    database: bool,
+    options: &'static [&'static str],
+    /// The frozen NCBI bytes of the outfmt 6 report, a row of the manifest (`db.ps.inmsa.*`), when
+    /// the case is that row's.
+    frozen: Option<&'static str>,
+}
+
+const MSA_CASES: &[MsaCase] = &[
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &[],
+        frozen: Some("db.ps.inmsa.b.db.6"),
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "fasta/PajaWSV.faa",
+        database: false,
+        options: &[],
+        frozen: None,
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-msa_master_idx", "2"],
+        frozen: None,
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-ignore_msa_master"],
+        frozen: None,
+    },
+    // The rounds of an alignment query, with the master chosen.
+    MsaCase {
+        alignment: "ps6_nc_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-msa_master_idx", "2", "-num_iterations", "2"],
+        frozen: None,
+    },
+];
+
+impl MsaCase {
+    fn file(&self) -> PathBuf {
+        PathBuf::from(engine_tests("fixtures/msa")).join(self.alignment)
+    }
+
+    /// The command line's report for one `-outfmt`, and its standard error.
+    fn cli(&self, extra: &[&str], outfmt: &str) -> (Vec<u8>, Vec<u8>) {
+        let output = command(env!("CARGO_BIN_EXE_losat"))
+            .args(["psiblast", "-in_msa"])
+            .arg(self.file())
+            .arg(if self.database { "-db" } else { "-subject" })
+            .arg(engine_tests(self.subject))
+            .args(self.options)
+            .args(extra)
+            .arg("-outfmt")
+            .arg(outfmt)
+            .output()
+            .expect("run the command line");
+        assert!(
+            output.status.success(),
+            "{} {:?} -outfmt {outfmt}: {}",
+            self.alignment,
+            self.options,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.stdout, output.stderr)
+    }
+}
+
+/// The command line's standard error for a psiblast `-in_msa` run that fails, with `words`.
+fn msa_cli_error(alignment: &Path, words: &[&str]) -> Vec<u8> {
+    let output = command(env!("CARGO_BIN_EXE_losat"))
+        .args(["psiblast", "-in_msa"])
+        .arg(alignment)
+        .arg("-subject")
+        .arg(fixture("PajaWSV.faa"))
+        .args(words)
+        .args(["-outfmt", "6"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{alignment:?} {words:?}");
+    output.stderr
+}
+
+#[test]
+fn a_query_alignment_is_the_command_lines() {
+    for case in MSA_CASES {
+        let context = format!("{} {} {:?}", case.alignment, case.subject, case.options);
+        let alignment = case.file();
+        let search = validate(Program::Psiblast, case.options).unwrap();
+        let subject = engine_tests(case.subject);
+        let subjects = match case.database {
+            true => Vec::new(),
+            false => read_fasta(
+                Program::Psiblast,
+                Role::Subject,
+                &std::fs::read(&subject).unwrap(),
+            )
+            .unwrap(),
+        };
+        let inputs = match case.database {
+            true => Inputs::msa_database(&alignment, &subject),
+            false => Inputs::msa(&alignment, &subjects).named("ignored", &subject),
+        };
+        let formats = ["6", "0", "7", COLUMNS];
+        let outcome = run_collect(&search, inputs, &formats)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            let (stdout, stderr) = case.cli(&[], outfmt);
+            assert!(report.bytes == stdout, "{context} -outfmt {outfmt}");
+            if outfmt == "6" {
+                assert_eq!(
+                    outcome.diagnostics, stderr,
+                    "{context}: the diagnostics are the command line's"
+                );
+            }
+        }
+        // The report NCBI 2.17.0 wrote for the row of the manifest.
+        if let Some(row) = case.frozen {
+            let frozen = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/db_search")
+                .join(format!("{row}.out"));
+            assert!(
+                outcome.reports[0].bytes == std::fs::read(frozen).unwrap(),
+                "{context}: NCBI's bytes"
+            );
+        }
+        // One query, the alignment's master: query 0, with its statistics and rounds.
+        assert!(!outcome.hsps.is_empty(), "{context}");
+        assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 0), "{context}");
+        assert_eq!(outcome.query_stats.len(), 1, "{context}");
+        assert!(outcome.query_stats[0].is_some(), "{context}");
+        let rounds = outcome.hsps.iter().map(|hsp| hsp.round).max().unwrap();
+        assert_eq!(outcome.rounds[0].stats.len() as u32, rounds, "{context}");
+        if case.options.contains(&"-num_iterations") {
+            assert!(rounds > 1, "{context}");
+        }
+        // One batch with the same records.
+        let batches = run_batches(&search, inputs).unwrap();
+        assert_eq!(batches.query_count(), 1, "{context}");
+        let batches: Vec<_> = batches.map(Result::unwrap).collect();
+        assert_eq!(batches.len(), 1, "{context}");
+        assert_eq!(batches[0].query_indices, 0..1, "{context}");
+        assert_eq!(batches[0].hsps, outcome.hsps, "{context}");
+        assert_eq!(batches[0].rounds, outcome.rounds, "{context}");
+    }
+    // `-ignore_msa_master` and `-msa_master_idx` change the PSSM, so they change the report.
+    let report = |options: &[&str]| {
+        let search = validate(Program::Psiblast, options).unwrap();
+        let alignment = MSA_CASES[0].file();
+        let database = engine_tests("db_search/paja");
+        run_collect(&search, Inputs::msa_database(&alignment, &database), &["0"])
+            .unwrap()
+            .reports
+            .remove(0)
+            .bytes
+    };
+    let plain = report(&[]);
+    assert!(plain != report(&["-msa_master_idx", "2"]));
+    assert!(plain != report(&["-ignore_msa_master"]));
+}
+
+#[test]
+fn a_query_alignment_that_fails_gives_the_command_lines_message() {
+    let directory = PathBuf::from(engine_tests("fixtures/msa"));
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(fixture("PajaWSV.faa")).unwrap(),
+    )
+    .unwrap();
+    let missing = temp_path("none.aln");
+    for (alignment, words) in [
+        // A file that is none of the formats, a master index past the rows, a missing file.
+        (directory.join("ps6_f_unknown.aln"), &[][..]),
+        (
+            directory.join("ps6_nc_db_0.aln"),
+            &["-msa_master_idx", "27"][..],
+        ),
+        (missing, &[][..]),
+    ] {
+        let search = validate(Program::Psiblast, words).unwrap();
+        let error = run_collect(&search, Inputs::msa(&alignment, &subjects), &["6"]).unwrap_err();
+        // The engine's error is the command line's standard error, byte for byte (its last
+        // line feed included, as `run_local_blastx`'s errors of the ranges are).
+        assert_eq!(
+            error.message(),
+            msa_cli_error(&alignment, words),
+            "{alignment:?} {words:?}: {error}"
+        );
+    }
+    // The alignment is psiblast's: another program refuses it, as it refuses a PSSM it cannot take.
+    let alignment = directory.join("ps6_b_db_0.aln");
+    for program in [
+        Program::Blastp,
+        Program::Blastn,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let search = validate(program, &[]).unwrap();
+        let error = run_collect(&search, Inputs::msa(&alignment, &[]), &["6"]).unwrap_err();
+        assert!(
+            matches!(error, Error::Argv(_))
+                && error
+                    .to_string()
+                    .contains(&format!("is searched by psiblast, not by {program}")),
+            "{program}: {error}"
+        );
+    }
+    // The master options need the alignment, as `-in_msa` is their option on the command line.
+    let search = validate(Program::Psiblast, &["-msa_master_idx", "2"]).unwrap();
+    let error = run_collect(&search, Inputs::new(&subjects, &subjects), &["6"]).unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error:?}");
+    let error = validate(Program::Psiblast, &["-in_msa", "m.aln"]).unwrap_err();
+    assert!(error.to_string().contains("(Inputs::msa)"), "{error}");
 }
 
 /// Each round's `Gapped` Karlin-Altschul values (lambda, K, H) and effective search space in
@@ -2242,11 +2582,6 @@ fn prints_as(value: f64, printed: f64) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
-// ```c++
-//     if (itr_num != numeric_limits<unsigned int>::max()) {
-//         m_Outfile << "Results from round " << itr_num << "\n";
-//     }
-// ```
 // Line RG item Q5: psiblast's rounds in the library: the records carry their round, the rounds of
 // a query hold each round's statistics (those its pairwise report prints) and its convergence, and
 // round 1 is the search of `-num_iterations 1`.
@@ -2432,7 +2767,7 @@ fn a_database_fails_as_on_the_command_line() {
         .output()
         .unwrap();
     assert_eq!(
-        error.message().as_bytes(),
+        error.message(),
         output.stderr,
         "the message of a database that does not open"
     );
@@ -2445,12 +2780,12 @@ fn a_database_fails_as_on_the_command_line() {
     let only_database = validate(Program::Blastn, &["-taxids", "9606"]).unwrap();
     let error = run_collect(&only_database, Inputs::new(&records, &records), &["6"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("-taxids"), "{error}");
+    assert!(error.to_string().contains("-taxids"), "{error}");
     let only_subject = validate(Program::Blastn, &["-subject_loc", "1-10"]).unwrap();
     let inputs = Inputs::database(&records, &missing);
     let error = run_collect(&only_subject, inputs, &["6"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("-subject_loc"), "{error}");
+    assert!(error.to_string().contains("-subject_loc"), "{error}");
     // Queries without a record are NCBI's warning, after the database opened.
     let db = engine_tests(case.db);
     let outcome = run_collect(&search, Inputs::database(&[], &db), &["6"]).unwrap();
@@ -2538,7 +2873,7 @@ fn a_masked_database_made_through_the_library_equals_the_command_lines() {
     )
     .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("mask_data"), "{error}");
+    assert!(error.to_string().contains("mask_data"), "{error}");
 }
 
 #[test]
@@ -2632,11 +2967,7 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     assert!(!cli.status.success());
     assert_eq!(diagnostics, cli.stderr);
     assert!(matches!(error, Error::Search(_)), "{error}");
-    assert_eq!(
-        error.message().as_bytes(),
-        cli.stderr.trim_ascii_end(),
-        "{error}"
-    );
+    assert_eq!(error.message(), cli.stderr.trim_ascii_end(), "{error}");
     // An argv that the parser refuses is the parser's message.
     let error = run_makeblastdb(
         &["-dbtype", "neither"],
@@ -2647,6 +2978,47 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:254-258
+/// A tool's error is the bytes that the command line writes to standard error, also a byte that
+/// is not UTF-8: blastdbcmd reads `%é` as the specifier `%` and the first byte of `é` (C3), a
+/// `char` that NCBI's stream writes alone into its error.
+#[test]
+fn a_tool_error_holds_the_bytes_that_the_command_line_writes() {
+    let db = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/prot_v5");
+    let words = [
+        "-db",
+        db.to_str().unwrap(),
+        "-entry",
+        "all",
+        "-outfmt",
+        "%é",
+    ];
+    let mut diagnostics = Vec::new();
+    let error = run_blastdbcmd(
+        &words,
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut diagnostics,
+    )
+    .unwrap_err();
+    let cli = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("blastdbcmd")
+        .args(words)
+        .output()
+        .unwrap();
+    assert!(!cli.status.success());
+    assert_eq!(diagnostics, cli.stderr);
+    let written = cli.stderr.strip_suffix(b"\n").unwrap();
+    assert!(
+        written.ends_with(b"Unrecognized format specification: '%\xC3'"),
+        "{:?}",
+        String::from_utf8_lossy(written)
+    );
+    assert!(matches!(error, Error::Search(_)), "{error:?}");
+    assert_eq!(error.message(), written, "{error:?}");
+    assert_eq!(error.to_string(), String::from_utf8_lossy(written));
 }
 
 #[test]
@@ -2661,7 +3033,7 @@ fn the_api_owns_the_inputs_and_the_outputs() {
         };
         let error = validate(program, &[&flag, "x"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{flag}: {error}");
-        assert!(error.message().starts_with(&flag), "{flag}: {error}");
+        assert!(error.to_string().starts_with(&flag), "{flag}: {error}");
         for program in Program::ALL {
             assert!(
                 describe(program)
@@ -2677,9 +3049,9 @@ fn the_api_owns_the_inputs_and_the_outputs() {
     let error = validate(Program::Tblastx, &["-evalue"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
     let error = Program::parse("makeblastdb").unwrap_err();
-    assert!(error.message().contains("run_makeblastdb"), "{error}");
+    assert!(error.to_string().contains("run_makeblastdb"), "{error}");
     let error = Program::parse("dustmasker").unwrap_err();
-    assert!(error.message().contains("run_dustmasker"), "{error}");
+    assert!(error.to_string().contains("run_dustmasker"), "{error}");
 }
 
 /// The output of `command` run with `input` as its standard input.
@@ -2740,11 +3112,7 @@ fn dustmasker_masks_sequences_in_memory_as_the_command_line_does() {
     assert!(!cli.status.success());
     assert_eq!(diagnostics, cli.stderr);
     assert!(matches!(error, Error::Search(_)), "{error}");
-    assert_eq!(
-        error.message().as_bytes(),
-        cli.stderr.trim_ascii_end(),
-        "{error}"
-    );
+    assert_eq!(error.message(), cli.stderr.trim_ascii_end(), "{error}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the subjects'
@@ -2763,7 +3131,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         let bad_subject = format!(";c\n{subject}\n>s2\n{subject}\n");
         let bad_query = format!(";c\n\n{query}\n");
         let message = |error: Error| match error {
-            Error::Input(message) => message,
+            Error::Input(message) => String::from_utf8(message).expect("a UTF-8 message"),
             other => panic!("{program:?}: not an input error: {other}"),
         };
         let error =
@@ -2771,7 +3139,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         assert_eq!(
             message(error),
             "BLAST query/options error: Query input doesn't start with a defline or comment, \
-             line 2\0\nPlease refer to the BLAST+ user manual.",
+             line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
         // The subjects are read first: a bad query and a bad subject end with the subjects' error.
@@ -2779,7 +3147,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         assert_eq!(
             message(error),
             "BLAST query/options error: Query input doesn't start with a defline or comment, \
-             line 2\0\nPlease refer to the BLAST+ user manual.",
+             line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
         let error =

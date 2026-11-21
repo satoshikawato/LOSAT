@@ -1,0 +1,1 @@
+BLAST query error: CAlnReader::GetSeqEntry(): Seq_entry is not available until after Read()

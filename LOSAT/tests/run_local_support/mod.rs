@@ -250,20 +250,8 @@ pub fn field(row: &[u8], index: usize) -> String {
         .to_string()
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 /// The ranges of `Report::spans` of report `index`, one per HSP of `Outcome::hsps` in the order of
 /// the hit list; a range is missing only where the report does not show the HSP.
 fn spans_of(outcome: &Outcome, index: usize, context: &str) -> Vec<Range<usize>> {
@@ -502,14 +490,15 @@ pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRel
 /// at `line` of ncbistr.cpp and position `pos`, as `CATCH_ALL` writes it (`Error: ` and `what()`,
 /// exit status 255; blast_app_util.hpp:248-251): line 640 is the `int` range check of
 /// `StringToInt`, 852 the overflow of `StringToInt8`, 861 no digit and 870 a byte after the
-/// digits.
+/// digits. NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
 pub fn string_to_int_exception(value: &str, line: u32, pos: usize) -> String {
     let (function, kind) = match line {
         640 => ("StringToInt", "int, overflow"),
         852 => ("StringToInt8", "Int8, overflow"),
         _ => ("StringToInt8", "Int8"),
     };
-    format!(
+    losat::wording::losat_text(&format!(
         "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{value}' to {kind} (m_Pos = {pos})\n\n"
-    )
+    ))
+    .into_owned()
 }

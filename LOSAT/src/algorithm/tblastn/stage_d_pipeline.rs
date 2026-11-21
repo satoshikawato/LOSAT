@@ -1,6 +1,7 @@
 //! Internal local-subject TBLASTN Stage C to D composition pipeline.
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::collections::HashMap;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,11 +60,10 @@ use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::SegParams;
 use crate::utils::threading::{with_search_pool, SearchPool};
 
-// NCBI c++/src/algo/blast/core/blast_options.c:673-675;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:673-675;
 // c++/include/algo/blast/core/blast_options.h:128,144,163:
 // gap_x_dropoff = BLAST_GAP_X_DROPOFF_PROT; /* 15 */
 // gap_x_dropoff_final = BLAST_GAP_X_DROPOFF_FINAL_PROT; /* 25 */
-// #define PSI_INCLUSION_ETHRESH 0.002
 #[derive(Clone, Copy)]
 pub(super) struct LocalStageDProfile<'a> {
     pub seg: Option<&'a SegParams>,
@@ -86,6 +86,13 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// `-subject_besthit`: the preliminary stage filters each subject frame's list after each
+    /// merge of a chunk (`search_gapped`), the finish of the search each final hit list.
+    pub subject_besthit: bool,
+    /// The `-max_intron_length` value (0: NCBI's default). With sum statistics it gives the
+    /// largest subject gap of the linking, or turns the linking off
+    /// (`core::link_hsps::translated_longest_intron`); without them nothing reads it.
+    pub max_intron_length: i32,
     /// `-in_pssm` (PSI-TBLASTN): the query's PSSM, the source of the scores of the batch's one
     /// query (`score::PssmScore`) and of its Karlin-Altschul blocks (`query_set_setup`); `None`
     /// for a FASTA query batch.
@@ -118,12 +125,14 @@ impl BatchFetches<'_> {
 
 /// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
 /// (`SeqDb::statistics`): the total length and the number of sequences of the setup
-/// (`DbStatistics::setup_total`, `setup_count`: NCBI's `Int4`, negative for a negative `NSEQ`)
+/// (`DbStatistics::setup_total`, `setup_count`: NCBI's `Int8`, not negative, which an alias
+/// file's `LENGTH` declares, so 2^32 or more also on a 32-bit target; NCBI's `Int4`, negative for
+/// a negative `NSEQ`)
 /// and the Gumbel block's length in nucleotides (`gumbel_db_length`: the total before the
 /// fallback to OID 0, so 0 or negative for an alias file's `LENGTH` of 0 or of 2^63 or more).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DatabaseNumbers {
-    pub total_length: u64,
+    pub total_length: i64,
     pub num_seqs: i32,
     pub gumbel_db_length: i64,
     /// `BlastSeqSrcGetTotLen` (`DbStatistics::engine_db_length`): only a positive one sorts the
@@ -153,52 +162,20 @@ pub(super) struct SubjectSetNumbers {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
-// ```c++
-//             m_MinLength   = x_GetMinLength();
-//
-//             // Do not bother scanning the db... it would be slow
-//             // FIXME: future implementation should probably have the
-//             // shortest length encoded in index file...
-//             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922
-// ```c
-//       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-//       if (total_length <= 0)
-//           total_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//       /* Set the database length for new FSC */
-//       if (sbp->gbp) {
-//           Int8 dbl = total_length;
-//           /* Override the database length or set one (e.g., blast2seq). */
-//           if (eff_len_options->db_length) {
-//               dbl = eff_len_options->db_length;
-//           }
-//           sbp->gbp->db_length =
-//               (Blast_SubjectIsTranslated(program_number))?
-//               dbl/3 : dbl;
-//       }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-735
-// ```c
-//    if (eff_len_options->db_length > 0)
-//       db_length = eff_len_options->db_length;
-//    else
-//       db_length = eff_len_params->real_db_length;
-//    ...
-//    if (Blast_SubjectIsTranslated(program_number))
-//       db_length = db_length/3;
-// ```
 impl SubjectSetNumbers {
     /// `BLAST_SEQSRC_MINLENGTH` (blast_seqsrc.h): the shortest length a sequence source
     /// answers.
     const MIN_LENGTH: usize = 10;
 
-    /// The total length in nucleotides: the database's, or the sum of the subjects'.
-    pub(super) fn total_nt(&self, subjects: &SubjectLetters<'_>) -> u64 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
+    /// The total length in nucleotides, NCBI's `Int8`: the database's, or the sum of the
+    /// subjects' (each held in memory, so at most `isize::MAX`).
+    pub(super) fn total_nt(&self, subjects: &SubjectLetters<'_>) -> i64 {
         match self.database {
             Some(database) => database.total_length,
-            None => subjects.lengths().map(|length| length as u64).sum(),
+            None => subjects.lengths().map(|length| length as i64).sum(),
         }
     }
 
@@ -210,7 +187,7 @@ impl SubjectSetNumbers {
             .is_none_or(|database| database.engine_db_length > 0)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (cited at
     // `seqdb::DbStatistics`)
     /// Whether NCBI's preliminary search computes the statistics of each subject on its own: a
     /// database whose `BlastSeqSrcGetTotLen` is 0 (`DbStatistics::per_subject`); a FASTA set's
@@ -221,11 +198,9 @@ impl SubjectSetNumbers {
     }
 
     /// `-dbsize` in nucleotides when above 0, which the effective lengths read in place of the
-    /// database's (or a subject's) length (blast_setup.c:716-721).
-    pub(super) fn dbsize_nt(&self) -> Option<usize> {
-        self.dbsize
-            .filter(|&dbsize| dbsize > 0)
-            .and_then(|dbsize| usize::try_from(dbsize).ok())
+    /// database's (or a subject's) length (blast_setup.c:716-721), NCBI's `Int8`.
+    pub(super) fn dbsize_nt(&self) -> Option<i64> {
+        self.dbsize.filter(|&dbsize| dbsize > 0)
     }
 
     /// The number of sequences, NCBI's `Int4`.
@@ -238,44 +213,30 @@ impl SubjectSetNumbers {
 
     /// The database length of the effective lengths in nucleotides (divided by 3 there): a
     /// positive `-dbsize`, else the total `total_nt` (blast_setup.c:716-735).
-    pub(super) fn eff_length_nt(&self, total_nt: u64) -> u64 {
-        match self.dbsize {
-            Some(dbsize) if dbsize > 0 => dbsize as u64,
-            _ => total_nt,
-        }
+    pub(super) fn eff_length_nt(&self, total_nt: i64) -> i64 {
+        self.dbsize_nt().unwrap_or(total_nt)
     }
 
     /// The Gumbel block's database length in residues: a `-dbsize` other than 0, else a
     /// database's length before the fallback to OID 0 (`DatabaseNumbers::gumbel_db_length`) or
     /// the total `total_nt` of a FASTA set, divided by 3 (blast_setup.c:916-922; C's `Int8`
     /// division, toward 0).
-    pub(super) fn gumbel_db_length(&self, total_nt: u64) -> i64 {
+    pub(super) fn gumbel_db_length(&self, total_nt: i64) -> i64 {
         match (self.dbsize, self.database) {
             (Some(dbsize), _) if dbsize != 0 => dbsize / 3,
             (_, Some(database)) => database.gumbel_db_length / 3,
-            _ => (total_nt / 3) as i64,
+            _ => total_nt / 3,
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
-    // ```c++
-    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-    //         CNcbiEnvironment env;
-    //         env.Set("OLD_FSC", "true");
-    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
-    // ```c
-    //     use_old_fsc = getenv("OLD_FSC");
-    //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-    // ```
     /// The Gumbel block of the database length `total_nt`, none with `-searchsp` or `OLD_FSC`
     /// (`old_fsc`).
     pub(super) fn gumbel_block(
         &self,
         spec: &ProteinScoringSpec,
-        total_nt: u64,
+        total_nt: i64,
     ) -> Option<BlastGumbelBlk> {
         if self.old_fsc {
             return None;
@@ -299,11 +260,11 @@ impl SubjectSetNumbers {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_options.c:903-936;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:903-936;
 // core/blast_parameters.c:302-383,902-999:
 // scoring matrix, gap costs, word size, threshold and two-hit window are
 // independent options supplied before the preliminary and Stage D calls.
-// NCBI c++/src/algo/blast/core/blast_parameters.c:457-463:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
 // gap_x_dropoff and gap_x_dropoff_final are converted from bits using lambda.
 #[derive(Clone, Copy)]
 pub(super) struct LocalStageDScoring {
@@ -337,7 +298,7 @@ impl Default for LocalStageDScoring {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905;
 // core/blast_kappa.c:3525-3565; core/blast_traceback.c:717-719:
 // comparison-only boundary snapshots expose the actual Stage C HSP list,
 // Kappa incoming order and ordinary posttraceback stat_length to tests.
@@ -345,8 +306,7 @@ impl Default for LocalStageDScoring {
 #[derive(Default)]
 struct StageDBoundaryTrace {
     parameters: Option<LocalSubjectParameters>,
-    // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
-    // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115:
     ungapped_karlin: Vec<KarlinParams>,
     query_validity: Vec<bool>,
     subject_nt_lengths: Vec<usize>,
@@ -355,10 +315,8 @@ struct StageDBoundaryTrace {
     posttraceback_lengths: Vec<(usize, usize, i32)>,
 }
 
-// NCBI c++/src/algo/blast/api/blast_results.cpp:72-115;
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115;
 // c++/src/algo/blast/format/blast_format.cpp:445-477:
-// s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
-// x_PrintOneQueryFooter(*results.GetAncillaryData());
 // The report of a batch reads these set-up values only; the search returns them
 // with or without the comparison-only trace above.
 struct LocalBatchSetup {
@@ -367,10 +325,8 @@ struct LocalBatchSetup {
     query_validity: Vec<bool>,
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:1011-1024;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024;
 // c++/src/algo/blast/format/blast_format.cpp:445-477:
-// BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
-// x_PrintOneQueryFooter(*results.GetAncillaryData());
 // Formatting consumes the same initial context lengths computed before search.
 #[cfg(test)]
 pub(super) fn run_local_for_report(
@@ -397,14 +353,8 @@ pub(super) fn run_local_for_report(
     )
 }
 
-// NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-188:
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
-// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414:
-// /* iterate over all subject sequences */
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    Int4 stat_length;
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414:
 // The pool owns one search (or is the run's, `with_run_pool`); ordered subject results enter
 // the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
@@ -445,14 +395,6 @@ pub(super) fn run_local_for_report_threads(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-291
-// ```c
-//                 query =  input->GetNextSeqBatch(*scope);
-//                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-// ...
-//                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-//                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                     results = lcl_blast.Run();
-// ```
 // One query batch searched on a pool that the caller keeps (the port of CLocalBlast::Run for the
 // batch, with its report data).
 /// `run_local_for_report_threads` on a pool that the caller keeps for all its query batches.
@@ -689,14 +631,6 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 /// (tblastn_app.rs passes none when the database's sequences could not be read).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
-/// ```c++
-///             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-///
-///                 query =  input->GetNextSeqBatch(*scope);
-///                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-///                 ...
-///                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-/// ```
 /// NCBI searches each batch on its own (`CLocalBlast` per batch); a batch reads nothing
 /// another batch writes, so only the order of the reports matters, and the caller appends
 /// them in the order of `ranges`. One search pool serves every
@@ -726,16 +660,6 @@ pub(super) fn x_search_batches<'p>(
     // every batch's profile shares.
     let first = profile(first.clone());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631,912-913
-    // ```c
-    //     if (program_number != eBlastTypeRpsTblastn) {
-    //         if (translation_buffer) {
-    //             sfree(translation_buffer);
-    //         }
-    //     }
-    // ...
-    //     s_BlastSearchEngineCoreCleanUp(program_number, query_info, query_info_in,
-    //                                    translation_buffer, frame_offsets_a);
-    // ```
     // NCBI frees the translation of a subject when the subject has been searched. The plans are
     // kept only for a later query batch to read, and only from four batches on
     // (XSubjectSide::KEEP_FROM_BATCHES): a search of fewer batches gets no XSubjectSide
@@ -807,15 +731,6 @@ pub(super) fn x_search_batches<'p>(
         // subject, as a one-thread search does.
         #[cfg(feature = "parallel")]
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:380-393
-        // ```c
-        // 		while (master_node.Processing()) {
-        // ...
-        // 					int num_q = input.GetQueryBatch(qb, q_index);
-        // ...
-        // 						CTblastnNode * t(new CTblastnNode(chunk_num, GetArguments(), args, m_Bah, qb, q_index, num_q, mb));
-        // 						master_node.RegisterNode(t, mb);
-        // 						chunk_num ++;
-        // ```
         // Dispatch point: NCBI has a mode that searches several query batches at once as nodes of a
         // master node (-mt_mode 1). Here, with four or more batches, plans that
         // would fit and at least one batch per thread, the batches are searched side by side, each
@@ -946,15 +861,9 @@ pub(super) fn x_search_batches<'p>(
     Ok(Some(searched))
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905;
 // c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736,2494-2515;
 // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-// BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
-// BlastCompo_EarlyTermination(...); Blast_RedoOneMatch(...);
-// s_HitlistReapContained(...); s_HitlistEvaluateAndPurge(...);
-// BlastCompo_HeapInsert(...); Blast_HitListUpdate(...);
-// Blast_HSPResultsReverseOrder(results);
-// if (BlastSeqSrcGetTotLen(seq_src) > 0) Blast_HSPResultsSortByEvalue(results);
 
 #[allow(dead_code)] // This internal path is compared before the public CLI is enabled.
 pub(super) fn run_local_mode2_sum_stats(
@@ -973,8 +882,7 @@ pub(super) fn run_local_mode2_sum_stats(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,1644-1707:
-// if (ext_params->options->compositionBasedStats > 0) Blast_RedoAlignmentCore_MT(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501,1644-1707:
 // else Blast_TracebackFromHSPList(...); Blast_HSPResultsInsertHSPList(...);
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_no_sum_stats(
@@ -993,7 +901,7 @@ pub(super) fn run_local_mode0_no_sum_stats(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:1486-1501;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1501;
 // c++/src/algo/blast/core/blast_kappa.c:411-427:
 // compositionBasedStats selects redo independently of hitParams->do_sum_stats.
 #[allow(dead_code)]
@@ -1013,7 +921,7 @@ pub(super) fn run_local_mode0_sum_stats(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:1486-1501;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1501;
 // c++/src/algo/blast/core/blast_kappa.c:411-427:
 // compositionBasedStats selects redo independently of hitParams->do_sum_stats.
 #[allow(dead_code)]
@@ -1033,7 +941,7 @@ pub(super) fn run_local_mode2_no_sum_stats(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_parameters.c:457-463;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463;
 // core/blast_kappa.c:2372-2384: selected x-drop bits reach both Stage C
 // gapped extension and composition redo.
 #[allow(dead_code)]
@@ -1054,7 +962,7 @@ pub(super) fn run_local_mode2_sum_stats_with_scoring(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_options.c:903-936;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:903-936;
 // core/blast_traceback.c:198-250,1486-1501:
 // the selected protein scoring options enter ordinary traceback and statistics.
 #[allow(dead_code)]
@@ -1075,8 +983,7 @@ pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501:
-// if (compositionBasedStats > 0) Blast_RedoAlignmentCore_MT(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501:
 // else Blast_TracebackFromHSPList(...);
 fn run_local_search(
     queries: &[Vec<u8>],
@@ -1100,7 +1007,7 @@ fn run_local_search(
     )
 }
 
-/// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, blast_setup.c:888-1000):
+/// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
 /// NCBI 2.17.0 tblastn writes the start of the outfmt 0 report (and the reports of the batches
 /// before), then `BLAST engine error: <text>`, exit status 3. `tblastn_app::batch_failure` fails
 /// the batch with it, as a read of the database that fails. The text is one of the constants.
@@ -1109,13 +1016,6 @@ pub(crate) struct SetupEngineError(pub(crate) &'static str);
 
 impl SetupEngineError {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:433-437
-    // ```c
-    //    if (sbp->kbp) {
-    //       Blast_KarlinBlk* kbp = NULL;
-    //       Int2 status=0;
-    //       if ((status=s_BlastFindValidKarlinBlk(sbp->kbp, query_info, &kbp)) != 0)
-    //          return status;
-    // ```
     /// `BlastExtensionParametersNew` (blast_setup.c:960, before the subject length) finds no valid
     /// `sbp->kbp`: a PSSM query whose file's ungapped values make `kbp_psi` invalid
     /// (`query_set_setup`; probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
@@ -1123,15 +1023,11 @@ impl SetupEngineError {
         Self(crate::report::query_warnings::INVALID_QUERY_MESSAGE);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-    // ```c
-    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
-    //         new_msg->message = strdup("The average subject length is too short");
-    //         new_msg->severity = eBlastSevFatal;
-    // ```
     /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
-    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self("The average subject length is too short");
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self =
+        Self(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
 
     /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
     /// sum statistics with a setup subject length that is not positive, the average of a negative
@@ -1149,6 +1045,26 @@ impl std::fmt::Display for SetupEngineError {
 
 impl std::error::Error for SetupEngineError {}
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-301
+/// LOSAT's refusal of a batch's setup where NCBI's crashes (`common::database::check_setup_count`:
+/// the statistics' count of 0 without the Gumbel block). NCBI writes the reports of each batch
+/// before the next is searched, so its tabular output before the crash holds those of the batches
+/// before (NCBI 2.17.0, D1a-5 of line RG: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`, two queries
+/// without letters to search then a valid one, the 152 bytes of their outfmt 7 reports without the
+/// last line; the crash cuts the buffered output of the other formats short):
+/// `tblastn_app::batch_failure` makes the refusal after them, as an engine error of the batch.
+#[derive(Debug)]
+pub(crate) struct SetupRefusal(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for SetupRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for SetupRefusal {}
+
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
 struct XSearchTimer(Option<std::time::Instant>);
@@ -1165,14 +1081,8 @@ impl Drop for XSearchTimer {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//      status =
-//          s_BlastSearchEngineCore(program_number, query, query_info,
-//                                  seq_arg.seq, lookup_wrap, gap_align,
-// NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-// BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
 fn run_local_search_with_pool(
     queries: &[Vec<u8>],
@@ -1202,14 +1112,14 @@ fn run_local_search_with_pool(
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     // The set's numbers: a database's, or those of the FASTA subjects (`SubjectSetNumbers`).
-    let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
-    let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
+    let total_nt = profile.subject_set.total_nt(&subjects);
+    let stats_nt = profile.subject_set.eff_length_nt(total_nt);
     let num_subjects = profile.subject_set.num_seqs(&subjects);
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
         .collect::<std::result::Result<_, _>>()?;
-    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:908-936;
     // core/blast_stat.c:2547-2605: reject scoring schemes absent from
     // the pinned NCBI gapped table before any search.
     let spec = ProteinScoringSpec {
@@ -1223,46 +1133,14 @@ fn run_local_search_with_pool(
     );
     let gapped = lookup_protein_params(&spec);
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
-    // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
-    // ```c
-    //             if ( !m_Subjects.empty() ) {
-    //                 //m_SeqSrc = QueryFactoryBlastSeqSrcInit(m_Subjects, program);
-    //                 m_SeqSrc = MultiSeqBlastSeqSrcInit(m_Subjects, program, m_DbScanMode);
-    // ```
-    // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
-    // ```c
-    // s_MultiSeqGetMinLength(void* multiseq_handle, void*)
-    // {
-    //     Int4 retval = INT4_MAX;
-    //     Uint4 index;
-    //     CRef<CMultiSeqInfo>* seq_info =
-    //         static_cast<CRef<CMultiSeqInfo>*>(multiseq_handle);
-    //
-    //     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)
-    //         retval = MIN(retval, (*seq_info)->GetSeqBlk(index)->length);
-    //
-    //     if(retval < BLAST_SEQSRC_MINLENGTH)
-    // 	retval = BLAST_SEQSRC_MINLENGTH;
-    //
-    //     return retval;
-    // }
-    // ```
-    // NCBI reference: c++/include/algo/blast/core/blast_seqsrc.h:205
-    // ```c
-    // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-973
-    // ```c
-    //    if (sbp->gbp) {
-    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-    //        if (Blast_SubjectIsTranslated(program_number)) {
-    //            min_subject_length/=3;
-    //        }
-    // ```
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:133-135
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-973
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers `GetMinLength` (`SubjectSetNumbers::shortest_subject_length`); a quotient of 0 is
@@ -1271,10 +1149,10 @@ fn run_local_search_with_pool(
     // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
     // `None`: the setup fails (`stats::setup::setup_subject_length`, below).
     let min_subject_length = if gumbel.is_none() {
-        crate::stats::setup::setup_subject_length(total_nt as i64, num_subjects, None)
+        crate::stats::setup::setup_subject_length(total_nt, num_subjects, None)
     } else {
         crate::stats::setup::setup_subject_length(
-            total_nt as i64,
+            total_nt,
             num_subjects,
             Some((profile.subject_set.shortest_subject_length(&subjects), true)),
         )
@@ -1306,27 +1184,32 @@ fn run_local_search_with_pool(
         pool,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // ```c
-    //    if (sbp->gbp) {
-    //    ...
-    //    } else {
-    //        min_subject_length = (Int4) (total_length/num_seqs);
-    //    }
-    //
-    //    if(min_subject_length <=0) {
-    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-    //    }
-    // ```
     // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
     // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
     // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
     // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
-    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
+    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`). A count of 0
+    // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
+    // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports
+    // (`SetupRefusal`); a run whose batches have no valid context does not reach it and is
+    // reported as NCBI's. `query_set_setup` above (NCBI's `BLAST_CalcEffLengths`,
+    // blast_setup.c:946-951, before the division at :975) refuses first where NCBI's search
+    // space overflows: with a count of 0 as well, that LOSAT refusal takes the place of this one
+    // for a run that NCBI does not finish. It is not a batch failure, so it comes before the
+    // reports of the batches before, which NCBI writes before it crashes (line RG D1a-6,
+    // review A F2).
     if valid_contexts.iter().any(|&valid| valid) {
+        crate::algorithm::common::database::check_setup_count(
+            total_nt,
+            num_subjects,
+            gumbel.is_some(),
+            "TBLASTN",
+        )
+        .map_err(SetupRefusal)?;
         match min_subject_length {
             None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760
-            // (quoted at `stats::setup::hit_saving_parameters_fail`); TBLASTN is gapped.
+            // (cited at `stats::setup::hit_saving_parameters_fail`); TBLASTN is gapped.
             Some(length)
                 if crate::stats::setup::hit_saving_parameters_fail(do_sum_stats, true, length) =>
             {
@@ -1337,13 +1220,12 @@ fn run_local_search_with_pool(
     }
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
-        // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
-        // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115:
         ungapped_karlin: contexts
             .iter()
             .map(|context| context.karlin_params)
             .collect(),
-        // NCBI blast_results.cpp:82-97: no valid context returns before
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-97: no valid context returns before
         // Karlin block initialization and leaves search space at zero.
         query_validity: contexts.iter().map(|context| context.is_valid).collect(),
     };
@@ -1354,17 +1236,9 @@ fn run_local_search_with_pool(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
-    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
-    // int status = m_PrelimSearch->CheckInternalData();
-    // if (status != 0) {
-    //     // Search was not run, but we send back an empty CSearchResultSet.
-    //     CRef<objects::CSeq_align_set> tmp_align;
-    //     sa_vec.push_back(tmp_align);
-    // }
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:322-327:
-    // retval = BlastScoreBlkCheck(m_InternalData->m_ScoreBlk->GetPointer());
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2815-2824:
-    // if (valid_context == FALSE) status = 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:
     // Preserve the parameter/validity state for reporting, then skip subject
     // search when every query context has failed Karlin setup.
     if !valid_contexts.iter().any(|&valid| valid) || subjects.count() == 0 {
@@ -1377,7 +1251,7 @@ fn run_local_search_with_pool(
     // composition redo and the traceback) is `search` of the common line (utils/xtiming.rs); a
     // guard, as the function has many returns. No NCBI counterpart.
     let _x_search_timer = XSearchTimer::start();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (cited at
     // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces, which its
     // setup reads in place of its own where the statistics' total before the fallback to OID 0 is
     // not positive, and which the statistics of each subject read
@@ -1418,7 +1292,7 @@ fn run_local_search_with_pool(
     };
     let link = preliminary_parameters.link;
     let cutoff_arrays = ContextCutoffArrays::of(&preliminary_parameters);
-    // NCBI blast_parameters.c:455-458: the gapped X-drop from `kbp_gap` (a PSSM query's
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-458: the gapped X-drop from `kbp_gap` (a PSSM query's
     // `kbp_gap_psi`, `query_set_setup`).
     let search = preliminary_profile(
         profile,
@@ -1428,32 +1302,20 @@ fn run_local_search_with_pool(
             .map_or(gapped, |psi| psi.gapped_karlin(&gapped)),
         &cutoff_arrays,
     );
-    // NCBI c++/src/algo/blast/core/blast_hits.c:43-70;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70;
     // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
-    // if (compositionBasedStats) {
-    //     if (hitlist_size <= 500) prelim_hitlist_size = 1050;
-    //     else prelim_hitlist_size = hitlist_size*2 + 50;
-    // }
-    // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-    // NCBI c++/src/algo/blast/core/blast_hits.c:43-70:
-    // if (compositionBasedStats) ... 1050 or 2*hitlist+50;
-    // else if (gapped_calculation)
-    //   prelim_hitlist_size = MIN(MAX(2*hitlist_size,10), hitlist_size+50);
-    // The size is NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`); a size that is
-    // not positive (NCBI crashes) is rejected with the options (`args.rs`).
-    let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70:
+    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
+    let prelim_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         profile.max_target_seqs,
         compo_adjust_mode.is_enabled(),
         true,
-    ))
-    .ok()
-    .filter(|&size| size > 0)
-    .context("TBLASTN preliminary hit list size is not positive")?;
+    );
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
     let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
     // `blastp::blast_engine::psi_round::run_queries`)
     // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
     // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
@@ -1513,12 +1375,6 @@ fn run_local_search_with_pool(
         )?,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
-    // ```c
-    //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
-    //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
-    //
-    //     }
-    // ```
     // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
     // (`core::blast_hspstream`).
     let mut preliminary_hitlists = preliminary_hitlists;
@@ -1530,7 +1386,7 @@ fn run_local_search_with_pool(
             hitlist.cbs_close_trim(profile.max_target_seqs);
         }
     }
-    // NCBI c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
     // Blast_HSPResultsReverseSort(results); stream reads from the end.
     let mut preliminary_lists: Vec<_> = preliminary_hitlists
         .iter()
@@ -1544,7 +1400,7 @@ fn run_local_search_with_pool(
             })
         })
         .collect();
-    // NCBI c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing
     // OID, then each batch reads from the end; equal-OID query lists were
     // inserted in query order and are consumed in reverse query order.
@@ -1558,7 +1414,7 @@ fn run_local_search_with_pool(
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
-    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+    // blast_traceback.c:1567-1577 (cited at `blastp::blast_engine::database::exclude_fetched`)
     // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
     // negative seqid list keeps without a line: its lists leave here, after the trim of
     // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
@@ -1593,7 +1449,7 @@ fn run_local_search_with_pool(
     }
 
     if !compo_adjust_mode.is_enabled() {
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501,
         // 1644-1707,1763-1776: the control path performs ordinary
         // traceback and posttraceback statistics, then result post-pipes.
         return finish_local_mode0_no_sum_stats(
@@ -1623,23 +1479,17 @@ fn run_local_search_with_pool(
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
     );
 
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
     // 3099-3110,3290-3302:
-    // s_RecordInitialSearch(...); s_GetAlignParams(...);
-    // BlastCompo_HeapInitialize(..., hitlist_size, inclusion_ethresh);
-    // NCBI c++/src/algo/blast/core/blast_setup.c:614-624;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-624;
     // c++/src/algo/blast/core/blast_kappa.c:2309-2337,3244-3248,515-526:
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-    // s_GetQueryInfo(queryBlk->sequence, queryInfo, ...);
     // For TBLASTN s_ComputeNumIdentities passes the working query sequence.
     // Stage C uses these same hard-masked bytes for extension and traceback.
     let encoded: Vec<Vec<u8>> = working_frames
         .iter()
         .map(|frames| frames[0].aa_seq[1..1 + frames[0].aa_len].to_vec())
         .collect();
-    // NCBI c++/src/objtools/align_format/tabular.cpp:983-1021:
-    // alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-    // if (m_QuerySeq[i] == m_SubjectSeq[i]) ++num_ident;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-1021:
     // The formatter reads the original query, not the hard-masked Kappa buffer.
     let report_queries: Vec<Vec<u8>> = queries
         .iter()
@@ -1662,8 +1512,9 @@ fn run_local_search_with_pool(
             words: Some(build_query_word_hashes(seq)),
         })
         .collect();
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2439-2479:
-    // do_link_hsps and cutoff_s follow the actual sum-statistics option.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2428,2450-2479:
+    // do_link_hsps and cutoff_s follow the sum statistics of the hit-saving parameters
+    // (`hitParams->do_sum_stats`: the search's linking parameters, `parameters.link`).
     let gumbel = gumbel.as_ref();
     let redo_params = local_kappa_redo_params(
         scoring.matrix,
@@ -1675,7 +1526,6 @@ fn run_local_search_with_pool(
         *query_lengths.iter().max().unwrap(),
         compo_adjust_mode,
         false,
-        do_sum_stats,
         scoring.final_xdrop_bits,
         local_extension_final_xdrop(
             scoring.gap_xdrop_bits,
@@ -1688,7 +1538,7 @@ fn run_local_search_with_pool(
         ..gapped
     };
     let scaled_by_context = vec![scaled; queries.len()];
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:411-427;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427;
     // core/blast_parameters.c:1245-1253: postredo link, when enabled, uses
     // the updated zero small-gap cutoff; direct E-value uses raw subject length.
     let mut post_link = link;
@@ -1709,17 +1559,6 @@ fn run_local_search_with_pool(
     // the match alone.  NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736 keeps
     // the same state thread-local (matrix, NRrecord, gapAlign) for its redo loop.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3534,3625-3626
-    // ```c
-    //                 if (BlastCompo_EarlyTermination(
-    //                         localMatch->best_evalue,
-    //                         redoneMatches,
-    //                         numQueries
-    //                 )) {
-    //                     Blast_HSPListFree(localMatch);
-    // ...
-    //                                 Blast_RedoOneMatch(
-    //                                         alignments,             // thread-local
-    // ```
     // redo_item is the redo of one (query, subject) match between the early-termination test and
     // the heap insertion, taken out as a function of the match. The steps are those of the serial
     // loop below.
@@ -1759,18 +1598,14 @@ fn run_local_search_with_pool(
             return Ok(None);
         }
         let mut hsp_values: Vec<_> = converted.iter().map(|h| (h.context, h.hsp)).collect();
-        // NCBI c++/src/algo/blast/core/blast_kappa.c:3661-3706:
-        // s_HSPListFromDistinctAlignments(...); s_HitlistReapContained(...);
-        // s_HitlistEvaluateAndPurge(...); s_HSPListNormalizeScores(...);
-        // s_ComputeNumIdentities(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3661-3706:
         let survivor_indices = reap_contained_postredo_hsps(&mut hsp_values);
         let mut slots: Vec<_> = converted.into_iter().map(Some).collect();
         let survivors: Vec<_> = survivor_indices
             .into_iter()
             .map(|index| slots[index].take().expect("unique containment survivor"))
             .collect();
-        // NCBI c++/src/algo/blast/core/blast_kappa.c:411-427,364-368:
-        // if (hitParams->do_sum_stats) BLAST_LinkHsps(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427,364-368:
         // else Blast_HSPListGetEvalues(..., s_GetSubjectLength(...), ..., 1.0);
         let mut postredo = if let Some(link) = post_link.as_ref() {
             link_preliminary_hsps(
@@ -1801,7 +1636,7 @@ fn run_local_search_with_pool(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -1830,7 +1665,7 @@ fn run_local_search_with_pool(
                     )?,
                     None => positives,
                 };
-                // NCBI core/blast_kappa.c:515-526 uses the masked working query;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526 uses the masked working query;
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
                 let (report_ident, report_positives, _, report_mismatches, _, _) =
@@ -1846,7 +1681,7 @@ fn run_local_search_with_pool(
                     num_positives: positives,
                     report_num_ident: report_ident,
                     report_num_positives: report_positives,
-                    report_mismatches,
+                    report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
                     gap_opens,
@@ -1867,19 +1702,6 @@ fn run_local_search_with_pool(
     };
     // The heap update of one redone match, in the order of the preliminary lists.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3715
-    // ```c
-    //                     if (BlastCompo_HeapWouldInsert(
-    //                             &redoneMatches[query_index],
-    //                             best_evalue,
-    //                             best_score,
-    //                             localMatch->oid
-    //                     )) {
-    //                         *pStatusCode =
-    //                                 BlastCompo_HeapInsert(
-    //                                         &redoneMatches[query_index],
-    //                                         hsp_list,
-    //                                         best_evalue,
-    // ```
     // The heap update of one redone match (BlastCompo_HeapWouldInsert / HeapInsert), applied in the
     // order of the preliminary lists.
     let mut keep_item = |context: usize,
@@ -1901,12 +1723,6 @@ fn run_local_search_with_pool(
     // match is a function of its own preliminary list; the only state shared
     // between matches is the heap array, which only this thread touches.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
-    // ```c
-    // #pragma omp for schedule(static)
-    //         for (b = 0; b < numMatches; ++b) {
-    // #pragma omp flush(interrupt)
-    //             if (!interrupt) {
-    // ```
     // NCBI redoes the matches in this omp loop. The matches of a batch are
     // redone on the pool by redo_item and then applied in list order (early termination is tested
     // again in order). A match depends only on its own preliminary list.
@@ -1937,7 +1753,6 @@ fn run_local_search_with_pool(
                     *query_lengths.iter().max().unwrap(),
                     compo_adjust_mode,
                     false,
-                    do_sum_stats,
                     scoring.final_xdrop_bits,
                     local_extension_final_xdrop(
                         scoring.gap_xdrop_bits,
@@ -2050,10 +1865,9 @@ fn run_local_search_with_pool(
             crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);
         }
         for (context, oid, list) in preliminary_lists {
-            // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
             // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
             //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
-            // query_index = localMatch->query_index;
             if compo_early_termination(list.best_evalue, &heaps) {
                 x_stage.done(oid);
                 continue;
@@ -2078,11 +1892,8 @@ fn run_local_search_with_pool(
     if let Some(fetches) = profile.fetch_excluded {
         note_redo_fetched(fetches, &heaps, &fetched_utf8, &fetched_orders);
     }
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
-    // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
-    //     Blast_HitListUpdate(hitlist, hsp_list);
-    // Blast_HSPResultsReverseOrder(results);
     // Blast_HSPResultsSortByEvalue(results); /* positive local TotLen */
     let mut results = Vec::with_capacity(queries.len());
     for (context, heap) in heaps.iter_mut().enumerate() {
@@ -2135,7 +1946,7 @@ fn redo_fetched_orders<L>(
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
 // `blastp::blast_engine::database::exclude_fetched`)
 /// Notes the batch's first fetch of the composition-based redo that read a header with a
 /// UTF8String where a VisibleString is expected (`fetched`, in the redo's order, query by
@@ -2178,31 +1989,8 @@ fn note_redo_fetched(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
-// ```c++
-//     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(),
-//                                   static_cast<int>(GetNumberOfThreads()));
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-344
-// ```c++
-//     if (m_NumThreads) {
-//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//         x_FillSeqBuffer(buffer, begin_chunk);
-//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-//     } else {
-//         end_chunk = begin_chunk + oid_size;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
-// ```c++
-//     Uint8 GetSliceSize()
-//     {
-//         Uint8 max_slice = e_MaxSlice64;
-//         Uint8 sliceSize = min(max_slice,m_MaxFileSize);
-//         return sliceSize;
-//     }
-// ...
-//     enum {e_MaxSlice64 = 1 << 30};
-// ```
 // With two or more search threads NCBI's database reader cuts the subjects into chunks by
 // residues (x_FillSeqBuffer, below), not into the hundredth of the subjects of its one-thread
 // iterator (`blast_engine.c:1409`). The budget of a chunk is the slice size (the largest file
@@ -2229,19 +2017,6 @@ fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
-// ```c++
-//         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
-//
-//         res.length = vol->GetSequence(vol_oid++, &seq);
-//         if (res.length < 0) return;
-//         // must return at least one sequence
-//         do {
-//             tot_length -= res.length;
-//             res.address = seq;
-//             buffer->results.push_back(res);
-//             res.length = vol->GetSequence(vol_oid++, &seq);
-//         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
-// ```
 // A chunk takes its first subject and then the next ones while the bases taken stay within
 // the budget (`tot_length >= res.length` is `taken + length <= bases`). NCBI's last condition
 // compares the OID after the next one with the end, so the last subject of a database always
@@ -2320,15 +2095,7 @@ fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> us
     end
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
-// ```c++
-//     begin_chunk = * state_obj;
-// ...
-//         x_FillSeqBuffer(buffer, begin_chunk);
-//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-// ...
-//     *state_obj = end_chunk;
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-350
 // The chunks NCBI's threads take one after another, all of them: each starts where the last one
 // ended. Each NCBI search thread takes the next chunk when it is free; LOSAT's pool takes the
 // chunks and each chunk is one task. Scheduling only.
@@ -2371,22 +2138,6 @@ fn x_flow_window(threads: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3346-3350,3499-3502
-// ```c
-//         if ((int) compo_adjust_mode > 1 && !positionBased) {
-//             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-//             status_code = Blast_CompositionWorkspaceInit(
-//                     NRrecord_tld[i],
-//                     scoringParams->options->matrix
-//             );
-// ...
-//         redo_align_params_tld[i] =
-//             s_GetAlignParams(
-// ...
-//                 NRrecord             = NRrecord_tld[tid];
-//                 sbp                  = sbp_tld[tid];
-//                 redo_align_params    = redo_align_params_tld[tid];
-//                 matrix               = matrix_tld[tid];
-// ```
 // One XRedoWorker is the Rust counterpart of the per-thread state NCBI allocates for the redo loop
 // (NRrecord_tld, redo_align_params_tld, and the gap_align and matrix of the thread).
 // One pool slot's redo state.  NCBI c++/src/algo/blast/core/blast_kappa.c:3290-3340
@@ -2432,15 +2183,6 @@ fn x_redo_lpt_order(wanted: &[bool], hsps: impl Fn(usize) -> usize) -> Vec<usize
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3497
-// ```c
-//         int b;
-// #pragma omp for schedule(static)
-//         for (b = 0; b < numMatches; ++b) {
-// ...
-//                 seqSrc               = seqsrc_tld[tid];
-//                 scoringParams        = score_params_tld[tid];
-//                 hitParams            = hit_params_tld[tid];
-// ```
 // No NCBI counterpart for the order: NCBI's threads take fixed shares of its loop; here the
 // threads take the matches one at a time, largest first. Scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNREDOLPT): `run(worker, index)` for every index of `order`, in one
@@ -2516,11 +2258,6 @@ impl ContextCutoffArrays {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245 and 1292
-// ```c
-//     lookup->threshold = (Int4)opt->threshold;
-// ...
-//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
-// ```
 /// The word threshold in the units of the lookup table: the standard table's (word sizes up to
 /// 4), or the compressed table's, scaled by `kMatrixScale` 100 (word sizes 5 to 7, the only ones
 /// that take it: `SetWordSize`, blast_options_local_priv.hpp:612-619), converted as the x86-64
@@ -2530,8 +2267,7 @@ pub(super) fn lookup_threshold(word_size: usize, threshold: f64) -> i32 {
     crate::core::blast_util::ncbi_int4_from_double(scale * threshold)
 }
 
-// NCBI c++/src/algo/blast/core/blast_parameters.c:302-383,455-463:
-// BlastInitialWordParametersNew(...); BlastExtensionParametersNew(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:302-383,455-463:
 // The word and extension parameters of the preliminary stage of a query set.
 fn preliminary_profile<'a>(
     profile: LocalStageDProfile<'a>,
@@ -2551,7 +2287,7 @@ fn preliminary_profile<'a>(
         word_size: scoring.word_size,
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
-        // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
         // converted as the x86-64 build does (INT_MIN beyond Int4; `core::x_drop`).
         gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
             scoring.gap_xdrop_bits,
@@ -2561,50 +2297,12 @@ fn preliminary_profile<'a>(
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        subject_besthit: profile.subject_besthit,
     }
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:219-290
-// ```c++
-//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
-//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
-//                                        m_InternalData);
-//     ...
-//     if (query_splitter->IsQuerySplit()) {
-//
-//         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
-//
-//         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-//             try {
-//                 CRef<IQueryFactory> chunk_qf =
-//                     query_splitter->GetQueryFactoryForChunk(i);
-//                 ...
-//                 CRef<SInternalData> chunk_data =
-//                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
-//                                                m_InternalData,
-//                                                GetNumberOfThreads());
-//                 ...
-//                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
-//                                 chunk_data->m_HspStream->GetPointer(),
-//                                 m_InternalData->m_HspStream->GetPointer());
-//             ...
-//             } catch (const CBlastException& e) {
-//                 // This error message is safe to ignore for a given chunk,
-//                 // because the chunks might end up producing a region of
-//                 // the query for which ungapped Karlin-Altschul blocks
-//                 // cannot be calculated
-// ```
-// NCBI reference: c++/src/algo/blast/api/split_query_aux_priv.cpp:171-182
-// ```c++
-//     BlastQueryInfo* qinfo = full_data->m_QueryInfo;
-//     _ASSERT(qinfo);
-//
-//     vector<Int8> eff_searchsp;
-//     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
-//         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
-//     }
-//     options->SetEffectiveSearchSpace(eff_searchsp);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-290
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:171-182
 // The preliminary stage of a split batch (RP-4): each chunk is a query set of its parts
 // (the chunk's query factory, with the lower-case masks restricted to each part), with the
 // batch's effective search spaces, and its hit lists merge into the batch's. A chunk whose
@@ -2715,13 +2413,7 @@ fn split_preliminary_hitlists(
             .zip(&chunk.context_offsets)
             .map(|(part, &offset)| (part.query, offset))
             .collect();
-        // NCBI reference: c++/src/algo/blast/api/split_query_cxx.cpp:174-178
-        // ```c++
-        //     const size_t kOverlap =
-        //         Blast_QueryIsTranslated(m_Options->GetProgramType())
-        //         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
-        //     m_SplitBlk->SetChunkOverlapSize(kOverlap);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         merge_query_chunk(
             &mut merged,
             chunk_lists,
@@ -2742,8 +2434,8 @@ struct QuerySetInputs<'a> {
     ungapped: &'a KarlinParams,
     gumbel: Option<&'a BlastGumbelBlk>,
     /// The database length of the effective lengths in nucleotides
-    /// (`SubjectSetNumbers::eff_length_nt`).
-    total_nt: usize,
+    /// (`SubjectSetNumbers::eff_length_nt`), NCBI's `Int8`.
+    total_nt: i64,
     num_subjects: i32,
     /// The setup's subject length of the hit-saving parameters (`setup_subject_length`), 0
     /// where the setup fails (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
@@ -2779,10 +2471,11 @@ struct LocalParameterRecipe<'a> {
 
 impl LocalParameterRecipe<'_> {
     /// The parameters with the database length `db_nt` in nucleotides (the setup's total, `-dbsize`
-    /// or a subject's length), the options' spaces `option_spaces` and the call `call`.
+    /// or a subject's length; NCBI's `Int8` `real_db_length`), the options' spaces `option_spaces`
+    /// and the call `call`.
     fn parameters(
         &self,
-        db_nt: usize,
+        db_nt: i64,
         option_spaces: Option<&[i64]>,
         call: LocalParameterCall,
     ) -> Result<LocalSubjectParameters, crate::stats::setup::SearchSpaceOverflow> {
@@ -2805,8 +2498,7 @@ impl LocalParameterRecipe<'_> {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
-// BlastSetUp_MaskQuery(...); BlastSetup_ScoreBlkInit(...); BLAST_CalcEffLengths(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
 // BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
 // query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
 // from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
@@ -2832,11 +2524,8 @@ fn query_set_setup<'a>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
     let _ = pool;
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/blast_setup.c:770-847:
-    // if (Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]))
-    //     contexts[context].is_valid = FALSE;
-    // if (query_info->contexts[index].is_valid) BLAST_CalcEffLengths(...);
     // Reuse the Stage C score-frequency calculation on the query bytes after
     // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
     // pinned blast_setup.c:614-654.
@@ -2890,20 +2579,12 @@ fn query_set_setup<'a>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
     let working_frames: Vec<_> = queries.iter().map(|q| encode(q, marked)).collect();
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/lookup_wrap.c:91-100:
-    // Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
     // The active matrix determines context validity; the active word size
     // determines the lookup state used by Stage C.
     // Only the contexts are used here (graduated 2026-10-22, was LOSAT_X_LUTSPLIT).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2792
-    // ```c
-    //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    //       if (loop_status) {
-    //           contexts[context].is_valid = FALSE;
-    // ```
     // Only the contexts (their validity, from the ungapped Karlin block) are used here, not the
     // lookup table. x_lookup_contexts_for_profile returns the contexts without building the table,
     // which the search builds where it needs it (lookup_wrap.c:91-100).
@@ -2972,20 +2653,7 @@ fn query_set_setup<'a>(
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
-    // ```c++
-    //         } catch (const CException& e) {
-    //             ...
-    //             CRef<CSearchMessage> m
-    //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-    //             messages[index].push_back(m);
-    //             s_InvalidateQueryContexts(qinfo, index);
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
-    // ```c
-    //       if ( !contexts[context].is_valid )
-    //           continue;
-    // ```
     // A query without letters (`Sequence contains no data`) is invalidated when the queries
     // are set up, before its Karlin-Altschul parameters would be computed: it is never
     // searched, and its effective lengths stay 0 (`local_parameters_for_call`).
@@ -3002,25 +2670,20 @@ fn query_set_setup<'a>(
         .collect();
     let valid_contexts: Vec<_> = contexts.iter().map(|context| context.is_valid).collect();
     let gapped_by_context = vec![inputs.gapped; queries.len()];
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2827;
     // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
-    // Blast_KarlinBlkUngappedCalc(kbp_std[context], sbp->sfp[context]);
-    // sbp->kbp = sbp->kbp_std;
     // Word x-drop and gap trigger both use each query context's Karlin block.
     let ungapped_by_context: Vec<_> = contexts
         .iter()
         .map(|context| context.karlin_params)
         .collect();
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024;
     // c++/src/algo/blast/core/blast_parameters.c:457-463:
-    // BlastHitSavingParametersNew(..., min_subject_length,
-    //     options->compositionBasedStats, ...);
-    // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*LN2/min_lambda);
     let options = LocalParameterOptions {
         expect_value: inputs.profile.expect_value,
         do_sum_stats: inputs.do_sum_stats,
-        max_intron_length: 0,
+        max_intron_length: inputs.profile.max_intron_length,
         gap_trigger_bits: 22.0,
         // `-xdrop_ungap` or 7 bits (`LocalStageDScoring::word_xdrop_bits`).
         word_xdrop_bits: inputs.scoring.word_xdrop_bits,
@@ -3042,7 +2705,7 @@ fn query_set_setup<'a>(
             num_subjects: inputs.num_subjects,
             options,
         },
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-127 (quoted at
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-127 (cited at
         // `PsiSearch::ungapped_karlin` and `PsiSearch::gapped_karlin`)
         // A PSSM query's `kbp_psi` and `kbp_gap_psi`: the file's values, else `kbp_std`'s and
         // `kbp_gap_std`'s. They are `kbp` and `kbp_gap` from here on (the word X-drop, the
@@ -3051,12 +2714,8 @@ fn query_set_setup<'a>(
         // (`LocalKarlinBlocks`).
         Some(psi) => {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-961
-            // ```c
-            //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
-            //                                query_info, ext_params)) != 0)
-            // ```
             // `BlastExtensionParametersNew` looks for a valid `sbp->kbp`, which is `kbp_psi`
-            // (blast_stat.c:2826; quoted at `SetupEngineError::NO_VALID_KARLIN_BLOCK`), before the
+            // (blast_stat.c:2826; cited at `SetupEngineError::NO_VALID_KARLIN_BLOCK`), before the
             // average subject length (`SUBJECT_LENGTH_INVALID`, below). A PSSM query whose letters give its
             // context a valid `kbp_std` but whose file's ungapped values make `kbp_psi` invalid
             // (`lambdaUngapped`, `kappaUngapped` or `hUngapped` negative) stops the search's
@@ -3125,24 +2784,6 @@ struct PreliminaryInputs<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1443
-// ```c
-//        if (seq_arg.seq->length < min_subj_seq_length) {
-//            BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-//            continue;
-//        }
-//
-//        if (db_length == 0) {
-//            /* This is not a database search, hence need to recalculate and save
-//             the effective search spaces and length adjustments for all
-//             queries based on the length of the current single subject
-//             sequence. */
-//            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-//                           seq_arg.seq->length, score_options, query_info,
-//                           sbp, hit_params, word_params,
-//                           eff_len_params)) != 0)
-//               return status;
-//       }
-// ```
 /// What the statistics of each subject read (`PreliminaryInputs::update`): the query set's
 /// parameter inputs, the preliminary stage's option spaces of its contexts, `-dbsize` in
 /// nucleotides when above 0 (the effective lengths' database length in place of the subject's),
@@ -3152,7 +2793,7 @@ struct PreliminaryInputs<'a> {
 struct SubjectUpdate<'a> {
     recipe: &'a LocalParameterRecipe<'a>,
     option_spaces: &'a [i64],
-    dbsize_nt: Option<usize>,
+    dbsize_nt: Option<i64>,
     min_length: usize,
 }
 
@@ -3166,8 +2807,7 @@ trait PreliminarySink {
     fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()>;
 }
 
-// NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-// Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:129-161:
 // Each context owns an independently capped preliminary list.
 struct PreliminaryCollector {
     hitlists: Vec<Option<KappaResultHitList>>,
@@ -3194,8 +2834,7 @@ impl PreliminarySink for PreliminaryCollector {
                 .collect();
             if !hsps.is_empty() {
                 let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
-                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:129-161:
                 // Each context owns an independently capped preliminary list.
                 let collector = self.hitlists[context]
                     .get_or_insert(KappaResultHitList::new(self.prelim_size)?);
@@ -3216,9 +2855,7 @@ impl PreliminarySink for PrelimCulling {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-//     status = s_BlastSearchEngineCore(...); ... BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
 // The preliminary hit list of each query context of the query set.
 fn run_preliminary_subjects(
     inputs: &PreliminaryInputs<'_>,
@@ -3249,24 +2886,10 @@ fn run_preliminary_subjects_into(
     mut observer: Option<&mut StageDBoundaryTrace>,
     sink: &mut (dyn PreliminarySink + Send),
 ) -> Result<()> {
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
-    //      status =
-    //          s_BlastSearchEngineCore(program_number, query, query_info,
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
-    // if (hit_params->link_hsp_params) {
-    //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-    //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
-    //               score_options->gapped_calculation);
-    // }
-    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905,1469-1475:
     // Finish search, link/direct E-value and preliminary reap inside one subject
     // job, before its OID-ordered list enters the shared collector.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-    // ```c
-    //     /* iterate over all subject sequences */
-    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //            != BLAST_SEQSRC_EOF) {
-    // ```
     // NCBI scans the subjects in this loop. With one job per subject the pool is busy with
     // subjects; otherwise the units of the single subject use it. Scheduling only.
     // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
@@ -3287,13 +2910,6 @@ fn run_preliminary_subjects_into(
         _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
-    // ```c
-    //     while (TRUE) {
-    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                        dbseq_chunk_overlap);
-    //
-    //         if (status == SUBJECT_SPLIT_DONE) break;
-    // ```
     // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDUNITS`): NCBI's thread searches the chunks of its
     // subject one after another. A subject longer than a chunk's budget, a chunk of its own, runs
     // its (frame, chunk) units on the pool as the single subject of a search does, so that threads
@@ -3321,18 +2937,11 @@ fn run_preliminary_subjects_into(
     // query frames the setup masked (`query_set_setup`; NCBI masks the batch's query once, in
     // BLAST_MainSetUp).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
-    // ```c
-    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-    //                              &lookup_wrap->lut);
-    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-    //                                  query, lookup_segments, 0);
-    // ```
     // NCBI builds the lookup table once per query batch; this value lets the subjects of the batch
     // share the query frames and the table (`XQuerySide`).
     let x_query_side =
         super::search_gapped::XQuerySide::x_with_frames(inputs.frames, inputs.queries)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99 (cited at
     // `pssm_search::lookup`)
     // A PSSM query's table, of its rows over the complement of its masks, made with the batch
     // (`in_pssm::lookup_table`).
@@ -3356,12 +2965,6 @@ fn run_preliminary_subjects_into(
     // The subject plans (was LOSAT_X_TBNSSIDE) the owner of the search
     // attached to the pool; `subjects` is its subject list.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-    // ```c
-    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-    //                                      backup.full_range.right,
-    //                                      subject->gen_code_string, &translation_buffer,
-    //                                      &frame_offsets, NULL);
-    // ```
     // The subject plans (translations) attached to the pool by the owner of the search
     // (`XSubjectSide`); a reuse of the translation NCBI makes for each subject.
     let x_subject_side = pool.and_then(|pool| pool.x_ext::<super::search_seed::XSubjectSide>());
@@ -3389,13 +2992,6 @@ fn run_preliminary_subjects_into(
             }
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
-        // ```c
-        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //            != BLAST_SEQSRC_EOF) {
-        // ...
-        //       status =
-        //           s_BlastSearchEngineCore(program_number, query, query_info,
-        // ```
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
         let x_pool = x_unit_pool(subject);
@@ -3407,7 +3003,7 @@ fn run_preliminary_subjects_into(
         let inputs = match inputs.update {
             Some(update) if subject.len() >= update.min_length => {
                 x_update = update.recipe.parameters(
-                    update.dbsize_nt.unwrap_or(subject.len()),
+                    update.dbsize_nt.unwrap_or(subject.len() as i64),
                     Some(update.option_spaces),
                     LocalParameterCall::Update {
                         subject_length: i32::try_from(subject.len())?,
@@ -3453,9 +3049,7 @@ fn run_preliminary_subjects_into(
                 super::score::PssmScore(rows),
             )?,
         };
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
         // Even an allocated empty subject list enters link/E-value. The query contexts of a
         // subject whose units ran on the pool are linked there side by side (LOSAT_X_TBNLINKCTX).
         let mut linked = if let Some(link) = inputs.link {
@@ -3470,9 +3064,7 @@ fn run_preliminary_subjects_into(
                 &link,
             )?
         } else {
-            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-            // if (subject->length > 0) stat_length = subject->length;
-            // Blast_HSPListGetEvalues(..., stat_length, ...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
             let stat_length = initial_translated_stat_length(subject.len());
             direct_local_evalues(
                 &preliminary,
@@ -3494,26 +3086,16 @@ fn run_preliminary_subjects_into(
             subject_core(x_oid, subject)
         })
     };
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //      status =
-    //          s_BlastSearchEngineCore(program_number, query, query_info,
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188:
     crate::utils::threading::report_stage(
         "tblastn",
         "subject_core",
         subjects.count(),
         parallel_selected,
     );
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-145:
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1409-1414:
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-145:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1414:
     // Keep at most one pool-sized batch of subject results before OID reduction;
     // memory follows NCBI's bounded number of workers, not total subject count.
     // The subjects are cut into chunks by residues as NCBI's database reader cuts them for its
@@ -3571,19 +3153,11 @@ fn run_preliminary_subjects_into(
     // other threads search the chunks of the flow.
     let mut reduce_subjects = || -> Result<()> {
         for oid in 0..subjects.count() {
-            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., subject->length, ...);
-            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
             #[cfg(feature = "parallel")]
             let (preliminary, linked) = if parallel_selected {
                 if parallel_batch.is_empty() {
-                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-341
-                    // ```c++
-                    //     if (m_NumThreads) {
-                    //         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-                    //         x_FillSeqBuffer(buffer, begin_chunk);
-                    //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-342
                     // Dispatch point: the next chunk in OID order from the flow (`x_oid_flow.rs`).
                     // The subjects are searched by the same call as before and their lists are
                     // taken in OID order. NCBI's thread searches the subjects of its chunk one
@@ -3610,16 +3184,13 @@ fn run_preliminary_subjects_into(
             };
             #[cfg(not(feature = "parallel"))]
             let (preliminary, linked) = subject_core_oid(oid)?;
-            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., hsp_list_out, ...);
-            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
             // The comparison-only trace retains pre-link HSP bytes by OID.
             if let Some(ref mut trace) = observer {
                 trace.preliminary.push((oid, preliminary.clone()));
             }
-            // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
-            // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-            // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1555:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:289-319:
             // Query-indexed lists are consumed in
             // reverse-sorted order by BlastHSPStreamRead.
             sink.add(oid, &linked)?;
@@ -3627,13 +3198,6 @@ fn run_preliminary_subjects_into(
         Ok(())
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
-    // ```c++
-    //     for (TBlastThreads::iterator thread = the_threads.begin();
-    //          thread != the_threads.end();
-    //          ++thread) {
-    //         (*thread)->Run();
-    //     }
-    // ```
     // NCBI runs its search threads side by side until the
     // subjects run out. With the flow the other threads of the pool take chunks for the whole
     // search while this thread reduces (and searches when the next chunk is not ready); the flow
@@ -3660,8 +3224,7 @@ fn run_preliminary_subjects_into(
     if let Some(line) = x_flow.as_ref().and_then(|flow| flow.stats_line()) {
         eprintln!("{line}");
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
-    // /* Use a local diagnostics structure, because the one passed in an input
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668:
     //    argument can be shared between multiple threads */
     #[cfg(feature = "parallel")]
     if parallel_selected && diagnose {
@@ -3682,12 +3245,8 @@ fn run_preliminary_subjects_into(
     Ok(())
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-// Int4 stat_length = subject->length;
-// if (subject->length > 0) stat_length = subject->length;
-// Blast_HSPListGetEvalues(..., stat_length, ...);
-// NCBI c++/src/algo/blast/core/blast_util.c:508-527,1070-1101:
-// if ((length-ABS(frame)+1) < CODON_LENGTH) return prot_length;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:508-527,1070-1101:
 // frame_offsets[context+1] = offset after the translated frame and sentinel.
 // The final nonempty frame in the six-frame loop supplies stat_length.
 fn initial_translated_stat_length(nt_length: usize) -> usize {
@@ -3697,11 +3256,9 @@ fn initial_translated_stat_length(nt_length: usize) -> usize {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:141-144,1811-1926:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:141-144,1811-1926:
 // Blast_HSPNew() uses calloc, so num remains zero without BLAST_LinkHsps.
 // hsp->evalue = BLAST_SpougeStoE(score, kbp, sbp->gbp,
-//   query_info->contexts[hsp->context].query_length, subject_length);
-// hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
 fn direct_local_evalues(
     input: &[(usize, super::search_gapped::GappedHsp)],
     query_lengths: &[i32],
@@ -3717,9 +3274,7 @@ fn direct_local_evalues(
             context,
             hsp,
             num: 0,
-            // NCBI c++/src/algo/blast/core/blast_hits.c:1870-1895:
-            // if (sbp->gbp) BLAST_SpougeStoE(...);
-            // else BLAST_KarlinStoE_simple(score, kbp, eff_searchsp);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1870-1895:
             evalue: if let Some(gumbel) = gumbel {
                 blast_spouge_stoe(
                     hsp.score,
@@ -3746,10 +3301,8 @@ fn direct_local_evalues(
     LinkedHspList { hsps, best_evalue }
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:200-251,675-721,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:200-251,675-721,
 // 1644-1707,1763-1776; core/blast_hits.c:1811-1935,3243-3297:
-// Blast_TracebackFromHSPList(...); s_HSPListPostTracebackUpdate(...);
-// Blast_HSPResultsInsertHSPList(...); Blast_HSPResultsSortByEvalue(...);
 fn finish_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -3768,7 +3321,7 @@ fn finish_local_mode0_no_sum_stats(
     let mut results: Vec<_> = (0..queries.len())
         .map(|_| KappaResultHitList::new(profile.max_target_seqs))
         .collect::<Result<_>>()?;
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:583-605;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-605;
     // c++/src/algo/blast/core/blast_encoding.c:110-121:
     // the traceback identity pass reads the unmasked amino-acid query;
     // lower-case FASTA residues represent the same protein letters.
@@ -3807,19 +3360,9 @@ fn finish_local_mode0_no_sum_stats(
         let held = x_stage.held(oid)?;
         let subject = held.nt();
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
-        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:455-463
-        // ```c
-        //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-        //       params->gap_x_dropoff = (Int4)
-        //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-        //       /* Note that this conversion from bits to raw score is done prematurely
-        //          when rescaling and composition based statistics is applied, as we
-        //          lose precision. Therefore this is redone in Kappa_RedoAlignmentCore */
-        //       params->gap_x_dropoff_final = (Int4)
-        //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
         // The final X-drop is at least the preliminary one (`-xdrop_gap` above
         // `-xdrop_gap_final`).
         let final_xdrop = local_extension_final_xdrop(
@@ -3867,8 +3410,7 @@ fn finish_local_mode0_no_sum_stats(
             return Ok((stat_length, None));
         }
         let input: Vec<_> = traced.iter().map(|row| (context, row.hsp)).collect();
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:213-250,717-719:
-        // if (hit_params->link_hsp_params) BLAST_LinkHsps(..., stat_length);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-250,717-719:
         // else Blast_HSPListGetEvalues(..., stat_length, ...);
         let mut post = if let Some(link) = link {
             let mut post_link = *link;
@@ -3920,13 +3462,13 @@ fn finish_local_mode0_no_sum_stats(
                     )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
-                        - gapped_params[context].k.ln())
+                        - gapped_params[context].k.glibc_ln())
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
                     report_num_ident: ident,
                     report_num_positives: positives,
-                    report_mismatches: mismatches,
+                    report_mismatches: i64::try_from(mismatches)?,
                     align_length: length,
                     mismatches,
                     gap_opens,
@@ -3946,12 +3488,6 @@ fn finish_local_mode0_no_sum_stats(
         ))
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1518-1521
-    // ```c
-    // #pragma omp parallel for default(none) num_threads(actual_num_threads) schedule(guided) if (actual_num_threads > 1) \
-    //         shared(retval, thread_data, batches, score_params, program_number, sbp, hit_params, pattern_blk, query, \
-    //         	   ext_params, query_info, default_db_genetic_code, has_been_interrupted, interrupt_search, progress_info, actual_num_threads)
-    //         for (i = 0; i < batches->num_batches; i++) {
-    // ```
     // NCBI traces the batches of its HSP stream (the lists of one subject) on its threads
     // (`schedule(guided)`), each into the results of its thread, which are joined afterward
     // (SThreadLocalDataArrayConsolidateResults). Here the lists of a batch are traced on the search
@@ -4005,9 +3541,7 @@ fn finish_local_mode0_no_sum_stats(
             keep(*context, *oid, item(*context, *oid, list)?)?;
         }
     }
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-    // if (BlastSeqSrcGetTotLen(seq_src) > 0)
-    //     Blast_HSPResultsSortByEvalue(results);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776:
     // Otherwise the lists keep the order of their insertion above, by OID, then the heap's
     // (`KappaResultHitList::update`): NCBI's one-thread traceback.
     if profile.subject_set.sorts_results() {
@@ -4019,3574 +3553,5 @@ fn finish_local_mode0_no_sum_stats(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
-    fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
-        subjects.iter().map(Vec::as_slice).collect()
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
-    // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
-    // sbp->kbp = sbp->kbp_std; x_dropoff_init uses kbp[context]->Lambda.
-    // c++/src/algo/blast/core/aa_ungapped.c:570-590:
-    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-    // For BDT63307, NCBI's query-specific x-drop is 15; using the matrix
-    // average's 16 changes which gapped seed survives into Kappa traceback.
-    #[test]
-    fn query_specific_word_xdrop_preserves_ncbi_bdt63307_seed() {
-        let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fasta"));
-        // The residues of NCBI's reader, as TBLASTN reads the query and the subjects.
-        let residues = |name: &str, config| {
-            use crate::blastinput::fasta_reader::{read_all, FastaInputSource};
-            let file = std::fs::File::open(base.join(name)).unwrap();
-            read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
-                Ok(())
-            })
-            .unwrap()
-            .into_iter()
-            .map(|record| record.sequence)
-            .collect::<Vec<Vec<u8>>>()
-        };
-        use crate::blastinput::fasta_reader::ReaderConfig;
-        let queries = residues("AvCLPV.faa", ReaderConfig::query("TBLASTN", true, false));
-        let subjects = residues(
-            "AvCLPV.fasta",
-            ReaderConfig::subject("TBLASTN", false, false),
-        );
-        let seg = SegParams::default();
-        let mut trace = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &queries[33..34],
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            true,
-            LocalStageDScoring::default(),
-            Some(&mut trace),
-        )
-        .unwrap();
-        assert_eq!(trace.parameters.as_ref().unwrap().cutoffs[0].word_xdrop, 15);
-        assert_eq!(
-            trace.parameters.as_ref().unwrap().cutoffs[0].word_cutoff,
-            36
-        );
-        let hsp = trace
-            .preliminary
-            .iter()
-            .flat_map(|(_, hsps)| hsps)
-            .map(|(_, hsp)| hsp)
-            .find(|hsp| hsp.frame == -1 && hsp.s_start == 76752 && hsp.s_end == 76934)
-            .unwrap();
-        assert_eq!((hsp.q_gapped_start, hsp.s_gapped_start), (173, 76909));
-        assert!(!results[0].lists().is_empty());
-    }
-
-    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
-    // if (m_PrelimSearch->CheckInternalData() != 0) {
-    //     // Search was not run, but we send back an empty CSearchResultSet.
-    //     CRef<objects::CSeq_align_set> tmp_align;
-    //     sa_vec.push_back(tmp_align);
-    // }
-    // The pinned NCBI no-hit probe records context valid=0 for this query.
-    #[test]
-    fn all_invalid_query_skips_subject_search_and_returns_empty_hitlist() {
-        let queries = vec![vec![b'W'; 60]];
-        let subjects = vec![vec![b'A'; 600]];
-        let seg = SegParams::default();
-        let mut trace = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            true,
-            LocalStageDScoring::default(),
-            Some(&mut trace),
-        )
-        .unwrap();
-        assert_eq!(trace.query_validity, [false]);
-        assert!(trace.preliminary.is_empty());
-        assert_eq!(results.len(), 1);
-        assert!(results[0].lists().is_empty());
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813;
-    // c++/src/algo/blast/core/blast_util.c:508-527,1070-1101:
-    // stat_length retains the raw nucleotide length until a nonempty frame
-    // replaces it, and the final translated context is frame -3.
-    #[test]
-    fn initial_stat_length_uses_last_nonempty_translated_frame() {
-        for (nt_length, expected) in [
-            (0, 0),
-            (1, 1),
-            (2, 2),
-            (3, 1),
-            (4, 1),
-            (5, 1),
-            (6, 1),
-            (7, 1),
-            (8, 2),
-            (360, 119),
-            (362, 120),
-        ] {
-            assert_eq!(initial_translated_stat_length(nt_length), expected);
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
-    // core/blast_kappa.c:3525-3565; core/blast_traceback.c:717-719:
-    // compare the actual Rust C-to-D list and Kappa incoming order with the
-    // saved function-entry snapshots, before comparing retained results.
-    fn assert_local_stage_d_boundaries(
-        trace: &StageDBoundaryTrace,
-        calls: &str,
-        kappa: Option<&str>,
-        do_sum_stats: bool,
-    ) {
-        let initial_phase = if do_sum_stats {
-            "link_before"
-        } else {
-            "evalue_before"
-        };
-        // NCBI core/blast_engine.c:870-905; blast_traceback.c:1644-1707:
-        // composition redo begins only after all preliminary lists were
-        // written. In the ordinary path, the first posttraceback E-value
-        // input has recomputed positive num_ident; initial HSPs have zero.
-        let boundary = if kappa.is_some() {
-            calls
-                .lines()
-                .find(|line| line.starts_with("D_CALL\t") && line.contains("\tredo\t"))
-                .and_then(|line| calls.find(line))
-                .expect("NCBI redo call")
-        } else {
-            calls
-                .lines()
-                .find(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    f.len() > 16
-                        && f[0] == "D_HSP"
-                        && f[2] == initial_phase
-                        && f[11].parse::<i32>().unwrap() > 0
-                })
-                .and_then(|line| {
-                    let event = line.split('\t').nth(1).unwrap();
-                    calls.find(&format!("D_CALL\t{event}\t"))
-                })
-                .unwrap_or(calls.len())
-        };
-        let preliminary_calls = &calls[..boundary];
-        let actual: Vec<_> = trace
-            .preliminary
-            .iter()
-            .flat_map(|(_, hsps)| hsps.iter())
-            .map(|(context, hsp)| {
-                (
-                    *context as i32,
-                    hsp.frame as i32,
-                    hsp.q_start,
-                    hsp.q_end,
-                    hsp.s_start,
-                    hsp.s_end,
-                    hsp.score,
-                    hsp.s_gapped_start,
-                )
-            })
-            .collect();
-        let expected: Vec<_> = preliminary_calls
-            .lines()
-            .filter_map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                if f.len() > 16 && f[0] == "D_HSP" && f[2] == initial_phase {
-                    Some((
-                        f[4].parse().unwrap(),
-                        f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
-                        f[7].parse().unwrap(),
-                        f[8].parse().unwrap(),
-                        f[9].parse().unwrap(),
-                        f[10].parse().unwrap(),
-                        f[16].parse().unwrap(),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert_eq!(actual, expected, "Stage C to D HSP input/order/count");
-        // NCBI core/blast_engine.c:870-905; link_hsps.c:1765-1810:
-        // each allocated subject list calls link with raw nucleotide length,
-        // or direct E-values with translated length, before preliminary reap.
-        let initial_call = if do_sum_stats { "link" } else { "evalue" };
-        let call_rows: Vec<Vec<_>> = preliminary_calls
-            .lines()
-            .filter_map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                (f.len() > 4 && f[0] == "D_CALL" && f[2] == initial_call).then_some(f)
-            })
-            .collect();
-        assert_eq!(
-            call_rows.len(),
-            trace.preliminary.len(),
-            "Stage C to D initial function call count"
-        );
-        for (row, (oid, _)) in call_rows.iter().zip(&trace.preliminary) {
-            let nt_length = trace.subject_nt_lengths[*oid];
-            assert_eq!(
-                row[4].parse::<usize>().unwrap(),
-                if do_sum_stats {
-                    nt_length
-                } else {
-                    initial_translated_stat_length(nt_length)
-                },
-                "Stage C to D subject length at initial call"
-            );
-            if do_sum_stats {
-                let link = trace.parameters.as_ref().unwrap().link.unwrap();
-                assert_eq!(row[6].parse::<i32>().unwrap(), link.longest_intron);
-                assert_eq!(
-                    row[7].parse::<f64>().unwrap().to_bits(),
-                    link.gap_decay_rate.to_bits()
-                );
-                assert_eq!(row[8].parse::<i32>().unwrap(), link.gap_size);
-                assert_eq!(row[9].parse::<i32>().unwrap(), link.cutoff_small_gap);
-            }
-        }
-        if let Some(params) = &trace.parameters {
-            for line in calls.lines().filter(|line| line.starts_with("D_CONTEXT\t")) {
-                let f: Vec<_> = line.split('\t').collect();
-                let context: usize = f[2].parse().unwrap();
-                assert_eq!(
-                    params.lengths[context].eff_searchsp,
-                    f[4].parse().unwrap(),
-                    "D effective search space"
-                );
-                assert_eq!(
-                    params.lengths[context].length_adjustment,
-                    f[5].parse().unwrap(),
-                    "D length adjustment"
-                );
-            }
-        }
-        if let Some(kappa) = kappa {
-            let actual: Vec<_> = trace
-                .redo
-                .iter()
-                .enumerate()
-                .flat_map(|(event, (context, _, hsps))| {
-                    hsps.iter().enumerate().map(move |(index, hsp)| {
-                        (
-                            event,
-                            index,
-                            hsp.score,
-                            *context,
-                            hsp.frame as i32,
-                            hsp.q_start,
-                            hsp.q_end,
-                            hsp.q_gapped_start,
-                            hsp.s_start,
-                            hsp.s_end,
-                            hsp.s_gapped_start,
-                        )
-                    })
-                })
-                .collect();
-            let expected: Vec<_> = kappa
-                .lines()
-                .filter(|line| line.starts_with("K_TRACE_PRELIM\t"))
-                .map(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    (
-                        f[1].parse().unwrap(),
-                        f[2].parse().unwrap(),
-                        f[3].parse().unwrap(),
-                        f[4].parse().unwrap(),
-                        f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
-                        f[7].parse().unwrap(),
-                        f[8].parse().unwrap(),
-                        f[9].parse().unwrap(),
-                        f[10].parse().unwrap(),
-                        f[11].parse().unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(actual, expected, "Kappa redo incoming HSPs/order");
-        } else {
-            // NCBI core/blast_traceback.c:717-719: stat_length is passed
-            // to the posttraceback E-value call. D_HSP field 16 is instead
-            // subject.gapped_start (ncbi_d_call_trace.c:113-118).
-            let mut seen = std::collections::HashSet::new();
-            let mut current_length = None;
-            let mut expected = Vec::new();
-            for line in calls.lines() {
-                let f: Vec<_> = line.split('\t').collect();
-                if f.len() > 4
-                    && f[0] == "D_CALL"
-                    && f[2] == if do_sum_stats { "link" } else { "evalue" }
-                {
-                    current_length = Some(f[4].parse::<i32>().unwrap());
-                } else if f.len() > 16
-                    && f[0] == "D_HSP"
-                    && f[2] == "bits_after"
-                    && seen.insert(f[1])
-                {
-                    expected.push((f[4].parse::<usize>().unwrap(), current_length.unwrap()));
-                }
-            }
-            let actual: Vec<_> = trace
-                .posttraceback_lengths
-                .iter()
-                .map(|(context, _, length)| (*context, *length))
-                .collect();
-            assert_eq!(
-                actual, expected,
-                "posttraceback translated stat_length/call order"
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736,2494-2515;
-    // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-    // The 112-subject comparison-only local run supplies natural Stage C
-    // candidates and two retained HSPs after Kappa and the result post-pipes.
-    #[test]
-    fn natural_112_subject_local_path_matches_retained_ncbi_fields() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
-            let mut records: Vec<Vec<u8>> = Vec::new();
-            for line in std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if line.starts_with('>') {
-                    records.push(Vec::new());
-                } else {
-                    records.last_mut().unwrap().extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("subjects.fna");
-        let seg = SegParams::default();
-        let mut boundary = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 2,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            true,
-            LocalStageDScoring::default(),
-            Some(&mut boundary),
-        )
-        .unwrap();
-        let calls =
-            std::fs::read_to_string(format!("{root}natural_c_d_early_20260925/calls.tsv")).unwrap();
-        let kappa =
-            std::fs::read_to_string(format!("{root}result_order_20260925/ncbi.trace")).unwrap();
-        assert_local_stage_d_boundaries(&boundary, &calls, Some(&kappa), true);
-        assert_eq!(results.len(), 1);
-        let hitlists = results[0].lists();
-        assert_eq!(hitlists.iter().map(|h| h.oid).collect::<Vec<_>>(), [10, 11]);
-        let report =
-            std::fs::read_to_string(format!("{root}report_payload_20260925/report_fields.tsv"))
-                .unwrap();
-        for (list, row) in hitlists.iter().zip(report.lines()) {
-            let f: Vec<_> = row.split('\t').collect();
-            assert_eq!(list.payloads.len(), 1);
-            let hsp = &list.hsps.hsps[0];
-            let payload = &list.payloads[0];
-            assert_eq!(f[1], format!("weak_{}", list.oid + 7));
-            assert_eq!(hsp.hsp.score, f[2].parse().unwrap());
-            assert_eq!(payload.num_ident, f[3].parse().unwrap());
-            assert_eq!(payload.num_positives, f[4].parse().unwrap());
-            assert_eq!(payload.align_length, f[5].parse().unwrap());
-            assert_eq!(payload.mismatches, f[6].parse().unwrap());
-            assert_eq!(payload.gap_letters, f[7].parse().unwrap());
-            assert_eq!(payload.gap_opens, f[8].parse().unwrap());
-            assert_eq!(hsp.hsp.q_start + 1, f[9].parse().unwrap());
-            assert_eq!(hsp.hsp.q_end, f[10].parse().unwrap());
-            assert_eq!(
-                3 * hsp.hsp.s_start + i32::from(hsp.hsp.frame),
-                f[11].parse().unwrap()
-            );
-            assert_eq!(
-                3 * hsp.hsp.s_end + i32::from(hsp.hsp.frame) - 1,
-                f[12].parse().unwrap()
-            );
-            assert_eq!(hsp.hsp.frame, f[13].parse().unwrap());
-            assert!(!payload.edit_script.is_empty());
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:3577-3736;
-    // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-    // Three query contexts share one local nucleotide subject; the third
-    // contains only X and NCBI leaves it invalid with no retained HSPs.
-    #[test]
-    fn natural_multi_query_local_path_matches_retained_ncbi_scores_and_coordinates() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
-        );
-        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
-            let mut records: Vec<Vec<u8>> = Vec::new();
-            for line in std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if line.starts_with('>') {
-                    records.push(Vec::new());
-                } else {
-                    records.last_mut().unwrap().extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("subjects.fna");
-        let seg = SegParams::default();
-        let mut boundary = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            true,
-            LocalStageDScoring::default(),
-            Some(&mut boundary),
-        )
-        .unwrap();
-        let calls = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/run_20260924/multi_query_20260924_default.trace"
-        ))
-        .unwrap();
-        let kappa = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/kappa_result_order_20260925/multi_query_20260924_default.tsv"
-        )).unwrap();
-        assert_local_stage_d_boundaries(&boundary, &calls, Some(&kappa), true);
-        let expected = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/run_20260924/multi_query_20260924_default.out"
-        ))
-        .unwrap();
-        let mut rows = Vec::new();
-        for (query_index, hitlist) in results.iter().enumerate() {
-            for list in hitlist.lists() {
-                for hsp in &list.hsps.hsps {
-                    let frame = i32::from(hsp.hsp.frame);
-                    let subject_len = subjects[list.oid as usize].len() as i32;
-                    let (sstart, send) = if frame > 0 {
-                        (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                    } else {
-                        (
-                            subject_len - 3 * hsp.hsp.s_start + frame + 1,
-                            subject_len - 3 * hsp.hsp.s_end + frame + 2,
-                        )
-                    };
-                    rows.push((
-                        query_index,
-                        hsp.hsp.score,
-                        hsp.hsp.q_start + 1,
-                        hsp.hsp.q_end,
-                        sstart,
-                        send,
-                        frame,
-                    ));
-                }
-            }
-        }
-        let expected_rows: Vec<_> = expected
-            .lines()
-            .map(|row| {
-                let f: Vec<_> = row.split('\t').collect();
-                let query_index = match f[0] {
-                    "full" => 0,
-                    "internal70" => 1,
-                    _ => 2,
-                };
-                (
-                    query_index,
-                    f[2].parse().unwrap(),
-                    f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
-                    f[7].parse().unwrap(),
-                    f[8].parse().unwrap(),
-                    f[9].parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(rows, expected_rows);
-        // NCBI c++/src/algo/blast/core/blast_kappa.c:3690-3713;
-        // c++/src/algo/blast/core/blast_hits.c:3243-3297:
-        // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
-        // Blast_HitListUpdate(hitlist, hsp_list);
-        // Compare the unformatted per-HSP values after the full local path.
-        let trace = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/kappa_result_order_20260925/multi_query_20260924_default.tsv")).unwrap();
-        let heap_rows: std::collections::HashMap<_, _> = trace
-            .lines()
-            .filter(|row| row.starts_with("K_TRACE_HEAP_HSP\t"))
-            .map(|row| {
-                let f: Vec<_> = row.split('\t').collect();
-                (
-                    (
-                        f[7].parse::<usize>().unwrap(),
-                        f[8].parse::<i8>().unwrap(),
-                        f[9].parse::<i32>().unwrap(),
-                        f[10].parse::<i32>().unwrap(),
-                        f[11].parse::<i32>().unwrap(),
-                        f[12].parse::<i32>().unwrap(),
-                    ),
-                    f,
-                )
-            })
-            .collect();
-        for (context, hitlist) in results.iter().enumerate() {
-            for list in hitlist.lists() {
-                for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                    let key = (
-                        context,
-                        hsp.hsp.frame,
-                        hsp.hsp.q_start,
-                        hsp.hsp.q_end,
-                        hsp.hsp.s_start,
-                        hsp.hsp.s_end,
-                    );
-                    let row = &heap_rows[&key];
-                    assert_eq!(hsp.hsp.score, row[3].parse().unwrap());
-                    assert_eq!(
-                        payload.bit_score.to_bits(),
-                        row[4].parse::<f64>().unwrap().to_bits()
-                    );
-                    assert_eq!(
-                        hsp.evalue.to_bits(),
-                        row[5].parse::<f64>().unwrap().to_bits()
-                    );
-                    assert_eq!(payload.num_ident, row[6].parse().unwrap());
-                }
-            }
-        }
-    }
-    // NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:800-812;
-    // core/blast_engine.c:1460-1466; core/blast_kappa.c:3687-3736:
-    // The comparison-only API uses FindGeneticCode(32) with the CLI-calibrated
-    // local seqSrc state and gives one retained HSP with full-precision values.
-    #[test]
-    fn code32_local_path_matches_cli_calibrated_api_oracle() {
-        let input = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_a/fixtures/"
-        );
-        let oracle = concat!(env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/code32_local_api_20260925_cli_calibrated/code32.trace");
-        let read = |name: &str| -> Vec<u8> {
-            std::fs::read_to_string(format!("{input}{name}"))
-                .unwrap()
-                .lines()
-                .filter(|line| !line.starts_with('>'))
-                .flat_map(str::bytes)
-                .collect()
-        };
-        let queries = vec![read("query.faa")];
-        let subjects = vec![read("subject_code32.fna")];
-        let seg = SegParams::default();
-        let results = run_local_mode2_sum_stats(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 32,
-                expect_value: 10.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-        )
-        .unwrap();
-        let trace = std::fs::read_to_string(oracle).unwrap();
-        let row: Vec<_> = trace
-            .lines()
-            .find(|row| row.starts_with("K_TRACE_HEAP_HSP\t"))
-            .unwrap()
-            .split('\t')
-            .collect();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].lists().len(), 1);
-        let list = &results[0].lists()[0];
-        assert_eq!(list.hsps.hsps.len(), 1);
-        let hsp = &list.hsps.hsps[0];
-        let payload = &list.payloads[0];
-        assert_eq!(hsp.hsp.score, row[3].parse().unwrap());
-        assert_eq!(
-            payload.bit_score.to_bits(),
-            row[4].parse::<f64>().unwrap().to_bits()
-        );
-        assert_eq!(
-            hsp.evalue.to_bits(),
-            row[5].parse::<f64>().unwrap().to_bits()
-        );
-        assert_eq!(payload.num_ident, row[6].parse().unwrap());
-        assert_eq!(hsp.hsp.frame, row[8].parse().unwrap());
-        assert_eq!(
-            (
-                hsp.hsp.q_start,
-                hsp.hsp.q_end,
-                hsp.hsp.s_start,
-                hsp.hsp.s_end
-            ),
-            (
-                row[9].parse().unwrap(),
-                row[10].parse().unwrap(),
-                row[11].parse().unwrap(),
-                row[12].parse().unwrap()
-            )
-        );
-        assert!(!payload.edit_script.is_empty());
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:200-251,
-    // 1481-1501,1644-1707,1763-1776:
-    // without composition statistics, ordinary traceback recomputes E-values,
-    // reaps, assigns bit scores, and inserts HSP lists before result sorting.
-    #[test]
-    fn ordinary_traceback_controls_match_local_ncbi_full_precision_fields() {
-        for case in [
-            "seg_hard_query_20260924",
-            "multi_query_20260924",
-            "run_20260923",
-        ] {
-            let input_root = format!(
-                "{}/../docs/evidence/tlosan_stage_c/{case}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let read_fasta = |name: &str| -> Vec<(String, Vec<u8>)> {
-                let mut records: Vec<(String, Vec<u8>)> = Vec::new();
-                for line in std::fs::read_to_string(format!("{input_root}/{name}"))
-                    .unwrap()
-                    .lines()
-                {
-                    if let Some(id) = line.strip_prefix('>') {
-                        records
-                            .push((id.split_whitespace().next().unwrap().to_owned(), Vec::new()));
-                    } else {
-                        records.last_mut().unwrap().1.extend(line.bytes());
-                    }
-                }
-                records
-            };
-            let queries = read_fasta("query.faa");
-            let subjects = read_fasta("subjects.fna");
-            let query_sequences: Vec<_> = queries.iter().map(|(_, seq)| seq.clone()).collect();
-            let subject_sequences: Vec<_> = subjects.iter().map(|(_, seq)| seq.clone()).collect();
-            let seg = SegParams::default();
-            let results = run_local_mode0_no_sum_stats(
-                &query_sequences,
-                &subject_slices(&subject_sequences),
-                LocalStageDProfile {
-                    seg: Some(&seg),
-                    soft_masking: false,
-                    mask_lowercase: false,
-                    genetic_code: 1,
-                    expect_value: 10.0,
-                    max_target_seqs: 500,
-                    query_records: &[],
-                    subject_set: Default::default(),
-                    engine_positives: false,
-                    culling_limit: 0,
-                    pssm: None,
-                    fetch_excluded: None,
-                },
-            )
-            .unwrap();
-            let root = concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../docs/evidence/tlosan_stage_d/run_20260924/"
-            );
-            let trace = std::fs::read_to_string(format!("{root}{case}_control.trace")).unwrap();
-            let expected: Vec<_> = trace
-                .lines()
-                .filter(|line| line.starts_with("D_HSP\t") && line.contains("\tbits_after\t"))
-                .map(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    (
-                        (
-                            f[4].parse::<usize>().unwrap(),
-                            f[5].parse::<i8>().unwrap(),
-                            f[6].parse::<i32>().unwrap(),
-                            f[7].parse::<i32>().unwrap(),
-                            f[8].parse::<i32>().unwrap(),
-                            f[9].parse::<i32>().unwrap(),
-                        ),
-                        (
-                            f[10].parse::<i32>().unwrap(),
-                            f[11].parse::<i32>().unwrap(),
-                            f[12].parse::<i32>().unwrap(),
-                            f[13].parse::<f64>().unwrap().to_bits(),
-                            f[14].parse::<f64>().unwrap().to_bits(),
-                        ),
-                    )
-                })
-                .collect();
-            let mut actual: Vec<_> = results
-                .iter()
-                .enumerate()
-                .flat_map(|(query_index, hitlist)| {
-                    hitlist.lists().iter().flat_map(move |list| {
-                        list.hsps
-                            .hsps
-                            .iter()
-                            .zip(&list.payloads)
-                            .map(move |(hsp, payload)| {
-                                (
-                                    (
-                                        query_index,
-                                        hsp.hsp.frame,
-                                        hsp.hsp.q_start,
-                                        hsp.hsp.q_end,
-                                        hsp.hsp.s_start,
-                                        hsp.hsp.s_end,
-                                    ),
-                                    (
-                                        hsp.hsp.score,
-                                        payload.num_ident,
-                                        hsp.num,
-                                        hsp.evalue.to_bits(),
-                                        payload.bit_score.to_bits(),
-                                    ),
-                                )
-                            })
-                    })
-                })
-                .collect();
-            let mut expected = expected;
-            actual.sort_unstable();
-            expected.sort_unstable();
-            assert_eq!(actual, expected, "{case} full-precision ordinary traceback");
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776;
-            // c++/src/algo/blast/core/blast_hits.c:3383-3400:
-            // positive local TotLen sorts result lists by best E-value.
-            // Here the saved diagnostic outfmt-6 columns witness Stage D
-            // order, coordinates and alignment length; Stage E byte output
-            // remains gated.
-            let expected_output =
-                std::fs::read_to_string(format!("{root}{case}_control.out")).unwrap();
-            let expected_order: Vec<_> = expected_output
-                .lines()
-                .map(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    (
-                        f[0].to_owned(),
-                        f[1].to_owned(),
-                        f[2].parse::<i32>().unwrap(),
-                        f[5].parse::<i32>().unwrap(),
-                        f[6].parse::<i32>().unwrap(),
-                        f[7].parse::<i32>().unwrap(),
-                        f[8].parse::<i32>().unwrap(),
-                        f[9].parse::<i8>().unwrap(),
-                        f[10].parse::<usize>().unwrap(),
-                    )
-                })
-                .collect();
-            let mut actual_order = Vec::new();
-            for (query_index, hitlist) in results.iter().enumerate() {
-                for list in hitlist.lists() {
-                    for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                        let frame = i32::from(hsp.hsp.frame);
-                        let subject_len = subjects[list.oid as usize].1.len() as i32;
-                        let (sstart, send) = if frame > 0 {
-                            (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                        } else {
-                            (
-                                subject_len - 3 * hsp.hsp.s_start + frame + 1,
-                                subject_len - 3 * hsp.hsp.s_end + frame + 2,
-                            )
-                        };
-                        actual_order.push((
-                            queries[query_index].0.clone(),
-                            subjects[list.oid as usize].0.clone(),
-                            hsp.hsp.score,
-                            hsp.hsp.q_start + 1,
-                            hsp.hsp.q_end,
-                            sstart,
-                            send,
-                            hsp.hsp.frame,
-                            payload.align_length,
-                        ));
-                    }
-                }
-            }
-            assert_eq!(
-                actual_order, expected_order,
-                "{case} result order/report-ready fields"
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:198-250,717-719;
-    // core/blast_kappa.c:3670-3733; core/blast_hits.c:3243-3297:
-    // every retained local Stage C FASTA fixture must preserve its final HSP
-    // values and order through the ordinary or composition result branch.
-    #[test]
-    fn remaining_five_local_fixture_families_match_ncbi_stage_d() {
-        let croot = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/"
-        );
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/remaining_local_20260925/run_20260925/"
-        );
-        for case in [
-            "ambiguity_20260923",
-            "lowercase_20260923",
-            "multi_hsp_20260924",
-            "multi_hsp_no_fence_20260924",
-            "six_frame_merged_20260924",
-        ] {
-            let read_fasta = |file: &str| -> Vec<(String, Vec<u8>)> {
-                let mut rows = Vec::new();
-                for line in std::fs::read_to_string(format!("{croot}{case}/{file}"))
-                    .unwrap()
-                    .lines()
-                {
-                    if let Some(id) = line.strip_prefix('>') {
-                        rows.push((id.split_whitespace().next().unwrap().to_owned(), Vec::new()));
-                    } else {
-                        rows.last_mut().unwrap().1.extend(line.bytes());
-                    }
-                }
-                rows
-            };
-            let queries = read_fasta("query.faa");
-            let subjects = read_fasta("subjects.fna");
-            let query_sequences: Vec<_> = queries.iter().map(|(_, seq)| seq.clone()).collect();
-            let subject_sequences: Vec<_> = subjects.iter().map(|(_, seq)| seq.clone()).collect();
-            let mut scoring = LocalStageDScoring::default();
-            if case == "multi_hsp_no_fence_20260924" {
-                scoring.gap_xdrop_bits = 5.0;
-                scoring.final_xdrop_bits = 5.0;
-            }
-            for mode in [0, 2] {
-                let name = format!("{case}.mode{mode}");
-                let profile = LocalStageDProfile {
-                    seg: None,
-                    soft_masking: false,
-                    mask_lowercase: case == "lowercase_20260923",
-                    genetic_code: 1,
-                    expect_value: 10000.0,
-                    max_target_seqs: 500,
-                    query_records: &[],
-                    subject_set: Default::default(),
-                    engine_positives: false,
-                    culling_limit: 0,
-                    pssm: None,
-                    fetch_excluded: None,
-                };
-                let mut boundary = StageDBoundaryTrace::default();
-                let results = run_local_search(
-                    &query_sequences,
-                    &subject_slices(&subject_sequences),
-                    profile,
-                    if mode == 2 {
-                        BlastCompoAdjustMode::CompositionMatrixAdjust
-                    } else {
-                        BlastCompoAdjustMode::NoCompositionBasedStats
-                    },
-                    mode == 2,
-                    scoring,
-                    Some(&mut boundary),
-                )
-                .unwrap();
-                assert_eq!(results.len(), 1, "{name} query count");
-                let mut actual = Vec::new();
-                let mut ordered = Vec::new();
-                for list in results[0].lists() {
-                    for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                        actual.push((
-                            hsp.hsp.frame,
-                            hsp.hsp.q_start,
-                            hsp.hsp.q_end,
-                            hsp.hsp.s_start,
-                            hsp.hsp.s_end,
-                            hsp.hsp.score,
-                            payload.num_ident,
-                            hsp.num,
-                            hsp.evalue.to_bits(),
-                            payload.bit_score.to_bits(),
-                        ));
-                        let frame = i32::from(hsp.hsp.frame);
-                        let slen = subjects[list.oid as usize].1.len() as i32;
-                        let (sstart, send) = if frame > 0 {
-                            (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                        } else {
-                            (
-                                slen - 3 * hsp.hsp.s_start + frame + 1,
-                                slen - 3 * hsp.hsp.s_end + frame + 2,
-                            )
-                        };
-                        ordered.push((
-                            (queries[0].0.clone(), subjects[list.oid as usize].0.clone()),
-                            (
-                                hsp.hsp.score,
-                                payload.report_num_ident,
-                                payload.report_num_positives,
-                                payload.align_length,
-                                payload.report_mismatches,
-                                payload.gap_letters,
-                                payload.gap_opens,
-                            ),
-                            (
-                                hsp.hsp.q_start + 1,
-                                hsp.hsp.q_end,
-                                sstart,
-                                send,
-                                hsp.hsp.frame,
-                            ),
-                        ));
-                    }
-                }
-                let trace = std::fs::read_to_string(format!(
-                    "{root}{name}.{}",
-                    if mode == 0 {
-                        "calls.trace"
-                    } else {
-                        "kappa.trace"
-                    }
-                ))
-                .unwrap();
-                let calls = std::fs::read_to_string(format!("{root}{name}.calls.trace")).unwrap();
-                assert_local_stage_d_boundaries(
-                    &boundary,
-                    &calls,
-                    if mode == 2 { Some(&trace) } else { None },
-                    mode == 2,
-                );
-                let mut expected: Vec<_> = trace
-                    .lines()
-                    .filter(|line| {
-                        if mode == 0 {
-                            line.starts_with("D_HSP\t") && line.contains("\tbits_after\t")
-                        } else {
-                            line.starts_with("K_TRACE_HEAP_HSP\t")
-                        }
-                    })
-                    .map(|line| {
-                        let f: Vec<_> = line.split('\t').collect();
-                        if mode == 0 {
-                            (
-                                f[5].parse().unwrap(),
-                                f[6].parse().unwrap(),
-                                f[7].parse().unwrap(),
-                                f[8].parse().unwrap(),
-                                f[9].parse().unwrap(),
-                                f[10].parse().unwrap(),
-                                f[11].parse().unwrap(),
-                                f[12].parse().unwrap(),
-                                f[13].parse::<f64>().unwrap().to_bits(),
-                                f[14].parse::<f64>().unwrap().to_bits(),
-                            )
-                        } else {
-                            (
-                                f[8].parse().unwrap(),
-                                f[9].parse().unwrap(),
-                                f[10].parse().unwrap(),
-                                f[11].parse().unwrap(),
-                                f[12].parse().unwrap(),
-                                f[3].parse().unwrap(),
-                                f[6].parse().unwrap(),
-                                f[13].parse().unwrap(),
-                                f[5].parse::<f64>().unwrap().to_bits(),
-                                f[4].parse::<f64>().unwrap().to_bits(),
-                            )
-                        }
-                    })
-                    .collect();
-                actual.sort_unstable();
-                expected.sort_unstable();
-                assert_eq!(actual, expected, "{name} full-precision internal HSPs");
-                let expected_order: Vec<_> =
-                    std::fs::read_to_string(format!("{root}{name}.report.tsv"))
-                        .unwrap()
-                        .lines()
-                        .map(|line| {
-                            let f: Vec<_> = line.split('\t').collect();
-                            (
-                                (f[0].to_owned(), f[1].to_owned()),
-                                (
-                                    f[2].parse().unwrap(),
-                                    f[5].parse().unwrap(),
-                                    f[6].parse().unwrap(),
-                                    f[7].parse().unwrap(),
-                                    f[8].parse().unwrap(),
-                                    f[9].parse().unwrap(),
-                                    f[10].parse().unwrap(),
-                                ),
-                                (
-                                    f[11].parse().unwrap(),
-                                    f[12].parse().unwrap(),
-                                    f[13].parse().unwrap(),
-                                    f[14].parse().unwrap(),
-                                    f[15].parse().unwrap(),
-                                ),
-                            )
-                        })
-                        .collect();
-                assert_eq!(ordered, expected_order, "{name} order/report fields");
-            }
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_engine.c:283-307,870-905;
-    // core/blast_traceback.c:198-250,717-719,1481-1501;
-    // core/blast_kappa.c:3525-3736:
-    // generated masked and unmasked translated chunk boundaries use the same
-    // local Stage C search then ordinary or composition Stage D result path.
-    #[test]
-    fn four_generated_stage_c_chunk_families_match_ncbi_stage_d() {
-        let croot = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/"
-        );
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/extended_chunks_20260925/run_20260925/"
-        );
-        let source = std::fs::read_to_string(format!("{croot}run_20260923/subjects.fna")).unwrap();
-        let insert = source
-            .split('>')
-            .find(|record| record.starts_with("plus1\n"))
-            .unwrap()
-            .lines()
-            .skip(1)
-            .flat_map(str::bytes)
-            .collect::<Vec<_>>();
-        assert_eq!(insert.len(), 362);
-        let query = std::fs::read_to_string(format!("{croot}run_20260923/query.faa"))
-            .unwrap()
-            .lines()
-            .filter(|line| !line.starts_with('>'))
-            .flat_map(str::bytes)
-            .collect::<Vec<_>>();
-        for case in [
-            "long_chunk_20260924",
-            "masked_chunk_boundary_20260924",
-            "no_range_middle_20260924",
-            "no_range_two_hits_20260924",
-        ] {
-            let mut subject = if case == "no_range_two_hits_20260924" {
-                let first = 4_998_450;
-                let second = 10_000_050;
-                let mut seq = b"ATG".repeat(first);
-                seq.extend(&insert);
-                seq.push(b'A');
-                seq.extend(b"ATG".repeat(second - first - 121));
-                seq.extend(&insert);
-                seq.extend(b"ATG".repeat(250));
-                seq
-            } else if case == "no_range_middle_20260924" {
-                let mut seq = b"ATG".repeat(10_000_050);
-                seq.extend(&insert);
-                seq.extend(b"ATG".repeat(250));
-                seq
-            } else {
-                let mut seq = b"ATG".repeat(4_999_950);
-                seq.extend(&insert);
-                seq.extend(b"ATG".repeat(250));
-                seq
-            };
-            if case.starts_with("no_range") {
-                subject[4_999_000 * 3..10_000_000 * 3].make_ascii_lowercase();
-            } else if case == "masked_chunk_boundary_20260924" {
-                subject[4_999_900 * 3..5_000_000 * 3].make_ascii_lowercase();
-            }
-            for mode in [0, 2] {
-                let name = format!("{case}.mode{mode}");
-                let profile = LocalStageDProfile {
-                    seg: None,
-                    soft_masking: false,
-                    mask_lowercase: case != "long_chunk_20260924",
-                    genetic_code: 1,
-                    expect_value: 10000.0,
-                    max_target_seqs: 500,
-                    query_records: &[],
-                    subject_set: Default::default(),
-                    engine_positives: false,
-                    culling_limit: 0,
-                    pssm: None,
-                    fetch_excluded: None,
-                };
-                let mut boundary = StageDBoundaryTrace::default();
-                let results = run_local_search(
-                    std::slice::from_ref(&query),
-                    &[subject.as_slice()],
-                    profile,
-                    if mode == 2 {
-                        BlastCompoAdjustMode::CompositionMatrixAdjust
-                    } else {
-                        BlastCompoAdjustMode::NoCompositionBasedStats
-                    },
-                    mode == 2,
-                    LocalStageDScoring::default(),
-                    Some(&mut boundary),
-                )
-                .unwrap();
-                let calls = std::fs::read_to_string(format!("{root}{name}.calls.trace")).unwrap();
-                let kappa = if mode == 2 {
-                    Some(std::fs::read_to_string(format!("{root}{name}.kappa.trace")).unwrap())
-                } else {
-                    None
-                };
-                assert_local_stage_d_boundaries(&boundary, &calls, kappa.as_deref(), mode == 2);
-                let actual: Vec<_> = results[0]
-                    .lists()
-                    .iter()
-                    .flat_map(|list| {
-                        list.hsps
-                            .hsps
-                            .iter()
-                            .zip(&list.payloads)
-                            .map(|(hsp, payload)| {
-                                let frame = i32::from(hsp.hsp.frame);
-                                let slen = subject.len() as i32;
-                                let (sstart, send) = if frame > 0 {
-                                    (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                                } else {
-                                    (
-                                        slen - 3 * hsp.hsp.s_start + frame + 1,
-                                        slen - 3 * hsp.hsp.s_end + frame + 2,
-                                    )
-                                };
-                                (
-                                    hsp.hsp.score,
-                                    payload.report_num_ident,
-                                    payload.report_num_positives,
-                                    payload.align_length,
-                                    payload.report_mismatches,
-                                    payload.gap_letters,
-                                    payload.gap_opens,
-                                    hsp.hsp.q_start + 1,
-                                    hsp.hsp.q_end,
-                                    sstart,
-                                    send,
-                                    hsp.hsp.frame,
-                                    hsp.evalue.to_bits(),
-                                    payload.bit_score.to_bits(),
-                                )
-                            })
-                    })
-                    .collect();
-                let report = std::fs::read_to_string(format!("{root}{name}.report.tsv")).unwrap();
-                let expected: Vec<_> = report
-                    .lines()
-                    .map(|line| {
-                        let f: Vec<_> = line.split('\t').collect();
-                        (
-                            f[2].parse().unwrap(),
-                            f[5].parse().unwrap(),
-                            f[6].parse().unwrap(),
-                            f[7].parse().unwrap(),
-                            f[8].parse().unwrap(),
-                            f[9].parse().unwrap(),
-                            f[10].parse().unwrap(),
-                            f[11].parse().unwrap(),
-                            f[12].parse().unwrap(),
-                            f[13].parse().unwrap(),
-                            f[14].parse().unwrap(),
-                            f[15].parse().unwrap(),
-                        )
-                    })
-                    .collect();
-                assert_eq!(actual.len(), expected.len(), "{name} retained count");
-                for (
-                    (
-                        score,
-                        ident,
-                        pos,
-                        length,
-                        mismatch,
-                        gaps,
-                        gapopen,
-                        q0,
-                        q1,
-                        s0,
-                        s1,
-                        frame,
-                        e,
-                        bits,
-                    ),
-                    expected,
-                ) in actual.into_iter().zip(expected)
-                {
-                    assert_eq!(
-                        (
-                            score, ident, pos, length, mismatch, gaps, gapopen, q0, q1, s0, s1,
-                            frame
-                        ),
-                        expected,
-                        "{name} report values/order"
-                    );
-                    let trace = std::fs::read_to_string(format!(
-                        "{root}{name}.{}",
-                        if mode == 0 {
-                            "calls.trace"
-                        } else {
-                            "kappa.trace"
-                        }
-                    ))
-                    .unwrap();
-                    let row = trace
-                        .lines()
-                        .find(|line| {
-                            let f: Vec<_> = line.split('\t').collect();
-                            if mode == 0 {
-                                f.len() > 14
-                                    && f[0] == "D_HSP"
-                                    && f[2] == "bits_after"
-                                    && f[10].parse::<i32>().unwrap() == score
-                                    && f[5].parse::<i8>().unwrap() == frame
-                            } else {
-                                f.len() > 13
-                                    && f[0] == "K_TRACE_HEAP_HSP"
-                                    && f[3].parse::<i32>().unwrap() == score
-                                    && f[8].parse::<i8>().unwrap() == frame
-                            }
-                        })
-                        .unwrap();
-                    let f: Vec<_> = row.split('\t').collect();
-                    let (ecol, bcol) = if mode == 0 { (13, 14) } else { (5, 4) };
-                    assert_eq!(
-                        e,
-                        f[ecol].parse::<f64>().unwrap().to_bits(),
-                        "{name} E-value"
-                    );
-                    assert_eq!(
-                        bits,
-                        f[bcol].parse::<f64>().unwrap().to_bits(),
-                        "{name} bits"
-                    );
-                }
-            }
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_engine.c:747-850,1446-1467;
-    // core/blast_traceback.c:198-250,717-719:
-    // the long six-frame subject enters the same local posttraceback call with
-    // translated statistical length and query-indexed effective search spaces.
-    #[test]
-    fn long_multi_query_local_stage_d_matches_ncbi() {
-        let croot = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/"
-        );
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/long_subject_20260925/run_20260925/"
-        );
-        let query_text =
-            std::fs::read_to_string(format!("{croot}long_multi_query_20260924/query.faa")).unwrap();
-        let mut queries = Vec::new();
-        let mut query_names = Vec::new();
-        for line in query_text.lines() {
-            if let Some(id) = line.strip_prefix('>') {
-                query_names.push(id.split_whitespace().next().unwrap().to_owned());
-                queries.push(Vec::new());
-            } else {
-                queries.last_mut().unwrap().extend(line.bytes());
-            }
-        }
-        let source = std::fs::read_to_string(format!("{croot}run_20260923/subjects.fna")).unwrap();
-        let plus1: Vec<u8> = source
-            .split('>')
-            .find_map(|record| {
-                let mut lines = record.lines();
-                (lines.next()?.split_whitespace().next()? == "plus1")
-                    .then(|| lines.flat_map(str::bytes).collect())
-            })
-            .unwrap();
-        let mut subject = Vec::with_capacity(15_000_962);
-        for _ in 0..4_999_950 {
-            subject.extend_from_slice(b"ATG");
-        }
-        subject.extend_from_slice(&plus1);
-        for _ in 0..250 {
-            subject.extend_from_slice(b"ATG");
-        }
-        assert_eq!(subject.len(), 15_000_962);
-        let mut boundary = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &queries,
-            &[subject.as_slice()],
-            LocalStageDProfile {
-                seg: None,
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10000.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::NoCompositionBasedStats,
-            false,
-            LocalStageDScoring::default(),
-            Some(&mut boundary),
-        )
-        .unwrap();
-        let mut actual = Vec::new();
-        let mut ordered = Vec::new();
-        for (qidx, hitlist) in results.iter().enumerate() {
-            for list in hitlist.lists() {
-                for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                    actual.push((
-                        qidx,
-                        hsp.hsp.frame,
-                        hsp.hsp.q_start,
-                        hsp.hsp.q_end,
-                        hsp.hsp.s_start,
-                        hsp.hsp.s_end,
-                        hsp.hsp.score,
-                        payload.num_ident,
-                        hsp.evalue.to_bits(),
-                        payload.bit_score.to_bits(),
-                    ));
-                    ordered.push((
-                        (query_names[qidx].clone(), "chunk_edge".to_owned()),
-                        (
-                            hsp.hsp.score,
-                            payload.report_num_ident,
-                            payload.report_num_positives,
-                            payload.align_length,
-                            payload.report_mismatches,
-                            payload.gap_letters,
-                            payload.gap_opens,
-                        ),
-                        (
-                            hsp.hsp.q_start + 1,
-                            hsp.hsp.q_end,
-                            3 * hsp.hsp.s_start + 1,
-                            3 * hsp.hsp.s_end,
-                            hsp.hsp.frame,
-                        ),
-                    ));
-                }
-            }
-        }
-        let trace = std::fs::read_to_string(format!("{root}calls.trace")).unwrap();
-        assert_local_stage_d_boundaries(&boundary, &trace, None, false);
-        let mut expected: Vec<_> = trace
-            .lines()
-            .filter(|line| line.starts_with("D_HSP\t") && line.contains("\tbits_after\t"))
-            .map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                (
-                    f[4].parse().unwrap(),
-                    f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
-                    f[7].parse().unwrap(),
-                    f[8].parse().unwrap(),
-                    f[9].parse().unwrap(),
-                    f[10].parse().unwrap(),
-                    f[11].parse().unwrap(),
-                    f[13].parse::<f64>().unwrap().to_bits(),
-                    f[14].parse::<f64>().unwrap().to_bits(),
-                )
-            })
-            .collect();
-        actual.sort_unstable();
-        expected.sort_unstable();
-        assert_eq!(actual, expected, "long subject full-precision final HSPs");
-        let expected_order: Vec<_> = std::fs::read_to_string(format!("{root}report.tsv"))
-            .unwrap()
-            .lines()
-            .map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                (
-                    (f[0].to_owned(), f[1].to_owned()),
-                    (
-                        f[2].parse().unwrap(),
-                        f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
-                        f[7].parse().unwrap(),
-                        f[8].parse().unwrap(),
-                        f[9].parse().unwrap(),
-                        f[10].parse().unwrap(),
-                    ),
-                    (
-                        f[11].parse().unwrap(),
-                        f[12].parse().unwrap(),
-                        f[13].parse().unwrap(),
-                        f[14].parse().unwrap(),
-                        f[15].parse().unwrap(),
-                    ),
-                )
-            })
-            .collect();
-        assert_eq!(
-            ordered, expected_order,
-            "long subject final order/report fields"
-        );
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2547-2605,4091-4171;
-    // core/blast_traceback.c:503-536,717-719: BLOSUM45 gap-14/2 uses
-    // its own score block and Karlin E-values with no Spouge gbp.
-    #[test]
-    fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
-        let input = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/alternate_matrix_word2_20260924/"
-        );
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/alternate_matrix_20260925/run_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<(String, Vec<u8>)> {
-            let mut records: Vec<(String, Vec<u8>)> = Vec::new();
-            for line in std::fs::read_to_string(format!("{input}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if let Some(id) = line.strip_prefix('>') {
-                    records.push((id.split_whitespace().next().unwrap().to_owned(), Vec::new()));
-                } else {
-                    records.last_mut().unwrap().1.extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("subjects.fna");
-        let query_sequences: Vec<_> = queries.iter().map(|(_, seq)| seq.clone()).collect();
-        let subject_sequences: Vec<_> = subjects.iter().map(|(_, seq)| seq.clone()).collect();
-        let mut boundary = StageDBoundaryTrace::default();
-        let results = run_local_search(
-            &query_sequences,
-            &subject_slices(&subject_sequences),
-            LocalStageDProfile {
-                seg: None,
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10000.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-            BlastCompoAdjustMode::NoCompositionBasedStats,
-            false,
-            LocalStageDScoring {
-                matrix: ScoringMatrix::Blosum45,
-                gap_open: 14,
-                gap_extend: 2,
-                word_size: 2,
-                threshold: 16.0,
-                window: 60,
-                gap_xdrop_bits: 15.0,
-                final_xdrop_bits: 25.0,
-                word_xdrop_bits: 7.0,
-            },
-            Some(&mut boundary),
-        )
-        .unwrap();
-        let mut actual = Vec::new();
-        let mut ordered = Vec::new();
-        for (qidx, hitlist) in results.iter().enumerate() {
-            for list in hitlist.lists() {
-                for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                    actual.push((
-                        qidx,
-                        hsp.hsp.frame,
-                        hsp.hsp.q_start,
-                        hsp.hsp.q_end,
-                        hsp.hsp.s_start,
-                        hsp.hsp.s_end,
-                        hsp.hsp.score,
-                        payload.num_ident,
-                        hsp.evalue.to_bits(),
-                        payload.bit_score.to_bits(),
-                    ));
-                    let frame = i32::from(hsp.hsp.frame);
-                    let slen = subjects[list.oid as usize].1.len() as i32;
-                    let (sstart, send) = if frame > 0 {
-                        (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                    } else {
-                        (
-                            slen - 3 * hsp.hsp.s_start + frame + 1,
-                            slen - 3 * hsp.hsp.s_end + frame + 2,
-                        )
-                    };
-                    ordered.push((
-                        (
-                            queries[qidx].0.clone(),
-                            subjects[list.oid as usize].0.clone(),
-                        ),
-                        (
-                            hsp.hsp.score,
-                            payload.report_num_ident,
-                            payload.report_num_positives,
-                            payload.align_length,
-                            payload.report_mismatches,
-                            payload.gap_letters,
-                            payload.gap_opens,
-                        ),
-                        (
-                            hsp.hsp.q_start + 1,
-                            hsp.hsp.q_end,
-                            sstart,
-                            send,
-                            hsp.hsp.frame,
-                        ),
-                    ));
-                }
-            }
-        }
-        let trace = std::fs::read_to_string(format!("{root}calls.trace")).unwrap();
-        assert_local_stage_d_boundaries(&boundary, &trace, None, false);
-        let mut expected: Vec<_> = trace
-            .lines()
-            .filter(|line| line.starts_with("D_HSP\t") && line.contains("\tbits_after\t"))
-            .map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                (
-                    f[4].parse().unwrap(),
-                    f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
-                    f[7].parse().unwrap(),
-                    f[8].parse().unwrap(),
-                    f[9].parse().unwrap(),
-                    f[10].parse().unwrap(),
-                    f[11].parse().unwrap(),
-                    f[13].parse::<f64>().unwrap().to_bits(),
-                    f[14].parse::<f64>().unwrap().to_bits(),
-                )
-            })
-            .collect();
-        actual.sort_unstable();
-        expected.sort_unstable();
-        assert_eq!(actual, expected, "BLOSUM45 full-precision retained HSPs");
-        let expected_order: Vec<_> = std::fs::read_to_string(format!("{root}report.tsv"))
-            .unwrap()
-            .lines()
-            .map(|line| {
-                let f: Vec<_> = line.split('\t').collect();
-                (
-                    (f[0].to_owned(), f[1].to_owned()),
-                    (
-                        f[2].parse().unwrap(),
-                        f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
-                        f[7].parse().unwrap(),
-                        f[8].parse().unwrap(),
-                        f[9].parse().unwrap(),
-                        f[10].parse().unwrap(),
-                    ),
-                    (
-                        f[11].parse().unwrap(),
-                        f[12].parse().unwrap(),
-                        f[13].parse().unwrap(),
-                        f[14].parse().unwrap(),
-                        f[15].parse().unwrap(),
-                    ),
-                )
-            })
-            .collect();
-        assert_eq!(
-            ordered, expected_order,
-            "BLOSUM45 final order and report fields"
-        );
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:198-250,1486-1501;
-    // c++/src/algo/blast/core/blast_kappa.c:411-427,3670-3701:
-    // compositionBasedStats chooses redo while do_sum_stats independently
-    // chooses BLAST_LinkHsps or direct Blast_HSPListGetEvalues.
-    #[test]
-    fn independent_composition_and_sum_stats_options_match_ncbi() {
-        let stage_c = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
-        );
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/option_cross_20260925/run_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<(String, Vec<u8>)> {
-            let mut records: Vec<(String, Vec<u8>)> = Vec::new();
-            for line in std::fs::read_to_string(format!("{stage_c}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if let Some(id) = line.strip_prefix('>') {
-                    records.push((id.split_whitespace().next().unwrap().to_owned(), Vec::new()));
-                } else {
-                    records.last_mut().unwrap().1.extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("subjects.fna");
-        let query_sequences: Vec<_> = queries.iter().map(|(_, seq)| seq.clone()).collect();
-        let subject_sequences: Vec<_> = subjects.iter().map(|(_, seq)| seq.clone()).collect();
-        let seg = SegParams::default();
-        for (name, mode) in [("mode0_sumtrue", 0), ("mode2_sumfalse", 2)] {
-            let profile = LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 500,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            };
-            let mut boundary = StageDBoundaryTrace::default();
-            let result = run_local_search(
-                &query_sequences,
-                &subject_slices(&subject_sequences),
-                profile,
-                if mode == 2 {
-                    BlastCompoAdjustMode::CompositionMatrixAdjust
-                } else {
-                    BlastCompoAdjustMode::NoCompositionBasedStats
-                },
-                mode == 0,
-                LocalStageDScoring::default(),
-                Some(&mut boundary),
-            )
-            .unwrap();
-            let mut actual = Vec::new();
-            let mut ordered = Vec::new();
-            for (query_index, hitlist) in result.iter().enumerate() {
-                for list in hitlist.lists() {
-                    for (hsp, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                        let frame = i32::from(hsp.hsp.frame);
-                        let subject_len = subjects[list.oid as usize].1.len() as i32;
-                        let (sstart, send) = if frame > 0 {
-                            (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                        } else {
-                            (
-                                subject_len - 3 * hsp.hsp.s_start + frame + 1,
-                                subject_len - 3 * hsp.hsp.s_end + frame + 2,
-                            )
-                        };
-                        actual.push((
-                            query_index,
-                            hsp.hsp.frame,
-                            hsp.hsp.q_start,
-                            hsp.hsp.q_end,
-                            hsp.hsp.s_start,
-                            hsp.hsp.s_end,
-                            hsp.hsp.score,
-                            hsp.evalue.to_bits(),
-                        ));
-                        ordered.push((
-                            (
-                                queries[query_index].0.clone(),
-                                subjects[list.oid as usize].0.clone(),
-                            ),
-                            (
-                                hsp.hsp.score,
-                                payload.report_num_ident,
-                                payload.report_num_positives,
-                                payload.align_length,
-                                payload.report_mismatches,
-                                payload.gap_letters,
-                                payload.gap_opens,
-                            ),
-                            (
-                                hsp.hsp.q_start + 1,
-                                hsp.hsp.q_end,
-                                sstart,
-                                send,
-                                hsp.hsp.frame,
-                            ),
-                        ));
-                    }
-                }
-            }
-            let trace = std::fs::read_to_string(format!(
-                "{root}{name}.{}",
-                if mode == 0 {
-                    "calls.trace"
-                } else {
-                    "kappa.trace"
-                }
-            ))
-            .unwrap();
-            let calls = std::fs::read_to_string(format!("{root}{name}.calls.trace")).unwrap();
-            assert_local_stage_d_boundaries(
-                &boundary,
-                &calls,
-                if mode == 2 { Some(&trace) } else { None },
-                mode == 0,
-            );
-            let mut expected: Vec<_> = trace
-                .lines()
-                .filter(|line| {
-                    if mode == 0 {
-                        line.starts_with("D_HSP\t") && line.contains("\tbits_after\t")
-                    } else {
-                        line.starts_with("K_TRACE_RESULT_HSP\t")
-                    }
-                })
-                .map(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    if mode == 0 {
-                        (
-                            f[4].parse().unwrap(),
-                            f[5].parse().unwrap(),
-                            f[6].parse().unwrap(),
-                            f[7].parse().unwrap(),
-                            f[8].parse().unwrap(),
-                            f[9].parse().unwrap(),
-                            f[10].parse().unwrap(),
-                            f[13].parse::<f64>().unwrap().to_bits(),
-                        )
-                    } else {
-                        (
-                            usize::from(f[7] == "70"),
-                            f[10].parse().unwrap(),
-                            f[6].parse().unwrap(),
-                            f[7].parse().unwrap(),
-                            f[8].parse().unwrap(),
-                            f[9].parse().unwrap(),
-                            f[4].parse().unwrap(),
-                            f[5].parse::<f64>().unwrap().to_bits(),
-                        )
-                    }
-                })
-                .collect();
-            actual.sort_unstable();
-            expected.sort_unstable();
-            assert_eq!(
-                actual, expected,
-                "{name} exact retained score/coords/E-value"
-            );
-            let expected_order: Vec<_> =
-                std::fs::read_to_string(format!("{root}{name}.report.tsv"))
-                    .unwrap()
-                    .lines()
-                    .map(|line| {
-                        let f: Vec<_> = line.split('\t').collect();
-                        (
-                            (f[0].to_owned(), f[1].to_owned()),
-                            (
-                                f[2].parse().unwrap(),
-                                f[5].parse().unwrap(),
-                                f[6].parse().unwrap(),
-                                f[7].parse().unwrap(),
-                                f[8].parse().unwrap(),
-                                f[9].parse().unwrap(),
-                                f[10].parse().unwrap(),
-                            ),
-                            (
-                                f[11].parse().unwrap(),
-                                f[12].parse().unwrap(),
-                                f[13].parse().unwrap(),
-                                f[14].parse().unwrap(),
-                                f[15].parse().unwrap(),
-                            ),
-                        )
-                    })
-                    .collect();
-            assert_eq!(
-                ordered, expected_order,
-                "{name} final order/report numeric fields"
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_setup.c:614-654;
-    // c++/src/algo/blast/core/blast_traceback.c:380-391,583-605,
-    // 1481-1501; c++/src/algo/blast/core/blast_kappa.c:3690-3736:
-    // hard/soft SEG and query lowercase flags choose the working-query bytes
-    // before Stage C, then each composition option follows its source branch.
-    #[test]
-    fn six_masking_fixtures_match_both_local_stage_d_option_paths() {
-        let cases = [
-            ("seg_cross_traceback_20260924", true, false, false),
-            ("seg_soft_traceback_20260924", true, true, false),
-            ("lcase_query_20260924", false, false, true),
-            ("lcase_soft_query_20260924", false, true, true),
-            ("seg_lcase_overlap_20260924", true, false, true),
-            ("seg_lcase_overlap_soft_20260924", true, true, true),
-        ];
-        let read = |path: &str| -> Vec<u8> {
-            std::fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .filter(|line| !line.starts_with('>'))
-                .flat_map(str::bytes)
-                .collect()
-        };
-        let seg = SegParams::default();
-        for (case, use_seg, soft, lowercase) in cases {
-            let input = format!(
-                "{}/../docs/evidence/tlosan_stage_c/{case}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let queries = vec![read(&format!("{input}/query.faa"))];
-            let subjects = vec![read(&format!("{input}/subjects.fna"))];
-            for mode in [0, 2] {
-                let profile = LocalStageDProfile {
-                    seg: if use_seg { Some(&seg) } else { None },
-                    soft_masking: soft,
-                    mask_lowercase: lowercase,
-                    genetic_code: 1,
-                    expect_value: 10000.0,
-                    max_target_seqs: 500,
-                    query_records: &[],
-                    subject_set: Default::default(),
-                    engine_positives: false,
-                    culling_limit: 0,
-                    pssm: None,
-                    fetch_excluded: None,
-                };
-                let mut boundary = StageDBoundaryTrace::default();
-                let results = run_local_search(
-                    &queries,
-                    &subject_slices(&subjects),
-                    profile,
-                    if mode == 2 {
-                        BlastCompoAdjustMode::CompositionMatrixAdjust
-                    } else {
-                        BlastCompoAdjustMode::NoCompositionBasedStats
-                    },
-                    mode == 2,
-                    LocalStageDScoring::default(),
-                    Some(&mut boundary),
-                )
-                .unwrap();
-                assert_eq!(results.len(), 1);
-                assert_eq!(results[0].lists().len(), 1, "{case} mode {mode}");
-                let list = &results[0].lists()[0];
-                assert_eq!(list.hsps.hsps.len(), 1, "{case} mode {mode}");
-                let hsp = &list.hsps.hsps[0];
-                let payload = &list.payloads[0];
-                let root = concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../docs/evidence/tlosan_stage_d/masking_options_20260925/run_20260925/"
-                );
-                let stem = format!("{case}.mode{mode}");
-                let report = std::fs::read_to_string(format!("{root}{stem}.report.tsv")).unwrap();
-                let f: Vec<_> = report.trim_end().split('\t').collect();
-                assert_eq!(hsp.hsp.score, f[2].parse().unwrap(), "{stem} score");
-                assert_eq!(
-                    (
-                        payload.report_num_ident,
-                        payload.report_num_positives,
-                        payload.align_length,
-                        payload.report_mismatches,
-                        payload.gap_letters,
-                        payload.gap_opens
-                    ),
-                    (
-                        f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
-                        f[7].parse().unwrap(),
-                        f[8].parse().unwrap(),
-                        f[9].parse().unwrap(),
-                        f[10].parse().unwrap()
-                    ),
-                    "{stem} report fields"
-                );
-                let frame = i32::from(hsp.hsp.frame);
-                let subject_len = subjects[0].len() as i32;
-                let (sstart, send) = if frame > 0 {
-                    (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.hsp.s_end + frame + 2,
-                    )
-                };
-                assert_eq!(
-                    (
-                        hsp.hsp.q_start + 1,
-                        hsp.hsp.q_end,
-                        sstart,
-                        send,
-                        hsp.hsp.frame
-                    ),
-                    (
-                        f[11].parse().unwrap(),
-                        f[12].parse().unwrap(),
-                        f[13].parse().unwrap(),
-                        f[14].parse().unwrap(),
-                        f[15].parse().unwrap()
-                    ),
-                    "{stem} coordinates"
-                );
-                let trace = std::fs::read_to_string(format!(
-                    "{root}{stem}.{}",
-                    if mode == 0 {
-                        "calls.trace"
-                    } else {
-                        "kappa.trace"
-                    }
-                ))
-                .unwrap();
-                let calls = std::fs::read_to_string(format!("{root}{stem}.calls.trace")).unwrap();
-                assert_local_stage_d_boundaries(
-                    &boundary,
-                    &calls,
-                    if mode == 2 { Some(&trace) } else { None },
-                    mode == 2,
-                );
-                let row: Vec<_> = trace
-                    .lines()
-                    .find(|line| {
-                        if mode == 0 {
-                            line.starts_with("D_HSP\t") && line.contains("\tbits_after\t")
-                        } else {
-                            line.starts_with("K_TRACE_HEAP_HSP\t")
-                        }
-                    })
-                    .unwrap()
-                    .split('\t')
-                    .collect();
-                let (bits_col, e_col) = if mode == 0 { (14, 13) } else { (4, 5) };
-                assert_eq!(
-                    payload.bit_score.to_bits(),
-                    row[bits_col].parse::<f64>().unwrap().to_bits(),
-                    "{stem} full-precision bits"
-                );
-                assert_eq!(
-                    hsp.evalue.to_bits(),
-                    row[e_col].parse::<f64>().unwrap().to_bits(),
-                    "{stem} full-precision E-value"
-                );
-                assert!(!payload.edit_script.is_empty(), "{stem} owned edit script");
-            }
-        }
-    }
-
-    // NCBI c++/src/objects/seqfeat/gc.prt:105-357;
-    // c++/src/algo/blast/core/blast_engine.c:762-774,1460-1466;
-    // c++/src/algo/blast/core/blast_kappa.c:3690-3736,2494-2515:
-    // the selected FindGeneticCode table enters subject translation before
-    // preliminary HSPs, redo, heap insertion and final hitlist updates.
-    // Each saved comparison uses the CLI-calibrated local API oracle, including
-    // code 32, and independently runs the identical input under code 1.
-    #[test]
-    fn all_27_codes_and_code1_controls_match_local_ncbi_result_traces() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/all_codes_20260925/"
-        );
-        let fixtures = std::fs::read_to_string(format!("{root}fixtures.tsv")).unwrap();
-        let read = |name: &str| -> Vec<u8> {
-            std::fs::read_to_string(format!("{root}fixtures/{name}"))
-                .unwrap()
-                .lines()
-                .filter(|line| !line.starts_with('>'))
-                .flat_map(str::bytes)
-                .collect()
-        };
-        let seg = SegParams::default();
-        let mut compared = 0;
-        for row in fixtures.lines().skip(1) {
-            let code: u8 = row.split('\t').next().unwrap().parse().unwrap();
-            let queries = vec![read(&format!("code{code}.faa"))];
-            let subjects = vec![read(&format!("code{code}.fna"))];
-            for (selected, label) in [(1, "control"), (code, "selected")] {
-                let mut boundary = StageDBoundaryTrace::default();
-                let results = run_local_search(
-                    &queries,
-                    &subject_slices(&subjects),
-                    LocalStageDProfile {
-                        seg: Some(&seg),
-                        soft_masking: false,
-                        mask_lowercase: false,
-                        genetic_code: selected,
-                        expect_value: 10.0,
-                        max_target_seqs: 500,
-                        query_records: &[],
-                        subject_set: Default::default(),
-                        engine_positives: false,
-                        culling_limit: 0,
-                        pssm: None,
-                        fetch_excluded: None,
-                    },
-                    BlastCompoAdjustMode::CompositionMatrixAdjust,
-                    true,
-                    LocalStageDScoring::default(),
-                    Some(&mut boundary),
-                )
-                .unwrap();
-                let trace = std::fs::read_to_string(format!(
-                    "{root}run_20260925/code{code}.{label}.kappa.trace"
-                ))
-                .unwrap();
-                let calls = std::fs::read_to_string(format!(
-                    "{root}run_20260925/code{code}.{label}.d.trace"
-                ))
-                .unwrap();
-                assert_local_stage_d_boundaries(&boundary, &calls, Some(&trace), true);
-                let expected: Vec<_> = trace
-                    .lines()
-                    .filter(|line| line.starts_with("K_TRACE_RESULT_HSP\t"))
-                    .collect();
-                let actual: Vec<_> = results[0]
-                    .lists()
-                    .iter()
-                    .flat_map(|list| list.hsps.hsps.iter().zip(&list.payloads))
-                    .collect();
-                let report = std::fs::read_to_string(format!(
-                    "{root}run_20260925/code{code}.{label}.report.tsv"
-                ))
-                .unwrap();
-                let report_rows: Vec<_> = report.lines().collect();
-                let fields = std::fs::read_to_string(format!(
-                    "{root}fields_rules_20260925/code{code}.{label}.fields.tsv"
-                ))
-                .unwrap();
-                let field_rows: Vec<_> = fields.lines().collect();
-                let rule_trace = std::fs::read_to_string(format!(
-                    "{root}fields_rules_20260925/code{code}.{label}.rules.trace"
-                ))
-                .unwrap();
-                let rule_rows: Vec<Vec<_>> = rule_trace
-                    .lines()
-                    .map(|line| line.split('\t').collect())
-                    .collect();
-                assert_eq!(
-                    actual.len(),
-                    expected.len(),
-                    "code {code} {label} result count"
-                );
-                assert_eq!(
-                    actual.len(),
-                    report_rows.len(),
-                    "code {code} {label} report count"
-                );
-                assert_eq!(
-                    actual.len(),
-                    field_rows.len(),
-                    "code {code} {label} custom report count"
-                );
-                let heap: Vec<_> = trace
-                    .lines()
-                    .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
-                    .collect();
-                assert_eq!(heap.len(), expected.len(), "code {code} {label} heap count");
-                let returns: Vec<_> = trace
-                    .lines()
-                    .filter(|line| line.starts_with("K_TRACE_RETURN\t"))
-                    .collect();
-                let edits: Vec<_> = trace
-                    .lines()
-                    .filter(|line| line.starts_with("K_TRACE_EDIT\t"))
-                    .collect();
-                assert_eq!(
-                    returns.len(),
-                    edits.len(),
-                    "code {code} {label} redo scripts"
-                );
-                for ((((hsp, payload), expected), reported), custom_reported) in actual
-                    .into_iter()
-                    .zip(expected)
-                    .zip(report_rows)
-                    .zip(field_rows)
-                {
-                    let f: Vec<_> = expected.split('\t').collect();
-                    let report_fields: Vec<_> = reported.split('\t').collect();
-                    let custom_fields: Vec<_> = custom_reported.split('\t').collect();
-                    // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021,
-                    // 1090-1095: the diagnostic field list exposes every
-                    // report count on the same retained HSP ordering.
-                    assert_eq!(custom_fields.len(), 16, "code {code} {label} custom width");
-                    assert_eq!(
-                        hsp.hsp.score,
-                        custom_fields[2].parse().unwrap(),
-                        "code {code} {label} custom score"
-                    );
-                    assert_eq!(
-                        payload.report_num_ident,
-                        custom_fields[5].parse().unwrap(),
-                        "code {code} {label} report identities"
-                    );
-                    assert_eq!(
-                        payload.report_num_positives,
-                        custom_fields[6].parse().unwrap(),
-                        "code {code} {label} positives"
-                    );
-                    assert_eq!(
-                        payload.align_length,
-                        custom_fields[7].parse().unwrap(),
-                        "code {code} {label} custom length"
-                    );
-                    assert_eq!(
-                        payload.report_mismatches,
-                        custom_fields[8].parse().unwrap(),
-                        "code {code} {label} custom mismatches"
-                    );
-                    assert_eq!(
-                        payload.gap_letters,
-                        custom_fields[9].parse().unwrap(),
-                        "code {code} {label} gap letters"
-                    );
-                    assert_eq!(
-                        payload.gap_opens,
-                        custom_fields[10].parse().unwrap(),
-                        "code {code} {label} custom gap opens"
-                    );
-                    // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021,
-                    // 1090-1095: report counts are recomputed from the aligned
-                    // sequence strings after the result HSPs are retained.
-                    assert_eq!(report_fields.len(), 12, "code {code} {label} report width");
-                    assert_eq!(
-                        payload.align_length,
-                        report_fields[3].parse().unwrap(),
-                        "code {code} {label} alignment length"
-                    );
-                    assert_eq!(
-                        payload.report_mismatches,
-                        report_fields[4].parse().unwrap(),
-                        "code {code} {label} mismatches"
-                    );
-                    assert_eq!(
-                        payload.gap_opens,
-                        report_fields[5].parse().unwrap(),
-                        "code {code} {label} gap opens"
-                    );
-                    let reported_identity: f64 = report_fields[2].parse().unwrap();
-                    let actual_identity =
-                        100.0 * payload.report_num_ident as f64 / payload.align_length as f64;
-                    assert!(
-                        (actual_identity - reported_identity).abs() <= 0.0005,
-                        "code {code} {label} percent identity"
-                    );
-                    let coords = (
-                        hsp.hsp.q_start,
-                        hsp.hsp.q_end,
-                        hsp.hsp.s_start,
-                        hsp.hsp.s_end,
-                    );
-                    assert_eq!(
-                        hsp.hsp.score,
-                        f[4].parse().unwrap(),
-                        "code {code} {label} score"
-                    );
-                    assert_eq!(
-                        hsp.evalue.to_bits(),
-                        f[5].parse::<f64>().unwrap().to_bits(),
-                        "code {code} {label} E-value"
-                    );
-                    assert_eq!(
-                        coords,
-                        (
-                            f[6].parse().unwrap(),
-                            f[7].parse().unwrap(),
-                            f[8].parse().unwrap(),
-                            f[9].parse().unwrap()
-                        ),
-                        "code {code} {label} coordinates/order"
-                    );
-                    assert_eq!(
-                        (hsp.hsp.frame, hsp.num),
-                        (f[10].parse().unwrap(), f[11].parse().unwrap()),
-                        "code {code} {label} frame/link count"
-                    );
-                    let heap_row: Vec<_> = heap
-                        .iter()
-                        .map(|line| line.split('\t').collect::<Vec<_>>())
-                        .find(|row| {
-                            row[3].parse::<i32>().unwrap() == hsp.hsp.score
-                                && (
-                                    row[9].parse::<i32>().unwrap(),
-                                    row[10].parse::<i32>().unwrap(),
-                                    row[11].parse::<i32>().unwrap(),
-                                    row[12].parse::<i32>().unwrap(),
-                                ) == coords
-                        })
-                        .unwrap_or_else(|| panic!("code {code} {label} missing heap HSP"));
-                    assert_eq!(
-                        payload.bit_score.to_bits(),
-                        heap_row[4].parse::<f64>().unwrap().to_bits(),
-                        "code {code} {label} bits"
-                    );
-                    assert_eq!(
-                        payload.num_ident,
-                        heap_row[6].parse().unwrap(),
-                        "code {code} {label} identities"
-                    );
-                    let matching_scripts: Vec<_> = returns
-                        .iter()
-                        .zip(&edits)
-                        .filter(|(returned, edit)| {
-                            let r: Vec<_> = returned.split('\t').collect();
-                            let e: Vec<_> = edit.split('\t').collect();
-                            assert_eq!(r[2], e[1], "code {code} {label} redo event identity");
-                            if e[2] == "-1"
-                                || (
-                                    r[5].parse::<i32>().unwrap(),
-                                    r[6].parse::<i32>().unwrap(),
-                                    r[7].parse::<i32>().unwrap(),
-                                    r[8].parse::<i32>().unwrap(),
-                                ) != coords
-                            {
-                                return false;
-                            }
-                            let script: Vec<_> = e[3..]
-                                .iter()
-                                .map(|op| {
-                                    let (kind, len) = op.split_once(':').unwrap();
-                                    let len = len.parse().unwrap();
-                                    match kind {
-                                        "3" => crate::common::GapEditOp::Sub(len),
-                                        "0" => crate::common::GapEditOp::Del(len),
-                                        "6" => crate::common::GapEditOp::Ins(len),
-                                        _ => panic!("unknown NCBI edit operation"),
-                                    }
-                                })
-                                .collect();
-                            payload.edit_script == script
-                        })
-                        .collect();
-                    assert_eq!(
-                        matching_scripts.len(),
-                        1,
-                        "code {code} {label} unique redo script owner"
-                    );
-                    let returned: Vec<_> = matching_scripts[0].0.split('\t').collect();
-                    // NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:103-124;
-                    // core/blast_kappa.c:325-342: BlastCompo_AlignmentNew stores
-                    // the raw matrix rule, then conversion moves it with the HSP.
-                    let rules: Vec<_> = rule_rows
-                        .iter()
-                        .filter(|row| {
-                            row[1] == returned[4]
-                                && row[4] == returned[5]
-                                && row[5] == returned[6]
-                                && row[6] == returned[7]
-                                && row[7] == returned[8]
-                                && row[8].parse::<i32>().unwrap() == i32::from(hsp.hsp.frame)
-                        })
-                        .collect();
-                    assert_eq!(rules.len(), 1, "code {code} {label} unique raw matrix rule");
-                    assert_eq!(
-                        payload.matrix_adjust_rule as i32,
-                        rules[0][2].parse().unwrap(),
-                        "code {code} {label} matrix rule owner"
-                    );
-                }
-                compared += 1;
-            }
-        }
-        assert_eq!(compared, 54);
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3736;
-    // c++/src/algo/blast/core/blast_hits.c:3243-3297:
-    // A broad 112-target local run retains every significant redone HSP,
-    // including both distinct scripts in the two-HSP OID 5 list.
-    #[test]
-    fn broad_112_subject_results_keep_every_ncbi_report_payload() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
-            let mut records: Vec<Vec<u8>> = Vec::new();
-            for line in std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if line.starts_with('>') {
-                    records.push(Vec::new());
-                } else {
-                    records.last_mut().unwrap().extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("subjects.fna");
-        let seg = SegParams::default();
-        let results = run_local_mode2_sum_stats(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: Some(&seg),
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10.0,
-                max_target_seqs: 112,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-        )
-        .unwrap();
-        let expected = std::fs::read_to_string(format!(
-            "{root}report_payload_20260925/report_fields_all.tsv"
-        ))
-        .unwrap();
-        let actual: Vec<_> = results[0]
-            .lists()
-            .iter()
-            .flat_map(|list| {
-                list.hsps
-                    .hsps
-                    .iter()
-                    .zip(&list.payloads)
-                    .map(move |(hsp, payload)| {
-                        (
-                            list.oid,
-                            hsp.hsp.score,
-                            payload.num_ident,
-                            payload.num_positives,
-                            payload.align_length,
-                            payload.mismatches,
-                            payload.gap_letters,
-                            payload.gap_opens,
-                            hsp.hsp.frame,
-                        )
-                    })
-            })
-            .collect();
-        let expected: Vec<_> = expected
-            .lines()
-            .map(|row| {
-                let f: Vec<_> = row.split('\t').collect();
-                (
-                    if let Some(id) = f[1].strip_prefix("weak_") {
-                        id.parse::<i32>().unwrap() - 7
-                    } else {
-                        f[1].strip_prefix("background_")
-                            .unwrap()
-                            .parse::<i32>()
-                            .unwrap()
-                            + 12
-                    },
-                    f[2].parse().unwrap(),
-                    f[3].parse().unwrap(),
-                    f[4].parse().unwrap(),
-                    f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
-                    f[7].parse().unwrap(),
-                    f[8].parse().unwrap(),
-                    f[13].parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(actual, expected);
-        assert_eq!(
-            results[0]
-                .lists()
-                .iter()
-                .map(|list| list.payloads.len())
-                .sum::<usize>(),
-            19
-        );
-        assert_eq!(
-            results[0]
-                .lists()
-                .iter()
-                .find(|list| list.oid == 5)
-                .unwrap()
-                .payloads
-                .len(),
-            2
-        );
-        // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358,3690-3706;
-        // c++/src/algo/blast/core/blast_hits.c:1437-1456,3243-3297:
-        // GapEditScript *editScript = align->context; align->context = NULL;
-        // Blast_HSPInit(..., &editScript, &new_hsp);
-        // Blast_HitListUpdate(hitlist, hsp_list);
-        // The max-112 run retains each of the 12 alignments recorded by the
-        // independent max-2 redo trace, including the one max-2 heap rejected.
-        let redo_trace =
-            std::fs::read_to_string(format!("{root}result_order_20260925/ncbi.trace")).unwrap();
-        let returns: Vec<_> = redo_trace
-            .lines()
-            .filter(|line| line.starts_with("K_TRACE_RETURN\t"))
-            .collect();
-        let edits: Vec<_> = redo_trace
-            .lines()
-            .filter(|line| line.starts_with("K_TRACE_EDIT\t"))
-            .collect();
-        assert_eq!((returns.len(), edits.len()), (12, 12));
-        let final_scripts: Vec<_> = results[0]
-            .lists()
-            .iter()
-            .flat_map(|list| {
-                list.hsps
-                    .hsps
-                    .iter()
-                    .zip(&list.payloads)
-                    .map(|(hsp, payload)| {
-                        (
-                            hsp.hsp.q_start,
-                            hsp.hsp.q_end,
-                            hsp.hsp.s_start,
-                            hsp.hsp.s_end,
-                            payload.edit_script.as_slice(),
-                        )
-                    })
-            })
-            .collect();
-        for (returned, edit) in returns.iter().zip(edits) {
-            let r: Vec<_> = returned.split('\t').collect();
-            let e: Vec<_> = edit.split('\t').collect();
-            assert_eq!(r[2], e[1], "redo event identity");
-            let script: Vec<_> = e[3..]
-                .iter()
-                .map(|op| {
-                    let (kind, len) = op.split_once(':').unwrap();
-                    let len = len.parse().unwrap();
-                    match kind {
-                        "3" => crate::common::GapEditOp::Sub(len),
-                        "0" => crate::common::GapEditOp::Del(len),
-                        "6" => crate::common::GapEditOp::Ins(len),
-                        _ => panic!("unexpected NCBI edit operation"),
-                    }
-                })
-                .collect();
-            let coords = (
-                r[5].parse::<i32>().unwrap(),
-                r[6].parse::<i32>().unwrap(),
-                r[7].parse::<i32>().unwrap(),
-                r[8].parse::<i32>().unwrap(),
-            );
-            assert!(
-                final_scripts
-                    .iter()
-                    .any(|&(q0, q1, s0, s1, ops)| (q0, q1, s0, s1) == coords && ops == script),
-                "NCBI redo event {} lost its owned script",
-                r[2]
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
-    // c++/src/algo/blast/core/blast_kappa.c:3525-3736,2494-2515;
-    // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-    // These local -subject traces cover thirteen subjects and hard SEG with
-    // the same setup, Kappa and result-post-pipe order.
-    #[test]
-    fn thirteen_subject_and_hard_seg_local_results_match_exact_ncbi_heap_fields() {
-        for (case, expected_count) in [("run_20260923", 11), ("seg_hard_query_20260924", 1)] {
-            let input_root = format!(
-                "{}/../docs/evidence/tlosan_stage_c/{case}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let read_fasta = |name: &str| -> Vec<(String, Vec<u8>)> {
-                let mut records: Vec<(String, Vec<u8>)> = Vec::new();
-                for line in std::fs::read_to_string(format!("{input_root}/{name}"))
-                    .unwrap()
-                    .lines()
-                {
-                    if let Some(id) = line.strip_prefix('>') {
-                        records
-                            .push((id.split_whitespace().next().unwrap().to_owned(), Vec::new()));
-                    } else {
-                        records.last_mut().unwrap().1.extend(line.bytes());
-                    }
-                }
-                records
-            };
-            let query = read_fasta("query.faa");
-            let subjects = read_fasta("subjects.fna");
-            let query_sequences: Vec<_> = query.iter().map(|(_, seq)| seq.clone()).collect();
-            let subject_sequences: Vec<_> = subjects.iter().map(|(_, seq)| seq.clone()).collect();
-            let seg = SegParams::default();
-            let results = run_local_mode2_sum_stats(
-                &query_sequences,
-                &subject_slices(&subject_sequences),
-                LocalStageDProfile {
-                    seg: Some(&seg),
-                    soft_masking: false,
-                    mask_lowercase: false,
-                    genetic_code: 1,
-                    expect_value: 10.0,
-                    max_target_seqs: 500,
-                    query_records: &[],
-                    subject_set: Default::default(),
-                    engine_positives: false,
-                    culling_limit: 0,
-                    pssm: None,
-                    fetch_excluded: None,
-                },
-            )
-            .unwrap();
-            let trace_path = format!(
-                "{}/../docs/evidence/tlosan_stage_d/kappa_result_order_20260925/{case}_default.tsv",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let trace = std::fs::read_to_string(trace_path).unwrap();
-            let expected: std::collections::HashMap<(i32, usize), Vec<&str>> = trace
-                .lines()
-                .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
-                .map(|line| {
-                    let f: Vec<_> = line.split('\t').collect();
-                    ((f[1].parse().unwrap(), f[2].parse().unwrap()), f)
-                })
-                .collect();
-            assert_eq!(expected.len(), expected_count);
-            let lists = results[0].lists();
-            let actual_count: usize = lists.iter().map(|list| list.hsps.hsps.len()).sum();
-            assert_eq!(actual_count, expected_count, "{case} HSP count");
-            for list in lists {
-                for (index, (hsp, payload)) in list.hsps.hsps.iter().zip(&list.payloads).enumerate()
-                {
-                    let row = &expected[&(list.oid, index)];
-                    assert_eq!(hsp.hsp.score, row[3].parse().unwrap(), "{case} score");
-                    assert_eq!(
-                        payload.bit_score.to_bits(),
-                        row[4].parse::<f64>().unwrap().to_bits(),
-                        "{case} bits"
-                    );
-                    assert_eq!(
-                        hsp.evalue.to_bits(),
-                        row[5].parse::<f64>().unwrap().to_bits(),
-                        "{case} E-value"
-                    );
-                    assert_eq!(
-                        payload.num_ident,
-                        row[6].parse().unwrap(),
-                        "{case} identity"
-                    );
-                    assert_eq!(hsp.hsp.frame, row[8].parse().unwrap(), "{case} frame");
-                    assert_eq!(
-                        (
-                            hsp.hsp.q_start,
-                            hsp.hsp.q_end,
-                            hsp.hsp.s_start,
-                            hsp.hsp.s_end
-                        ),
-                        (
-                            row[9].parse().unwrap(),
-                            row[10].parse().unwrap(),
-                            row[11].parse().unwrap(),
-                            row[12].parse().unwrap()
-                        ),
-                        "{case} coordinates"
-                    );
-                }
-            }
-            let output_path = format!(
-                "{}/../docs/evidence/tlosan_stage_d/run_20260924/{case}_default.out",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let output = std::fs::read_to_string(output_path).unwrap();
-            let actual_order: Vec<_> = lists
-                .iter()
-                .map(|list| subjects[list.oid as usize].0.as_str())
-                .collect();
-            let expected_order: Vec<_> = output
-                .lines()
-                .map(|line| line.split('\t').nth(1).unwrap())
-                .collect();
-            assert_eq!(actual_order, expected_order, "{case} result order");
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_hits.c:1437-1456,3243-3297;
-    // c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3736:
-    // Natural cross-frame sum-statistics HSPs leave Kappa in score order
-    // 238,189,135 but hitlist replacement E-value-sorts them 238,135,189.
-    #[test]
-    fn natural_evalue_sort_moves_the_owned_kappa_payload() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/natural_positive_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
-            let mut records: Vec<Vec<u8>> = Vec::new();
-            for line in std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if line.starts_with('>') {
-                    records.push(Vec::new());
-                } else {
-                    records.last_mut().unwrap().extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("evalue_subjects.fna");
-        let results = run_local_mode2_sum_stats(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: None,
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10000.0,
-                max_target_seqs: 1,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-        )
-        .unwrap();
-        let lists = results[0].lists();
-        assert_eq!(lists.len(), 1);
-        assert_eq!(lists[0].oid, 0);
-        assert_eq!(
-            lists[0]
-                .hsps
-                .hsps
-                .iter()
-                .map(|h| h.hsp.score)
-                .collect::<Vec<_>>(),
-            [238, 135, 189]
-        );
-        let trace =
-            std::fs::read_to_string(format!("{root}run_20260925/evalue_sort.kappa.trace")).unwrap();
-        let heap: std::collections::HashMap<i32, Vec<&str>> = trace
-            .lines()
-            .filter(|row| row.starts_with("K_TRACE_HEAP_HSP\t0\t"))
-            .map(|row| {
-                let f: Vec<_> = row.split('\t').collect();
-                (f[3].parse().unwrap(), f)
-            })
-            .collect();
-        for (hsp, payload) in lists[0].hsps.hsps.iter().zip(&lists[0].payloads) {
-            let row = &heap[&hsp.hsp.score];
-            assert_eq!(
-                hsp.evalue.to_bits(),
-                row[5].parse::<f64>().unwrap().to_bits()
-            );
-            assert_eq!(
-                payload.bit_score.to_bits(),
-                row[4].parse::<f64>().unwrap().to_bits()
-            );
-            assert_eq!(payload.num_ident, row[6].parse().unwrap());
-            assert_eq!(
-                (
-                    hsp.hsp.q_start,
-                    hsp.hsp.q_end,
-                    hsp.hsp.s_start,
-                    hsp.hsp.s_end
-                ),
-                (
-                    row[9].parse().unwrap(),
-                    row[10].parse().unwrap(),
-                    row[11].parse().unwrap(),
-                    row[12].parse().unwrap()
-                )
-            );
-            let script_len = match hsp.hsp.score {
-                238 => 45,
-                135 | 189 => 35,
-                _ => unreachable!(),
-            };
-            assert_eq!(
-                payload.edit_script,
-                vec![crate::common::GapEditOp::Sub(script_len)]
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:224-273,3658-3689:
-    // if (hsp_list->hspcnt > 1)
-    //     s_HitlistReapContained(hsp_list->hsp_array, &hsp_list->hspcnt);
-    // The pinned local fixture naturally redos two same-frame alignments;
-    // the smaller one is contained, leaving one postredo link input.
-    #[test]
-    fn natural_postredo_containment_keeps_surviving_script_and_report_fields() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/natural_positive_20260925/"
-        );
-        let read = |name: &str| -> Vec<u8> {
-            std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-                .filter(|line| !line.starts_with('>'))
-                .flat_map(str::bytes)
-                .collect()
-        };
-        let queries = vec![read("containment_query.faa")];
-        let subjects = vec![read("containment_subject.fna")];
-        let results = run_local_mode2_sum_stats(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: None,
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10000.0,
-                max_target_seqs: 1,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-        )
-        .unwrap();
-        let lists = results[0].lists();
-        assert_eq!(lists.len(), 1);
-        assert_eq!(lists[0].hsps.hsps.len(), 1);
-        let hsp = &lists[0].hsps.hsps[0];
-        let payload = &lists[0].payloads[0];
-        let trace =
-            std::fs::read_to_string(format!("{root}containment_run_20260925/kappa.trace")).unwrap();
-        let expected: Vec<_> = trace
-            .lines()
-            .find(|row| row.starts_with("K_TRACE_HEAP_HSP\t"))
-            .unwrap()
-            .split('\t')
-            .collect();
-        assert_eq!(hsp.hsp.score, expected[3].parse().unwrap());
-        assert_eq!(
-            payload.bit_score.to_bits(),
-            expected[4].parse::<f64>().unwrap().to_bits()
-        );
-        assert_eq!(
-            hsp.evalue.to_bits(),
-            expected[5].parse::<f64>().unwrap().to_bits()
-        );
-        assert_eq!(payload.num_ident, expected[6].parse().unwrap());
-        assert_eq!(
-            (
-                hsp.hsp.frame,
-                hsp.hsp.q_start,
-                hsp.hsp.q_end,
-                hsp.hsp.s_start,
-                hsp.hsp.s_end
-            ),
-            (
-                expected[8].parse().unwrap(),
-                expected[9].parse().unwrap(),
-                expected[10].parse().unwrap(),
-                expected[11].parse().unwrap(),
-                expected[12].parse().unwrap()
-            )
-        );
-        assert_eq!(
-            payload.edit_script,
-            vec![
-                crate::common::GapEditOp::Sub(18),
-                crate::common::GapEditOp::Ins(5),
-                crate::common::GapEditOp::Sub(97),
-            ]
-        );
-        assert_eq!(payload.matrix_adjust_rule as i32, 4);
-        let report =
-            std::fs::read_to_string(format!("{root}containment_run_20260925/report.tsv")).unwrap();
-        let f: Vec<_> = report.trim_end().split('\t').collect();
-        assert_eq!(
-            (
-                payload.num_ident,
-                payload.num_positives,
-                payload.align_length,
-                payload.mismatches,
-                payload.gap_letters,
-                payload.gap_opens
-            ),
-            (
-                f[5].parse().unwrap(),
-                f[6].parse().unwrap(),
-                f[7].parse().unwrap(),
-                f[8].parse().unwrap(),
-                f[9].parse().unwrap(),
-                f[10].parse().unwrap()
-            )
-        );
-    }
-
-    // NCBI c++/src/algo/blast/composition_adjustment/compo_heap.c:330-391;
-    // c++/src/algo/blast/core/blast_kappa.c:3719-3755:
-    // Two naturally generated weak subjects make the second Kappa record
-    // replace the first at heap threshold one, both above inclusion 0.002.
-    #[test]
-    fn natural_composition_heap_replacement_keeps_new_hsp_payloads() {
-        let root = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/natural_positive_20260925/"
-        );
-        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
-            let mut records: Vec<Vec<u8>> = Vec::new();
-            for line in std::fs::read_to_string(format!("{root}{name}"))
-                .unwrap()
-                .lines()
-            {
-                if line.starts_with('>') {
-                    records.push(Vec::new());
-                } else {
-                    records.last_mut().unwrap().extend(line.bytes());
-                }
-            }
-            records
-        };
-        let queries = read_fasta("query.faa");
-        let subjects = read_fasta("heap_subjects.fna");
-        let results = run_local_mode2_sum_stats(
-            &queries,
-            &subject_slices(&subjects),
-            LocalStageDProfile {
-                seg: None,
-                soft_masking: false,
-                mask_lowercase: false,
-                genetic_code: 1,
-                expect_value: 10000.0,
-                max_target_seqs: 1,
-                query_records: &[],
-                subject_set: Default::default(),
-                engine_positives: false,
-                culling_limit: 0,
-                pssm: None,
-                fetch_excluded: None,
-            },
-        )
-        .unwrap();
-        let lists = results[0].lists();
-        assert_eq!(lists.len(), 1);
-        assert_eq!(lists[0].oid, 0);
-        let trace =
-            std::fs::read_to_string(format!("{root}run_20260925/heap_replacement.kappa.trace"))
-                .unwrap();
-        assert!(trace
-            .lines()
-            .any(|row| row.starts_with("K_TRACE_HEAP_INSERT_RETURN\t0\t") && row.ends_with("\t1")));
-        let rows: Vec<_> = trace
-            .lines()
-            .filter(|row| row.starts_with("K_TRACE_HEAP_HSP\t0\t"))
-            .map(|row| row.split('\t').collect::<Vec<_>>())
-            .collect();
-        assert_eq!(lists[0].hsps.hsps.len(), rows.len());
-        for ((hsp, payload), row) in lists[0].hsps.hsps.iter().zip(&lists[0].payloads).zip(rows) {
-            assert_eq!(hsp.hsp.score, row[3].parse().unwrap());
-            assert_eq!(
-                hsp.evalue.to_bits(),
-                row[5].parse::<f64>().unwrap().to_bits()
-            );
-            assert_eq!(
-                payload.bit_score.to_bits(),
-                row[4].parse::<f64>().unwrap().to_bits()
-            );
-            assert_eq!(payload.num_ident, row[6].parse().unwrap());
-            assert!(!payload.edit_script.is_empty());
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697
-    // ```c++
-    //         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
-    // ```
-    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:499
-    // ```c++
-    //         Uint8 sliceSize = min(max_slice,m_MaxFileSize);
-    // ```
-    // The budget of a chunk: the largest file, at most 2^30 bytes, over four times the threads,
-    // plus one. For `-subject` the file is ceil(bases / 4), the `.nsq` of `makeblastdb`.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_chunk_budget_is_the_slice_over_four_times_the_threads() {
-        for (threads, largest_file, bases) in [
-            // the fly genome, 143.7 Mb: a .nsq of 35.9 MB
-            (8, 35_925_000, 1_122_657),
-            (2, 35_925_000, 4_490_626),
-            // the human genome, 3,100 Mb: 775 MB, below the slice limit
-            (8, 775_000_000, 24_218_751),
-            // above 2^30 bytes the slice is 2^30
-            (8, 2_000_000_000, 33_554_433),
-            (32, 1 << 30, 8_388_609),
-            (8, 0, 1),
-            (0, 100, 26),
-            (usize::MAX, 1 << 30, 1),
-        ] {
-            assert_eq!(
-                x_oid_chunk_bases(threads, largest_file),
-                bases,
-                "{threads} threads, largest file {largest_file}"
-            );
-        }
-        for (lengths, size) in [
-            (&[][..], 0),
-            (&[0][..], 0),
-            (&[1][..], 1),
-            (&[4][..], 1),
-            (&[5][..], 2),
-            (&[3, 3][..], 2),
-            (&[1_000; 240][..], 60_000),
-        ] {
-            let subjects: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
-            assert_eq!(
-                x_subject_file_size(SubjectLetters::Records(&subject_slices(&subjects))),
-                size,
-                "{lengths:?}"
-            );
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
-    // ```c++
-    //         res.length = vol->GetSequence(vol_oid++, &seq);
-    //         if (res.length < 0) return;
-    //         // must return at least one sequence
-    //         do {
-    //             tot_length -= res.length;
-    //             res.address = seq;
-    //             buffer->results.push_back(res);
-    //             res.length = vol->GetSequence(vol_oid++, &seq);
-    //         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
-    // ```
-    // A chunk is at least one subject, then the next ones while the bases stay within the budget
-    // (a sum equal to the budget is in); a subject longer than the budget is a chunk of its own,
-    // and empty subjects join a chunk that is not over its budget.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_chunks_hold_consecutive_subjects_within_the_budget() {
-        let set = |lengths: &[usize]| -> Vec<Vec<u8>> {
-            lengths.iter().map(|&n| vec![b'A'; n]).collect()
-        };
-        for (lengths, begin, bases, end) in [
-            // the budget's edge
-            (&[10, 10, 10][..], 0, 20, 2),
-            (&[10, 10, 10][..], 0, 19, 1),
-            (&[10, 10, 10][..], 0, 30, 3),
-            (&[10, 10, 10][..], 1, 20, 3),
-            // one subject over the budget, first or after shorter ones
-            (&[50, 1, 1][..], 0, 20, 1),
-            (&[5, 50, 5][..], 0, 20, 1),
-            (&[5, 50, 5][..], 1, 20, 2),
-            (&[5, 50, 5][..], 2, 20, 3),
-            // empty subjects
-            (&[0, 0, 0][..], 0, 1, 3),
-            (&[30, 0, 0][..], 0, 20, 1),
-            (&[10, 0, 10, 0, 1][..], 0, 20, 4),
-            (&[0, 30][..], 0, 20, 1),
-            // no subject at `begin`
-            (&[10][..], 1, 20, 1),
-        ] {
-            assert_eq!(
-                x_oid_chunk_end(
-                    SubjectLetters::Records(&subject_slices(&set(lengths))),
-                    begin,
-                    bases
-                ),
-                end,
-                "{lengths:?} from {begin}, {bases} bases"
-            );
-        }
-        // `x_all_chunks` takes every chunk from the first subject on, in OID order.
-        let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
-        assert_eq!(
-            x_all_chunks(SubjectLetters::Records(&subject_slices(&subjects)), 12),
-            [0..1, 1..3, 3..5, 5..6, 6..7]
-        );
-        assert!(x_all_chunks(SubjectLetters::Records(&[]), 12).is_empty());
-        // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
-        // subjects per chunk, 80 chunks in all.
-        let subjects = set(&[1_000; 240]);
-        let bases = x_oid_chunk_bases(
-            4,
-            x_subject_file_size(SubjectLetters::Records(&subject_slices(&subjects))),
-        );
-        assert_eq!(bases, 3_751);
-        let all = x_all_chunks(SubjectLetters::Records(&subject_slices(&subjects)), bases);
-        assert_eq!(all.len(), 80);
-        assert_eq!(all[..2], [0..3, 3..6]);
-        assert_eq!(all[79], 237..240);
-    }
-
-    // `XChunkCut` cuts, one length after the other, the chunks that `x_oid_chunk_end` cuts from
-    // each chunk's first subject (NCBI's loop), on the lengths of every edge above and on random
-    // ones; `x_all_chunks` of a `-db` stream cuts the index's lengths and keeps them.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_chunk_cut_gives_the_chunks_of_each_first_subject() {
-        let reference = |lengths: &[usize], bases: u64| -> Vec<u32> {
-            let records: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
-            let slices = subject_slices(&records);
-            let subjects = SubjectLetters::Records(&slices);
-            let mut ends = Vec::new();
-            let mut start = 0;
-            while start < lengths.len() {
-                start = x_oid_chunk_end(subjects, start, bases);
-                ends.push(start as u32);
-            }
-            ends
-        };
-        let cut = |lengths: &[usize], bases: u64| -> Vec<u32> {
-            let mut cut = XChunkCut::new(bases);
-            for &length in lengths {
-                cut.push(length as u64);
-            }
-            cut.ends()
-        };
-        let mut state = 0x2026_1103_u64;
-        let mut next = |below: u64| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state % below
-        };
-        let mut cases: Vec<(Vec<usize>, u64)> = vec![
-            (vec![], 12),
-            (vec![10, 10, 10], 20),
-            (vec![10, 10, 10], 19),
-            (vec![50, 1, 1], 20),
-            (vec![5, 50, 5], 20),
-            (vec![0, 0, 0], 1),
-            (vec![30, 0, 0], 20),
-            (vec![10, 0, 10, 0, 1], 20),
-            (vec![0, 30], 20),
-        ];
-        for _ in 0..500 {
-            let count = next(40) as usize;
-            let lengths = (0..count)
-                .map(|_| match next(4) {
-                    0 => 0,
-                    1 => next(5) as usize,
-                    _ => next(300) as usize,
-                })
-                .collect();
-            cases.push((lengths, 1 + next(400)));
-        }
-        for (lengths, bases) in cases {
-            assert_eq!(
-                cut(&lengths, bases),
-                reference(&lengths, bases),
-                "{lengths:?} {bases}"
-            );
-        }
-        // A sum past `u64` starts the next chunk.
-        let mut big = XChunkCut::new(u64::MAX);
-        for length in [u64::MAX, 1, 0] {
-            big.push(length);
-        }
-        assert_eq!(big.ends(), [1, 3]);
-        // A `-db` stream: the chunks of the index's lengths, cut once for each budget.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_mv");
-        let db =
-            crate::seqdb::SeqDb::open(path.to_str().unwrap(), crate::seqdb::SeqType::Nucleotide)
-                .unwrap();
-        let stream =
-            crate::algorithm::common::x_db_stream::XDbStream::new(&db, 4, "TBLASTN").unwrap();
-        let mut approx = Vec::new();
-        stream.x_approx_lengths(|length| approx.push(length as usize));
-        for bases in [1, 50, 500, 5_000, u64::MAX] {
-            let chunks = x_all_chunks(SubjectLetters::Stream(&stream), bases);
-            let ends: Vec<u32> = chunks.iter().map(|chunk| chunk.end as u32).collect();
-            assert_eq!(ends, reference(&approx, bases), "{bases}");
-            assert_eq!(chunks.first().map(|chunk| chunk.start), Some(0));
-            assert_eq!(chunks.last().map(|chunk| chunk.end), Some(stream.count()));
-            assert_eq!(x_all_chunks(SubjectLetters::Stream(&stream), bases), chunks);
-        }
-    }
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
-    // ```c++
-    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    //                 ...
-    //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-    // ```
-    // NCBI searches every batch with the same code, whatever their number. A search of fewer than
-    // four batches keeps no subject plans (XSubjectSide::KEEP_FROM_BATCHES), and that does not
-    // move it to the other loop: x_search_batches takes the batches whatever their number, at one
-    // thread too, and gives the report of run_local_for_report_threads, with the plans kept (four
-    // batches) and without (one, two, three).
-    #[test]
-    fn x_search_batches_takes_the_batches_whatever_their_number() {
-        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
-        let subjects: Vec<Vec<u8>> = (0..2usize)
-            .map(|n| {
-                (0..3_000usize)
-                    .map(|i| b"ACGT"[(i * 7 + i / 3 + i / 11 + n) % 4])
-                    .collect()
-            })
-            .collect();
-        let seg = SegParams::default();
-        let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
-            seg: Some(&seg),
-            soft_masking: false,
-            mask_lowercase: false,
-            genetic_code: 1,
-            expect_value: 10.0,
-            max_target_seqs: 500,
-            query_records: &[],
-            subject_set: Default::default(),
-            engine_positives: false,
-            culling_limit: 0,
-            pssm: None,
-            fetch_excluded: None,
-        };
-        for ranges in [
-            vec![0..1],
-            vec![0..1, 1..2],
-            vec![0..1, 1..2, 2..3],
-            vec![0..1, 1..2, 2..3, 3..4],
-        ] {
-            let searched = x_search_batches(
-                &queries,
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                ranges.clone(),
-                profile,
-                BlastCompoAdjustMode::CompositionMatrixAdjust,
-                true,
-                LocalStageDScoring::default(),
-                1,
-            )
-            .unwrap();
-            assert_eq!(searched.as_ref().map(Vec::len), Some(ranges.len()));
-            for (range, (results, parameters, _, validity)) in searched.into_iter().flatten() {
-                let (reference, reference_parameters, _, reference_validity) =
-                    run_local_for_report_threads(
-                        &queries[range.clone()],
-                        SubjectLetters::Records(&subject_slices(&subjects)),
-                        profile(range.clone()),
-                        BlastCompoAdjustMode::CompositionMatrixAdjust,
-                        true,
-                        LocalStageDScoring::default(),
-                        1,
-                    )
-                    .unwrap();
-                assert!(ranges.contains(&range));
-                assert_eq!(parameters, reference_parameters);
-                assert_eq!(validity, reference_validity);
-                assert_eq!(results.len(), reference.len());
-                for (hitlist, expected) in results.iter().zip(&reference) {
-                    assert_eq!(hitlist.lists().len(), expected.lists().len());
-                }
-            }
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
-    // ```c
-    //     if (program_number != eBlastTypeRpsTblastn) {
-    //         if (translation_buffer) {
-    //             sfree(translation_buffer);
-    //         }
-    //     }
-    // ```
-    // NCBI translates a subject for each batch and frees it after the subject. Batches searched
-    // side by side on five subjects at two threads (five subjects hold more than two of the
-    // longest, so only the side-by-side layout keeps the plans, x_searched_side_by_side): each
-    // batch's report is the one it has alone.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_search_batches_side_by_side_gives_each_batch_its_report() {
-        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
-        let subjects: Vec<Vec<u8>> = (0..5usize)
-            .map(|n| {
-                (0..3_000usize)
-                    .map(|i| b"ACGT"[(i * 7 + i / 3 + i / 11 + n) % 4])
-                    .collect()
-            })
-            .collect();
-        let lengths = || subjects.iter().map(Vec::len);
-        assert!(
-            !super::super::search_seed::XSubjectSide::kept_within_threads(
-                lengths().max().unwrap(),
-                lengths().sum(),
-                2
-            )
-        );
-        assert!(
-            x_searched_side_by_side(SubjectLetters::Records(&subject_slices(&subjects)), 4, 2)
-                || !x_tbn_batch_rule()
-        );
-        assert_eq!(
-            x_batches_side_by_side(lengths().sum(), subjects.len(), 4, 2),
-            4
-        );
-        let seg = SegParams::default();
-        let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
-            seg: Some(&seg),
-            soft_masking: false,
-            mask_lowercase: false,
-            genetic_code: 1,
-            expect_value: 10.0,
-            max_target_seqs: 500,
-            query_records: &[],
-            subject_set: Default::default(),
-            engine_positives: false,
-            culling_limit: 0,
-            pssm: None,
-            fetch_excluded: None,
-        };
-        let ranges = vec![0..1, 1..2, 2..3, 3..4];
-        let searched = x_search_batches(
-            &queries,
-            SubjectLetters::Records(&subject_slices(&subjects)),
-            ranges.clone(),
-            profile,
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            true,
-            LocalStageDScoring::default(),
-            2,
-        )
-        .unwrap();
-        let searched = searched.expect("two threads search the batches on the pool");
-        assert_eq!(
-            searched
-                .iter()
-                .map(|(range, _)| range.clone())
-                .collect::<Vec<_>>(),
-            ranges
-        );
-        for (range, (results, parameters, _, validity)) in searched {
-            let (reference, reference_parameters, _, reference_validity) =
-                run_local_for_report_threads(
-                    &queries[range.clone()],
-                    SubjectLetters::Records(&subject_slices(&subjects)),
-                    profile(range.clone()),
-                    BlastCompoAdjustMode::CompositionMatrixAdjust,
-                    true,
-                    LocalStageDScoring::default(),
-                    1,
-                )
-                .unwrap();
-            assert_eq!(parameters, reference_parameters);
-            assert_eq!(validity, reference_validity);
-            assert_eq!(results.len(), reference.len());
-            for (hitlist, expected) in results.iter().zip(&reference) {
-                let lists = |hitlist: &KappaResultHitList| {
-                    hitlist
-                        .lists()
-                        .iter()
-                        .map(|list| (list.oid, list.payloads.len()))
-                        .collect::<Vec<_>>()
-                };
-                assert_eq!(lists(hitlist), lists(expected));
-                assert_eq!(
-                    hitlist.worst_evalue().to_bits(),
-                    expected.worst_evalue().to_bits()
-                );
-            }
-        }
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNKEEPFEW): subjects searched by batches side by side or on own pools keep
-    // their plans; batches all one after another, or one thread, do not.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_plans_are_kept_for_batches_side_by_side() {
-        let subjects: Vec<Vec<u8>> = (0..100usize)
-            .map(|n| (0..3_000usize).map(|i| b"ACGT"[(i * 7 + n) % 4]).collect())
-            .collect();
-        let slices = subject_slices(&subjects);
-        let side_by_side = |batches, threads| {
-            x_searched_side_by_side(SubjectLetters::Records(&slices), batches, threads)
-        };
-        if !x_tbn_batch_rule() {
-            return;
-        }
-        assert!(side_by_side(8, 4));
-        assert!(side_by_side(7, 4));
-        assert!(side_by_side(8, 8));
-        assert!(side_by_side(16, 8));
-        assert!(!side_by_side(7, 8));
-        assert!(!side_by_side(8, 1));
-        // A set of more than 24 Mb of many subjects is searched one batch after another.
-        let large: Vec<&[u8]> = std::iter::repeat_n(&subjects[0][..], 8_001).collect();
-        assert!(!x_searched_side_by_side(
-            SubjectLetters::Records(&large),
-            16,
-            4
-        ));
-        // Ten long subjects (above 24 Mb) at 8 threads: four batches, none side by side, on four
-        // own pools (natively).
-        let long: Vec<u8> = (0..2_500_001usize).map(|i| b"ACGT"[i % 4]).collect();
-        let ten: Vec<&[u8]> = std::iter::repeat_n(&long[..], 10).collect();
-        assert_eq!(x_side_by_side_batches(25_000_010, 10, 4, 8, true), 0);
-        assert_eq!(
-            x_searched_side_by_side(SubjectLetters::Records(&ten), 4, 8),
-            x_tbn_own_pools()
-        );
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the full waves of a small subject set or of fewer than
-    // two subjects per thread; none of a large set of many subjects or of a search on one thread.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_side_by_side_takes_the_full_waves_of_a_small_or_few_subject_set() {
-        let small = X_SIDE_BY_SIDE_MAX_BASES;
-        assert_eq!(x_batches_side_by_side(small, 1_000, 10, 8), 8);
-        assert_eq!(x_batches_side_by_side(small, 1_000, 16, 8), 16);
-        assert_eq!(x_batches_side_by_side(small, 1_000, 4, 3), 3);
-        assert_eq!(x_batches_side_by_side(small, 1_000, 5, 8), 0);
-        assert_eq!(x_batches_side_by_side(small, 1_000, 64, 16), 64);
-        assert_eq!(x_batches_side_by_side(small, 1, 10, 1), 0);
-        assert_eq!(x_batches_side_by_side(small + 1, 32, 64, 16), 0);
-        assert_eq!(x_batches_side_by_side(usize::MAX, 1_000, 64, 16), 0);
-        assert_eq!(x_batches_side_by_side(small + 1, 31, 40, 16), 32);
-        assert_eq!(x_batches_side_by_side(small + 1, 32, 40, 16), 0);
-        assert_eq!(x_batches_side_by_side(usize::MAX, 3, 20, 8), 16);
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): two to threads - 1 batches left (threads / 2 above
-    // X_SIDE_BY_SIDE_MAX_BASES) go to pools of their own, all or none, and only with fewer than
-    // two subjects per thread; the threads are shared out with the remainder first.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn x_own_pools_take_the_batches_left_of_few_subjects() {
-        let small = X_SIDE_BY_SIDE_MAX_BASES;
-        assert_eq!(x_batches_on_own_pools(16, small, 1, 32), 16);
-        assert_eq!(x_batches_on_own_pools(5, small, 1, 8), 5);
-        assert_eq!(x_batches_on_own_pools(7, small, 1, 8), 7);
-        assert_eq!(x_batches_on_own_pools(8, small, 1, 8), 0);
-        assert_eq!(x_batches_on_own_pools(2, small, 1, 3), 2);
-        assert_eq!(x_batches_on_own_pools(1, small, 1, 8), 0);
-        assert_eq!(x_batches_on_own_pools(0, small, 1, 8), 0);
-        assert_eq!(x_batches_on_own_pools(5, small + 1, 3, 16), 5);
-        assert_eq!(x_batches_on_own_pools(8, small + 1, 3, 16), 8);
-        assert_eq!(x_batches_on_own_pools(9, small + 1, 3, 16), 0);
-        assert_eq!(x_batches_on_own_pools(5, small + 1, 3, 8), 0);
-        assert_eq!(x_batches_on_own_pools(16, small, 63, 32), 16);
-        assert_eq!(x_batches_on_own_pools(16, small, 64, 32), 0);
-        assert_eq!(x_batches_on_own_pools(5, small, 5_000, 16), 0);
-        let shares: Vec<_> = (0..5).map(|i| x_own_pool_threads(16, 5, i)).collect();
-        assert_eq!(shares, vec![4, 3, 3, 3, 3]);
-        assert_eq!(
-            (0..16)
-                .map(|i| x_own_pool_threads(32, 16, i))
-                .sum::<usize>(),
-            32
-        );
-        assert_eq!(
-            (0..7).map(|i| x_own_pool_threads(16, 7, i)).sum::<usize>(),
-            16
-        );
-    }
-
-    /// A fixed xorshift sequence.
-    #[cfg(feature = "parallel")]
-    struct XorShift(u64);
-
-    #[cfg(feature = "parallel")]
-    impl XorShift {
-        fn below(&mut self, bound: usize) -> usize {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            (self.0 % bound as u64) as usize
-        }
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the order names each wanted match once, by HSPs largest
-    // first, ties in index order, and no match early termination ended.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn the_redo_lpt_order_takes_the_wanted_matches_largest_first() {
-        assert!(x_redo_lpt_order(&[], |_| 0).is_empty());
-        assert!(x_redo_lpt_order(&[false, false], |_| 1).is_empty());
-        let hsps = [3, 9, 3, 0, 9, 4];
-        assert_eq!(
-            x_redo_lpt_order(&[true; 6], |index| hsps[index]),
-            [1, 4, 5, 0, 2, 3]
-        );
-        assert_eq!(
-            x_redo_lpt_order(&[true, false, true, true, true, false], |index| hsps[index]),
-            [4, 0, 2, 3]
-        );
-        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
-        for len in [1, 2, 7, 64, 256] {
-            // Few distinct HSP counts (many ties), and many.
-            for distinct in [1, 3, 100_000] {
-                let hsps: Vec<usize> = (0..len).map(|_| rng.below(distinct)).collect();
-                let wanted: Vec<bool> = (0..len).map(|_| rng.below(4) != 0).collect();
-                let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
-                let mut named = order.clone();
-                named.sort_unstable();
-                let expected: Vec<usize> = (0..len).filter(|&index| wanted[index]).collect();
-                assert_eq!(named, expected, "the wanted matches, once each");
-                for pair in order.windows(2) {
-                    let (a, b) = (pair[0], pair[1]);
-                    assert!(
-                        hsps[a] > hsps[b] || (hsps[a] == hsps[b] && a < b),
-                        "match {a} ({} HSPs) before match {b} ({} HSPs)",
-                        hsps[a],
-                        hsps[b]
-                    );
-                }
-            }
-        }
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the scope returns what the `par_iter` path returns for the
-    // same chunk (`Some(run(match))` where wanted, `None` elsewhere, by index), runs each wanted
-    // match once, and gives each task one worker of its own; also when a match runs nested
-    // parallel work, where a thread that waits in it may run another task's loop.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn the_redo_lpt_scope_returns_the_par_iter_results_by_index() {
-        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
-        for threads in [2, 3, 7, 17] {
-            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
-                for matches in [0_usize, 1, 2, 5, 40, 256] {
-                    let hsps: Vec<usize> = (0..matches).map(|_| rng.below(50)).collect();
-                    let wanted: Vec<bool> = (0..matches).map(|_| rng.below(5) != 0).collect();
-                    let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
-                    // Each worker records the matches it ran.
-                    let workers: Vec<std::sync::Mutex<Vec<usize>>> =
-                        (0..threads).map(|_| Default::default()).collect();
-                    let run = |index: usize| -> (usize, u64) {
-                        let nested: u64 =
-                            (0..64_u64).into_par_iter().map(|x| x * index as u64).sum();
-                        (index * 3 + hsps[index], nested)
-                    };
-                    let results = x_redo_lpt(pool, &workers, matches, &order, |ran, index| {
-                        assert!(rayon::current_thread_index().is_some(), "on the pool");
-                        ran.push(index);
-                        run(index)
-                    });
-                    let par_iter: Vec<Option<(usize, u64)>> = pool.install(|| {
-                        (0..matches)
-                            .into_par_iter()
-                            .zip(wanted.par_iter())
-                            .map(|(index, &wanted)| wanted.then(|| run(index)))
-                            .collect()
-                    });
-                    assert_eq!(results, par_iter, "threads {threads} matches {matches}");
-                    let ran: Vec<Vec<usize>> = workers
-                        .into_iter()
-                        .map(|worker| worker.into_inner().unwrap())
-                        .collect();
-                    let tasks = threads.min(order.len());
-                    assert!(
-                        ran[tasks..].iter().all(Vec::is_empty),
-                        "only the first {tasks} workers ran"
-                    );
-                    let mut all: Vec<usize> = ran.concat();
-                    all.sort_unstable();
-                    let mut expected = order.clone();
-                    expected.sort_unstable();
-                    assert_eq!(all, expected, "each wanted match once");
-                    // One worker runs its matches in the order's order.
-                    for worker in &ran {
-                        let position = |index: &usize| order.iter().position(|o| o == index);
-                        assert!(worker.windows(2).all(|w| position(&w[0]) < position(&w[1])));
-                    }
-                }
-                Ok(())
-            })
-            .expect("a pool");
-        }
-    }
-
-    // EXPERIMENT (LOSAT_X_TBNREDOLPT): a match that panics: the panic comes out of the scope (the
-    // other tasks finish first, so nothing hangs) and the same pool computes the next chunk, with
-    // workers made again as the search would make them.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn a_panicking_redo_match_propagates_and_the_pool_stays_usable() {
-        for threads in [2, 3, 7, 17] {
-            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
-                let matches = 40_usize;
-                let order: Vec<usize> = (0..matches).collect();
-                let run = |panicking: bool| {
-                    let workers: Vec<std::sync::Mutex<()>> =
-                        (0..threads).map(|_| Default::default()).collect();
-                    x_redo_lpt(pool, &workers, matches, &order, |_, index| {
-                        assert!(
-                            !(panicking && (index == 5 || index == 30)),
-                            "match {index} panics"
-                        );
-                        index * 3
-                    })
-                };
-                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(true)));
-                assert!(caught.is_err(), "threads {threads}: the panic was lost");
-                let expected: Vec<Option<usize>> =
-                    (0..matches).map(|index| Some(index * 3)).collect();
-                assert_eq!(run(false), expected, "threads {threads}");
-                Ok(())
-            })
-            .expect("a pool");
-        }
-    }
-}
+#[path = "stage_d_pipeline_tests.rs"]
+mod tests;

@@ -39,11 +39,23 @@ impl Source {
 type NamedSource = (Source, String);
 
 /// The query of a search: a FASTA input and its name, or a PSSM file (`-in_pssm` of psiblast and
-/// tblastn, `api::Inputs::pssm`), which the search reads.
+/// tblastn, `api::Inputs::pssm`), or an alignment file (`-in_msa` of psiblast, `api::Inputs::msa`),
+/// which the search reads. `_api.py` gives an alignment as the dict `{"alignment": path}`, a PSSM
+/// as the path alone.
 #[derive(FromPyObject)]
 pub enum NamedQuery {
+    Alignment {
+        #[pyo3(item("alignment"))]
+        path: PathBuf,
+    },
     Fasta(NamedSource),
     Pssm(PathBuf),
+}
+
+/// The file that holds the query of a search, in place of query records.
+enum QueryFile {
+    Pssm(PathBuf),
+    Alignment(PathBuf),
 }
 
 /// The subject of a search: a FASTA input and its name, or no input and the name of a database.
@@ -58,8 +70,8 @@ pub fn checked(program: &str, argv: &[String]) -> Result<Search, api::Error> {
 /// A checked search and its records.
 pub struct Loaded {
     search: Search,
-    /// The PSSM file of a PSSM query; the query records are then none.
-    pssm: Option<PathBuf>,
+    /// The PSSM or alignment file of a query that a file holds; the query records are then none.
+    file: Option<QueryFile>,
     query: Vec<FastaRecord>,
     subject: Vec<FastaRecord>,
     query_name: String,
@@ -77,15 +89,18 @@ impl Loaded {
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let database = subject.is_none();
-        let (query, query_name, pssm) = match query {
+        let (query, query_name, file) = match query {
             NamedQuery::Fasta((query, query_name)) => (Some(query), query_name, None),
-            NamedQuery::Pssm(path) => (None, String::new(), Some(path)),
+            NamedQuery::Pssm(path) => (None, String::new(), Some(QueryFile::Pssm(path))),
+            NamedQuery::Alignment { path } => {
+                (None, String::new(), Some(QueryFile::Alignment(path)))
+            }
         };
         // A dry run reads no record, as the command line's does not (`Search::dry_run`).
         if search.dry_run() {
             return Ok(Self {
                 search,
-                pssm,
+                file,
                 query: Vec::new(),
                 subject: Vec::new(),
                 query_name,
@@ -93,7 +108,8 @@ impl Loaded {
                 database,
             });
         }
-        // A PSSM query is read by the search, as the command line's `-in_pssm`.
+        // A PSSM or alignment query is read by the search, as the command line's `-in_pssm` and
+        // `-in_msa`.
         let query_bytes = match &query {
             Some(query) => query.bytes(Role::Query)?,
             None => Cow::Borrowed(&[][..]),
@@ -105,7 +121,7 @@ impl Loaded {
         let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
-            pssm,
+            file,
             query,
             subject,
             query_name,
@@ -115,9 +131,13 @@ impl Loaded {
     }
 
     fn inputs(&self) -> Inputs<'_> {
-        let inputs = match (self.database, self.pssm.as_deref()) {
-            (true, Some(pssm)) => Inputs::pssm_database(pssm, &self.subject_name),
-            (false, Some(pssm)) => Inputs::pssm(pssm, &self.subject),
+        let inputs = match (self.database, self.file.as_ref()) {
+            (true, Some(QueryFile::Pssm(pssm))) => Inputs::pssm_database(pssm, &self.subject_name),
+            (false, Some(QueryFile::Pssm(pssm))) => Inputs::pssm(pssm, &self.subject),
+            (true, Some(QueryFile::Alignment(msa))) => {
+                Inputs::msa_database(msa, &self.subject_name)
+            }
+            (false, Some(QueryFile::Alignment(msa))) => Inputs::msa(msa, &self.subject),
             (true, None) => Inputs::database(&self.query, &self.subject_name),
             (false, None) => Inputs::new(&self.query, &self.subject),
         };
@@ -154,11 +174,6 @@ fn rounds_rows(rounds: &[api::QueryRounds]) -> Vec<RoundsRow> {
         .iter()
         .map(|rounds| (stats_rows(&rounds.stats), rounds.converged))
         .collect()
-}
-
-/// The text of what the command line writes to its standard error.
-fn diagnostics_text(diagnostics: &[u8]) -> String {
-    String::from_utf8_lossy(diagnostics).into_owned()
 }
 
 /// A list of byte ranges of a report, as Python slices of its bytes.
@@ -218,41 +233,46 @@ pub fn run<'py>(
         HspTable::new(table),
         stats_rows(&outcome.query_stats),
         rounds_rows(&outcome.rounds),
-        diagnostics_text(&outcome.diagnostics),
+        PyBytes::new(py, &outcome.diagnostics),
     )
         .into_pyobject(py)
 }
 
 /// The report of `outfmt` written to the file `path`, as the command line's `-out` writes it, with
-/// the side files of outfmt 13 and 14 next to it; returns what the command line writes to its
-/// standard error.
+/// the side files of outfmt 13 and 14 next to it; returns the bytes that the command line writes
+/// to its standard error.
 #[pyfunction]
-pub fn run_to_file(
-    py: Python<'_>,
+pub fn run_to_file<'py>(
+    py: Python<'py>,
     program: &str,
     argv: Vec<String>,
     query: NamedQuery,
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
-) -> PyResult<String> {
-    py.detach(|| {
-        let loaded = Loaded::read(program, &argv, query, subject)?;
-        let mut diagnostics = Vec::new();
-        api::run_to_file(
-            &loaded.search,
-            loaded.inputs(),
-            outfmt,
-            &path,
-            &mut diagnostics,
-        )?;
-        Ok(diagnostics_text(&diagnostics))
-    })
-    .map_err(exception)
+) -> PyResult<Bound<'py, PyBytes>> {
+    let diagnostics = py
+        .detach(|| {
+            let loaded = Loaded::read(program, &argv, query, subject)?;
+            let mut diagnostics = Vec::new();
+            api::run_to_file(
+                &loaded.search,
+                loaded.inputs(),
+                outfmt,
+                &path,
+                &mut diagnostics,
+            )?;
+            Ok(diagnostics)
+        })
+        .map_err(exception)?;
+    Ok(PyBytes::new(py, &diagnostics))
 }
 
 /// A tool of the library API (`api::run_makeblastdb` and the others).
 type Tool = fn(&[&str], &mut dyn Read, &mut dyn Write, &mut dyn Write) -> Result<(), api::Error>;
+
+/// The bytes that a tool writes to standard output and to standard error.
+type ToolBytes<'py> = (Bound<'py, PyBytes>, Bound<'py, PyBytes>);
 
 /// `tool` with the command line's words and `input` as its standard input, without the GIL:
 /// what it writes to standard output and to standard error.
@@ -261,7 +281,7 @@ fn run_tool<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
     tool: Tool,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     let (output, diagnostics) = py
         .detach(|| {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -270,7 +290,7 @@ fn run_tool<'py>(
             Ok((output, diagnostics))
         })
         .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    Ok((PyBytes::new(py, &output), PyBytes::new(py, &diagnostics)))
 }
 
 /// `makeblastdb` with the command line's words: `input` is its standard input. Returns what it
@@ -280,7 +300,7 @@ pub fn makeblastdb<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_makeblastdb)
 }
 
@@ -291,7 +311,7 @@ pub fn blastdbcmd<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_blastdbcmd)
 }
 
@@ -302,7 +322,7 @@ pub fn dustmasker<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_dustmasker)
 }
 
@@ -313,8 +333,19 @@ pub fn segmasker<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_segmasker)
+}
+
+/// `windowmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn windowmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_windowmasker)
 }
 
 /// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
@@ -324,8 +355,20 @@ pub fn convert2blastmask<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_convert2blastmask)
+}
+
+/// `makembindex` with the command line's words: `input` is its standard input (FASTA input of
+/// `-old_style_index true` without `-input`). Returns what it writes to standard output and to
+/// standard error; the index files are written where the command line writes them.
+#[pyfunction]
+pub fn makembindex<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_makembindex)
 }
 
 /// `run` without reports.
@@ -353,7 +396,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         HspTable::new(table),
         stats_rows(&stats),
         rounds_rows(&rounds),
-        diagnostics_text(&diagnostics),
+        PyBytes::new(py, &diagnostics),
     )
         .into_pyobject(py)
 }
@@ -378,7 +421,7 @@ type BatchRow = (
     RecordBatch,
     Vec<Option<StatsRow>>,
     Vec<RoundsRow>,
-    String,
+    Vec<u8>,
 );
 
 /// The search of one query batch at a time. Each `next` searches a batch with the GIL released;
@@ -437,6 +480,7 @@ impl Batches {
             .map_err(exception)?;
         batch
             .map(|(start, end, table, stats, rounds, diagnostics)| {
+                let diagnostics = PyBytes::new(py, &diagnostics);
                 (start, end, HspTable::new(table), stats, rounds, diagnostics).into_pyobject(py)
             })
             .transpose()
@@ -450,6 +494,6 @@ fn batch_row(batch: api::Batch) -> BatchRow {
         of_records(&batch.hsps),
         stats_rows(&batch.query_stats),
         rounds_rows(&batch.rounds),
-        diagnostics_text(&batch.diagnostics),
+        batch.diagnostics,
     )
 }

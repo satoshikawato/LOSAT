@@ -1,16 +1,20 @@
 # Product Decision: a platform's libm and the last digit of a full-precision value
 
 - Decision ID: `PD-LOSAT-PLATFORM-LIBM`
-- Version: 1.1
+- Version: 1.2 (2026-11-20, Owner: the WASI clause of 1.1 is retired)
 - Date: 2026-10-25 (1.0, macOS: Owner, release board question 2, option (a); for v0.2.0);
-  2026-11-18 (1.1, WASI: Owner, see Amendments)
-- Status: Accepted for v0.2.0. A bit-identical `exp` / `log` port is a later line, not part of
-  this decision.
+  2026-11-18 (1.1, WASI: Owner, see Amendments); 2026-11-20 (1.2, WASI retired: Owner, see
+  Amendments)
+- Status: macOS clause (1.0): Accepted for v0.2.0; it stays, and is unverified on macOS (no Apple
+  device). WASI clause (1.1): retired by 1.2 (Owner, 2026-11-20) because `exp`, `log`, `log10` and
+  `pow` give the bits of glibc 2.35's FMA versions on one Rust path on every target (#1344: the code
+  of Arm Optimized Routines, MIT, and Sun's fdlibm for `log10`).
 
 ## Scope
 
 Two platforms where the libm that LOSAT calls for `exp` and `log` can differ by 1 ULP from glibc's
-on an x86-64 CPU with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of the tests (Linux x64):
+on an x86-64 CPU with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of the tests (Linux x64).
+Since 1.2 only macOS is in force; the WASI paragraph is kept as it stood in 1.1:
 
 - **macOS** (arm64 and x86_64), since 1.0: Apple's libm, when LOSAT computes an E value. The
   condition is an output format that prints the E value with all its digits. Of the formats LOSAT
@@ -19,7 +23,8 @@ on an x86-64 CPU with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of th
   JSON formats (5, 13, 14, 15, 16) round the E value to 6 significant digits first (`round6`,
   `LOSAT/src/report/blast_xml/hsp.rs:18`), and the tabular formats (6, 7, outfmt 0 tables) print 2
   or 3 significant digits; neither is affected in practice. This record names outfmt 11 and 8 only.
-- **WASI** (`wasm32-wasip1` serial and `wasm32-wasip1-threads`), since 1.1: Rust's `f64::ln` there is
+- **WASI** (`wasm32-wasip1` serial and `wasm32-wasip1-threads`), since 1.1, no longer in force
+  under 1.2 (see Amendments): Rust's `f64::ln` there is
   wasi-libc's `log` (musl's, the same algorithm as glibc's without FMA; WebAssembly has no FMA
   instruction). The condition is psiblast's ASN.1 PSSM (`-out_pssm`) written with its diagnostics,
   which psiblast adds when `-out_ascii_pssm` is given too (`PSIDiagnosticsRequestNewEx`,
@@ -37,11 +42,13 @@ production code.
 ## Decision
 
 On macOS, the 15-digit mantissa of a full-precision E value may differ from the Linux and
-Windows value by 1 in its last digit, with the same exponent. On WASI, the 15-digit mantissa of a
-value of psiblast's ASN.1 PSSM may differ from the Linux x64 value by 1 in its last digit, with the
-same exponent. LOSAT does not work around either: no platform-specific code path, no normalization
-of the output. The tests accept the difference on these platforms and nowhere else: the macOS
-platform checks, and the WASI guard for the PSSM files.
+Windows value by 1 in its last digit, with the same exponent. LOSAT does not work around it: no
+platform-specific code path, no normalization of the output. The tests accept the difference on
+macOS and nowhere else: the macOS platform checks.
+
+Under 1.1, the same held on WASI for the 15-digit mantissa of a value of psiblast's ASN.1 PSSM.
+Under 1.2 WASI is no longer in force: the port gives the Linux x64 bytes there (Amendments,
+Verification), and the WASI guard compares the PSSM files byte for byte.
 
 ## Observation
 
@@ -64,7 +71,7 @@ macOS (1.0):
 - NCBI BLAST+ built on macOS has the same property: it calls the same libm (see
   `PD-NCBI-PLATFORM-VARIANCE` for NCBI's own platform variance).
 
-WASI (1.1):
+WASI (1.1; describes the builds before the port of #1344):
 
 - In 14 psiblast `-db` rows of `LOSAT/tests/db_search_manifest/` (`db.ps.asn.tk.b.6`,
   `db.ps.inpssm.f.each.tk`, `db.ps.inpssm.f.last.tk`, `db.ps.it.f.both.tk`, `db.ps.it.f.last.tk`,
@@ -75,7 +82,9 @@ WASI (1.1):
   an ASN.1 PSSM whose `informationContent` differs in the last of its 15 digits, for example
   `{ 347923230575625, 10, -15 }` where the frozen file and the native commands have
   `{ 347923230575626, 10, -15 }`. Every other byte of these files is the same. (Found by the
-  psiblast WASI work of 2026-11-17, #1281.)
+  psiblast WASI work of 2026-11-17, #1281.) Correction (1.2, the v0.2.0 release line, 2026-11-20): in these
+  14 rows the differing value comes from `pow` in the pseudocounts (relative entropy to the power
+  K, `LOSAT/src/core/psi/stages.rs`), not from `log` as this record said in 1.1.
 - NCBI's own output depends on the CPU: on x86-64, glibc picks an FMA variant of `log()` on a CPU
   with FMA. NCBI BLAST+ 2.17.0 on a Xeon 6338 (glibc 2.35) writes the frozen bytes by default; with
   glibc's FMA variants off (`GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4`) it writes the WASI
@@ -85,8 +94,8 @@ WASI (1.1):
 - Rust's `f64::ln` on `wasm32-wasip1` differs from glibc 2.39's `log` by 1 ULP in 7 of 200,000
   random inputs, and in none with glibc's FMA variant off.
 
-What was compared on WASI (1.1), to bound the scope: the serial command of dev `e87bb4538` ran
-every row of the NCBI fixture sets of the release test plan, D (`outfmt0_manifest.tsv`, 2,602
+What was compared on WASI (1.1, before the port), to bound the scope: the serial command of dev
+`e87bb4538` ran every row of the NCBI fixture sets of the release test plan, D (`outfmt0_manifest.tsv`, 2,602
 `-subject` rows) and E (`db_search_manifest/`, 6,571 `-db` rows), at one thread, against the frozen
 bytes (2026-11-18). Outside psiblast's ASN.1 PSSM no value differs in its digits: every `-outfmt 11`
 and `-outfmt 8` row of the five search programs gives its expected bytes (483 `-subject` rows; 563
@@ -102,38 +111,41 @@ above).
 
 ## Verification
 
-One rule, in two copies: `archives_match_allowing_libm_last_digit` in
-`LOSAT/tests/outfmt11_blastx.rs` (the `-outfmt 11` blastx tests, macOS) and
-`libm_last_digit_differences` in `LOSAT/tests/xinclude_fixtures.py` (the Python tools, WASI). A
-difference is accepted only when every byte outside the ASN.1 REAL values is identical and each
-differing value has the same exponent and a mantissa of 15 digits, as the expected one, that
-differs from it by exactly 1. A mantissa 2 away, another exponent, a mantissa of another or fewer
-digits (NCBI drops trailing zeros, so a shorter mantissa 1 away is not a last-digit change), or any
-other byte fails. The Rust copy reads the values of a Seq-align (`real { M, 10, E }`); the Python
-copy reads every REAL value `{ M, 10, E }` of ASN.1 text, which in an archive is the same token and
-in an ASN.1 PSSM is how the values are written (`lambda { M, 10, E }`, the values of
-`informationContent { ... }`). Their unit tests run on every OS (`cargo test`, and
-`LOSAT/tests/test_ci_fast_regressions.py` in CI).
+The rule for macOS: `archives_match_allowing_libm_last_digit` in `LOSAT/tests/outfmt11_blastx.rs`
+(the `-outfmt 11` blastx tests). A difference is accepted only when every byte outside the ASN.1
+REAL values is identical and each differing value has the same exponent and a mantissa of 15
+digits, as the expected one, that differs from it by exactly 1. A mantissa 2 away, another exponent,
+a mantissa of another or fewer digits (NCBI drops trailing zeros, so a shorter mantissa 1 away is
+not a last-digit change), or any other byte fails. The copy reads the values of a Seq-align
+(`real { M, 10, E }`). Its unit tests run on every OS (`cargo test`).
 
 - macOS: the `-outfmt 11` blastx tests apply the rule with `cfg!(target_os = "macos")`; on every
-  other OS the comparison is exact.
-- WASI: `LOSAT/tests/check_wasm_threading.py` (set G of the release test plan, `wasm-threading.yml`)
-  runs every psiblast `-db` row (`db_search_fixtures.py check --program psiblast --threads 1`)
-  through each WASI command it is given, with `--libm-last-digit` naming its native command. The
-  rule applies to the PSSM files only; the report, standard error and exit status are compared byte
-  for byte. A PSSM file over 64 KB is not frozen (it is compared by its SHA-256); its expected bytes
-  are those of the native command's run of the row, which must have the frozen SHA-256. A row taken
-  by the rule is listed as `libm-last-digit` with its files. Native runs of the same checker (sets
-  D, E, F) pass no option and stay exact.
+  other OS the comparison is exact. This copy stays under 1.2.
+- WASI, since 1.2: `LOSAT/tests/check_wasm_threading.py` (set G of the release test plan,
+  `wasm-threading.yml`) runs every psiblast `-db` row through each WASI command it is given and
+  compares the PSSM files byte for byte, as the report, standard error and exit status (1,030 rows
+  equal on the serial WASI command of the port's branch, 2026-11-20). The Python copy of the rule
+  (`libm_last_digit_differences` in `LOSAT/tests/xinclude_fixtures.py`, and `db_search_fixtures.py
+  check --libm-last-digit`) is removed. A PSSM file over 64 KB is not frozen (it is compared by its
+  SHA-256); its expected bytes are those of the native command's run of the row, which must have the
+  frozen SHA-256. Native runs of the same checker (sets D, E, F) stay exact.
+- WASI, 1.1 (before the port): the same guard applied the rule to the PSSM files with
+  `--libm-last-digit` naming its native command; a row taken by the rule was listed as
+  `libm-last-digit` with its files.
+
+### macOS
+
+The port of #1344 runs on macOS too (`f64::mul_add` where the CPU has an FMA instruction, the
+exact emulation elsewhere). It is unverified on macOS (no Apple device): nobody has checked it on a
+Mac. The macOS clause (1.0) stays until the Owner retires it.
 
 ## Release-notes sentence
 
 On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from the
 other platforms' output by 1 in its last (15th) digit because Apple's libm differs from the
 other platforms' by 1 ULP; NCBI BLAST+ built on macOS has the same property, and the formats
-that print 2 to 6 digits are not affected in the cases tested. On WASI, a value of psiblast's
-ASN.1 PSSM (`-out_pssm` with `-out_ascii_pssm`) can differ in the same way, because WebAssembly's
-`log()` has no FMA; NCBI BLAST+ writes the same digit on an x86-64 CPU without FMA.
+that print 2 to 6 digits are not affected in the cases tested. WASI is no longer named (1.2): its
+psiblast ASN.1 PSSM files give the Linux x64 bytes.
 
 ## Amendments
 
@@ -147,3 +159,24 @@ ASN.1 PSSM (`-out_pssm` with `-out_ascii_pssm`) can differ in the same way, beca
   guard (`check_wasm_threading.py`) runs the psiblast `-db` rows under the rule; the rule's two
   copies now also require 15-digit mantissas, as the Decision says (1.0's test compared digit
   counts only, which let a shorter mantissa 1 away pass).
+- 1.2 (2026-11-20, Owner; proposed the same day by line LIBM): the WASI clause of 1.1 is
+  retired; the macOS clause (1.0) stays and is unverified on macOS (no Apple device). Why: the branch
+  `fix/libm-glibc-fma` (#1344) gives `exp`, `log`, `log10` and `pow` the bits of glibc 2.35's
+  x86-64 FMA versions on one Rust path on every target (`LOSAT/src/utils/glibc_fma_libm.rs`, the
+  code of Arm Optimized Routines, MIT, and Sun's fdlibm for `log10`): `f64::mul_add`
+  where there is an FMA instruction (aarch64; x86-64 CPUs that have FMA, detected at run time), an
+  exact emulation of the FMA elsewhere (WebAssembly, x86-64 without FMA). Every call site uses it,
+  and clippy refuses the libm methods of `f64` elsewhere. Measured 2026-11-20 on the serial WASI
+  command of that branch: all 1,030 psiblast `-db` rows of `LOSAT/tests/db_search_manifest/` give the
+  frozen bytes byte for byte, with no rule (the 14 rows of 1.1 among them); every `-outfmt 8` and
+  `-outfmt 11` row of D (483) and E (587) is equal; the 20 WQA web-page cases give the native bytes
+  (dev's WASI command differed on 4 of them, the four tblastx cases, in E values printed with
+  all 15 digits). On that
+  branch the WASI guard compares the psiblast PSSM files byte for byte and the Python copy of the
+  rule is removed; the macOS Rust copy stays. Correction to 1.1: in the 14 psiblast rows the
+  differing value came from `pow` in the pseudocounts, not from `log` (the v0.2.0 release line, 2026-11-20).
+  The Owner answered with no words: on 2026-11-20 at 05:39 JST the Owner pressed "Ready for review"
+  on pull request #1345, which its description named as the way to accept option A of this question
+  (Q-LIBM-PD, as shown to the Owner): retire the WASI clause of PD-LOSAT-PLATFORM-LIBM (1.1, Owner
+  2026-11-18)? (A) retire it (recommended) / (B) keep 1.1; the macOS clause stays in both. Not
+  taken: (B). #1345 merged into dev the same minute.

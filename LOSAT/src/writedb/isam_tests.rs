@@ -230,31 +230,7 @@ fn several_sample_pages_are_makeblastdb_s() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:1500-1541
-// ```c++
-// BOOST_AUTO_TEST_CASE(PDBIdLowerCase)
-// {
-//     ...
-//         I1("pdb|3E3Q|b"), T1("Lower case chain b");
-//     ...
-//         CRef<CSeqDB> rd ...
-//         rd.AccessionToOids("3e3q_b", oids);
-//
-//         BOOST_REQUIRE(oids.size() == 1);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:1318-1359
-// ```c++
-// BOOST_AUTO_TEST_CASE(UsPatId)
-// {
-//
-//     CRef<CSeq_id> seqid(new CSeq_id("pat|us|123|456"));
-//     ...
-//     CSeqDB seqdb("uspatid", CSeqDB::eProtein);
-//     int oid(-1);
-//     bool found = seqdb.SeqidToOid(*seqid, oid);
-//
-//     BOOST_REQUIRE_EQUAL(found, true);
-//     BOOST_REQUIRE_EQUAL(oid,   0);
-// ```
 // NCBI's cases read the database back with CSeqDB (the ISAM lookups the files allow). Here
 // the files are compared with makeblastdb's for the same two ids (s3b/probe/ncbiut, where
 // `blastdbcmd -entry '3e3q_b,pat|us|123|456'` finds OIDs 0 and 1); it checks the files, not

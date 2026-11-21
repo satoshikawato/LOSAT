@@ -1,27 +1,7 @@
 //! The `Blast4-mask` lists of a BLAST archive: the masks of the results and the `LCaseMask`
 //! parameters of the request.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1064-1138
-//! ```c++
-//! static CRef<CBlast4_mask>
-//! s_CreateBlastMask(const CPacked_seqint& packed_int, EBlastProgramType program)
-//! {
-//!     CRef<CBlast4_mask> retval(new CBlast4_mask);
-//!     CRef<CSeq_loc> seqloc(new CSeq_loc);
-//!     ITERATE(CPacked_seqint::Tdata, masked_region, packed_int.Get()) {
-//!         CRef<CSeq_interval> seqint
-//!             (new CSeq_interval(const_cast<CSeq_id&>((*masked_region)->GetId()),
-//!                           (*masked_region)->GetFrom(),
-//!                           (*masked_region)->GetTo()));
-//!         ...
-//!         seqloc->SetPacked_int().Set().push_back(seqint);
-//!     }
-//!     retval->SetLocations().push_back(seqloc);
-//!     EBlast4_frame_type frame =
-//!         (Blast_QueryIsNucleotide(program) || Blast_QueryIsTranslated(program))
-//!         ? eBlast4_frame_type_plus1
-//!         : eBlast4_frame_type_notset;
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1063-1138
 //! A mask is one `Seq-loc` `packed-int` of the intervals of a query in one frame (a
 //! nucleotide query not translated: `plus1`; a protein query: `notset`; a translated query:
 //! the frame of its run of intervals).
@@ -98,17 +78,7 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
 /// interval of `intervals` (0-based, inclusive), each with the Seq-id `id` (`CSeq_loc(id,
 /// ranges)`, as the Blast4 masks and the mask writers of dustmasker build it).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:72-79
-/// ```c++
-///     CPacked_seqint::TRanges masked_ranges;
-///     masked_ranges.reserve(mask.size());
-///     ITERATE(TMaskList, itr, mask) {
-///         masked_ranges.push_back
-///             (CPacked_seqint::TRanges::value_type(itr->first, itr->second));
-///     }
-///     CConstRef<CSeq_id> id = bsh.GetSeqId();
-///     CSeq_loc seqloc(const_cast<CSeq_id&>(*id), masked_ranges);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:65-79
 pub fn write_packed_int<E: Encoder>(
     enc: &mut E,
     id: &SeqId<'_>,
@@ -130,18 +100,6 @@ pub fn write_packed_int<E: Encoder>(
 /// (`write_packed_int`); the mask writers of dustmasker build their Seq-locs so.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:173-182
-/// ```c++
-/// CSeq_loc::CSeq_loc(TId& id, TRanges ranges, TStrand strand)
-/// {
-///     InvalidateCache();
-///     if ( ranges.size() == 1 ) {
-///         SetInt(*new CSeq_interval(id,
-///             ranges.front().GetFrom(), ranges.front().GetTo(), strand));
-///     } else {
-///         SetPacked_int(*new CPacked_seqint(id, ranges, strand));
-///     }
-/// }
-/// ```
 pub fn write_ranges_seq_loc<E: Encoder>(enc: &mut E, id: &SeqId<'_>, intervals: &[(u32, u32)]) {
     if let [(from, to)] = *intervals {
         enc.variant("Seq-loc", "int", 3);

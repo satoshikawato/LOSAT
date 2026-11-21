@@ -1,4 +1,4 @@
-import type { FastaParserKind, IndexedRecord, RecordKey } from 'losat/domain';
+import type { FastaParserKind, IndexedRecord, RecordKey, ShownIds } from 'losat/domain';
 // Datasets (plan §5.2, §5.4): the record table of one source FASTA, and immutable
 // revisions of it that say which records a run uses. The record fields are those of the
 // ABI v2 *scan* response (docs/web/abi_v2.md §9), so no mapping layer is needed.
@@ -27,10 +27,14 @@ export function includedRecords(revision: DatasetRevision): readonly DatasetReco
 }
 
 /**
- * The name of a run input's record in the results: its ID, or for a record without a title the
- * name of NCBI's tabular outputs, `Query_N` or `Subject_N` (N its number in the run input).
+ * The name of a run input's record in the results: the ID that the run's outputs show for it where
+ * the engine read the IDs of the deflines (`shown`, -parse_deflines: `AB000001.1` of
+ * `>gb|AB000001.1| ...`; line WQA's sweep, D7, 2026-11-19), else its ID, or for a record without a
+ * title the name of NCBI's tabular outputs, `Query_N` or `Subject_N` (N its number in the run input).
  */
-export function recordName(id: string, role: 'query' | 'subject', index: number): string {
+export function recordName(id: string, role: 'query' | 'subject', index: number, shown?: ShownIds): string {
+  const parsed = shown?.[role][index];
+  if (parsed !== undefined) return parsed;
   return id !== '' ? id : `${role === 'query' ? 'Query' : 'Subject'}_${index + 1}`;
 }
 

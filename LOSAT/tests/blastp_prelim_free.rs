@@ -14,12 +14,6 @@
 //! release of the lists window by window in the redo of `LOSAT_X_BPREDOPAR`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3734-3738
-//! ```c
-//! match_loop_cleanup:
-//!                 if (seqSrc) {
-//!                     localMatch = Blast_HSPListFree(localMatch);
-//!                 } else {
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

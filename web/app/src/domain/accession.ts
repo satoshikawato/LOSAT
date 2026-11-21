@@ -78,11 +78,12 @@ export function accessionsOnALine(text: string): readonly string[] | undefined {
 }
 
 /**
- * The part of the engine's reason that names a first line NCBI BLAST+ would fetch as a Seq-id
- * (adapter, scan/ncbi.rs). The adapter's answer has no kind or code, only this text, so the
- * app tells that reason by this part of it (WA2-OP-04); the CLI's message is not the adapter's.
- * Kept equal to the adapter's text by tests/unit/accession.test.ts (reads scan/ncbi.rs) and, in
- * the engine build, the e2e tests of fetch.spec.ts (WA2-OP-04) and search.spec.ts ("empty inputs").
+ * The part of the engine's reason that names a first line NCBI BLAST+ would fetch as a Seq-id: the
+ * CLI's own sentence, which the engine's reader gives the index scan and `register` (LOSAT's
+ * fasta_reader/seq_id.rs; line WQA's D13, 2026-11-20). The answer has no kind or code, only this
+ * text, so the app tells that reason by this part of it (WA2-OP-04). Kept equal to the engine's text
+ * by tests/unit/accession.test.ts (reads seq_id.rs) and, in the engine build, the e2e tests of
+ * fetch.spec.ts (WA2-OP-04) and search.spec.ts ("empty inputs").
  */
 export const SEQ_ID_REASON = 'may be a sequence identifier that NCBI BLAST+ fetches through a data loader';
 

@@ -1,0 +1,413 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 115,
+          to 133,
+          id local str "rec1"
+        },
+        {
+          from 186,
+          to 199,
+          id local str "rec1"
+        },
+        {
+          from 324,
+          to 337,
+          id local str "rec1"
+        },
+        {
+          from 573,
+          to 591,
+          id local str "rec1"
+        },
+        {
+          from 644,
+          to 657,
+          id local str "rec1"
+        },
+        {
+          from 782,
+          to 795,
+          id local str "rec1"
+        },
+        {
+          from 1031,
+          to 1049,
+          id local str "rec1"
+        },
+        {
+          from 1102,
+          to 1115,
+          id local str "rec1"
+        },
+        {
+          from 1240,
+          to 1253,
+          id local str "rec1"
+        },
+        {
+          from 1489,
+          to 1507,
+          id local str "rec1"
+        },
+        {
+          from 1560,
+          to 1573,
+          id local str "rec1"
+        },
+        {
+          from 1698,
+          to 1711,
+          id local str "rec1"
+        },
+        {
+          from 1947,
+          to 1965,
+          id local str "rec1"
+        },
+        {
+          from 2018,
+          to 2031,
+          id local str "rec1"
+        },
+        {
+          from 2156,
+          to 2169,
+          id local str "rec1"
+        },
+        {
+          from 2405,
+          to 2423,
+          id local str "rec1"
+        },
+        {
+          from 2476,
+          to 2489,
+          id local str "rec1"
+        },
+        {
+          from 2614,
+          to 2627,
+          id local str "rec1"
+        },
+        {
+          from 2863,
+          to 2881,
+          id local str "rec1"
+        },
+        {
+          from 2934,
+          to 2947,
+          id local str "rec1"
+        },
+        {
+          from 3072,
+          to 3085,
+          id local str "rec1"
+        },
+        {
+          from 3321,
+          to 3339,
+          id local str "rec1"
+        },
+        {
+          from 3392,
+          to 3405,
+          id local str "rec1"
+        },
+        {
+          from 3530,
+          to 3543,
+          id local str "rec1"
+        },
+        {
+          from 3779,
+          to 3797,
+          id local str "rec1"
+        },
+        {
+          from 3850,
+          to 3863,
+          id local str "rec1"
+        }
+      },
+      packed-int {
+        {
+          from 237,
+          to 255,
+          id local str "rec2"
+        },
+        {
+          from 308,
+          to 321,
+          id local str "rec2"
+        },
+        {
+          from 446,
+          to 459,
+          id local str "rec2"
+        },
+        {
+          from 695,
+          to 713,
+          id local str "rec2"
+        },
+        {
+          from 766,
+          to 779,
+          id local str "rec2"
+        },
+        {
+          from 904,
+          to 917,
+          id local str "rec2"
+        },
+        {
+          from 1158,
+          to 1171,
+          id local str "rec2"
+        },
+        {
+          from 1250,
+          to 1263,
+          id local str "rec2"
+        },
+        {
+          from 1341,
+          to 1354,
+          id local str "rec2"
+        },
+        {
+          from 1381,
+          to 1395,
+          id local str "rec2"
+        },
+        {
+          from 1404,
+          to 1420,
+          id local str "rec2"
+        },
+        {
+          from 1426,
+          to 1439,
+          id local str "rec2"
+        },
+        {
+          from 2002,
+          to 2020,
+          id local str "rec2"
+        },
+        {
+          from 2143,
+          to 2172,
+          id local str "rec2"
+        },
+        {
+          from 2196,
+          to 2214,
+          id local str "rec2"
+        },
+        {
+          from 2287,
+          to 2304,
+          id local str "rec2"
+        },
+        {
+          from 2330,
+          to 2343,
+          id local str "rec2"
+        },
+        {
+          from 2400,
+          to 2414,
+          id local str "rec2"
+        },
+        {
+          from 2766,
+          to 2778,
+          id local str "rec2"
+        },
+        {
+          from 2808,
+          to 2828,
+          id local str "rec2"
+        },
+        {
+          from 2944,
+          to 2962,
+          id local str "rec2"
+        }
+      },
+      packed-int {
+        {
+          from 21,
+          to 78,
+          id local str "rec4."
+        },
+        {
+          from 83,
+          to 99,
+          id local str "rec4."
+        },
+        {
+          from 204,
+          to 231,
+          id local str "rec4."
+        },
+        {
+          from 307,
+          to 322,
+          id local str "rec4."
+        },
+        {
+          from 442,
+          to 459,
+          id local str "rec4."
+        },
+        {
+          from 486,
+          to 515,
+          id local str "rec4."
+        },
+        {
+          from 547,
+          to 573,
+          id local str "rec4."
+        },
+        {
+          from 677,
+          to 691,
+          id local str "rec4."
+        },
+        {
+          from 850,
+          to 868,
+          id local str "rec4."
+        },
+        {
+          from 1037,
+          to 1053,
+          id local str "rec4."
+        },
+        {
+          from 1078,
+          to 1092,
+          id local str "rec4."
+        },
+        {
+          from 1098,
+          to 1112,
+          id local str "rec4."
+        },
+        {
+          from 1151,
+          to 1163,
+          id local str "rec4."
+        },
+        {
+          from 1199,
+          to 1213,
+          id local str "rec4."
+        },
+        {
+          from 1229,
+          to 1243,
+          id local str "rec4."
+        },
+        {
+          from 1257,
+          to 1270,
+          id local str "rec4."
+        },
+        {
+          from 1320,
+          to 1334,
+          id local str "rec4."
+        },
+        {
+          from 1491,
+          to 1505,
+          id local str "rec4."
+        },
+        {
+          from 1747,
+          to 1767,
+          id local str "rec4."
+        }
+      },
+      packed-int {
+        {
+          from 36,
+          to 62,
+          id local str "rec8"
+        },
+        {
+          from 96,
+          to 110,
+          id local str "rec8"
+        },
+        {
+          from 143,
+          to 157,
+          id local str "rec8"
+        },
+        {
+          from 386,
+          to 400,
+          id local str "rec8"
+        },
+        {
+          from 617,
+          to 632,
+          id local str "rec8"
+        },
+        {
+          from 711,
+          to 725,
+          id local str "rec8"
+        },
+        {
+          from 838,
+          to 851,
+          id local str "rec8"
+        },
+        {
+          from 898,
+          to 912,
+          id local str "rec8"
+        },
+        {
+          from 986,
+          to 1000,
+          id local str "rec8"
+        },
+        {
+          from 1039,
+          to 1062,
+          id local str "rec8"
+        },
+        {
+          from 1321,
+          to 1356,
+          id local str "rec8"
+        },
+        {
+          from 1385,
+          to 1413,
+          id local str "rec8"
+        },
+        {
+          from 1531,
+          to 1549,
+          id local str "rec8"
+        }
+      }
+    },
+    more FALSE
+  }
+}

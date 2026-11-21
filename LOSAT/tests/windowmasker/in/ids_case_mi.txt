@@ -1,0 +1,4 @@
+ab000001.1
+sp|P12345|abc_human
+REC1
+lcl|REC2

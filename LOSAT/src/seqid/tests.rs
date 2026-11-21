@@ -263,7 +263,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         .map(|defline| defline.title.as_deref().unwrap_or_default())
         .collect();
     let taxonomy = TabularTaxonomy::of_deflines(subject.deflines());
-    let spec = TabularSpec::of(
+    let spec = TabularSpec::of_app(
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
@@ -271,6 +271,11 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
                 "sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
                     .to_string(),
             delimiter: String::new(),
+        },
+        if protein {
+            crate::report::archive::options::RequestKind::Blastp
+        } else {
+            crate::report::archive::options::RequestKind::Blastn
         },
     )
     .expect("the fields");
@@ -306,6 +311,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         s_frame: 0,
         rows: None,
         end_gaps: true,
+        stored_gaps: [&[], &[]],
         qcovhsp: 100,
     };
     let mut out = Vec::new();
@@ -596,7 +602,7 @@ fn textseq(accession: Option<&str>, name: Option<&str>, version: Option<i32>) ->
 }
 
 /// Forms that no fixture holds (makeblastdb does not write them from FASTA), by NCBI's rules
-/// quoted in `label` and `rank`.
+/// cited in `label` and `rank`.
 #[test]
 fn printings_of_forms_without_a_fixture() {
     let giim = ParsedSeqId::Giim(GiimportId {
@@ -900,7 +906,7 @@ fn definite_lengths_read_as_ncbis_reader_reads_them() {
         assert!(
             exception
                 .get_msg()
-                .ends_with(": EndOfContentsByte expected"),
+                .ends_with(b": EndOfContentsByte expected"),
             "18S {oid}: {error}"
         );
     }
@@ -928,11 +934,10 @@ fn damaged_records_are_errors() {
         for cut in 1..record.len() {
             let error = decode_full_set(&record[..cut]).expect_err("cut short");
             let exception = error.exception().expect("NCBI's report");
+            let what = String::from_utf8_lossy(&exception.what()).into_owned();
             assert!(
-                exception
-                    .what()
-                    .contains("Error: (CSerialException::eEOF) ")
-                    || exception.what().contains("Error: (CEofException::eEof) "),
+                what.contains("Error: (CSerialException::eEOF) ")
+                    || what.contains("Error: (CEofException::eEof) "),
                 "18S {oid} cut at {cut}: {error}"
             );
         }
@@ -960,7 +965,7 @@ fn damaged_records_are_errors() {
     };
     assert_eq!(
         message(&no_seqid),
-        "byte 11: member seqid expected ( at Blast-def-line-set.[].[])"
+        b"byte 11: member seqid expected ( at Blast-def-line-set.[].[])"
     );
     // An alternative 20 of Seq-id does not exist.
     let id = [
@@ -968,7 +973,7 @@ fn damaged_records_are_errors() {
     ];
     assert_eq!(
         message(&id),
-        "error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[])"
+        b"error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[])"
     );
     // A title with bytes outside ' ' ..= '~' reads with '#' for each, and counts them.
     let title = [
@@ -1624,14 +1629,14 @@ fn header_reads_fail_as_ncbis_object_stream_fails() {
             &format!("\"{}/", crate::ncbi_exception::NCBI_BUILD_ROOT),
         );
         match program {
-            "what" => assert_eq!(exception.what(), report, "{case}"),
+            "what" => assert_eq!(exception.what(), report.as_bytes(), "{case}"),
             _ => assert_eq!(
                 exception.report_default_ex(106, 16, "Application's execution failed"),
-                report,
+                report.as_bytes(),
                 "{case}"
             ),
         }
-        assert_eq!(exception.get_msg(), message, "{case}");
+        assert_eq!(exception.get_msg(), message.as_bytes(), "{case}");
         let path = std::path::Path::new("t.phr");
         match crate::seqdb::header::decode_deflines_as(&record, path, 0, true) {
             Err(error) if error.is_parsed_seqids() => {}

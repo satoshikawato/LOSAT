@@ -106,7 +106,9 @@ fn blastdbcmd_input(
 fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
-    text.replace("{R}", run_dir().to_str().unwrap())
+    // NCBI's footer in LOSAT's words (AGENTS.md rule 8).
+    losat::wording::losat_text(&text.replace("{R}", run_dir().to_str().unwrap()))
+        .into_owned()
         .into_bytes()
 }
 

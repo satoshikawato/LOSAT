@@ -31,14 +31,16 @@ impl ListedSubjects {
     /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists` (the lists not
     /// expanded yet, `x_prelim_compact.rs`) and their lengths, read from the index, without a copy
     /// of the residues; the subjects of both are renamed to their ranks. The subjects that NCBI's
-    /// fetches of the redo or the traceback exclude leave both lists first (`exclude_fetched`; a
-    /// header that the fetch cannot read is LOSAT's refusal).
+    /// fetches of the redo or the traceback exclude leave both lists first, each list leaving a
+    /// mark of its place (`exclude_fetched`, `fetch_excluded`; a header that the fetch cannot read
+    /// is LOSAT's refusal).
     pub(in crate::algorithm::blastp::blast_engine) fn x_list(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        let fetched_utf8 = super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
+        let (fetch_excluded, fetched_utf8) =
+            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()
@@ -57,13 +59,17 @@ impl ListedSubjects {
             x_lengths,
             fetched_utf8,
             earlier_utf8: Default::default(),
+            fetch_excluded,
         })
     }
 
     /// The subjects as the redo reads them: the database by rank.
+    /// `hard_mask`: the algorithm of `-db_hard_mask`, whose masks the redo's reads write `X`
+    /// over (`XDbSubjects::mask_hard`).
     pub(in crate::algorithm::blastp::blast_engine) fn redo_subjects<'a>(
         &'a self,
         database: &'a BlastpDatabase,
+        hard_mask: Option<i32>,
     ) -> XRedoSubjects<'a> {
         XRedoSubjects::Database(XDbSubjects {
             db: &database.db,
@@ -71,32 +77,34 @@ impl ListedSubjects {
             lengths: &self.x_lengths,
             recounted: &self.x_recounted,
             program: database.program,
+            hard_mask,
         })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310, quoted
     // above `read_titles`: NCBI reads the database again when it formats the results of a batch.
     /// After the redo, `encoded` for the reports: every listed subject with its length, and with
-    /// its residues read from the database where the reports read them (`residues`; `query_has_o`:
-    /// whether each query's record has an O, by query index, read with `WithO`).
+    /// its residues read from the database where the reports read them (`residues`;
+    /// `query_recounted`: whether the recount counts each query's HSPs again, by query index,
+    /// `ShownLetters::recounted`, read with `WithO`).
     pub(in crate::algorithm::blastp::blast_engine) fn x_read_shown(
         &mut self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         residues: XShownResidues,
-        query_has_o: &[bool],
+        query_recounted: &[bool],
     ) -> Result<()> {
         let ranks = self.ordinals.len();
         let mut reported = vec![residues == XShownResidues::Listed; ranks];
-        // With `WithO`, the subjects of the HSPs whose query has an O: the recount reads all their
-        // letters.
+        // With `WithO`, the subjects of the HSPs of a query that the recount counts again (an O, a
+        // gap residue, Bioseq letters): it reads all their letters.
         let mut kept = vec![residues != XShownResidues::WithO; ranks];
         for hit_list in hit_lists.iter().flatten() {
             for hsp_list in &hit_list.hsplist_array {
                 reported[hsp_list.oid as usize] = true;
                 for hsp in &hsp_list.hsps {
                     reported[hsp.s_idx as usize] = true;
-                    if query_has_o.get(hsp.q_idx as usize) == Some(&true) {
+                    if query_recounted.get(hsp.q_idx as usize) == Some(&true) {
                         kept[hsp.s_idx as usize] = true;
                     }
                 }
@@ -113,7 +121,7 @@ impl ListedSubjects {
                 continue;
             }
             // With `WithO`, a subject that no read of the redo found an O or a gap character in (the
-            // redo read every subject of the final hit lists) and no HSP of a query with an O names
+            // redo read every subject of the final hit lists) and no HSP of a recounted query names
             // keeps its length only, without a read.
             if !kept[rank] && !self.x_recounted[rank].load(Ordering::Relaxed) {
                 encoded.push(length_only);

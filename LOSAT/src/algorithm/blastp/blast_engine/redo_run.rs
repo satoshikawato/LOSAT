@@ -9,13 +9,6 @@
 //! and its `?` passes the path's errors on.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2977-2981
-//! ```c
-//!  *  Recompute alignments for each match found by the gapped BLAST
-//!  *  algorithm.
-//!  */
-//! Int2
-//! Blast_RedoAlignmentCore_MT(EBlastProgramType program_number,
-//! ```
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads: the six
 //! `blastp_*` functions that `build` calls (`blastp_local_scaling_factor`,
@@ -24,6 +17,7 @@
 //! `preliminary_hit_from_local_match_hsp`, `query_nomask_sequence`, `X_NEWTON_LANES_MATCHES`, and
 //! for the parallel paths' choice `blastp_should_parallelize_stage` and `x_prelim_hsplist_count`.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::ops::Range;
 use std::sync::OnceLock;
 
@@ -78,15 +72,6 @@ use {
 /// parameters of every query share, made at the first `build`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2401-2407
-/// ```c
-/// /**
-///  * Read the parameters required for the Blast_RedoOneMatch* functions from
-///  * the corresponding parameters in standard BLAST datatypes.  Return a new
-///  * object representing these parameters.
-///  */
-/// static Blast_RedoAlignParams *
-/// s_GetAlignParams(BlastKappa_GappingParamsContext * context,
-/// ```
 pub(super) struct RedoParamsBuilder<'a> {
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) contexts: &'a [QueryContext],
@@ -94,13 +79,8 @@ pub(super) struct RedoParamsBuilder<'a> {
     pub(super) hit_cutoff_score_min: i32,
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) x_drop_gapped_final: i32,
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
-    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
-    // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
-    // if (status == 0) {
-    //     Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2228-2236
     //                              self->startFreqRatios, self->ungappedLambda);
-    // }
     // This non-position-based initial matrix is invariant within this search.
     // Initialize at the existing first params request, preserving no-hit/error
     // boundaries, and clone completed values into independently mutable params.
@@ -113,17 +93,6 @@ impl RedoParamsBuilder<'_> {
     /// made at the first call, and each call clones it (or returns its error).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2471-2479
-    /// ```c
-    ///     } else {
-    ///         return
-    ///             Blast_RedoAlignParamsNew(&scaledMatrixInfo, &gapping_params,
-    ///                                      compo_adjust_mode, positionBased,
-    ///                                      query_is_translated,
-    ///                                      subject_is_translated,
-    ///                                      queryInfo->max_length, cutoff_s, cutoff_e,
-    ///                                      do_link_hsps, &redo_align_callbacks,
-    ///                                      near_identical_cutoff);
-    /// ```
     pub(super) fn build(&self, q_idx: usize) -> Result<BlastRedoAlignParams> {
         let RedoParamsBuilder {
             args,
@@ -142,13 +111,7 @@ impl RedoParamsBuilder<'_> {
             .get_or_init(|| {
                 build_matrix_info(
                     blastp_redo_matrix(args.scoring.matrix),
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
-                    // ```c
-                    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
-                    // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
-                    // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
-                    //                          self->startFreqRatios, self->ungappedLambda);
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2232
                     ideal_ungapped_lambda / local_scaling_factor,
                 )
             })
@@ -156,31 +119,11 @@ impl RedoParamsBuilder<'_> {
             .map_err(|error| anyhow::anyhow!("{error}"))?
             .clone();
         Ok(BlastRedoAlignParams {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
-            // ```c
-            // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
-            // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
-            // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
-            //                          self->startFreqRatios, self->ungappedLambda);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2232
             matrix_info,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-106
-            // ```c
-            // typedef struct BlastCompo_GappingParams {
-            //     int gap_open;
-            //     int gap_extend;
-            //     int decline_align;
-            //     int x_dropoff;
-            //     void * context;
-            // } BlastCompo_GappingParams;
-            // ```
+            // NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-112
             //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2117-2133
-            // ```c
-            // kbp->Lambda /= scale_factor;
-            // sp->gap_open = (Int4)BLAST_Nint(sp->gap_open  * scale_factor);
-            // sp->gap_extend = (Int4)BLAST_Nint(sp->gap_extend * scale_factor);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133
             gapping_params: BlastCompoGappingParams {
                 gap_open: ((args.scoring.gap_open as f64) * local_scaling_factor).round() as i32,
                 gap_extend: ((args.scoring.gap_extend as f64) * local_scaling_factor).round()
@@ -193,23 +136,16 @@ impl RedoParamsBuilder<'_> {
                 context: std::cell::Cell::new(None),
             },
             compo_adjust_mode: blastp_compo_adjust_mode(args.comp_based_stats.mode),
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1107-1118
-            // ```c
-            // Blast_RedoOneMatch(..., int ** matrix, int alphsize,
-            //                    ..., int compositionTestIndex, ...)
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1107-1118
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
-            log_k: gapped_params.k.ln(),
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
-            // ```c
-            // localScalingFactor      /* i */
-            // ...
-            // s_HSPListNormalizeScores(hsp_list, kbp->Lambda, kbp->logK,
-            //                          localScalingFactor);
-            // ```
+            log_k: gapped_params.k.glibc_ln(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3584-3690
             score_divisor: local_scaling_factor,
-            smith_waterman: false,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
+            // `-use_sw_tback` (item X4): the one-thread loop redoes each match with NCBI's
+            // Smith-Waterman redo (`one_thread_redo`).
+            smith_waterman: args.use_sw_tback,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,
             ccat_query_length: contexts[q_idx].aa_len as i32,
@@ -221,14 +157,36 @@ impl RedoParamsBuilder<'_> {
                 local_scaling_factor,
             ),
             do_link_hsps,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
-            // ```c
-            // Nearly identical alignments are computed with exact subjects,
-            // and others with segged subjects; this makes comparing end
-            // points more difficult.
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
         })
     }
+}
+
+/// Each query's context of the E-value adjustment with a composition P-value, in query order
+/// (`kappa::evalue_adjust_contexts`): the next query's of its batch (`kappa_query_batches`), or
+/// its own. With unified P-values a batch whose adjustment NCBI makes with a search space of 0
+/// is refused here, by the ids the reports show (`query_ids`).
+pub(super) fn evalue_adjust_contexts(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    search_spaces: &[SearchSpace],
+    kappa_query_batches: &[Range<usize>],
+    query_ids: &[std::sync::Arc<[u8]>],
+) -> Result<Vec<kappa::EvalueAdjustContext>> {
+    let refuse = args
+        .comp_based_stats
+        .unified_p
+        .then(|| kappa::UnifiedPRefusal {
+            program: args.app.name(),
+            query_ids,
+        });
+    kappa::evalue_adjust_contexts(
+        contexts,
+        search_spaces,
+        kappa_query_batches,
+        args.searchsp.unwrap_or(0),
+        refuse,
+    )
 }
 
 /// Each query's batch as a range of the queries, one range per query in query order
@@ -238,31 +196,7 @@ pub(super) fn kappa_query_batches(
     query_batches: &[RangedBatch],
 ) -> Vec<Range<usize>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-260,274-276
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    // 	    BLAST_PROF_START( APP.LOOP.PRE );
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    // ...
-    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-    //                 results = lcl_blast.Run();
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3013,3119-3128
-    // ```c
-    //     int numQueries = queryInfo->num_queries;
-    // ...
-    //     redoneMatches = calloc(numQueries, sizeof(BlastCompo_Heap));
-    //     if (redoneMatches == NULL) {
-    //         status_code = -1;
-    //         goto function_cleanup;
-    //     }
-    //     for (query_index = 0;  query_index < numQueries;  query_index++) {
-    //         status_code =
-    //             BlastCompo_HeapInitialize(&redoneMatches[query_index],
-    //                                       hitParams->options->hitlist_size,
-    //                                       inclusion_ethresh);
-    // ```
     // NCBI searches one query batch at a time, so the heaps that the redo of a query reads
     // (BlastCompo_EarlyTermination) are those of the queries of its batch. `redone_matches`
     // holds the heaps of all batches; this is each query's batch as a range of it. A query
@@ -288,22 +222,6 @@ pub(super) fn kappa_query_batches(
 /// NCBI's threads share those of its parallel region.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3432-3445
-/// ```c
-///     shared(interrupt, seqsrc_tld, score_params_tld, hit_params_tld, \
-///     gap_align_tld, results_tld, \
-///     redoneMatches_tld, \
-///     STDERR_COMMA \
-///     numMatches, theseMatches, \
-///     numFrames, program_number, subjectBlk_tld, positionBased, \
-///     default_db_genetic_code, localScalingFactor, queryInfo, \
-///     sbp, smithWaterman, numQueries_tld, compositionTestIndex_tld, forbidden_tld, \
-///     NRrecord_tld, actual_num_threads, sbp_tld, \
-///     matrix_tld, query_info_tld, numContexts_tld, \
-///     genetic_code_string, queryBlk, compo_adjust_mode, \
-///     alignments_tld, incoming_align_set_tld, savedParams_tld, \
-///     scoringParams, redo_align_params_tld, \
-///     status_code_tld)
-/// ```
 pub(super) struct RedoInputs<'a, P> {
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
@@ -314,7 +232,19 @@ pub(super) struct RedoInputs<'a, P> {
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,
     pub(super) kappa_query_batches: &'a [Range<usize>],
+    /// Each query's context of the E-value adjustment with a composition P-value
+    /// (`kappa::evalue_adjust_contexts`).
+    pub(super) evalue_adjust_contexts: &'a [kappa::EvalueAdjustContext],
     pub(super) build_redo_align_params: &'a P,
+    /// The marks of the lists that the redo reaches and its fetch excludes, by query and place
+    /// (`database::exclude_fetched`; empty without a database or a negative seqid list): only the
+    /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
+    /// status, so its paths read the lists without them.
+    pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
+    /// The notes of the call's fetches that read a header with a UTF8String: the error of a
+    /// batch whose Smith-Waterman redo fails or does not end comes after NCBI's warning of the
+    /// first of them that the batch made before (`FetchNotes::fetched_before_failure`).
+    pub(super) fetch_notes: &'a super::database::FetchNotes<'a>,
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
     #[cfg(all(
@@ -322,11 +252,6 @@ pub(super) struct RedoInputs<'a, P> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(super) blastp_num_threads: usize,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub(super) total_db_len: usize,
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -369,13 +294,11 @@ pub(super) enum RedoPath {
 /// NCBI chooses only the number of threads of its one loop (`actual_num_threads`); it has no
 /// counterpart of the choice among LOSAT's paths, each of which gives the output of the one loop.
 ///
+/// With `-use_sw_tback` (item X4) the one-thread loop runs: the Smith-Waterman redo of a match
+/// asks the query's heap before its first alignment (`BlastCompo_HeapWouldInsert`), so a match's
+/// redo reads the heap that the matches before it in the loop's order leave.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3079-3082
-/// ```c
-///     int actual_num_threads = 1;
-/// #ifdef _OPENMP
-///     actual_num_threads = num_threads;
-/// #endif
-/// ```
 pub(super) fn plan_redo_and_expand_lists<P>(
     redo: &RedoInputs<'_, P>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -394,7 +317,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         args,
         subjects,
         blastp_num_threads,
-        total_db_len,
         ..
     } = *redo;
     #[cfg(all(
@@ -411,35 +333,19 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let use_parallel_kappa_redo = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
-        // ```c
-        // #pragma omp parallel ... num_threads(actual_num_threads)
-        // #pragma omp for schedule(static)
-        // for (b = 0; b < numMatches; ++b) {
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-409,417-418
-        // ```c
-        // BlastCompo_HeapFilledToCutoff(const BlastCompo_Heap * self)
-        // {
-        //     return self->n >= self->heapThreshold &&
-        //         self->worstEvalue <= self->ecutoff;
-        // }
-        // ...
-        //     self->n             = 0;
-        //     self->heapThreshold = heapThreshold;
-        // ```
         // The query-parallel redo below relies on a heap that no match has reached not being
         // filled to its cutoff (hitlist_size >= 1); otherwise the one-thread loop is used.
         kappa_parallel_query_indices.len() > 1
-            && !BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh)
-                .filled_to_cutoff()
+            && !args.use_sw_tback
+            && !args.redone_match_heap().filled_to_cutoff()
             && blastp_should_parallelize_stage(
                 "kappa-query-redo",
                 args.num_threads,
                 blastp_num_threads,
                 subjects.len(),
                 kappa_parallel_query_indices.len(),
-                total_db_len,
             )
     };
     #[cfg(any(
@@ -452,13 +358,8 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let kappa_match_parallel_query_index = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
-        // ```c
-        // #pragma omp parallel ... num_threads(actual_num_threads)
-        // #pragma omp for schedule(static)
-        // for (b = 0; b < numMatches; ++b) {
-        // ```
-        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
+        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 || args.use_sw_tback {
             None
         } else {
             let q_idx = kappa_parallel_query_indices[0];
@@ -470,7 +371,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                 blastp_num_threads,
                 subjects.len(),
                 match_jobs,
-                total_db_len,
             ) {
                 Some(q_idx)
             } else {
@@ -490,14 +390,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
     let use_parallel_kappa_match_redo = false;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3447-3449
-    // ```c
-    //         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-    //                 != kBlastHSPStream_Eof) {
-    // ...
-    //         int b;
-    // #pragma omp for schedule(static)
-    //         for (b = 0; b < numMatches; ++b) {
-    // ```
     // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch): NCBI splits one loop over the matches
     // of all queries between its threads. With the switch, more than one thread and at least two
     // matches, the matches run on the pool in jobs of up to four matches of one query, and the
@@ -514,6 +406,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let x_redo_par_on = x_redo_par_switch
+        && !args.use_sw_tback
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -528,7 +421,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                     &[]
                 },
             ),
-            total_db_len,
         );
     #[cfg(all(
         feature = "parallel",
@@ -564,9 +456,11 @@ pub(super) fn plan_redo_and_expand_lists<P>(
             "LOSAT_X_SEGSHARE",
             x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
         );
+        // `-use_sw_tback` solves no Newton problem ahead (`x_newton_lanes_prefetch_matches`
+        // returns at once for the Smith-Waterman redo).
         crate::utils::xreach::x_reach!(
             "LOSAT_X_NEWTONLANES",
-            x_redo_par_run || !use_parallel_kappa_match_redo
+            (x_redo_par_run || !use_parallel_kappa_match_redo) && !redo.args.use_sw_tback
         );
     }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
@@ -599,13 +493,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
 /// the lists it has redone are released, and counted in `x_prelim_freed`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3414-3418
-/// ```c
-///         /*
-///          * Convert linked list of matches into array.
-///          */
-///         theseMatches =
-///                 (BlastHSPList**) calloc(numMatches, sizeof(BlastHSPList*));
-/// ```
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -630,6 +517,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         x_win_expand,
         blastp_num_threads,
@@ -645,6 +533,7 @@ where
         search_spaces,
         subjects,
         query_batches: kappa_query_batches,
+        evalue_adjust_contexts,
         matrix: args.scoring.matrix,
         gapped_params,
         gapped_gumbel: gapped_gumbel.as_ref(),
@@ -671,9 +560,6 @@ where
 /// the heap insertions are replayed after them in stream order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3511-3511
-/// ```c
-///                 BlastHSPList* localMatch = theseMatches[b];
-/// ```
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -697,6 +583,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         ..
     } = *redo;
@@ -708,38 +595,18 @@ where
     let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
     let query_nomask = query_nomask_sequence(ctx);
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
-    // ```c
-    // #pragma omp parallel ... num_threads(actual_num_threads)
-    // #pragma omp for schedule(static)
-    // for (b = 0; b < numMatches; ++b) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3493-3503
-    // ```c
-    // scoringParams = score_params_tld[tid];
-    // redoneMatches = redoneMatches_tld[tid];
-    // NRrecord = NRrecord_tld[tid];
-    // redo_align_params = redo_align_params_tld[tid];
-    // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
-    // ```c
-    // #pragma omp parallel default(none) num_threads(actual_num_threads)
-    // #pragma omp for schedule(static)
-    // for (b = 0; b < numMatches; ++b) {
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
-    // query_info->seq.data = &query_data[query_info->origin];
-    // query_info = query_info_tld[tid];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3493-3503
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3459
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
     // Only immutable query preparation is shared within this search.
     let query_workspace = std::sync::OnceLock::new();
     let pool = blastp_parallel_pool;
     let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
         local_matches
             .par_iter()
-            // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
-            // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-            // NRrecord = NRrecord_tld[tid];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
             // Each Rayon work unit owns its mutable scratch. Initialization
             // count is scheduler-dependent, never assumed to equal threads.
             .map_init(
@@ -778,14 +645,12 @@ where
                             ctx.aa_len as i32,
                             search_spaces[q_idx].length_adjustment as i32,
                             search_spaces[q_idx].effective_space,
+                            evalue_adjust_contexts[q_idx],
                         )
                     });
                     let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new(None);
 
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
-                    // ```c
-                    // *pStatusCode = s_ResultHspToDistinctAlign(...);
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3577-3585
                     postprocess_preliminary_hits(
                         kappa_preliminary_hits,
                         query_workspace,
@@ -807,18 +672,9 @@ where
             .collect()
     });
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3529
-    // ```c
-    // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-    //                                 redoneMatches,
-    //                                 numQueries)) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3849
-    // ```c
-    // /* Reduce results from all threads and continue with business as usual */
-    // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3817-3849
     //
     // The expensive redo calculation above runs in NCBI's static-loop
     // spirit, but heap admission is replayed in the original HSP stream
@@ -853,15 +709,6 @@ where
 /// with the heaps of its batch.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3282-3283,3288-3291
-/// ```c
-///         redoneMatches_tld[i] =
-///                 (BlastCompo_Heap*) calloc(numQueries, sizeof(BlastCompo_Heap));
-/// ...
-///         for (query_index = 0; query_index < numQueries; query_index++) {
-///             status_code =
-///                 BlastCompo_HeapInitialize(&redoneMatches_tld[i][query_index],
-///                                           hitParams->options->hitlist_size,
-/// ```
 /// NCBI's threads split the matches, each thread with its own heaps; LOSAT runs the queries on the
 /// pool, each query with its own heap.
 #[cfg(all(
@@ -887,44 +734,18 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         ..
     } = *redo;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3119-3128
-    // ```c
-    // redoneMatches = calloc(numQueries, sizeof(BlastCompo_Heap));
-    // for (query_index = 0;  query_index < numQueries;  query_index++) {
-    //     BlastCompo_HeapInitialize(&redoneMatches[query_index], ...);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3119-3128
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
-    // ```c
-    // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-    // status_code = Blast_CompositionWorkspaceInit(...);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3436-3459
-    // ```c
-    // #pragma omp for schedule(static)
-    // for (b = 0; b < numMatches; ++b) {
-    //     ... redoneMatches = redoneMatches_tld[tid];
-    // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
-    // ```c
-    // #pragma omp parallel default(none) num_threads(actual_num_threads)
-    // #pragma omp for schedule(static)
-    // for (b = 0; b < numMatches; ++b) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3436-3459
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3459
     let pool = blastp_parallel_pool;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636,3448-3449
-    // ```c
-    //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-    //                                              subject_maybe_biased);
-    // ...
-    // #pragma omp for schedule(static)
-    //         for (b = 0; b < numMatches; ++b) {
-    // ```
     // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
     // matches). Here the masked ranges are kept in one store for all queries, as the serial
     // redo already does. Reuse of an identical result only.
@@ -933,35 +754,7 @@ where
         crate::algorithm::blastp::kappa::XSharedSubjectRanges::new(),
     ));
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-    // ```c
-    //                 if (BlastCompo_EarlyTermination(
-    //                         localMatch->best_evalue,
-    //                         redoneMatches,
-    //                         numQueries
-    //                 )) {
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
-    // ```c
-    // BlastCompo_EarlyTermination(double evalue,
-    //                             BlastCompo_Heap significantMatches[],
-    //                             int numQueries)
-    // {
-    //     int i;
-    //     for (i = 0;  i < numQueries;  i++) {
-    //         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
-    //             double ecutoff = significantMatches[i].ecutoff;
-    //             /* Only matches with evalue <= ethresh will be saved. */
-    //             if (evalue <= EVALUE_STRETCH * ecutoff) {
-    //                 ...
-    //                 return FALSE;
-    //             }
-    //         } else {
-    //             return FALSE;
-    //         }
-    //     }
-    //     return TRUE;
-    // }
-    // ```
     // The test reads the heaps of the queries of the batch (`kappa_query_batches`).
     // `one_thread_redo` redoes the queries in order, so when it tests a match of one
     // query, the heaps of the queries of its batch before it are complete and those of
@@ -977,8 +770,7 @@ where
     // A heap that no match has reached, for the Newton lanes prefetch: the
     // prefetch leaves out the matches that the test ends for the heaps it is given, and
     // a query that does not test its own heap redoes every match.
-    let x_untouched_heap =
-        BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh);
+    let x_untouched_heap = args.redone_match_heap();
     // (query, its heap, the kept results of a batch's last query by match position)
     type KappaQueryRedo = (
         usize,
@@ -998,8 +790,7 @@ where
                 // See XSharedSubjectRanges.
                 let mut kappa_subject_range_cache =
                     BlastpKappaSubjectRangeCache::new(x_shared_ranges.clone());
-                let mut redone_match =
-                    BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh);
+                let mut redone_match = args.redone_match_heap();
                 let mut kept_for_replay = Vec::new();
                 let batch = &kappa_query_batches[q_idx];
                 let alone_in_batch = batch.len() == 1;
@@ -1014,17 +805,13 @@ where
                     ctx.aa_len as i32,
                     search_spaces[q_idx].length_adjustment as i32,
                     search_spaces[q_idx].effective_space,
+                    evalue_adjust_contexts[q_idx],
                 );
                 let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
                     return Ok((q_idx, redone_match, kept_for_replay));
                 };
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
-                // ```c
-                // hit_list = results->hitlist_array[index];
-                // last_hsplist_index = hit_list->hsplist_count - 1;
-                // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
-                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:289-318
                 // No NCBI counterpart: position of the next Newton lanes prefetch.
                 let mut x_next_prefetch = 0usize;
                 for (match_position, local_match) in preliminary_hit_list
@@ -1046,13 +833,6 @@ where
                     }
 
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-                    // ```c
-                    //                 if (BlastCompo_EarlyTermination(
-                    //                         localMatch->best_evalue,
-                    //                         redoneMatches,
-                    //                         numQueries
-                    //                 )) {
-                    // ```
                     // Tested here only for a query that is alone in its batch: FALSE for
                     // a query that is not the last one of its batch, and replayed after
                     // the parallel loop for the last one of several (see above).
@@ -1135,11 +915,7 @@ where
             })
             .collect()
     });
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3850
-    // ```c
-    // /* Reduce results from all threads and continue with business as usual */
-    // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3817-3850
     let mut kept_queries = Vec::new();
     for (q_idx, heap, kept_for_replay) in query_heaps? {
         redone_matches[q_idx] = heap;
@@ -1148,29 +924,6 @@ where
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3705-3719
-    // ```c
-    //                 if (BlastCompo_EarlyTermination(
-    //                         localMatch->best_evalue,
-    //                         redoneMatches,
-    //                         numQueries
-    //                 )) {
-    // ...
-    //                     if (BlastCompo_HeapWouldInsert(
-    //                             &redoneMatches[query_index],
-    //                             best_evalue,
-    //                             best_score,
-    //                             localMatch->oid
-    //                     )) {
-    //                         *pStatusCode =
-    //                                 BlastCompo_HeapInsert(
-    //                                         &redoneMatches[query_index],
-    //                                         hsp_list,
-    //                                         best_evalue,
-    //                                         best_score,
-    //                                         localMatch->oid,
-    //                                         &discarded_aligns
-    //                                 );
-    // ```
     // The last query of each batch of several: the steps of `one_thread_redo`
     // in stream order, with the heaps of the batch and the results redone above.
     for (q_idx, kept_for_replay) in kept_queries {
@@ -1201,6 +954,130 @@ where
     Ok(())
 }
 
+/// NCBI's error of a query batch whose Smith-Waterman redo (`kappa::smith_waterman::SwRedoFailed`)
+/// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
+/// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
+/// the status again), a status other than 0 at the end fails the batch's traceback, and the
+/// application writes `BLAST engine error: Traceback failed` (exit status 3) after the reports of
+/// the batches before (without the epilog) and the failing batch's reader messages and search
+/// strategy request. LOSAT gives NCBI's one-thread output at every `-num_threads`. The error names
+/// the batch's first query (`batch_start`, a query of this call: the search of all queries, the only
+/// call that runs `-use_sw_tback`, `x_query_block_plan`), as the error of a header file that a
+/// batch reaches does (`database::HeaderReadError`), whose batches before `search` searches again
+/// and reports alone.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:274-276 (the exception leaves the
+/// batch loop before the batch's formatting and `PrintEpilog`)
+///
+/// NCBI ends such a batch by `Traceback failed` only when the batch's first query holds no redone
+/// match (`first_query`, the heap of `batch_start`). With a status other than 0 the clean-up frees
+/// the arrays of every query's heap, leaving each heap's count, and then empties the heap of the
+/// first query alone (`s_ClearHeap(redoneMatches_tld[i])`, the address of its element 0):
+/// `BlastCompo_HeapPop` converts nothing (`array` is NULL) and, when the count is above 0, reads
+/// `heapArray[1]` through the NULL `heapArray` (SIGSEGV, at address 0x28 on ws, 2026-11-18). A
+/// heap's count is above 0 once `BlastCompo_HeapInsert` (blast_kappa.c:3705-3719) has put a match
+/// in it, and nothing pops it before the clean-up, so NCBI crashes exactly when a match of the
+/// batch's first query was redone and kept. The heaps of the other queries are freed without a
+/// pop; the heaps of the function's own `redoneMatches` (blast_kappa.c:3006, 3119-3130), which its
+/// clean-up empties at 3807-3813, receive no match (the loop inserts into its block's
+/// `redoneMatches`, :3472 and :3496, that thread's heaps), so they pop nothing. LOSAT refuses that
+/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.53), in the place of NCBI's error and
+/// after the same reports (the S1 form of 2026-11-18: what NCBI formats before its failing step,
+/// not the part of its stdio buffer that its crash loses). Exit status 1, its message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2518-2524
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-457
+#[cold]
+#[inline(never)]
+fn sw_batch_failed(
+    batch_start: usize,
+    first_query: &BlastCompoHeap,
+    utf8: Option<super::database::Utf8Read>,
+) -> anyhow::Error {
+    let error = if first_query.n > 0 {
+        anyhow::anyhow!(
+            "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
+        )
+    } else {
+        crate::blastinput::app::engine_error("Traceback failed")
+    };
+    super::database::HeaderReadError {
+        query: batch_start,
+        error,
+        utf8,
+    }
+    .into()
+}
+
+/// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
+/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
+/// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
+/// printed the reports of the batches before (`blastp_app.cpp:257-276`, cited at
+/// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
+/// does, after those reports (without the epilog), as TBLASTX's and TBLASTN's refusals of a step
+/// where NCBI's search of a batch does not finish do (`blastinput::app::ErrorAfterBatchReports`,
+/// the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the results of the query batches before
+/// are written"). Exit status 1, its message.
+#[cold]
+#[inline(never)]
+fn sw_endless(batch_start: usize, utf8: Option<super::database::Utf8Read>) -> anyhow::Error {
+    super::database::HeaderReadError {
+        query: batch_start,
+        utf8,
+        error: anyhow::anyhow!(
+            "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
+        ),
+    }
+    .into()
+}
+
+/// NCBI's Smith-Waterman redo at a list whose subject its fetch excludes (`mark`, a list that
+/// `database::exclude_fetched` removed; `batch_heaps`, the heaps of the list's query batch): the
+/// list is freed without a change of the status when the early termination test holds, and
+/// otherwise the excluded fetch sets the status back to 0, which clears an earlier failure of
+/// the batch (`sw_last_failed`). Nothing is fetched, redone or inserted.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
+#[inline]
+fn fetch_excluded_reached(
+    mark: &super::database::FetchExcludedMatch,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    if !blast_compo_early_termination(mark.best_evalue, batch_heaps) {
+        *sw_last_failed = false;
+    }
+}
+
+/// NCBI's Smith-Waterman redo at the lists of one query whose subjects its fetch excludes
+/// (`marks`, in stream order), read after the query's loop. `status_position` is the place of
+/// the query's last kept list whose redo set the status (`None` where no redo of the query did).
+/// A list before that place changes nothing, since that redo sets the status again. After it no
+/// list of the query enters a heap (each one ends early), so each later excluded list meets the
+/// heaps as they are after the loop (`batch_heaps`) and goes through `fetch_excluded_reached`.
+/// With no such redo the query changed no heap, and every excluded list goes through it.
+///
+/// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
+/// is NCBI's one-thread status of the batch.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+fn query_fetch_excluded_reached(
+    marks: &[super::database::FetchExcludedMatch],
+    status_position: Option<usize>,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    let after_status = status_position.map_or(0, |at| at + 1);
+    for mark in marks.iter().filter(|mark| mark.position >= after_status) {
+        fetch_excluded_reached(mark, batch_heaps, sw_last_failed);
+    }
+}
+
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
 /// in stream order, each query's compact list expanded when the loop reaches it and its preliminary
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
@@ -1210,24 +1087,10 @@ where
 /// least 1):
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1488,1492-1494
-/// ```c
-///     } else if (ext_params->options->compositionBasedStats > 0 ||
-///                ext_params->options->eTbackExt == eSmithWatermanTbck) {
-///         Uint4 num_threads = MAX(1, thread_data->num_elems);
-/// ...
-///         retval =
-///                 Blast_RedoAlignmentCore_MT(program_number,
-///                         num_threads,
-/// ```
 ///
 /// With one thread its parallel region runs on the calling thread, as this loop does:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3431
-/// ```c
-/// #pragma omp parallel \
-///     default(none) num_threads(actual_num_threads) \
-///     if(actual_num_threads>1) \
-/// ```
 pub(super) fn one_thread_redo<P>(
     redo: &RedoInputs<'_, P>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -1248,45 +1111,22 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
+        fetch_excluded,
+        fetch_notes,
         ..
     } = *redo;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
-    // ```c
-    // if ((int) compo_adjust_mode > 1 && !positionBased) {
-    //     NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-    //     status_code = Blast_CompositionWorkspaceInit(...);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
     let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
     if args.scoring.matrix != ScoringMatrix::Blosum62 {
         blastp_use_matrix_workspace(&mut composition_workspace, args.scoring.matrix);
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3656-3667
-    // ```c
-    // s_HSPListFromDistinctAlignments(hsp_list,
-    //         &alignments[context_index],
-    //         matchingSeq.index,
-    //         queryInfo, qframe);
-    // BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3656-3667
     let mut kappa_preliminary_hits = Vec::new();
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3017-3019
-    // ```c
-    // /* keeps track of gapped alignment params */
-    // BlastGapAlignStruct* gapAlign = NULL;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3017-3019
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1934-1942
-    // ```c
-    // status =
-    //     BLAST_GappedAlignmentWithTraceback(..., gapAlign,
-    //                                        context->scoringParams,
-    //                                        q_start, s_start,
-    //                                        query_data->length,
-    //                                        subject_data->length,
-    //                                        &fence_hit);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1934-1942
     let mut kappa_gap_scratch = GapAlignScratch::new();
     // In a block search of the subjects encoded for all blocks, the store of SEG-masked subject
     // ranges of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key
@@ -1294,9 +1134,33 @@ where
     let x_block_seg_store = x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
     let mut kappa_subject_range_cache =
         BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
+    // `-use_sw_tback` (item X4): the Smith-Waterman redo's memory, and whether the last match
+    // that the redo of the query batch has reached failed (NCBI's `status_code_tld`).
+    let mut sw_scratch = args
+        .use_sw_tback
+        .then(kappa::smith_waterman::SwMatchScratch::new);
+    let mut sw_last_failed = false;
+    // The marks of the lists that the Smith-Waterman redo reaches and whose fetch excludes the
+    // subject (`fetch_excluded_reached`), by query; the X-drop redo reads none.
+    let mut fetch_excluded = if sw_scratch.is_some() {
+        fetch_excluded
+    } else {
+        &[][..]
+    };
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
+        if batch.start == q_idx {
+            sw_last_failed = false;
+        }
+        let excluded_here = fetch_excluded
+            .iter()
+            .take_while(|mark| mark.query == q_idx)
+            .count();
+        let (excluded_here, excluded_after) = fetch_excluded.split_at(excluded_here);
+        fetch_excluded = excluded_after;
+        // The place of the query's last list whose Smith-Waterman redo set the status.
+        let mut x_status_position = None;
         let redo_align_params = build_redo_align_params(q_idx)?;
 
         let ctx = &contexts[q_idx];
@@ -1307,41 +1171,34 @@ where
             preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
+            if sw_last_failed && q_idx + 1 == batch.end {
+                return Err(sw_batch_failed(
+                    batch.start,
+                    &redone_matches[batch.start],
+                    fetch_notes.fetched_before_failure(
+                        redone_matches,
+                        batch.clone(),
+                        q_idx,
+                        usize::MAX,
+                    ),
+                ));
+            }
             continue;
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
-        // ```c
-        // BLAST_ComputeLengthAdjustment(..., query_length, db_length,
-        //                               db_num_seqs, &length_adjustment);
-        // query_info->contexts[index].eff_searchsp = effective_search_space;
-        // query_info->contexts[index].length_adjustment = length_adjustment;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-847
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3244-3248
-        // ```c
-        // query_info_tld[i] = s_GetQueryInfo(queryBlk->sequence, queryInfo, ...);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
         let query_workspace = build_query_workspace(
             query_raw,
             ctx.aa_len as i32,
             search_spaces[q_idx].length_adjustment as i32,
             search_spaces[q_idx].effective_space,
+            evalue_adjust_contexts[q_idx],
         );
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:133-151
-        // ```c
-        // if (hsp_stream->sort_by_score->sort_on_read) {
-        //     Blast_HSPResultsReverseSort(hsp_stream->results);
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:133-151
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
-        // ```c
-        // hit_list = results->hitlist_array[index];
-        // last_hsplist_index = hit_list->hsplist_count - 1;
-        // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
-        // --hit_list->hsplist_count;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:289-318
         //
         // For composition-based searches the preliminary stream is read in
         // query order, and within each query from best to worst preliminary
@@ -1357,13 +1214,7 @@ where
             .enumerate()
         {
             let s_idx = local_match.oid;
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
-            // ```c
-            // localMatch->hsp_array,  /* i */
-            // localMatch->hspcnt,     /* i */
-            // ...
-            // *pStatusCode = s_ResultHspToDistinctAlign(...);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3580-3581
             kappa_preliminary_hits.clear();
             kappa_preliminary_hits.extend(
                 local_match
@@ -1371,18 +1222,14 @@ where
                     .iter()
                     .map(preliminary_hit_from_local_match_hsp),
             );
+            // An empty match (NCBI's `hsp_array` not NULL with `hspcnt` 0) would reach NCBI's redo
+            // and set `status_code_tld` to 0 (`-use_sw_tback`: the batch's failure status); LOSAT's
+            // preliminary lists hold no match without HSPs, so this skip is never taken there.
             if kappa_preliminary_hits.is_empty() {
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
-            // ```c
-            // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-            //                                 redoneMatches,
-            //                                 numQueries)) {
-            //     ...
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3528
             // `redoneMatches` and `numQueries` are those of the query's batch
             // (`kappa_query_batches`).
             if blast_compo_early_termination(
@@ -1392,13 +1239,6 @@ where
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-            // ```c
-            //                 if (BlastCompo_EarlyTermination(
-            //                         localMatch->best_evalue,
-            //                         redoneMatches,
-            //                         numQueries
-            //                 )) {
-            // ```
             // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
             // a result is used only by a call with the same input bits. It does not change any value
@@ -1420,21 +1260,69 @@ where
             // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
             let subject = subjects.read(s_idx)?;
             let subject_raw = subject.residues();
-            let postprocessed = postprocess_preliminary_hits(
-                &kappa_preliminary_hits,
-                &query_workspace,
-                &mut composition_workspace,
-                query_nomask,
-                subject_raw,
-                args.scoring.matrix,
-                gapped_params,
-                gapped_gumbel.as_ref(),
-                &redo_align_params,
-                args.evalue,
-                &mut kappa_gap_scratch,
-                &mut kappa_subject_range_cache,
-                needs.seqalign,
-            )?;
+            let postprocessed = if let Some(sw_scratch) = sw_scratch.as_mut() {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646,3735-3737
+                // The Smith-Waterman redo (item X4). A failed redo leaves the match without HSPs
+                // and its status until the next match that the redo reaches; a redo that does not
+                // end in NCBI is refused.
+                let redone_match = &mut redone_matches[q_idx];
+                match kappa::postprocess_preliminary_hits_smith_waterman(
+                    &kappa_preliminary_hits,
+                    &query_workspace,
+                    &mut composition_workspace,
+                    query_nomask,
+                    subject_raw,
+                    args.scoring.matrix,
+                    gapped_params,
+                    gapped_gumbel.as_ref(),
+                    &redo_align_params,
+                    args.evalue,
+                    &mut kappa_gap_scratch,
+                    &mut kappa_subject_range_cache,
+                    needs.seqalign,
+                    sw_scratch,
+                    &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
+                ) {
+                    Ok(postprocessed) => {
+                        sw_last_failed = false;
+                        x_status_position = Some(x_match_position);
+                        postprocessed
+                    }
+                    Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
+                        sw_last_failed = true;
+                        x_status_position = Some(x_match_position);
+                        continue;
+                    }
+                    Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
+                        return Err(sw_endless(
+                            batch.start,
+                            fetch_notes.fetched_before_failure(
+                                redone_matches,
+                                batch.clone(),
+                                q_idx,
+                                x_match_position,
+                            ),
+                        ));
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                postprocess_preliminary_hits(
+                    &kappa_preliminary_hits,
+                    &query_workspace,
+                    &mut composition_workspace,
+                    query_nomask,
+                    subject_raw,
+                    args.scoring.matrix,
+                    gapped_params,
+                    gapped_gumbel.as_ref(),
+                    &redo_align_params,
+                    args.evalue,
+                    &mut kappa_gap_scratch,
+                    &mut kappa_subject_range_cache,
+                    needs.seqalign,
+                )?
+            };
             let best_score = postprocessed.best_score;
             let best_evalue = postprocessed.best_evalue;
             let Some(hsp_list) = postprocessed.hsp_list else {
@@ -1445,10 +1333,34 @@ where
                 redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
             }
         }
+        // The excluded lists of the query, read after its loop (none without `-use_sw_tback`, so
+        // the loop above has no test of them).
+        query_fetch_excluded_reached(
+            excluded_here,
+            x_status_position,
+            &redone_matches[batch.clone()],
+            &mut sw_last_failed,
+        );
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
         *x_prelim_freed += 1;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3781
+        // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
+        // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
+        // when the batch's first query holds a redone match (`sw_batch_failed`).
+        if sw_last_failed && q_idx + 1 == batch.end {
+            return Err(sw_batch_failed(
+                batch.start,
+                &redone_matches[batch.start],
+                fetch_notes.fetched_before_failure(
+                    redone_matches,
+                    batch.clone(),
+                    q_idx,
+                    usize::MAX,
+                ),
+            ));
+        }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as
     // LOSAT_X_BPSEGWIN keeps it for the next window (`x_redo_par.rs` `x_redo`).
@@ -1466,3 +1378,7 @@ where
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "redo_run_tests.rs"]
+mod tests;

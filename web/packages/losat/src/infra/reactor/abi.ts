@@ -6,13 +6,14 @@
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
-import type { RecordKey } from '../../domain/dataset.js';
-import { FileReadError, type StartResult } from '../../ports/engine.js';
+import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
+import { isPrintedKind } from '../../domain/run-files.js';
+import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 3;
-/** Stream 2: the JSON response of describe, register, scan_end, inflate_begin, start and file_end. */
+export const ABI_VERSION = 10;
+/** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
 export const INFLATED_STREAM = 5;
@@ -22,16 +23,66 @@ export const INFLATED_STREAM = 5;
  */
 export const RUN_FILES_STREAM = 8;
 /**
- * Stream 9: a run's signal that the host discards what it received of an output stream, which
- * failed alone after a chunk of it was sent (ABI v2 §5, §7; line RG T7-W). Each `emit` is one
- * signal; `discardedStream` reads the stream's number from its bytes.
+ * Stream 9: a run's signal that an output stream failed, whose received chunks the host discards,
+ * and where its error is (ABI v2 §5, §7; line RG T7-W): every output stream that failed alone, or
+ * whose search failed in a run of two searches, since ABI version 4 (line WQA's sweep, D7,
+ * 2026-11-19 and 2026-11-20). Each `emit` is one signal; `discardSignal` reads it.
  */
 export const DISCARD_STREAM = 9;
+/**
+ * Stream 10: a run's signal of where its messages go, the messages that the CLI writes to its standard error without
+ * -logfile (ABI v2 §5, version 4; line WQA's sweep, D7, 2026-11-20): one signal per run that its start did not end,
+ * before its outputs. `messagesSignal` reads it.
+ */
+export const MESSAGES_STREAM = 10;
+/**
+ * Stream 11: the text that the command line prints to its standard output in place of a run (its help, the XML of
+ * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 10; line WQA's D14, 2026-11-20).
+ */
+export const PRINTED_STREAM = 11;
+/** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
+export const PLACE_NOWHERE = 0xffff_ffff;
+/**
+ * The place "the error that ended the run" in the signals of stream 9 (ABI v2 §5, version 7; line WQA's sweep, D15,
+ * 2026-11-20): an output that a run which failed does not keep, because the CLI's run of the argv does not write it.
+ */
+export const PLACE_RUN = 0xffff_fffe;
 
-/** The output stream that a signal of stream 9 discards: its 4 bytes, an unsigned 32-bit little-endian number. */
+/**
+ * A signal of stream 9 (ABI v2 §5): the output stream that failed, and the stream that holds its
+ * error (3, the diagnostics; 8, the run's files: the file of -logfile), or `undefined` where the
+ * run wrote it nowhere (`PLACE_NOWHERE`); `ended` where it is the error that ended the run (`PLACE_RUN`), which no stream
+ * holds.
+ */
+export interface DiscardSignal {
+  readonly stream: number;
+  readonly errorStream: number | undefined;
+  readonly ended: boolean;
+}
+
+/** Reads a signal of stream 9: its 8 bytes, the stream and the place of its error, each an unsigned 32-bit little-endian number. */
+export function discardSignal(bytes: Uint8Array): DiscardSignal {
+  if (bytes.length !== 8) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 8`);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+  const place = view.getUint32(4, true);
+  const ended = place === PLACE_RUN;
+  return { stream: view.getUint32(0, true), errorStream: place === PLACE_NOWHERE || ended ? undefined : place, ended };
+}
+
+/** The output stream that a signal of stream 9 discards (`discardSignal`). */
 export function discardedStream(bytes: Uint8Array): number {
-  if (bytes.length !== 4) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 4`);
-  return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+  return discardSignal(bytes).stream;
+}
+
+/**
+ * Reads the signal of stream 10: its 4 bytes, the place of the run's messages as an unsigned 32-bit little-endian
+ * number: the stream that holds them (3, the diagnostics; 8, the run's files: the file of -logfile), or `undefined`
+ * where the run writes them nowhere (`PLACE_NOWHERE`).
+ */
+export function messagesSignal(bytes: Uint8Array): number | undefined {
+  if (bytes.length !== 4) throw new Error(`a signal of stream ${MESSAGES_STREAM} has ${bytes.length} bytes, not 4`);
+  const place = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+  return place === PLACE_NOWHERE ? undefined : place;
 }
 export const ROLE_QUERY = 0;
 export const ROLE_SUBJECT = 1;
@@ -55,6 +106,7 @@ export interface AbiExports {
   readonly losat_web2_start: Export;
   readonly losat_web2_validate: Export;
   readonly losat_web2_register: Export;
+  readonly losat_web2_register_inputs: Export;
   readonly losat_web2_release: Export;
   readonly losat_web2_scan_begin: Export;
   readonly losat_web2_scan_chunk: Export;
@@ -107,6 +159,18 @@ export interface RegisteredInput {
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
+
+/**
+ * The inputs of one run that `losat_web2_register_inputs` read together for its argv (a run with
+ * `-parse_deflines`; ABI v2 §4, §9 *inputs*), and the IDs that its outputs show for their records.
+ */
+export interface RegisteredInputs {
+  readonly query: RegisteredInput;
+  readonly subject: RegisteredInput;
+  readonly shownIds: ShownIds;
+}
+
+type RecordsResponse = { handle: number; records: Array<{ id: string; length: number; shown_id?: string }> };
 
 /**
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
@@ -203,24 +267,50 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile` and whether it is a dry run; or the CLI's message for an
-   * argv that the engine cannot start (a version word, a program that ABI v2 does not run).
+   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * together (`registerInputs`) and what it prints in place of a search (`prints`); or the CLI's message
+   * for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
     const status = this.call(this.exports.losat_web2_start, [encoder.encode(argv.join('\0'))]);
     if (status < 0) return { ok: false, message: this.lastError() };
-    const json = this.response() as { conffile: string | null; log_file: string | null; dry_run: boolean };
-    return { ok: true, start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run } };
+    const json = this.response() as {
+      conffile: string | null;
+      log_file: string | null;
+      dry_run: boolean;
+      register_inputs: boolean;
+      prints: string | null;
+    };
+    if (json.prints !== null && !isPrintedKind(json.prints)) throw new EngineCallError(`the engine's start says that a run prints ${JSON.stringify(json.prints)}`);
+    return {
+      ok: true,
+      start: {
+        conffile: json.conffile,
+        logFile: json.log_file,
+        dryRun: json.dry_run,
+        registerInputs: json.register_inputs,
+        prints: json.prints,
+      },
+    };
   }
 
-  /** Undefined if the argv is valid, else the CLI's error text. */
-  validate(argv: readonly string[]): string | undefined {
+  /**
+   * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
+   * data loaders on (the *validation* JSON, ABI v2 §9, version 8), which `register` and `scanBegin`
+   * then take.
+   */
+  validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
-    return status < 0 ? this.lastError() : undefined;
+    // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
+    // it is read before the error, whose call drops the responses.
+    const known = status < 0 && this.responses.length === 0 ? undefined : (this.response() as { data_loaders: boolean }).data_loaders;
+    if (status < 0) return { ok: false, message: this.lastError(), ...(known === undefined ? {} : { dataLoaders: known }) };
+    return { ok: true, dataLoaders: known! };
   }
 
-  register(program: string, role: number, bytes: Uint8Array): RegisteredInput {
-    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, bytes]));
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
+  register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
+    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
     try {
       const response = this.response() as { handle: number; records: Array<{ id: string; length: number }> };
       return { handle, records: Object.freeze(response.records.map(({ id, length }) => ({ id, length }))) };
@@ -231,12 +321,53 @@ export class ReactorAbi {
     }
   }
 
+  /**
+   * Reads the query and the subject of the run of `argv` together, as the CLI reads its `-query` and
+   * `-subject` for that argv (ABI v2 §4 `losat_web2_register_inputs`): the inputs of a run whose
+   * *start* JSON says `register_inputs` (`-parse_deflines`, line WQA's sweep, D7, 2026-11-19). Only
+   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs.
+   */
+  registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
+    this.check(this.call(this.exports.losat_web2_register_inputs, [encoder.encode(argv.join('\0')), query, subject]));
+    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse };
+    const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
+    try {
+      const read = (input: RecordsResponse) => ({
+        handle: input.handle,
+        records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
+      });
+      const shown = (input: RecordsResponse) =>
+        Object.freeze(
+          input.records.map(({ shown_id }) => {
+            if (typeof shown_id !== 'string') throw new Error('a record of register_inputs has no shown_id');
+            return shown_id;
+          }),
+        );
+      return {
+        query: read(response.query),
+        subject: read(response.subject),
+        shownIds: Object.freeze({ query: shown(response.query), subject: shown(response.subject) }),
+      };
+    } catch (error) {
+      // Handles whose response cannot be read are not used: give their copies of the inputs back.
+      if (this.stopped === undefined) for (const handle of handles) this.release(handle);
+      throw error;
+    }
+  }
+
   release(handle: number): void {
     this.check(this.call(this.exports.losat_web2_release, [handle]));
   }
 
-  scanBegin(parser: number): number {
-    return this.check(this.call(this.exports.losat_web2_scan_begin, [parser]));
+  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 8). */
+  scanBegin(reader: FastaReader): number {
+    return this.check(
+      this.call(this.exports.losat_web2_scan_begin, [
+        encoder.encode(reader.program),
+        reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT,
+        reader.dataLoaders ? 1 : 0,
+      ]),
+    );
   }
 
   scanChunk(scanner: number, bytes: Uint8Array): void {
@@ -333,7 +464,10 @@ export class ReactorAbi {
     this.inflating(sink, () => this.check(this.call(this.exports.losat_web2_inflate_end, [inflation])));
   }
 
-  /** Runs one search (ABI v2 §4); the output streams go to `sink` during the call. */
+  /**
+   * Runs one search (ABI v2 §4); the output streams go to `sink` during the call. A run whose start `prints` reads no
+   * input: its handles are 0.
+   */
   run(argv: readonly string[], query: number, subject: number, sink: StreamSink): void {
     this.sink = sink;
     try {

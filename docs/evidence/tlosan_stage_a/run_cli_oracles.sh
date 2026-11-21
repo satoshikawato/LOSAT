@@ -2,12 +2,9 @@
 set -euo pipefail
 
 # Comparison-only NCBI oracle. Run from any directory with a new output path.
-# NCBI c++/src/algo/blast/blastinput/blast_args.cpp:997-1056:
-#   static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
-#   opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
-# NCBI c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056:
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
 #   m_Scope = ReadSequencesToBlast(... subjects ...);
-#   m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
 root=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: run_cli_oracles.sh NEW_OUTPUT_DIRECTORY}
 mkdir "$out"
@@ -42,7 +39,7 @@ for subject in code1 code4 code32; do
           -max_intron_length 0 -db_gencode "$code" -num_threads 1 -outfmt "$fmt" \
           -out "$out/$name.out" 2> "$out/$name.stderr"
       done
-      # NCBI c++/src/objtools/align_format/tabular.cpp:907-1095:
+      # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:907-1095:
       #   score and sframe expose raw-score and subject-frame differences.
       "$tblastn_bin" -task tblastn -query "$root/fixtures/query.faa" "${source_args[@]}" \
         -evalue 10 -matrix BLOSUM62 -word_size 3 -threshold 13 -window_size 40 \

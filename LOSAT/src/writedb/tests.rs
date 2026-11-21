@@ -308,7 +308,7 @@ fn build_version(
     let result = (|| {
         let mut db = BuildDatabase::new(
             out_base,
-            title,
+            title.as_bytes(),
             is_protein,
             &mut log,
             &time_of(date),
@@ -520,8 +520,10 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             out: Some(base.clone()),
             blastdb_version: 4,
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
+            oid_masks: None,
             hash_index: false,
             taxid: None,
             taxid_map: None,
@@ -550,7 +552,8 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let err = replace_bytes(&err, input.as_bytes(), b"<IN>");
         let err = replace_bytes(&err, base.as_bytes(), b"<OUT>");
         assert!(
-            err == case.stderr,
+            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+            crate::wording::losat_bytes(case.stderr) == err,
             "{name}: standard error\n{}\nexpected\n{}",
             show(&err),
             show(case.stderr)
@@ -618,8 +621,10 @@ fn makedb_version(
         out: Some(out.to_string()),
         blastdb_version: version,
         max_file_sz: max_file_sz.to_string(),
+        metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,
+        oid_masks: None,
         hash_index: false,
         taxid: None,
         taxid_map: None,
@@ -915,12 +920,14 @@ fn a_late_error_removes_the_volumes_already_written() {
 }
 
 /// `Error: ` and the exception's report, as makeblastdb's general handler prints it: the build
-/// tree of the official Linux x64 release of 2.17.0 and the file below it.
+/// tree of the official Linux x64 release of 2.17.0 and the file below it; in LOSAT's words
+/// (`crate::wording::losat_text`).
 fn ncbi_report(file: &str, rest: &str) -> String {
-    format!(
+    crate::wording::losat_text(&format!(
         "Error: NCBI C++ Exception:\n    T0 \"{}/src/{file}\", line {rest}\n\n",
         crate::ncbi_exception::NCBI_BUILD_ROOT
-    )
+    ))
+    .into_owned()
 }
 
 /// The report of `CBuildDatabase::CreateDirectories`' exception at `line` with `message`.
@@ -1472,7 +1479,8 @@ fn run_v5_case(case: &V5Case) {
         );
         let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
         assert!(
-            err == run.stderr,
+            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+            crate::wording::losat_bytes(run.stderr) == err,
             "{name} run {k}: standard error\n{}\nexpected\n{}",
             show(&err),
             show(run.stderr)
@@ -1505,7 +1513,7 @@ fn run_v5_case(case: &V5Case) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        let actual = mask_column_date(file, std::fs::read(tmp.0.join(file)).unwrap());
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -1521,6 +1529,29 @@ fn run_v5_case(case: &V5Case) {
             ),
         }
     }
+}
+
+/// The index file of a column (`.?aa`, `.?ba`, ...: a `p` or `n`, the column's letter, `a`) with
+/// the creation time it stores (the second string after the 32 bytes of its head) as `<C>`, as
+/// the cases have it; another file as it is.
+pub(super) fn mask_column_date(file: &str, mut bytes: Vec<u8>) -> Vec<u8> {
+    let extension = file.rsplit('.').next().unwrap_or("").as_bytes();
+    let is_column_index = extension.len() == 3
+        && matches!(extension[0], b'p' | b'n')
+        && extension[2] == b'a'
+        && crate::writedb::column::COLUMN_LETTERS.contains(&extension[1]);
+    if !is_column_index || bytes.len() < 34 {
+        return bytes;
+    }
+    let title_len = usize::from(bytes[32]);
+    let at = 33 + title_len;
+    let date_len = usize::from(bytes[at]);
+    assert!(
+        title_len < 64 && date_len < 64,
+        "{file}: a column head of short strings"
+    );
+    bytes.splice(at..at + 1 + date_len, *b"\x03<C>");
+    bytes
 }
 
 fn run_v5_cases(prefix: &str) {
@@ -1568,6 +1599,53 @@ fn several_input_files_run_as_makeblastdb() {
 )]
 fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
+}
+
+/// `-metadata_output_prefix` as makeblastdb 2.17.0 has it: the prefix before each name of the
+/// metadata's `files`, with a separator added when it has none (`x`) and not when it has one
+/// (`/data/blast/`), nothing for the empty value, every volume and the alias file of a database
+/// of several volumes, version 4, a nucleotide database, and a quote, a backslash, a tab and
+/// UTF-8 in the value (line RG item D3a).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+#[cfg_attr(
+    windows,
+    ignore = "the separator added is `\\` on Windows (makeblastdb's too); the runs recorded are Linux's"
+)]
+fn metadata_output_prefix_runs_as_makeblastdb() {
+    run_v5_cases("P_");
+}
+
+/// `-oid_masks` as makeblastdb 2.17.0 has it: the OID mask file of each volume (`.pxm`, `.nxm`)
+/// whose bit is 0 for a sequence whose ids but GIs are all predicted RefSeq accessions, with and
+/// without `-parse_seqids`, the values 0 and 2 (no file), -1 and `0x01`, a database without models,
+/// several volumes, version 4 with a GI alone (a model) and the accession guide's warnings that
+/// the mask posts again, for every id (line RG item D3b).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn oid_masks_runs_as_makeblastdb() {
+    run_v5_cases("O_");
+}
+
+/// `-input_type blastdb` as makeblastdb 2.17.0 has it: copies of databases of version 5 and 4 into
+/// either version (sequences with ambiguities, taxids, GIs, local ids, several definition lines,
+/// a source without parsed ids), several volumes in and out, several names (sorted, a name twice),
+/// the mask algorithms (two of one program, an `other` one, `-mask_data` beside them, an id taken
+/// by another name), `-taxid`, `-taxid_map`, `-hash_index`, `-logfile`, `-oid_masks`, a PIG and
+/// membership bits, and the refusals of the command line (line RG item D3c).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn blastdb_input_runs_as_makeblastdb() {
+    run_v5_cases("B_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
@@ -1707,7 +1785,12 @@ fn run_parse_case(case: &ParseCase) {
     );
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
-    assert!(err == case.stderr, "{name}: standard error\n{}", show(&err));
+    // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+    assert!(
+        crate::wording::losat_bytes(case.stderr) == err,
+        "{name}: standard error\n{}",
+        show(&err)
+    );
     assert!(
         out == case.stdout,
         "{name}: standard output\n{}\nexpected\n{}",
@@ -1826,7 +1909,8 @@ fn run_fix_case(case: &FixCase) {
         return;
     }
     assert!(
-        err == build_tree_masked(case.stderr),
+        // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+        crate::wording::losat_bytes(&build_tree_masked(case.stderr)) == err,
         "{name}: standard error\n{}\nexpected\n{}",
         show(&err),
         show(case.stderr)
@@ -1928,6 +2012,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
 // sorted list (the upper-case copy here).
 #[test]
 fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
+    // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     let seq = "MKTAYIAKQRQISFVKSHFSRQ";
     let (status, out, err) = parse_seqids_v5_run(
         "gap",

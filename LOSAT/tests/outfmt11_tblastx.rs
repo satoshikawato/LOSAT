@@ -34,12 +34,14 @@ fn engine() -> PathBuf {
 }
 
 fn frozen(name: &str, ext: &str) -> Vec<u8> {
-    std::fs::read(
-        engine()
-            .join("tests/fixtures/outfmt11")
-            .join(format!("tbx_{name}.{ext}")),
+    crate::outfmt11_blastx::expected_losat_bytes(
+        std::fs::read(
+            engine()
+                .join("tests/fixtures/outfmt11")
+                .join(format!("tbx_{name}.{ext}")),
+        )
+        .unwrap_or_default(),
     )
-    .unwrap_or_default()
 }
 
 fn input(name: &str) -> String {

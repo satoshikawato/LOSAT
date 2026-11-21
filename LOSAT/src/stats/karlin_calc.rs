@@ -1,6 +1,6 @@
 //! NCBI-style Karlin-Altschul parameter calculation from amino acid composition
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c
 //!   - Blast_ResFreqString: compute amino acid composition
 //!   - BlastScoreFreqCalc: compute score frequency profile
 //!   - Blast_KarlinBlkUngappedCalc: compute Lambda, K, H
@@ -9,13 +9,14 @@
 use crate::config::ScoringMatrix;
 use crate::stats::sum_statistics::{blast_expm1, blast_powi};
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:121-122
 const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:56-72
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:56-72
 const BLAST_SCORE_RANGE_MAX: i32 = BLAST_SCORE_MAX - BLAST_SCORE_MIN;
 const BLAST_KARLIN_K_SUMLIMIT_DEFAULT: f64 = 0.0001;
 const BLAST_KARLIN_LAMBDA_ACCURACY_DEFAULT: f64 = 1.0e-5;
@@ -25,32 +26,13 @@ const BLAST_KARLIN_K_ITER_MAX: i32 = 100;
 
 /// Standard amino acid frequencies (Robinson probabilities).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
-/// ```c
-/// static BLAST_LetterProb Robinson_prob[] = {
-///       { 'A', 78.05 },
-///       { 'C', 19.25 },
-///       { 'D', 53.64 },
-///       ...
-///       { 'Y', 32.16 }
-///    };
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1794-1816
 const STD_AA_FREQS: [f64; 20] = [
     78.05, 19.25, 53.64, 62.95, 38.56, 73.77, 21.99, 51.42, 57.44, 90.19, 22.43, 44.87, 52.03,
     42.64, 51.29, 71.20, 58.41, 64.41, 13.30, 32.16,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1863-1879
-// ```c
-// for (index=0; index<(int)DIM(STD_AMINO_ACID_FREQS); index++)
-// {
-//    if (alphabet_code == BLASTAA_SEQ_CODE)
-//    {
-//       residues[index] =
-//          AMINOACID_TO_NCBISTDAA[toupper((unsigned char) STD_AMINO_ACID_FREQS[index].ch)];
-//    }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1863-1879
 const STD_AA_NCBISTDAA: [u8; 20] = [
     ncbistdaa::A,
     ncbistdaa::C,
@@ -75,7 +57,7 @@ const STD_AA_NCBISTDAA: [u8; 20] = [
 ];
 
 /// Compute amino acid composition from sequence
-/// Reference: NCBI Blast_ResFreqString (blast_stat.c:2078-2091)
+/// Reference: NCBI Blast_ResFreqString (c++/src/algo/blast/core/blast_stat.c:2078-2091)
 ///   - BlastResCompStr: count residues
 ///   - Blast_ResFreqResComp: normalize to frequencies
 ///
@@ -101,25 +83,9 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
-    // ```c
-    // for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
-    // {
-    //    ++rcp->comp[(int)(*lp & mask)];
-    // }
-    // ...
-    // for (index=0; index<sbp->ambig_occupy; index++)
-    // {
-    //    rcp->comp[sbp->ambiguous_res[index]] = 0;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1984-2014
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
-    // ```c
-    // sbp->read_in_matrix = TRUE;
-    // BLAST_ScoreSetAmbigRes(sbp, 'X');
-    // sbp->name = BLAST_StrToUpper(scoring_options->matrix);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385
     comp[ncbistdaa::X as usize] = 0;
 
     // Normalize to frequencies (NCBI Blast_ResFreqResComp)
@@ -136,27 +102,17 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
 }
 
 /// Compute standard amino acid composition
-/// Reference: NCBI Blast_ResFreqStdComp (blast_stat.c:1887-1917)
+/// Reference: NCBI Blast_ResFreqStdComp (c++/src/algo/blast/core/blast_stat.c:1887-1917)
 /// Uses Robinson standard frequencies
 pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
     let mut freq = [0.0; BLASTAA_SIZE];
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1887-1901
-    // ```c
-    // retval = Blast_GetStdAlphabet(sbp->alphabet_code, residues, DIM(STD_AMINO_ACID_FREQS));
-    // for (index=0; index<DIM(STD_AMINO_ACID_FREQS); index++)
-    // {
-    //    rfp->prob[residues[index]] = STD_AMINO_ACID_FREQS[index].p;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1887-1901
     for (index, &residue) in STD_AA_NCBISTDAA.iter().enumerate() {
         freq[residue as usize] = STD_AA_FREQS[index];
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1909-1910
-    // ```c
-    // Blast_ResFreqNormalize(sbp, rfp, 1.0);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1914
     let sum: f64 = freq.iter().sum();
     if sum > 0.0 {
         for f in freq.iter_mut() {
@@ -228,20 +184,7 @@ impl ScoreFreqProfile {
 
     /// A profile whose fields are given as NCBI's caller sets them, without the normalization of
     /// `BlastScoreFreqCalc`: `sprob[0]` is the probability of `score_min`.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2700-2726
-    // ```c
-    //     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
-    //     ...
-    //     score_freqs->obs_min = min_score;
-    //     score_freqs->obs_max = max_score;
-    //     ...
-    //             score_freqs->sprob[kScore] +=
-    //                 (std_probs[aa_alphabet[r]]/effective_length);
-    //     ...
-    //     for (s = min_score; s <= max_score; s++) {
-    //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2698-2726
     pub(crate) fn from_ncbi_parts(
         score_min: i32,
         sprob: Vec<f64>,
@@ -261,19 +204,7 @@ impl ScoreFreqProfile {
 
 /// Build a score frequency profile from already-combined score probabilities.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2151-2205
-/// ```c
-/// for (score = sfp->score_min; score <= sfp->score_max; score++)
-///    sfp->sprob[score] = 0.0;
-/// ...
-/// sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
-/// ...
-/// for (score = obs_min; score <= obs_max; score++) {
-///    sfp->sprob[score] /= score_sum;
-///    score_avg += score * sfp->sprob[score];
-/// }
-/// sfp->score_avg = score_avg;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2151-2207
 pub fn score_freq_profile_from_probabilities(
     score_min: i32,
     score_max: i32,
@@ -322,7 +253,7 @@ pub fn score_freq_profile_from_probabilities(
 }
 
 /// Compute score frequency profile from two amino acid compositions
-/// Reference: NCBI BlastScoreFreqCalc (blast_stat.c:2151-2205)
+/// Reference: NCBI BlastScoreFreqCalc (c++/src/algo/blast/core/blast_stat.c:2151-2205)
 ///
 /// # Arguments
 /// * `comp1` - Query composition (28 frequencies)
@@ -347,10 +278,7 @@ pub fn compute_score_freq_profile(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_stat.c:2167-2180:
-// matrix = sbp->matrix->data;
-// score = matrix[index1][index2];
-// sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2167-2180:
 pub fn compute_score_freq_profile_for_matrix(
     comp1: &[f64; BLASTAA_SIZE],
     comp2: &[f64; BLASTAA_SIZE],
@@ -366,11 +294,10 @@ pub fn compute_score_freq_profile_for_matrix(
     }
 
     // Compute score probabilities: P(score) = sum_{i,j: matrix[i][j]=score} comp1[i] * comp2[j]
-    // Reference: blast_stat.c:2171-2181
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2171-2181
     for i in 0..BLASTAA_SIZE {
         for j in 0..BLASTAA_SIZE {
-            // NCBI c++/src/algo/blast/core/blast_stat.c:2171-2179:
-            // score = matrix[index1][index2];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2171-2179:
             let score = protein_score(matrix, i as u8, j as u8);
             if score >= score_min {
                 let prob = comp1[i] * comp2[j];
@@ -381,7 +308,7 @@ pub fn compute_score_freq_profile_for_matrix(
     }
 
     // Find observed min/max and compute average
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2183-2205
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2183-2205
     let mut score_sum = 0.0;
     let mut obs_min = BLAST_SCORE_MIN;
     let mut obs_max = BLAST_SCORE_MIN;
@@ -419,24 +346,7 @@ pub fn compute_score_freq_profile_for_matrix(
     sfp
 }
 
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
-/// ```c
-/// Int4 BLAST_Gcd(Int4 a, Int4 b)
-/// {
-///    Int4   c;
-///
-///    b = ABS(b);
-///    if (b > a)
-///       c=a, a=b, b=c;
-///
-///    while (b != 0) {
-///       c = a%b;
-///       a = b;
-///       b = c;
-///    }
-///    return a;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:405-419
 pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     let mut c: i32;
 
@@ -455,7 +365,7 @@ pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     a
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2099-2109
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2099-2109
 fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
     if lo >= 0 || hi <= 0 || lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX {
         return Err("Invalid score range".to_string());
@@ -466,7 +376,7 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2491-2563
 fn nlm_karlin_lambda_nr(
     sfp: &ScoreFreqProfile,
     d: i32,
@@ -481,7 +391,7 @@ fn nlm_karlin_lambda_nr(
         return Err("GCD must be positive".to_string());
     }
 
-    let x0 = (-lambda0).exp();
+    let x0 = (-lambda0).glibc_exp();
     let mut x = if x0 > 0.0 && x0 < 1.0 { x0 } else { 0.5 };
     let mut a = 0.0;
     let mut b = 1.0;
@@ -543,11 +453,11 @@ fn nlm_karlin_lambda_nr(
         k += 1;
     }
 
-    Ok(-x.ln() / d as f64)
+    Ok(-x.glibc_ln() / d as f64)
 }
 
 /// Compute Lambda using Newton-Raphson method
-/// Reference: NCBI Blast_KarlinLambdaNR (blast_stat.c:2567-2598)
+/// Reference: NCBI Blast_KarlinLambdaNR (c++/src/algo/blast/core/blast_stat.c:2567-2598)
 /// Uses NlmKarlinLambdaNR internally (blast_stat.c:2491-2563)
 fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, String> {
     let low = sfp.obs_min();
@@ -584,32 +494,6 @@ fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:550-572
-// ```c
-// static double
-// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-// {
-//
-//     int i;                 /* loop index */
-//     int score_range;       /* range of possible scores */
-//     double avg;            /* expected score of aligning two characters */
-//     Blast_ScoreFreq freq;  /* score frequency data */
-//
-//     score_range = max_score - min_score + 1;
-//     avg = 0.0;
-//     for (i = 0;  i < score_range;  i++) {
-//         avg += (min_score + i) * probs[i];
-//     }
-//     freq.score_min = min_score;
-//     freq.score_max = max_score;
-//     freq.obs_min = min_score;
-//     freq.obs_max = max_score;
-//     freq.sprob0 = probs;
-//     freq.sprob = &probs[-min_score];
-//     freq.score_avg = avg;
-//
-//     return Blast_KarlinLambdaNR(&freq, lambda0);
-// }
-// ```
 /// NCBI's `s_CalcLambda` as written: the probabilities `probs` of the scores `min_score` to
 /// `max_score` as given (not normalized, the observed range as given), -1.0 where
 /// `Blast_KarlinLambdaNR` gives it. The composition-based statistics call it: the position-based
@@ -636,7 +520,7 @@ pub(crate) fn calc_lambda_of_score_probs(
 }
 
 /// Compute H from Lambda
-/// Reference: NCBI BlastKarlinLtoH (blast_stat.c:2607-2633)
+/// Reference: NCBI BlastKarlinLtoH (c++/src/algo/blast/core/blast_stat.c:2607-2633)
 fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, String> {
     if lambda < 0.0 {
         return Err("Lambda must be non-negative".to_string());
@@ -647,7 +531,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 
     blast_score_chk(low, high)?;
 
-    let etonlam = (-lambda).exp();
+    let etonlam = (-lambda).glibc_exp();
 
     let mut sum = (low as f64) * sfp.get_prob(low);
     for score in (low + 1)..=high {
@@ -659,26 +543,15 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
         lambda * sum / scale
     } else {
         // Underflow: use log form
-        lambda * (lambda * high as f64 + sum.ln()).exp()
+        lambda * (lambda * high as f64 + sum.glibc_ln()).glibc_exp()
     };
 
     Ok(h)
 }
 
 /// Compute K from Lambda and H
-/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
+/// Reference: NCBI BlastKarlinLHtoK (c++/src/algo/blast/core/blast_stat.c:2247-2418)
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2247-2248,2346-2348,2412-2413
-// ```c
-// BlastKarlinLHtoK(Blast_ScoreFreq* sfp, double lambda, double H)
-// {
-// ...
-//     for (iterCounter = 0;
-//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
-//          outerSum += innerSum /= ++iterCounter) {
-// ...
-//     K = -exp((double)-2.0*outerSum) /
-//              (firstTermClosedForm*BLAST_Expm1(-(double)lambda));
-// ```
 // The body ports BlastKarlinLHtoK. The eight-lane convolution (was LOSAT_X_KARLINFAST) only changes
 // how the convolution `innerSum` values are produced, not which values or the order of the
 // additions in each of them; the scalar loop below it runs where `first != 0` and for the
@@ -718,7 +591,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     range = high - low;
 
     let mut first_term_closed_form = h / lambda;
-    let exp_minus_lambda = (-lambda).exp();
+    let exp_minus_lambda = (-lambda).glibc_exp();
 
     if low == -1 && high == 1 {
         let low_prob = sfp.get_prob(low * divisor);
@@ -744,7 +617,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // NCBI's `oldsum` and `oldsum2` (c++/src/algo/blast/core/blast_stat.c:2266, 2344, 2379-2380) are read only under
     // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
@@ -763,16 +636,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             // eight of them are accumulated side by side.  Each lane performs
             // NCBI's additions and multiplications in NCBI's order.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2357-2364
-            // ```c
-            //             ptr1  = ptrP - first;
-            //             ptr1e = ptrP - last;
-            //             ptr2  = probArrayStartLow + first;
-            //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
-            //                 innerSum += *ptr1  *  *ptr2;
-            //         ptr1--;
-            //         ptr2++;
-            //             }
-            // ```
             // When `first == 0` and `last == range`, `ptr1 - ptr1e` is `range` and each new
             // `*ptrP` is the sum over the terms `*(ptrP - t) * probArrayStartLow[t]`, t = 0..range,
             // added in increasing t starting from 0.0. The lanes compute eight adjacent `ptrP` that
@@ -841,7 +704,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
         outer_sum += inner_sum;
     }
 
-    let k = -(-2.0 * outer_sum).exp() / (first_term_closed_form * blast_expm1(-lambda));
+    let k = -(-2.0 * outer_sum).glibc_exp() / (first_term_closed_form * blast_expm1(-lambda));
 
     if k <= 0.0 {
         return Err("Computed K is non-positive".to_string());
@@ -851,7 +714,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 }
 
 /// Compute Karlin-Altschul parameters from score frequency profile
-/// Reference: NCBI Blast_KarlinBlkUngappedCalc (blast_stat.c:2699-2734)
+/// Reference: NCBI Blast_KarlinBlkUngappedCalc (c++/src/algo/blast/core/blast_stat.c:2699-2734)
 ///
 /// # Arguments
 /// * `sfp` - Score frequency profile
@@ -880,7 +743,7 @@ pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinPa
 }
 
 /// Apply check_ideal logic: use ideal params if computed Lambda >= ideal Lambda
-/// Reference: NCBI blast_stat.c:2796-2797
+/// Reference: NCBI c++/src/algo/blast/core/blast_stat.c:2796-2797
 ///
 /// # Arguments
 /// * `computed` - Computed Karlin parameters from sequence composition
@@ -898,34 +761,13 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
-// ```c
-// Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
-// {
-//    stdrfp = Blast_ResFreqNew(sbp);
-//    Blast_ResFreqStdComp(sbp, stdrfp);
-//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-//    sbp->kbp_ideal = Blast_KarlinBlkNew();
-//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2832-2852
 pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     // Memo (was LOSAT_X_IDEALMEMO): the function has no inputs (standard
     // composition, BLOSUM62, score range -4..11), so its value is computed
     // once per process. TBLASTN and BLASTX call it for every query batch and,
     // in the parallel redo, on every worker.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848,2754-2754
-    // ```c
-    //    stdrfp = Blast_ResFreqNew(sbp);
-    //    Blast_ResFreqStdComp(sbp, stdrfp);
-    //    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-    //    sbp->kbp_ideal = Blast_KarlinBlkNew();
-    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-    // ...
-    //    status = Blast_ScoreBlkKbpIdealCalc(sbp);
-    // ```
     // NCBI computes `kbp_ideal` once per score block, in `Blast_ScoreBlkKbpIdealCalc` called from
     // `Blast_ScoreBlkKbpUngappedCalc`; BLOSUM62 with the standard composition has no other inputs.
     // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
@@ -937,14 +779,6 @@ pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848
-// ```c
-//    stdrfp = Blast_ResFreqNew(sbp);
-//    Blast_ResFreqStdComp(sbp, stdrfp);
-//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-//    sbp->kbp_ideal = Blast_KarlinBlkNew();
-//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-// ```
 // The body of the original `compute_blosum62_ideal_karlin_params`, moved into its own function so
 // that the memo can call it; the computation is unchanged.
 fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
@@ -954,123 +788,5 @@ fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_compute_aa_composition() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2009-2012
-        // ```c
-        // for (index=0; index<sbp->ambig_occupy; index++)
-        // {
-        //    rcp->comp[sbp->ambiguous_res[index]] = 0;
-        // }
-        // ```
-        // Test sequence: "ACDEFGHIKLMNPQRSTVWY" (20 standard AAs in NCBISTDAA encoding)
-        // NCBISTDAA: A=1, C=3, D=4, E=5, F=6, G=7, H=8, I=9, K=10, L=11, M=12, N=13, P=14, Q=15, R=16, S=17, T=18, V=19, W=20, Y=22
-        // Sequence with sentinels: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 0]
-        let seq = b"\x00\x01\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x16\x00";
-        let comp = compute_aa_composition(seq, 20);
-
-        // Each AA should appear once, so frequency = 1/20 = 0.05
-        let expected_freq = 1.0 / 20.0;
-        // Check standard AAs (skip B=2, X=21, Z=23, U=24, *=25, O=26, J=27)
-        let standard_aas = [
-            1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
-        ];
-        for &i in &standard_aas {
-            assert!(
-                (comp[i] - expected_freq).abs() < 0.01,
-                "AA {} frequency: expected {}, got {}",
-                i,
-                expected_freq,
-                comp[i]
-            );
-        }
-
-        // Non-standard AAs should have frequency 0
-        assert!(comp[2] < 0.01, "B should not appear");
-        assert!(comp[21] < 0.01, "X should not appear");
-        assert!(comp[23] < 0.01, "Z should not appear");
-    }
-
-    #[test]
-    fn test_compute_aa_composition_excludes_x_from_denominator() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
-        // ```c
-        // sbp->read_in_matrix = TRUE;
-        // BLAST_ScoreSetAmbigRes(sbp, 'X');
-        // ```
-        let seq = b"\x00\x01\x15\x03\x00";
-        let comp = compute_aa_composition(seq, 3);
-
-        assert!((comp[ncbistdaa::A as usize] - 0.5).abs() < 1.0e-12);
-        assert!((comp[ncbistdaa::C as usize] - 0.5).abs() < 1.0e-12);
-        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
-    }
-
-    #[test]
-    fn test_compute_std_aa_composition() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
-        // ```c
-        // static BLAST_LetterProb Robinson_prob[] = {
-        //       { 'A', 78.05 },
-        //       { 'C', 19.25 },
-        //       ...
-        //       { 'R', 51.29 },
-        //       ...
-        // };
-        // ```
-        let comp = compute_std_aa_composition();
-        let sum: f64 = comp.iter().sum();
-        assert!((sum - 1.0).abs() < 1.0e-12);
-        let robinson_sum: f64 = STD_AA_FREQS.iter().sum();
-        assert!((comp[ncbistdaa::A as usize] - 78.05 / robinson_sum).abs() < 1.0e-12);
-        assert!((comp[ncbistdaa::C as usize] - 19.25 / robinson_sum).abs() < 1.0e-12);
-        assert!((comp[ncbistdaa::R as usize] - 51.29 / robinson_sum).abs() < 1.0e-12);
-        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
-    }
-
-    #[test]
-    fn test_compute_score_freq_profile() {
-        let comp1 = compute_std_aa_composition();
-        let comp2 = compute_std_aa_composition();
-        let sfp = compute_score_freq_profile(&comp1, &comp2, -4, 11);
-
-        assert!(sfp.obs_min() <= sfp.obs_max());
-        assert!(sfp.score_avg() < 0.0, "Average score should be negative");
-    }
-
-    #[test]
-    fn test_apply_check_ideal() {
-        let ideal = KarlinParams {
-            lambda: 0.3176,
-            k: 0.134,
-            h: 0.4012,
-            alpha: 0.7916,
-            beta: -3.2,
-        };
-
-        // Computed Lambda >= ideal Lambda -> use ideal
-        let computed_high = KarlinParams {
-            lambda: 0.35,
-            k: 0.15,
-            h: 0.45,
-            alpha: 0.8,
-            beta: -3.0,
-        };
-        let result = apply_check_ideal(computed_high, ideal);
-        assert_eq!(result.lambda, ideal.lambda);
-
-        // Computed Lambda < ideal Lambda -> use computed
-        let computed_low = KarlinParams {
-            lambda: 0.25,
-            k: 0.10,
-            h: 0.30,
-            alpha: 0.7,
-            beta: -2.5,
-        };
-        let result = apply_check_ideal(computed_low, ideal);
-        assert_eq!(result.lambda, computed_low.lambda);
-    }
-}
+#[path = "karlin_calc_tests.rs"]
+mod tests;

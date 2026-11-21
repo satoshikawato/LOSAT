@@ -24,7 +24,7 @@
 //! reports do not change.
 //!
 //! No NCBI counterpart for the holding: NCBI reads each sequence and definition line from the
-//! mapped database files when it formats a hit (`CSeqDBVol::x_GetHdrAsn1Binary`, quoted above
+//! mapped database files when it formats a hit (`CSeqDBVol::x_GetHdrAsn1Binary`, cited above
 //! `read_titles`).
 //!
 //! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`.
@@ -51,7 +51,7 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_bp_listed_lean() -> bool {
 
 impl ListedSubjects {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582 and
-    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310, quoted above `read_titles`:
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310, cited above `read_titles`:
     // NCBI reads the definition lines of the final hit lists, query by query, in the order of each
     // hit list; these are the same reads.
     /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): `read_titles` without the records: the definition lines

@@ -1,11 +1,13 @@
 // A thread worker of the ThreadHost (thread-host.ts): it instantiates the threaded module
 // on the shared memory, waits until the host starts a thread in it, runs that thread
 // (`wasi_thread_start`), counts it off the instance's use count (instance-use.ts), and then
-// prepares itself again for the next thread.
+// prepares itself again for the next thread. It is ready only once its link to the main thread
+// carries messages (link.ts): a thread that stops is reported there.
 import { stopMessage } from '../reactor/abi.js';
 import { instantiateThread } from '../reactor/instance.js';
 import { createWasi, type WasiContext } from '../reactor/wasi.js';
 import { InstanceUse } from './instance-use.js';
+import { openLink } from './link.js';
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -26,7 +28,9 @@ const scope = self as unknown as {
 
 let config: ThreadPrepare | undefined;
 let state: Int32Array | undefined;
-let faults: BroadcastChannel | undefined;
+let faults: MessagePort | undefined;
+/** Resolves once the link to the main thread carries messages (openLink); the slot is ready only then. */
+let linked: Promise<void> = Promise.resolve();
 let use: InstanceUse | undefined;
 let prepared: { readonly start: (tid: number, startArg: number) => void; readonly wasi: WasiContext } | undefined;
 
@@ -52,6 +56,7 @@ async function prepare(): Promise<void> {
     const wasi = createWasi();
     const thread = await instantiateThread(config.module, config.memory, wasi);
     prepared = { start: thread.start, wasi };
+    await linked;
     setState(SLOT_READY);
   } catch (error) {
     scope.postMessage({ type: 'failed', message: `a thread worker could not be prepared: ${String(error)}` });
@@ -88,7 +93,8 @@ scope.onmessage = (event) => {
   if (command.type === 'prepare') {
     config = command;
     state = new Int32Array(command.slot);
-    faults = new BroadcastChannel(command.faultChannel);
+    faults = command.faults;
+    linked = openLink(command.faults);
     use = new InstanceUse(command.use);
     void prepare();
     return;

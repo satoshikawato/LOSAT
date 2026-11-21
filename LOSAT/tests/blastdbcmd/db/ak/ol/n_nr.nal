@@ -1,0 +1,5 @@
+TITLE ol n range
+DBLIST ../or/tfn
+OIDLIST n.msk
+FIRST_OID 10
+LAST_OID 14

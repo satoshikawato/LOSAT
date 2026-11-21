@@ -32,33 +32,7 @@
 //! unwrapped upper-case hex.
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1009-1042
-//! ```c++
-//! void CObjectOStreamXml::OpenTagStart(void)
-//! {
-//!     ...
-//!         if (m_SkipIndent) {
-//!             m_SkipIndent = false;
-//!         } else {
-//!             m_Output.PutEol(false);
-//!             m_Output.PutIndent();
-//!         }
-//!         m_Output.PutChar('<');
-//!     ...
-//!     m_EndTag = false;
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1069-1079
-//! ```c++
-//! void CObjectOStreamXml::CloseTagStart(void)
-//! {
-//!     _ASSERT(m_LastTagAction != eTagSelfClosed);
-//!     m_Output.DecIndentLevel();
-//!     if (m_EndTag && !m_SkipIndent) {
-//!         m_Output.PutEol(false);
-//!         m_Output.PutIndent();
-//!     }
-//!     m_Output.PutString("</");
-//! ```
 //! (The indentation step is 2: `COStreamBuffer::IncIndentLevel`, util/strbuffer.inl:252-264.)
 //! So an opening tag is an end of line, the indentation and `<tag>`; a closing tag has its
 //! own line only when the last thing written was a closing tag (`m_EndTag`): a primitive
@@ -66,7 +40,7 @@
 
 use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, StreamPosition};
 use super::real::write_xml_double;
-use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::utf8::{decode_to_ascii, Utf8Error};
 
 /// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
@@ -193,57 +167,9 @@ impl ThrowFrame {
     /// The place of the frame's rethrow and its message (`GetFrameInfo`).
     ///
     /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:209-213
-    /// ```c++
-    ///     } catch (CException& expt) { \
-    ///         std::string msg((Stream).TopFrame().GetFrameInfo()); \
-    ///         (Stream).PopFrame(); \
-    ///         NCBI_RETHROW_SAME(expt,msg); \
-    ///     } \
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-410
-    /// ```c++
-    /// string CObjectStackFrame::GetFrameInfo(void) const
-    /// {
-    ///     string info(" Frame type= ");
-    ///     info += GetFrameTypeName();
-    ///     if (m_TypeInfo) {
-    ///         info += ", Object type= " + m_TypeInfo->GetName();
-    ///     }
-    ///     if (m_MemberId) {
-    ///         info += ", Member name= " + m_MemberId->GetName();
-    ///     }
-    ///     return info;
-    /// }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1530-1540
-    /// ```c++
-    /// void CObjectOStreamXml::WriteClassMember(const CMemberId& memberId,
-    ///                                          TTypeInfo memberType,
-    ///                                          TConstObjectPtr memberPtr)
-    /// {
-    ///     BEGIN_OBJECT_FRAME2(eFrameClassMember,memberId);
-    ///
-    ///     BeginClassMember(memberType,memberId);
-    ///     WriteObject(memberPtr, memberType);
-    ///     EndClassMember();
-    ///
-    ///     END_OBJECT_FRAME();
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1528-1540
     /// NCBI reference (598d8ae6): c++/src/serial/choice.cpp:452-463
-    /// ```c++
-    ///         BEGIN_OBJECT_FRAME_OF2(out, eFrameChoiceVariant, variantInfo->GetId());
-    ///         out.BeginChoiceVariant(choiceType, variantInfo->GetId());
-    ///
-    ///         variantInfo->WriteVariant(out, objectPtr);
-    ///
-    ///         out.EndChoiceVariant();
-    ///         END_OBJECT_FRAME_OF(out);
-    ///     }
-    ///
-    ///     out.EndChoice();
-    ///     END_OBJECT_FRAME_OF(out);
-    /// ```
     /// (`WriteClass`'s frame ends at objostrxml.cpp:1519, `Write`'s at objostr.cpp:621.)
     fn rethrow(&self, exception: NcbiException) -> NcbiException {
         let (file, line, function, info) = match self {
@@ -278,16 +204,7 @@ impl ThrowFrame {
                 format!(" Frame type= eFrameNamed, Object type= {name}"),
             ),
         };
-        exception.rethrow_same(
-            ThrowSite {
-                file,
-                line,
-                // The exception keeps its own (`NcbiException::rethrow_same`).
-                kind: "",
-                function: Some(function),
-            },
-            info,
-        )
+        exception.rethrow_same(file, line, function, info)
     }
 }
 
@@ -521,25 +438,6 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// stream's exception (`throw`).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:556-572
-    /// ```c++
-    /// void CObjectOStreamXml::WriteEncodedChar(const char*& src, EStringType type)
-    /// {
-    ///     EEncoding enc_in( type == eStringTypeUTF8 ? eEncoding_UTF8 : m_StringEncoding);
-    ///     EEncoding enc_out(m_Encoding == eEncoding_Unknown ? eEncoding_UTF8 : m_Encoding);
-    ///
-    ///     if (enc_in == enc_out || enc_in == eEncoding_Unknown || (*src & 0x80) == 0) {
-    ///         char s = x_VerifyChar(*src);
-    ///         if (s != '\0') {
-    ///             WriteEscapedChar(s);
-    ///         }
-    ///     } else if (enc_out != eEncoding_UTF8) {
-    ///         TUnicodeSymbol chU = (enc_in == eEncoding_UTF8) ?
-    ///             CUtf8::Decode(src) : CUtf8::CharToSymbol( *src, enc_in);
-    ///         char s = x_VerifyChar( CUtf8::SymbolToChar( chU, enc_out));
-    ///         if (s != '\0') {
-    ///             WriteEscapedChar(s);
-    ///         }
-    /// ```
     /// (The strings are UTF-8, `m_StringEncoding`'s default, objostrxml.cpp:81, and the stream
     /// US-ASCII, `SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:502, :786,
     /// blastxml2_format.cpp:721, :733.) A decoded NUL (`C0 80`) writes nothing and the string
@@ -581,15 +479,6 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// stream only appends (the `>` that `value_attribute` takes back is no end of line).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
-    /// ```c++
-    /// inline bool BAD_CHAR(char x) {
-    ///     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
-    /// }
-    /// inline char CObjectOStreamXml::x_VerifyChar(char x) {
-    ///     return BAD_CHAR(x) ?
-    ///         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
-    /// }
-    /// ```
     ///
     /// Outside the object mode the encoder posts by itself (`XmlPost`, with the stack trace of its
     /// open tags, `asn_path`); a `fragment`'s stream wrote the declaration's line that BLAST then
@@ -632,7 +521,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
         });
     }
 
-    /// The loop of `WriteString` (quoted at `visible_str`): the string ends at its first NUL. In
+    /// The loop of `WriteString` (cited at `visible_str`): the string ends at its first NUL. In
     /// the object mode a control character is the error `NonVisibleChar` without `REPLACE`, and
     /// with it the character is recorded (`replace`) and `#` written in its place; a byte >= 0x80
     /// is written as it is (the stream has no encoding). Outside it (outfmt 5 / 14 / 16) a
@@ -809,16 +698,6 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
-    /// ```c++
-    /// void CObjectOStreamXml::WriteFileHeader(TTypeInfo type)
-    /// {
-    ///     m_Output.PutString("<?xml version=\"1.0\"");
-    ///     if (m_Encoding != eEncoding_Unknown) { ... m_Output.PutString(" encoding=\"") ... }
-    ///     m_Output.PutString("?>");
-    ///     ...
-    ///             m_Output.PutString("\n<!DOCTYPE ");
-    ///             ... " PUBLIC \"" ... "-//NCBI//" ... module name with '-' as ' ' ... "/EN\"" ...
-    /// ```
     /// (`SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
     /// `SetDefaultDTDFilePrefix`, :789.)
     fn begin_document(&mut self, type_name: &str) {
@@ -1047,19 +926,6 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteEnum` of the object mode: ` value="name"/>` in place of the `>` of the open tag.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:473-484
-    /// ```c++
-    ///                 OpenTagEndBack();
-    ///                 m_Output.PutString(" value=\"");
-    ///                 m_Output.PutString(valueName);
-    ///                 m_Output.PutChar('"');
-    ///                 if ( values.IsInteger() ) {
-    ///                     OpenTagEnd();
-    ///                     m_Output.PutInt4(value);
-    ///                 }
-    ///                 else {
-    ///                     SelfCloseTagEnd();
-    ///                 }
-    /// ```
     fn enumerated(&mut self, name: &str, _value: i32) {
         if OBJECT {
             self.value_attribute(name);
@@ -1072,23 +938,6 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// number, and the closing tag that `end_named` writes.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:442-456
-    /// ```c++
-    ///     if ( !m_SkipNextTag && !values.GetName().empty() ) {
-    ///         OpenTagStart();
-    ///         m_Output.PutString(values.GetName());
-    ///         if ( !skipname ) {
-    ///             m_Output.PutString(" value=\"");
-    ///             m_Output.PutString(valueName);
-    ///             m_Output.PutChar('\"');
-    ///         }
-    ///         if ( values.IsInteger() ) {
-    ///             OpenTagEnd();
-    ///             m_Output.PutInt4(value);
-    ///             CloseTagStart();
-    ///             m_Output.PutString(values.GetName());
-    ///             CloseTagEnd();
-    ///         }
-    /// ```
     fn named_int(&mut self, name: &str, value: i32) {
         if OBJECT {
             if self.pending_elem {
@@ -1118,20 +967,6 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteString`: the escaped text.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:502-549
-    /// ```c++
-    /// void CObjectOStreamXml::WriteEscapedChar(char c)
-    /// {
-    ///     switch ( c ) {
-    ///     case '&':  m_Output.PutString("&amp;");  break;
-    ///     case '<':  m_Output.PutString("&lt;");   break;
-    ///     case '>':  m_Output.PutString("&gt;");   break;
-    ///     case '\'': m_Output.PutString("&apos;"); break;
-    ///     case '"':  m_Output.PutString("&quot;"); break;
-    ///     default:
-    ///         if ((unsigned int)c < 0x20) {
-    ///             m_Output.PutString("&#x");
-    ///             ... hi (if not 0) and lo in lower-case hex ... ';'
-    /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
     /// message (`x_VerifyChar`, `BAD_CHAR`; `replace`): in the object mode an error here, `#`
     /// and a record in `visible_str_replacing`; in outfmt 5 / 14 / 16 always `#` and a post
@@ -1142,17 +977,6 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// object mode). A NUL byte ends the string.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:927-935
-    /// ```c++
-    /// void CObjectOStreamXml::WriteString(const string& str, EStringType type)
-    /// {
-    ///     if (m_SpecialCaseWrite && x_SpecialCaseWrite()) {
-    ///         return;
-    ///     }
-    ///     for ( const char* src = str.c_str(); *src; ++src ) {
-    ///         WriteEncodedChar(src,type);
-    ///     }
-    /// }
-    /// ```
     fn visible_str(&mut self, value: &[u8]) {
         self.write_string::<false>(value);
     }

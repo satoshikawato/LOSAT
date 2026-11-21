@@ -46,6 +46,7 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS))
 from db_search_fixtures import clean_env, ncbi_env  # noqa: E402
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 MANIFEST = TESTS / "dropin_corpus_manifest.tsv"
 INPUTS = TESTS / "dropin_corpus"
@@ -202,6 +203,7 @@ def compare(row: dict[str, str], run: Run) -> str:
     want = (FROZEN / f"{row['row_id']}.out").read_bytes()
     if sha256(want) != row["stdout_sha256"]:
         return "the frozen stdout does not match the manifest"
+    want = losat_wording.losat_output_bytes(want)  # LOSAT's words (AGENTS.md rule 8)
     if check == "line1":
         lines = run.stdout.split(b"\n")
         if lines[0] != want.split(b"\n")[0] or len(lines) != 3 or b"LOSAT" not in lines[1] or lines[2]:
@@ -219,7 +221,7 @@ def compare(row: dict[str, str], run: Run) -> str:
     name = next(n for n in want_cells if want_cells[n] != got_cells[n])
     frozen = FROZEN / f"{row['row_id']}--{name}"
     if frozen.exists():
-        return f"{name} " + first_difference(frozen.read_bytes(), run.files[name])
+        return f"{name} " + first_difference(losat_wording.losat_output_bytes(frozen.read_bytes()), run.files[name])
     return f"{name}: sha256 {got_cells[name]}, frozen {want_cells[name]}"
 
 

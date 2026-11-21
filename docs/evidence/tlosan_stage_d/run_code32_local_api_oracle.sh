@@ -33,7 +33,7 @@ PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects/seq" so
 PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects" sources > "$out/objects_sources.log" 2>&1
 PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects/genomecoll" sources > "$out/genomecoll_sources.log" 2>&1
 
-# NCBI api/blast_setup_cxx.cpp:800-812 selects the subject's code string.
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:800-812 selects the subject's code string.
 # core/blast_engine.c:1460-1466 consumes a code supplied by BlastSeqSrc.
 g++ -std=c++17 -O2 -I"$work/build/inc" -I"$src/include" \
   "$root/tblastn_code32_local_oracle.cpp" -L"$blast_lib" -Wl,-rpath,"$blast_lib" \
@@ -41,13 +41,13 @@ g++ -std=c++17 -O2 -I"$work/build/inc" -I"$src/include" \
   -lxblast -lblast -lseqdb -lxobjmgr -lseqset -lseq -lgeneral -lxser -lxncbi \
   -o "$work/tblastn_code32_local_oracle"
 gcc -std=c11 -O0 -shared -fPIC "$root/ncbi_kappa_traceback_trace.c" -ldl -o "$work/kappa_trace.so"
-# NCBI core/blast_engine.c:870-899 links and reaps before
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899 links and reaps before
 # core/blast_kappa.c:3577-3585 converts the retained preliminary HSPs.
 gcc -std=c11 -O0 -shared -fPIC "$root/ncbi_d_call_trace.c" -ldl -o "$work/d_trace.so"
-# NCBI core/blast_engine.c:1407,1434-1443 reads TotLen and conditionally
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407,1434-1443 reads TotLen and conditionally
 # updates per-subject search parameters.
 gcc -std=c11 -O0 -shared -fPIC "$root/ncbi_seqsrc_callstate_trace.c" -ldl -o "$work/seqsrc_trace.so"
-# NCBI core/blast_parameters.c:902-999 and core/blast_gapalign.c:3924-3927
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999 and c++/src/algo/blast/core/blast_gapalign.c:3924-3927
 # expose the actual setup and per-context search cutoffs.
 gcc -std=c11 -O0 -shared -fPIC "$root/ncbi_parameter_trace.c" -ldl -o "$work/parameter_trace.so"
 gcc -std=c11 -O0 -shared -fPIC "$root/../tlosan_stage_c/ncbi_context_cutoff_trace.c" -ldl -o "$work/hit_cutoff_trace.so"
@@ -77,7 +77,7 @@ assert plain_err == other
 assert any(line.startswith(b"K_TRACE_HEAP_HSP\t") for line in selected)
 (out / f"code{code}.trace").write_bytes(b"".join(selected))
 PY
-  # NCBI core/blast_engine.c:870-899; core/blast_kappa.c:3577-3585:
+  # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899; c++/src/algo/blast/core/blast_kappa.c:3577-3585:
   # retain the complete preliminary link/reap input and output call order.
   LD_PRELOAD="$work/d_trace.so" "$work/tblastn_code32_local_oracle" \
     "$stage_a/fixtures/query.faa" "$stage_a/fixtures/subject_code32.fna" "$code" 6 \
@@ -95,7 +95,7 @@ assert ordinary == (out / f"code{code}.stderr").read_bytes()
 assert b"\tlink_before\t" in selected and b"\treap_after\t" in selected
 (out / f"code{code}_d.trace").write_bytes(selected)
 PY_D_TRACE
-  # NCBI core/blast_engine.c:1407,1434-1443: capture TotLen and the
+  # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407,1434-1443: capture TotLen and the
   # conditional OneSubjectUpdateParameters call in the API local path.
   LD_PRELOAD="$work/seqsrc_trace.so" "$work/tblastn_code32_local_oracle" \
     "$stage_a/fixtures/query.faa" "$stage_a/fixtures/subject_code32.fna" "$code" 6 \
@@ -112,7 +112,7 @@ assert ordinary == (out / f"code{code}.stderr").read_bytes()
 assert b"D_SEQSRC_TOTLEN\t" in selected
 (out / f"code{code}_seqsrc.trace").write_bytes(selected)
 PY_SEQSRC_TRACE
-  # NCBI core/blast_setup.c:1011-1024, core/blast_gapalign.c:3924-3927,
+  # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024, c++/src/algo/blast/core/blast_gapalign.c:3924-3927,
   # core/aa_ungapped.c:547-583: preserve initial and call-site cutoffs.
   for cutoff_probe in parameter hit_cutoff word_cutoff; do
     LD_PRELOAD="$work/${cutoff_probe}_trace.so" "$work/tblastn_code32_local_oracle" \
@@ -176,7 +176,7 @@ assert (out / "code1.trace").read_bytes() == selected
 (out / "cli_code1.trace").write_bytes(selected)
 PY
 
-# NCBI core/blast_engine.c:870-899,1407,1434-1443: code-1 API and CLI
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899,1407,1434-1443: code-1 API and CLI
 # must have the same preliminary D calls and sequence-source update state.
 for probe in d seqsrc; do
   LD_PRELOAD="$work/${probe}_trace.so" "$tblastn_bin" -task tblastn \
@@ -197,7 +197,7 @@ assert selected == (out / f"code1_{probe}.trace").read_bytes()
 (out / f"cli_code1_{probe}.trace").write_bytes(selected)
 PY_CLI_D_TRACE
 done
-# NCBI core/blast_engine.c:1407,1434-1443; core/blast_kappa.c:3577-3595:
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407,1434-1443; c++/src/algo/blast/core/blast_kappa.c:3577-3595:
 # this pinned fixture must use the CLI local-subject call state and preserve
 # both code-32 preliminary HSPs through Kappa entry.
 python3 - "$out" <<'PY_LOCAL_STATE'

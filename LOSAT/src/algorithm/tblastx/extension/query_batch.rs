@@ -3,13 +3,7 @@
 //! NCBI's protein walks run on the query batch, not on a context:
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841 (`s_BlastAaExtendRight`)
-//! ```c
-//!     n = MIN(subject->length - s_off, query->length - q_off);
-//! ```
 //! and :897 (`s_BlastAaExtendLeft`)
-//! ```c
-//!     n = MIN(s_off, q_off);
-//! ```
 //! `query` is the batch's sequence block: `query->sequence` holds the letters of every context of
 //! the batch, `q_off` is an offset into it and `query->length` its length (`buflen - 2`,
 //! api/blast_setup_cxx.cpp:654, with `QueryInfo_GetSeqBufLen` of blast_query_info.c:246-250: the
@@ -124,26 +118,7 @@ impl<'a> QueryBatch<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:897-912
-    // ```c
-    //     n = MIN(s_off, q_off);
-    //     best_i = n + 1;
-    //
-    //     s = subject->sequence + s_off - n;
-    //     q = query->sequence + q_off - n;
-    //
-    //     for (i = n; i >= 0; i--) {
-    //         score += matrix[q[i]][s[i]];
-    //
-    //         if (score > maxscore) {
-    //             maxscore = score;
-    //             best_i = i;
-    //         }
-    // ...
-    //         if ((maxscore - score) >= dropoff)
-    //             break;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:897-916
     // The steps of NCBI's left walk after the context's first letter: `s_next` subject letters are
     // left (the next one is `s_seq[s_next - 1]`), and the batch's letters before the context are its
     // `frame_base`. The sums are `i64` (NCBI's `Int4` sum of many NULLBs would overflow).
@@ -205,24 +180,6 @@ impl<'a> QueryBatch<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841-866
-    // ```c
-    //     n = MIN(subject->length - s_off, query->length - q_off);
-    // ...
-    //     for (i = 0; i < n; i++) {
-    //         score += matrix[q[i]][s[i]];
-    //
-    //         if (score > maxscore) {
-    //             maxscore = score;
-    //             best_i = i;
-    //         }
-    // ...
-    //         if (score <= 0 || (maxscore - score) >= dropoff)
-    //             break;
-    //     }
-    //
-    //     *length = best_i + 1;
-    //     *s_last_off = s_off + i;
-    // ```
     // The steps of NCBI's right walk after the context's letters: the walk has taken `j` steps, the
     // next subject letter is `s_seq[s_at]` and the next query byte is at offset `q_at` of the
     // context (its letters' count, the NULLB after them; or one more, where the one-hit extension
@@ -322,18 +279,6 @@ impl<'a> QueryBatch<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2383-2392
-    // ```c
-    // static NCBI_INLINE void
-    // s_AdjustInitialHSPOffsets(BlastInitHSP* init_hsp, Int4 query_start)
-    // {
-    //     init_hsp->offsets.qs_offsets.q_off -= query_start;
-    //     if (init_hsp->ungapped_data) {
-    //         init_hsp->ungapped_data->q_start -= query_start;
-    //     }
-    //     ASSERT(init_hsp->ungapped_data == NULL ||
-    //            init_hsp->ungapped_data->q_start >= 0);
-    // }
-    // ```
     // An HSP that a walk past a NULLB makes span two contexts keeps the seed's context with offsets
     // outside it (a start before it fails the debug-only assertion above; an end past it is not
     // tested), and NCBI's later steps report query coordinates past the query or no alignment
@@ -513,18 +458,7 @@ pub(crate) enum Pass {
     Resume(Again),
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:906-912 (`s_BlastAaExtendLeft`)
-// ```c
-//         score += matrix[q[i]][s[i]];
-//
-//         if (score > maxscore) {
-//             maxscore = score;
-//             best_i = i;
-//         }
-// ...
-//         if ((maxscore - score) >= dropoff)
-//             break;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:904-916 (`s_BlastAaExtendLeft`)
 /// Whether the NULLB's step leaves NCBI's left walk going, the walk being at `score` below its
 /// best `max_score` without a break (`max_score - score < x_drop` after a step; 0 with no step):
 /// the NULLB takes `-NULLB_SCORE` (32,768) off, so the sum stays below the best and the walk breaks
@@ -536,18 +470,7 @@ fn nullb_goes_on_left(score: i32, max_score: i32, x_drop: i32) -> bool {
     x_drop - (max_score - score) > -NULLB_SCORE
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:851-862 (`s_BlastAaExtendRight`)
-// ```c
-//         score += matrix[q[i]][s[i]];
-//
-//         if (score > maxscore) {
-//             maxscore = score;
-//             best_i = i;
-//         }
-// ...
-//         if (score <= 0 || (maxscore - score) >= dropoff)
-//             break;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-862 (`s_BlastAaExtendRight`)
 /// `nullb_goes_on_left` for the right walk, which also breaks where the sum falls to 0 or less.
 #[inline(always)]
 fn nullb_goes_on_right(score: i32, max_score: i32, x_drop: i32) -> bool {

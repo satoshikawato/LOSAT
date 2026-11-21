@@ -1,0 +1,372 @@
+Seq-loc ::= int {
+  from 711,
+  to 735,
+  id local str "t1"
+}
+Seq-loc ::= packed-int {
+  {
+    from 160,
+    to 193,
+    id local str "t2"
+  },
+  {
+    from 329,
+    to 359,
+    id local str "t2"
+  },
+  {
+    from 451,
+    to 465,
+    id local str "t2"
+  },
+  {
+    from 629,
+    to 646,
+    id local str "t2"
+  },
+  {
+    from 668,
+    to 682,
+    id local str "t2"
+  },
+  {
+    from 700,
+    to 714,
+    id local str "t2"
+  },
+  {
+    from 753,
+    to 770,
+    id local str "t2"
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 136,
+    to 152,
+    id local str "t4"
+  },
+  {
+    from 202,
+    to 222,
+    id local str "t4"
+  },
+  {
+    from 259,
+    to 280,
+    id local str "t4"
+  },
+  {
+    from 331,
+    to 357,
+    id local str "t4"
+  },
+  {
+    from 391,
+    to 405,
+    id local str "t4"
+  },
+  {
+    from 438,
+    to 452,
+    id local str "t4"
+  },
+  {
+    from 681,
+    to 695,
+    id local str "t4"
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 112,
+    to 127,
+    id local str "t5"
+  },
+  {
+    from 206,
+    to 220,
+    id local str "t5"
+  },
+  {
+    from 333,
+    to 346,
+    id local str "t5"
+  },
+  {
+    from 393,
+    to 407,
+    id local str "t5"
+  },
+  {
+    from 481,
+    to 495,
+    id local str "t5"
+  },
+  {
+    from 532,
+    to 549,
+    id local str "t5"
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 0,
+    to 14,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 88,
+    to 100,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 265,
+    to 280,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 304,
+    to 320,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 325,
+    to 339,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 378,
+    to 395,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 449,
+    to 463,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 642,
+    to 654,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 717,
+    to 745,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 761,
+    to 777,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  },
+  {
+    from 787,
+    to 799,
+    id tpg {
+      accession "BK000001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 31,
+    to 51,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 62,
+    to 78,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 220,
+    to 274,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 279,
+    to 293,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 311,
+    to 325,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 392,
+    to 406,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 545,
+    to 582,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 607,
+    to 627,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 664,
+    to 685,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  },
+  {
+    from 736,
+    to 762,
+    id tpg {
+      accession "BK000002",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 43,
+    to 57,
+    id patent {
+      seqid 5,
+      cit {
+        country "US",
+        id number "1234"
+      }
+    }
+  },
+  {
+    from 286,
+    to 300,
+    id patent {
+      seqid 5,
+      cit {
+        country "US",
+        id number "1234"
+      }
+    }
+  },
+  {
+    from 517,
+    to 532,
+    id patent {
+      seqid 5,
+      cit {
+        country "US",
+        id number "1234"
+      }
+    }
+  },
+  {
+    from 611,
+    to 625,
+    id patent {
+      seqid 5,
+      cit {
+        country "US",
+        id number "1234"
+      }
+    }
+  },
+  {
+    from 738,
+    to 751,
+    id patent {
+      seqid 5,
+      cit {
+        country "US",
+        id number "1234"
+      }
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 0,
+    to 12,
+    id local str "t9"
+  },
+  {
+    from 86,
+    to 100,
+    id local str "t9"
+  },
+  {
+    from 139,
+    to 162,
+    id local str "t9"
+  },
+  {
+    from 421,
+    to 456,
+    id local str "t9"
+  },
+  {
+    from 485,
+    to 513,
+    id local str "t9"
+  },
+  {
+    from 631,
+    to 649,
+    id local str "t9"
+  }
+}

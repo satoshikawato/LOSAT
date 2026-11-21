@@ -3,9 +3,10 @@
 //! LOSAT reads the keys a multi-volume database of makeblastdb uses, `TITLE`
 //! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
 //! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
-//! `walk_totals`) and the OID ranges `FIRST_OID` / `LAST_OID` (`compute_masks`,
-//! `range_mask`). The keys that select sequences by a list, an OID mask or a
-//! membership bit, and `MASKLIST`, are explicit errors (not supported yet);
+//! `walk_totals`), the OID ranges `FIRST_OID` / `LAST_OID` and the OID lists of
+//! `OIDLIST` (`compute_masks`, `alias_oids`). The keys that select sequences
+//! by a list of ids or a membership bit, `OID_MASK_TYPE` and `MASKLIST` are
+//! explicit errors (not supported yet);
 //! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
 //! NCBI.
 //!
@@ -22,6 +23,7 @@ use std::ffi::OsStr;
 use std::path::{Path, MAIN_SEPARATOR};
 
 use super::file::DbFile;
+use super::oid_list::{self, OidListError, OidListFile};
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
 use crate::ncbi_exception::NcbiException;
@@ -38,6 +40,12 @@ pub(super) struct AliasNode {
     /// `FIRST_OID` / `LAST_OID` of the alias file as `ComputeMasks` reads them
     /// (`compute_masks`); `None` before it ran and for a node without them.
     pub range: Option<OidRange>,
+    /// The path of the OID list file of the alias file's `OIDLIST` as `ComputeMasks`
+    /// resolves it (`compute_masks`); `None` before it ran and for a node without the key.
+    pub oid_list: Option<String>,
+    /// The directory of the alias file (`m_DBPath`), which a relative `OIDLIST` is joined to;
+    /// empty for the top node.
+    pub db_path: String,
     /// Alias files named in `DBLIST`, in order.
     pub subnodes: Vec<AliasNode>,
     /// Volumes named in `DBLIST` (paths without extension), in order.
@@ -49,12 +57,6 @@ pub(super) struct AliasNode {
 
 impl AliasNode {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1583
-    // ```c++
-    //     TVarList::const_iterator value =
-    //         m_Values.find(walker->GetFileKey());
-    //
-    //     if (value != m_Values.end()) {
-    // ```
     /// The value of `key` in the alias file of this node (`m_Values.find(key)`).
     pub fn value(&self, key: &str) -> Option<&[u8]> {
         self.values
@@ -77,32 +79,6 @@ pub(super) struct OidRange {
 
 impl OidRange {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1975-1998
-    // ```c++
-    //             int first_oid = 0;
-    //             int last_oid  = INT_MAX;
-    //             bool has_range = false;
-    //
-    //             if (f_oid_iter != m_Values.end()) {
-    //                 first_oid = NStr::StringToUInt(f_oid_iter->second);
-    //
-    //                 // Starts at one, adjust to zero-indexed.
-    //                 if (first_oid)
-    //                     first_oid--;
-    //
-    //                 has_range = true;
-    //             }
-    //
-    //             if (l_oid_iter != m_Values.end()) {
-    //                 // Zero indexing and post notation adjustments cancel.
-    //                 last_oid = NStr::StringToUInt(l_oid_iter->second);
-    //                 has_range = true;
-    //             }
-    //
-    //             if (has_range) {
-    //                 CRef<TMask> mask(new TMask(first_oid, last_oid));
-    //                 m_NodeMasks.push_back(mask);
-    //             }
-    // ```
     // `NStr::StringToUInt` gives a `Uint4` that NCBI stores in an `int`: GCC wraps a value of
     // 2^31 or more to a negative number (defined since C++20, implementation-defined before).
     // `first_oid--` of `FIRST_OID 2147483648` decrements `INT_MIN`, which is undefined; NCBI
@@ -130,53 +106,27 @@ pub(super) struct AliasTree {
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
-/// sequences by a list, an OID mask or a membership bit (alias_files.txt
-/// "Type: filter"), or name masks LOSAT does not read (`MASKLIST`). They are
-/// the keys NCBI's reader looks up (seqdbalias.cpp) but those LOSAT reads:
-/// `TITLE`, `DBLIST`, the counts of the walks (`walk_totals`) and the OID
-/// ranges (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
+/// sequences by a list of ids or a membership bit (alias_files.txt "Type:
+/// filter"), remove the definition lines of model sequences (`OID_MASK_TYPE`),
+/// or name masks LOSAT does not read (`MASKLIST`). They are the keys NCBI's
+/// reader looks up (seqdbalias.cpp) but those LOSAT reads: `TITLE`, `DBLIST`,
+/// the counts of the walks (`walk_totals`), the OID ranges and the OID lists
+/// (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
 /// (seqdbimpl.cpp:972-976 takes the maximum from the volumes), and `VDBLIST`,
 /// which only NCBI's VDB tools read (vdbalias.cpp; `CSeqDBAliasNode` looks it
 /// up nowhere), are ignored as unknown keys are.
-const UNSUPPORTED_KEYS: [&str; 8] = [
+const UNSUPPORTED_KEYS: [&str; 7] = [
     "GILIST",
     "TILIST",
     "SEQIDLIST",
     "TAXIDLIST",
-    "OIDLIST",
     "MEMB_BIT",
     "MASKLIST",
     "OID_MASK_TYPE",
 ];
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-182
-// ```c++
-// bool CSeqDBAtlas::GetFileSizeL(const string & fname, TIndx &length)
-// {
-//     ...
-//     pair<bool, TIndx> val;
-//     CFile whole(fname);
-//     Int8 file_length = whole.GetLength();
-//
-//     if (file_length >= 0) {
-//         val.first = true;
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3204-3216
-// ```c++
-// Int8 CFile::GetLength(void) const
-// {
-//     TNcbiSys_stat st;
-//     if (NcbiSys_stat(_T_XCSTRING(GetPath()), &st) != 0) {
-//         LOG_ERROR_ERRNO(40, "CFile:GetLength(): stat() failed for: " + GetPath());
-//         return -1L;
-//     }
-//     if ( GetType(st) != eFile ) {
-//         LOG_ERROR_NCBI(40, "CFile:GetLength(): Not a file: " + GetPath(), CNcbiError::eOperationNotPermitted);
-//         return -1L;
-//     }
-//     return st.st_size;
-// }
-// ```
 /// `CSeqDBAtlas::DoesFileExist`: `path` is a regular file, or a symbolic link
 /// to one.
 pub(super) fn exists(path: &Path) -> bool {
@@ -193,21 +143,6 @@ fn base_name(path: &str) -> &str {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:88-107
-// ```c++
-//     int slen = s.Size();
-//
-//     if (slen > 4) {
-//         string extn(s.GetEnd()-4, s.GetEnd());
-//         string extn2(extn, 2, 4);
-//         ...
-//         if (extn[0] == '.'     &&
-//             (extn[1] == 'n' || extn[1] == 'p') &&
-//             (extn2 == "al"  || extn2 == "in" || extn2 == "db")) {
-//             ...
-//             s.Resize(slen - 4);
-//         }
-//     }
-// ```
 // `CSeqDB_Path::FindBaseName` is `SeqDB_RemoveExtn(SeqDB_RemoveDirName(..))`
 // (seqdbgeneral.hpp:975-979): the file name without a final `.pal`, `.nal`,
 // `.pin`, `.nin`, `.pdb` or `.ndb`. `SeqDB_CompareVolume` compares these.
@@ -215,7 +150,7 @@ fn path_base_name(path: &str) -> &str {
     remove_extn(base_name(path))
 }
 
-/// `SeqDB_RemoveExtn` (quoted above): `s` without a final `.pal`, `.nal`,
+/// `SeqDB_RemoveExtn` (cited above): `s` without a final `.pal`, `.nal`,
 /// `.pin`, `.nin`, `.pdb` or `.ndb`, when something precedes it.
 fn remove_extn(s: &str) -> &str {
     let bytes = s.as_bytes();
@@ -232,20 +167,6 @@ fn remove_extn(s: &str) -> &str {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:284-295
-// ```c++
-// void SeqDB_ConvertOSPath(string & dbs)
-// {
-//     // See also CDirEntry::ConvertToOSPath()
-//
-//     char delim = CDirEntry::GetPathSeparator();
-//
-//     for(size_t i = 0; i<dbs.size(); i++) {
-//         if (dbs[i] == '/' || dbs[i] == '\\') {
-//             dbs[i] = delim;
-//         }
-//     }
-// }
-// ```
 fn fix_delimiters(name: &str) -> String {
     name.chars()
         .map(|c| {
@@ -259,37 +180,6 @@ fn fix_delimiters(name: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
-// ```c++
-//     if (two.Empty()) {
-//         // We only use the extension if there is a filename.
-//         one.GetString(outp);
-//         return;
-//     }
-//
-//     bool only_two = false;
-//
-//     if (one.Empty() || two[0] == delim) {
-//         only_two = true;
-//     }
-//
-//     // Drive letter test for CP/M derived systems
-//     if (delim == '\\'   &&
-//         two.Size() > 3  &&
-//         isalpha(two[0]) &&
-//         two[1] == ':'   &&
-//         two[2] == '\\') {
-//
-//         only_two = true;
-//     }
-//     ...
-//     one.GetString(outp);
-//
-//     if (outp[outp.size() - 1] != delim) {
-//         outp += delim;
-//     }
-//
-//     outp.append(two.GetBegin(), two.GetEnd());
-// ```
 fn combine_path(one: &str, two: &str) -> String {
     if two.is_empty() {
         return one.to_string();
@@ -316,16 +206,6 @@ fn combine_path(one: &str, two: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
-// ```c++
-// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
-// {
-//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
-//     if (pos + 1 < path.length()) {
-//         return path.substr(0, pos + 1);
-//     }
-//     return path;
-// }
-// ```
 // `DIR_SEPARATORS` is "/" on Unix and "/\\" on Windows (ncbifile.cpp:110, 114).
 fn delete_trailing_path_separator(path: &str) -> &str {
     if cfg!(windows) {
@@ -336,161 +216,6 @@ fn delete_trailing_path_separator(path: &str) -> &str {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
-// ```c++
-// string CDirEntry::NormalizePath(const string& path, EFollowLinks follow_links)
-// {
-//     if ( path.empty() ) {
-//         return path;
-//     }
-//     static const char kSep[] = { DIR_SEPARATOR, '\0' };
-//
-//     std::list<string> head;       // already resolved to our satisfaction
-//     std::list<string> tail;       // to resolve afterwards
-//     string  current;              // to resolve next
-//     int     link_depth = 0;
-//
-//     // Delete trailing slash for all paths except similar to 'd:\'
-// #  ifdef DISK_SEPARATOR
-//     if ( path.find(DISK_SEPARATOR) == NPOS ) {
-//         current = DeleteTrailingPathSeparator(path);
-//     } else {
-//         current = path;
-//     }
-// #  else
-//     current = DeleteTrailingPathSeparator(path);
-// #  endif
-//
-//     if ( current.empty() ) {
-//         // root dir
-//         return string(1, DIR_SEPARATOR);
-//     }
-//
-// #ifdef NCBI_OS_MSWIN
-//     NStr::ReplaceInPlace(current, "/", "\\");
-// #endif
-//
-//     while ( !current.empty()  ||  !tail.empty() ) {
-//         std::list<string> pretail;
-//         if ( !current.empty() ) {
-//             NStr::Split(current, kSep, pretail);
-//             current.erase();
-//             if (pretail.front().empty()
-// #ifdef DISK_SEPARATOR
-//                 ||  pretail.front().find(DISK_SEPARATOR) != NPOS
-// #endif
-//                 ) {
-//                 // Absolute path
-//                 head.clear();
-// #ifdef NCBI_OS_MSWIN
-//                 // Remove leading "\\?\". Replace leading "\\?\UNC\" with "\\".
-//                 static const char* const kUNC[] = { "", "", "?", "UNC" };
-//                 std::list<string>::iterator it = pretail.begin();
-//                 unsigned int matched = 0;
-//                 while (matched < 4  &&  it != pretail.end()
-//                        &&  !NStr::CompareNocase(*it, kUNC[matched])) {
-//                     ++it;
-//                     ++matched;
-//                 }
-//                 pretail.erase(pretail.begin(), it);
-//                 switch (matched) {
-//                 case 2: case 4: // got a UNC path (\\... or \\?\UNC\...)
-//                     head.push_back(kEmptyStr);
-//                     // fall through
-//                 case 1:         // normal volume-less absolute path
-//                     head.push_back(kEmptyStr);
-//                     break;
-//                 case 3/*?*/:    // normal path, absolute or relative
-//                     break;
-//                 }
-// #endif
-//             }
-//             tail.splice(tail.begin(), pretail);
-//         }
-//
-//         string next;
-//         if (!tail.empty()) {
-//             next = tail.front();
-//             tail.pop_front();
-//         }
-//         if ( !head.empty() ) { // empty heads should accept anything
-//             string& last = head.back();
-//             if (last == DIR_CURRENT) {
-//                 if (!next.empty()) {
-//                     head.pop_back();
-//                 }
-// #ifdef DISK_SEPARATOR
-//             } else if (!last.empty() && last[last.size()-1] == DISK_SEPARATOR) {
-//                 // Allow almost anything right after a volume specification
-// #endif
-//             } else if (next == DIR_CURRENT) {
-//                 // Leave out, since we already have content
-//                 continue;
-//             } else if (next.empty()) {
-//                 continue; // leave out empty components in most cases
-//             } else if (next == DIR_PARENT) {
-// #ifdef DISK_SEPARATOR
-//                 SIZE_TYPE pos;
-// #endif
-//                 // Back up if possible, assuming existing path to be "physical"
-//                 if (last.empty()) {
-//                     // Already at the root; .. is a no-op
-//                     continue;
-// #ifdef DISK_SEPARATOR
-//                 } else if ((pos = last.find(DISK_SEPARATOR) != NPOS)) {
-//                     last.erase(pos + 1);
-// #endif
-//                 } else if (last != DIR_PARENT) {
-//                     head.pop_back();
-//                     continue;
-//                 }
-//             }
-//         }
-// #ifdef NCBI_OS_UNIX
-//         // Is there a Windows equivalent for readlink?
-//         if ( follow_links ) {
-//             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
-//             char buf[PATH_MAX];
-//             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
-//             if (length > 0) {
-//                 current.assign(buf, length);
-//                 if (++link_depth >= 1024) {
-//                     ERR_POST_X(1, Warning << "CDirEntry::NormalizePath(): "
-//                                "Reached symlink depth limit " <<
-//                                link_depth << " when resolving " << path);
-//                     CNcbiError::Set(CNcbiError::eTooManySymbolicLinkLevels);
-//                     follow_links = eIgnoreLinks;
-//                 }
-//                 continue;
-//             }
-//         }
-// #endif
-//         // Normal case: just append the next element to head
-//         head.push_back(next);
-//     }
-//
-//     // Special cases
-//     if ( (head.size() == 0)  ||
-//          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
-//         // current dir
-//         return DIR_CURRENT;
-//     }
-//     if (head.size() == 1  &&  head.front().empty()) {
-//         // root dir
-//         return string(1, DIR_SEPARATOR);
-//     }
-// #ifdef DISK_SEPARATOR
-//     if (head.front().find(DISK_SEPARATOR) != NPOS) {
-//         if ((head.size() == 2  &&  head.back() == DIR_CURRENT) ||
-//             (head.size() == 3  &&  *(++head.begin()) == DIR_CURRENT  &&  head.back().empty()) ) {
-//             // root dir on drive X:
-//             return head.front() + DIR_SEPARATOR;
-//         }
-//     }
-// #endif
-//     // Compose path
-//     return NStr::Join(head, string(1, DIR_SEPARATOR));
-// }
-// ```
 // `DIR_SEPARATOR` is '/' on Unix and '\\' on Windows, where `DISK_SEPARATOR`
 // is ':' (ncbifile.cpp:102-116). `NStr::Split` without flags keeps empty
 // pieces. NCBI applies the function to a whole value such as `BLASTDB`, the
@@ -661,34 +386,6 @@ pub struct SearchPath {
 
 impl SearchPath {
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
-    // ```c++
-    //     static const string GenerateSearchPath() {
-    //         string splitter;
-    //         string path;
-    // #if defined(NCBI_OS_UNIX)
-    //         splitter = ":";
-    // #else
-    //         splitter = ";";
-    // #endif
-    //         // Local directory first;
-    //         path  = CDirEntry::NormalizePath(CDir::GetCwd(),eFollowLinks);
-    //         path += splitter;
-    //         // Then, BLASTDB;
-    //         CNcbiEnvironment env;
-    //         path += CDirEntry::NormalizePath(env.Get("BLASTDB"),eFollowLinks);
-    //         path += splitter;
-    //         // Finally, the config file.
-    //         CNcbiApplicationAPI* app = CNcbiApplicationAPI::Instance();
-    //         if (app) {
-    //             const CNcbiRegistry& registry = app->GetConfig();
-    //             if (registry.HasEntry("BLAST", "BLASTDB")) {
-    //                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
-    //                 path += splitter;
-    //             }
-    //         }
-    //         return path;
-    //     }
-    // ```
     // `env.Get` gives the empty string for a variable that is not set
     // (ncbienv.cpp:109-130), and `NormalizePath` returns an empty string as
     // it is, so the string is `CWD::` without `BLASTDB` and without a
@@ -733,17 +430,6 @@ impl SearchPath {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716
-    // ```c++
-    // string CDir::GetCwd(void)
-    // {
-    //     TXChar buf[4096];
-    //     if ( NcbiSys_getcwd(buf, sizeof(buf)/sizeof(TXChar) - 1) ) {
-    //         return _T_CSTRING(buf);
-    //     }
-    //     LOG_ERROR_ERRNO(90, "CDir::GetCwd(): Cannot get current directory");
-    //     return kEmptyCStr;
-    // }
-    // ```
     /// The search path of this process: its current directory (the empty
     /// string when it cannot be read, as `CDir::GetCwd` gives), its
     /// environment variable `BLASTDB`, and `registry` as in [`Self::new`].
@@ -766,67 +452,7 @@ impl SearchPath {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:330-374
-    // ```c++
-    // static string s_SeqDB_TryPaths(const string         & blast_paths,
-    //                                const string         & dbname,
-    //                                char                   dbtype,
-    //                                bool                   exact,
-    //                                CSeqDB_FileExistence & access,
-    //                                bool                   linkoutdb_search = false)
-    // {
-    //     ...
-    //     vector<string> roads;
-    //     NStr::Split(blast_paths, s_GetPathSplitter(), roads, NStr::fSplit_Tokenize);
-    //
-    //     string result;
-    //     string attempt;
-    //
-    //     ITERATE(vector<string>, road, roads) {
-    //         attempt.erase();
-    //
-    //         SeqDB_CombinePath(CSeqDB_Substring(SeqDB_MakeOSPath(*road)),
-    //                           CSeqDB_Substring(dbname),
-    //                           0,
-    //                           attempt);
-    //
-    //         if (exact) {
-    //             if (access.DoesFileExist(attempt)) {
-    //                 result = attempt;
-    //                 break;
-    //             }
-    //         } else {
-    //             if (s_SeqDB_DBExists(attempt, dbtype, access, linkoutdb_search)) {
-    //                 result = attempt;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //
-    //     return result;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
-    // ```c++
-    // static bool s_SeqDB_DBExists(const string         & dbname,
-    //                              char                   dbtype,
-    //                              CSeqDB_FileExistence & access,
-    //                              bool linkoutdb_search)
-    // {
-    //     ...
-    //         path.append(".-al");
-    //
-    //         path[path.size()-3] = dbtype;
-    //
-    //         if (access.DoesFileExist(path)) {
-    //             return true;
-    //         }
-    //
-    //         path[path.size()-2] = 'i';
-    //         path[path.size()-1] = 'n';
-    //
-    //         if (access.DoesFileExist(path)) {
-    //             return true;
-    // ```
     // `fSplit_Tokenize` is `fSplit_MergeDelimiters | fSplit_Truncate`
     // (ncbistr.hpp:2500-2510): empty directories are left out. With
     // `seqtype` the name is a database name and `s_SeqDB_DBExists` looks for
@@ -850,18 +476,6 @@ impl SearchPath {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
-    // ```c++
-    // string SeqDB_ResolveDbPath(const string & filename)
-    // {
-    //     CSeqDB_SimpleAccessor access;
-    //
-    //     return s_SeqDB_FindBlastDBPath(filename,
-    //                                    '-',
-    //                                    0,
-    //                                    true,
-    //                                    access);
-    // }
-    // ```
     // `exact` is true, so `s_SeqDB_TryPaths` takes the file name as it is
     // (the `dbtype` `'-'` is not used) and returns the first directory of the
     // search path in which `CFile::GetLength` finds a regular file of that
@@ -875,54 +489,6 @@ impl SearchPath {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807
-// ```c++
-// void SeqDB_SplitQuoted(const string             & dbname,
-//                        vector<CSeqDB_Substring> & dbs,
-//                        bool keep_quote)
-// {
-//     // split names
-//
-//     const char * sp = dbname.data();
-//
-//     bool quoted = false;
-//     unsigned begin = 0;
-//
-//     for(unsigned i = 0; i < dbname.size(); i++) {
-//         char ch = dbname[i];
-//
-//         if (quoted) {
-//             // Quoted mode sees '"' as the only actionable token.
-//             if (ch == '"') {
-//                 if (begin < i) {
-//                 	if(keep_quote) i++;
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = i + 1;
-//                 quoted = false;
-//             }
-//         } else {
-//             // Non-quote mode: Space or quote starts the next string.
-//
-//             if (ch == ' ') {
-//                 if (begin < i) {
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = i + 1;
-//             } else if (ch == '"') {
-//                 if (begin < i) {
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = keep_quote ? i : i + 1;
-//                 quoted = true;
-//             }
-//         }
-//     }
-//
-//     if (begin < dbname.size()) {
-//         dbs.push_back(CSeqDB_Substring(sp + begin, sp + dbname.size()));
-//     }
-// }
-// ```
 // `keep_quote` is false for a `DBLIST` and for the names the reader opens
 // (seqdbalias.cpp:85-88), true for the names of the reports (`report_names`).
 // With `keep_quote`, the closing quote stays in the name and NCBI's `i++` also
@@ -965,23 +531,7 @@ fn split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
     dbs
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:479-500
-// ```c++
-//     vector<CTempString> dbs;
-//     SeqDB_SplitQuoted(blastdb_names, dbs, true);
-//     retval.reserve(dbs.size());
-//
-//     ITERATE(vector<CTempString>, i, dbs) {
-//         CAlignFormatUtil::SDbInfo info;
-//         info.is_protein = is_protein;
-//         bool success = false;
-// 	// Unsafe OK as kDbName only used in this loop.
-//         const string kDbName = NStr::TruncateSpaces_Unsafe(*i);
-//         if (kDbName.empty())
-//             continue;
-//
-//         success = s_FillDbInfoLocally(kDbName, info, dbfilt_algorithm);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:476-500
 // `TruncateSpaces` drops `isspace` bytes at both ends (`db_argument_name`).
 /// The names of the `-db` value `dbname` as NCBI's reports take them, one per database of
 /// the list, each of which they open alone (`CAlignFormatUtil::GetBlastDbInfo`): split at
@@ -996,60 +546,7 @@ pub(crate) fn report_names(dbname: &str) -> Vec<String> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:689-710
-// ```c++
-//     while(p < ep) {
-//         // Skip spaces
-//         while((p < ep) && (*p == ' ')) {
-//             p++;
-//         }
-//
-//         const char * eolp = p;
-//
-//         while((eolp < ep) && !SEQDB_ISEOL(*eolp)) {
-//             eolp++;
-//         }
-//
-//         // Non-empty line, so read it.
-//         if (eolp != p) {
-//             x_ReadLine(p, eolp, name_s, value_s);
-//         }
-//
-//         p = eolp + 1;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:406-436
-// ```c++
-//     const char * p = bp;
-//
-//     // If first nonspace char is '#', line is a comment, so skip.
-//     if (*p == '#') {
-//         return;
-//     }
-//
-//     // Find name
-//     const char * spacep = p;
-//
-//     while((spacep < ep) && ((*spacep != ' ') && (*spacep != '\t')))
-//         spacep ++;
-//
-//     s_SeqDB_QuickAssign(name, p, spacep);
-//
-//     // Skip spaces, tabs, to find value
-//     while((spacep < ep) && ((*spacep == ' ') || (*spacep == '\t')))
-//         spacep ++;
-//
-//     // Strip spaces, tabs from end
-//     while((spacep < ep) && ((ep[-1] == ' ') || (ep[-1] == '\t')))
-//         ep --;
-//
-//     s_SeqDB_QuickAssign(value, spacep, ep);
-//
-//     for(size_t i = 0; i<value.size(); i++) {
-//         if (value[i] == '\t') {
-//             value[i] = ' ';
-//         }
-//     }
-// ```
 // `SEQDB_ISEOL(x)` is `(x) == '\n' || (x) == '\r'` (seqdbgeneral.hpp:192). A
 // key that appears again replaces the earlier value (seqdbalias.cpp:446-449).
 /// The key / value lines of an alias file, in file order.
@@ -1133,20 +630,6 @@ impl Resolver<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:851-862
-    // ```c++
-    //         if (found) {
-    //             string normal_name;
-    //             if (m_ExpandLinks) {
-    //                 // normalize this_name
-    //                 string dir_name, base_name;
-    //                 bp.FindDirName().GetString(dir_name);
-    //                 bp.FindBaseName().GetString(base_name);
-    //                 normal_name = CDirEntry::NormalizePath(dir_name, eFollowLinks) +
-    //                   CDirEntry::GetPathSeparator() + base_name;
-    //             } else {
-    //                 normal_name = bp.GetBasePathS();
-    //             }
-    // ```
     // `m_ExpandLinks` is true for the alias file of a database that is opened
     // (seqdbalias.hpp:1005-1008, the default of `CSeqDBAliasFile`;
     // seqdbimpl.cpp:56 passes no value). The same lines stand at the three
@@ -1167,37 +650,7 @@ impl Resolver<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:203-222
-    // ```c++
-    // bool
-    // CSeqDBAliasSets::FindAliasPath(const CSeqDB_Path & dbpath,
-    //                                CSeqDB_Path       * resolved,
-    //                                CSeqDBLockHold    & locked)
-    // {
-    //     CSeqDB_Path     aset_path;
-    //     CSeqDB_FileName alias_fname;
-    //
-    //     x_DbToIndexName(dbpath, aset_path, alias_fname);
-    //
-    //     CSeqDB_Path resolved_aset;
-    //
-    //     if (! FindBlastDBPath(aset_path, resolved_aset)) {
-    //         return false;
-    //     }
-    //
-    //     CSeqDB_Path afpath(resolved_aset.FindDirName(),
-    //                        alias_fname.GetFileNameSub());
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:453-460
-    // ```c++
-    // void CSeqDBAliasSets::x_DbToIndexName(const CSeqDB_Path & dbpath,
-    //                                       CSeqDB_Path       & index_path,
-    //                                       CSeqDB_FileName   & alias_fname)
-    // {
-    //     index_path.ReplaceFilename(dbpath,
-    //                                CSeqDB_Substring(kSeqDBGroupAliasFileName));
-    //     alias_fname.Assign(dbpath.FindFileName());
-    // }
-    // ```
     // `kSeqDBGroupAliasFileName` is "index.alx" (seqdbcommon.cpp:48), and
     // `FindBlastDBPath` of a `CSeqDB_Path` looks for that file name in the
     // directories of the search path (seqdbalias.hpp:285-300, "exact").
@@ -1225,16 +678,6 @@ impl Resolver<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:169-176
-    // ```c++
-    //     recurse.Push(m_ThisName);
-    //
-    //     x_ReadValues(m_ThisName, locked);
-    //     x_Tokenize(m_Values["DBLIST"]);
-    //
-    //     CSeqDB_BasePath basepath(m_ThisName.FindBasePath());
-    //
-    //     x_ExpandAliases(basepath, prot_nucl, recurse, locked);
-    // ```
     /// Reads the alias file of `base` and expands its `DBLIST`.
     fn alias_node(&mut self, base: &str) -> Result<AliasNode, SeqDbError> {
         let path = self.alias_path(base);
@@ -1255,8 +698,14 @@ impl Resolver<'_> {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
                             "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ, \
-                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID and LAST_OID"
+                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID, LAST_OID \
+                             and OIDLIST"
                         )));
+                    }
+                    if other == b"OIDLIST" && std::str::from_utf8(value).is_err() {
+                        return Err(unsupported(
+                            "the OIDLIST value is not valid UTF-8".to_string(),
+                        ));
                     }
                 }
             }
@@ -1272,6 +721,7 @@ impl Resolver<'_> {
         let mut node = AliasNode {
             this_name: Some(path.to_string_lossy().into_owned()),
             values,
+            db_path: dir_name(base).to_string(),
             ..AliasNode::default()
         };
         let result = self.expand(&mut node, dir_name(base), base, &entries, false);
@@ -1280,98 +730,7 @@ impl Resolver<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:740-926
-    // ```c++
-    //     if (m_DBList.empty()) {
-    //         ...
-    //         NCBI_THROW(CSeqDBException,
-    //                    eArgErr,
-    //                    string("No database names were ") + situation);
-    //     }
-    //
-    //     for(size_t i = 0; i < m_DBList.size(); i++) {
-    //         ...
-    //         if (m_DBList[i].FindDirName().Empty()) {
-    //             if (m_DBList[i].FindBaseName() == this_name.FindBaseName()) {
-    //                 ...
-    //                 if (!found) {
-    //                     m_VolNames.push_back(CSeqDB_BasePath(normal_name));
-    //                 }
-    //                 continue;
-    //             }
-    //         }
-    //         ...
-    //         CSeqDB_BasePath base(m_DBPath, m_DBList[i]);
-    //         CSeqDB_Path new_db_path( base, prot_nucl, 'a', 'l' );
-    //
-    //         if ( recurse.Exists(new_db_path) ) {
-    //             NCBI_THROW(CSeqDBException,
-    //                        eFileErr,
-    //                        "Illegal configuration: DB alias files are mutually recursive.");
-    //         }
-    //         ...
-    //         if ( m_AliasSets.FindAliasPath(new_db_path, 0, locked) ||
-    //              m_Atlas.DoesFileExist(new_db_path) ) {
-    //
-    //             x_AppendSubNode(base, prot_nucl, recurse, locked);
-    //             continue;
-    //         }
-    //         ...
-    //         // Always check local copy first unless full path is given
-    //         if (!m_SkipLocal[i]) {
-    //             // GCC 3.0.4 requires the extra parentheses below.
-    //             CSeqDB_BasePath local_base((CSeqDB_DirName(CDir::GetCwd())),
-    //                                    CSeqDB_BaseName(m_DBList[i].FindBaseName()));
-    //             CSeqDB_Path new_local_vol_path(local_base, prot_nucl, 'i', 'n' );
-    //             if (m_Atlas.DoesFileExist(new_local_vol_path)) {
-    //                 bp = CSeqDB_BasePath(new_local_vol_path.FindBasePath());
-    //                 found = true;
-    //             }
-    //         }
-    //
-    //         if (!found) {
-    //             CSeqDB_Path new_vol_path( base, prot_nucl, 'i', 'n' );
-    //             if (m_Atlas.DoesFileExist(new_vol_path)) {
-    //                 bp = CSeqDB_BasePath(new_db_path.FindBasePath() );
-    //                 found = true;
-    //             }
-    //         }
-    //         ...
-    //         ostringstream oss;
-    //         oss << "Could not find volume or alias file ("
-    //             << m_DBList[i].GetBasePathS() << ") referenced in alias file ("
-    //             << this_name.GetBasePathS() << ").";
-    //
-    //         NCBI_THROW(CSeqDBException, eFileErr, oss.str());
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:877-917
-    // ```c++
-    //         // If all that failed, "restart" the search using the blast DB
-    //         // path configuration.  This ensures always finding the local
-    //         // copy of a database even if the alias file resides on remote site.
-    //
-    //         CSeqDB_BasePath result;
-    //         CSeqDB_BasePath restart(m_DBList[i]);
-    //
-    //         if (m_AliasSets.FindBlastDBPath(restart, prot_nucl, result)) {
-    //             // either alias or volume file exists for this entry
-    //             CSeqDB_Path new_alias( result, prot_nucl, 'a', 'l' );
-    //             CSeqDB_Path new_volume( result, prot_nucl, 'i', 'n' );
-    //
-    //             if (m_Atlas.DoesFileExist(new_alias)) {
-    //                 x_AppendSubNode( result, prot_nucl, recurse, locked );
-    //             } else if (m_Atlas.DoesFileExist(new_volume)) {
-    //                 string normal_name;
-    //                 if (m_ExpandLinks) {
-    //                     ...
-    //                 }
-    //                 ...
-    //                 if (!found) {
-    //                     m_VolNames.push_back(CSeqDB_BasePath(normal_name));
-    //                 }
-    //             }
-    //             continue;
-    //         }
-    // ```
     // `resolve_one_name` (no search path) does not take this last step and
     // keeps the names as they are written; `resolve_in` follows NCBI: the
     // name as the alias file writes it is looked up in the directories of the
@@ -1461,10 +820,13 @@ impl Resolver<'_> {
                 continue;
             }
 
-            return Err(SeqDbError::NotFound(format!(
-                "Could not find volume or alias file ({entry}) referenced in alias file \
+            return Err(SeqDbError::NotFound(
+                format!(
+                    "Could not find volume or alias file ({entry}) referenced in alias file \
                  ({this_name})."
-            )));
+                )
+                .into(),
+            ));
         }
         Ok(())
     }
@@ -1484,40 +846,14 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:190-197
-// ```c++
-// bool SeqDB_CompareVolume(const string & s1, const string & s2)
-// {
-//     string x1, x2;
-//     CSeqDB_Path(s1).FindBaseName().GetString(x1);
-//     CSeqDB_Path(s2).FindBaseName().GetString(x2);
-//     if (x1 != x2) return (x1 < x2);
-//     else return (s1 < s2);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:932-958
-// ```c++
-//     set<string> volset;
-//     set<string> aliset;
-//
-//     if (recursive) {
-//         x_FindVolumePaths(volset, aliset);
-//     } else {
-//     ...
-//     vols.clear();
-//     ITERATE(set<string>, iter, volset) {
-//         vols.push_back(*iter);
-//     }
-//
-//     // Sort to insure deterministic order.
-//     sort(vols.begin(), vols.end(), SeqDB_CompareVolume);
-// ```
 // The volumes are opened, and ordinal ids are given, in the sorted order of
 // the volume names, not in `DBLIST` order.
 //
 // A volume reached from several nodes (an alias file and a name of `-db`, or
 // two alias files) is one entry of the set, so it is opened once and its OIDs
 // are numbered once; NCBI's walks still count it once per node that names it
-// (`walk_totals`), and its OIDs are those of every path to it (`range_mask`).
+// (`walk_totals`), and its OIDs are those of every path to it (`alias_oids`).
 // A node lists a volume once however often its `DBLIST` names it
 // (`push_unique`, seqdbalias.cpp:789-798, 864-873, 905-914). Volumes of the
 // same base name in different directories (two databases of one name, `-db
@@ -1537,161 +873,10 @@ fn volumes_in_order(root: AliasNode) -> AliasTree {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-165
-// ```c++
-// CSeqDB::CSeqDB(const string & dbname,
-//                ESeqType       seqtype,
-//                CSeqDBGiList * gi_list,
-//                bool           use_atlas_lock)
-//
-// {
-//     if (dbname.size() == 0) {
-//         NCBI_THROW(CSeqDBException,
-//                    eArgErr,
-//                    "Database name is required.");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:249-337
-// ```c++
-// void CSeqDBAliasNode::x_ResolveNames(char prot_nucl, CSeqDBLockHold & locked)
-// {
-//     m_DBPath = CSeqDB_DirName(".");
-//
-//     size_t i = 0;
-//
-//     for(i = 0; i < m_DBList.size(); i++) {
-//         // skip local DB search only if absolute path is given
-//         if(m_DBList[i].GetBasePathS().find(CDirEntry::GetPathSeparator()) != string::npos) {
-//             m_SkipLocal[i] = true;
-//         }
-//
-//         const CSeqDB_Path db_path( (CSeqDB_BasePath(m_DBList[i])), prot_nucl, 'a', 'l' );
-//
-//         CSeqDB_Path resolved_path;
-//
-//         // search for X/kSeqDBGroupAliasFileName
-//         if (! m_AliasSets.FindAliasPath(db_path, & resolved_path, locked)) {
-//             CSeqDB_BasePath base(db_path.FindBasePath());
-//             CSeqDB_BasePath resolved_bp;
-//
-//             // search for X/base.nal/nin
-//             if (m_AliasSets.FindBlastDBPath(base, prot_nucl, resolved_bp)) {
-//                 resolved_path = CSeqDB_Path(resolved_bp, prot_nucl, 'a', 'l');
-//             }
-//         }
-//
-//         if (! resolved_path.Valid()) {
-//             string p_or_n;
-//
-//             switch(prot_nucl) {
-//             case 'p':
-//                 p_or_n = "protein";
-//                 break;
-//
-//             case 'n':
-//                 p_or_n = "nucleotide";
-//                 break;
-//             ...
-//             }
-//
-//             // Do over (to get the search path).  This doesnt use the
-//             // resolution map, since speed is not of the essence.
-//
-//             string search_path;
-//             string input_path;
-//
-//             db_path.FindBasePath().GetString(input_path);
-//
-//             SeqDB_FindBlastDBPath(input_path,
-//                                   prot_nucl,
-//                                   & search_path,
-//                                   false,
-//                                   m_Atlas);
-//
-//             ostringstream oss;
-//             oss << "No alias or index file found for " << p_or_n
-//                 << " database [" << m_DBList[i].GetBasePathS()
-//                 << "] in search path [" << search_path << "]. "
-//                 << "Please verify the spelling of the BLAST "
-//                 << "database and its molecule type.";
-//
-//             string msg(oss.str());
-//
-//             NCBI_THROW(CSeqDBException,
-//                        eFileErr,
-//                        msg);
-//         } else {
-//             // full dereferenced name but without suffix /X/base
-//             if (m_ExpandLinks) {
-//                 string dir_name, base_name;
-//                 resolved_path.FindDirName().GetString(dir_name);
-//                 resolved_path.FindBaseName().GetString(base_name);
-//                 m_DBList[i].Assign(CSeqDB_Substring(
-//                     CDirEntry::NormalizePath(dir_name, eFollowLinks) +
-//                     CDirEntry::GetPathSeparator() +
-//                     base_name  ));
-//             } else {
-//                 m_DBList[i].Assign(resolved_path.FindBasePath());
-//             }
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:343-383
-// ```c++
-//     size_t common = m_DBList[0].GetBasePathS().size();
-//
-//     // Reduce common length to length of min db path.
-//     for(i = 1; common && (i < m_DBList.size()); i++) {
-//         if (m_DBList[i].GetBasePathS().size() < common) {
-//             common = m_DBList[i].GetBasePathS().size();
-//         }
-//     }
-//
-//     if (common) {
-//         --common;
-//     }
-//
-//     // Reduce common length to largest universal prefix.
-//     const string & first = m_DBList[0].GetBasePathS();
-//
-//     for(i = 1; common && (i < m_DBList.size()); i++) {
-//         // Reduce common prefix length until match is found.
-//         while(memcmp(first.c_str(),
-//                      m_DBList[i].GetBasePathS().c_str(),
-//                      common)) {
-//             --common;
-//         }
-//     }
-//
-//     // Adjust back to whole path component.
-//     while(common && (first[common-1] != CFile::GetPathSeparator())) {
-//         --common;
-//     }
-//
-//     if (common > 1) {
-//         // Factor out common path components.
-//         m_DBPath.Assign( CSeqDB_Substring(first.data(), first.data() + common) );
-//
-//         for(i = 0; i < m_DBList.size(); i++) {
-//             CSeqDB_Substring sub(m_DBList[i].GetBasePathS());
-//             sub.EraseFront((int) common);
-//
-//             m_DBList[i].Assign(sub);
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:112-127
-// ```c++
-//     m_Values["DBLIST"] = dbname_list;
-//
-//     x_Tokenize(dbname_list);
-//     ...
-//     x_ResolveNames(prot_nucl, locked);
-//
-//     CSeqDBAliasStack recurse;
-//
-//     x_ExpandAliases(CSeqDB_BasePath("-"), prot_nucl, recurse, locked);
-// ```
-// The name is a list (`x_Tokenize`, quoted at `resolve_one_name`): spaces
+// The name is a list (`x_Tokenize`, cited at `resolve_one_name`): spaces
 // separate databases and double quotes keep a name with spaces together.
 // Several names are the databases of one search, the entries of the top
 // alias node "-" as the names of a `DBLIST` are; a volume that two names give
@@ -1712,14 +897,16 @@ pub(super) fn resolve_in(
 ) -> Result<AliasTree, SeqDbError> {
     if dbname.is_empty() {
         return Err(SeqDbError::NotFound(
-            "Database name is required.".to_string(),
+            "Database name is required.".to_string().into(),
         ));
     }
     let names = split_quoted(dbname.as_bytes(), false);
-    // `x_ExpandAliases` on an empty list (quoted at `Resolver::expand`).
+    // `x_ExpandAliases` on an empty list (cited at `Resolver::expand`).
     if names.is_empty() {
         return Err(SeqDbError::NotFound(
-            "No database names were passed to CSeqDB::CSeqDB().".to_string(),
+            "No database names were passed to CSeqDB::CSeqDB()."
+                .to_string()
+                .into(),
         ));
     }
     let mut resolver = Resolver {
@@ -1743,12 +930,15 @@ pub(super) fn resolve_in(
         let db_path = db_path.to_string_lossy();
         resolver.reject_group_alias(&db_path)?;
         let Some(resolved) = search.find(remove_extn(&db_path), Some(seqtype)) else {
-            return Err(SeqDbError::NotFound(format!(
-                "No alias or index file found for {} database [{name}] in search path [{}]. \
+            return Err(SeqDbError::NotFound(
+                format!(
+                    "No alias or index file found for {} database [{name}] in search path [{}]. \
                  Please verify the spelling of the BLAST database and its molecule type.",
-                seqtype.name(),
-                search.as_str()
-            )));
+                    seqtype.name(),
+                    search.as_str()
+                )
+                .into(),
+            ));
         };
         // `resolved_path` is the resolved name with the extension of an alias
         // file; its directory is normalised and its base name loses the extension.
@@ -1796,21 +986,6 @@ pub(super) fn resolve_in(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:85-97
-// ```c++
-// void CSeqDBAliasNode::x_Tokenize(const string & dbnames)
-// {
-//     vector<CSeqDB_Substring> dbs;
-//     SeqDB_SplitQuoted(dbnames, dbs);
-//
-//     m_DBList.resize(dbs.size());
-//     m_SkipLocal.resize(dbs.size(),false);
-//
-//     for(size_t i = 0; i<dbs.size(); i++) {
-//         m_DBList[i].Assign(dbs[i]);
-//         m_DBList[i].FixDelimiters();
-//     }
-// }
-// ```
 // This entry point is for a caller that holds the path of one database, not
 // a list in the syntax above (`losat makeblastdb`, whose output name is one name
 // by makeblastdb's own check): the name is not split, so a space or a double
@@ -1841,12 +1016,15 @@ pub(super) fn resolve_one_name(
     };
     let db_base = fix_delimiters(db_base);
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
-        return Err(SeqDbError::NotFound(format!(
-            "No alias or index file found for {} database [{db_base}] in search path [{}]. \
+        return Err(SeqDbError::NotFound(
+            format!(
+                "No alias or index file found for {} database [{db_base}] in search path [{}]. \
              Please verify the spelling of the BLAST database and its molecule type.",
-            seqtype.name(),
-            search.as_str()
-        )));
+                seqtype.name(),
+                search.as_str()
+            )
+            .into(),
+        ));
     }
     let mut root = AliasNode::default();
     // The top node is named "-" (seqdbalias.cpp:106, 127).
@@ -1855,23 +1033,6 @@ pub(super) fn resolve_one_name(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:970-984
-// ```c++
-// void CSeqDBAliasNode::x_FindVolumePaths(set<string> & vols, set<string> & alias) const
-// {
-//     ITERATE(TVolNames, iter, m_VolNames) {
-//         vols.insert(iter->GetBasePathS());
-//     }
-//
-//     string alias_base = m_ThisName.GetPathS();
-//     if (alias_base != "-") {
-//         alias.insert(m_ThisName.GetPathS());
-//     }
-//
-//     ITERATE(TSubNodeList, iter, m_SubNodes) {
-//         (*iter)->x_FindVolumePaths(vols, alias);
-//     }
-// }
-// ```
 pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
     if let Some(name) = &node.this_name {
         out.insert(name.clone());
@@ -1882,24 +1043,6 @@ pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1517-1532
-// ```c++
-// void
-// CSeqDBImpl::FindVolumePaths(const string   & dbname,
-//                             char             prot_nucl,
-//                             vector<string> & paths,
-//                             vector<string> * alias_paths,
-//                             bool             recursive,
-//                             bool             expand_links)
-// {
-//     bool use_atlas_lock = true;
-//     CSeqDBAtlasHolder AH(NULL, use_atlas_lock);
-//     CSeqDBAtlas & atlas(AH.Get());
-//
-//     // This constructor handles its own locking.
-//     CSeqDBAliasFile aliases(atlas, dbname, prot_nucl, expand_links);
-//     aliases.FindVolumePaths(paths, alias_paths, recursive);
-// }
-// ```
 // The only caller is the removal of an existing database before a build
 // (`DeleteBlastDb`), and for that use LOSAT departs from NCBI on purpose in
 // two points:
@@ -1909,7 +1052,7 @@ pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::
 //   so leaves the existing database in place.
 // * A volume named in an alias file is looked for in the alias file's own
 //   directory only (an absolute name as it is). NCBI looks in the current
-//   directory first ("local copy", seqdbalias.cpp:831-840, quoted at
+//   directory first ("local copy", seqdbalias.cpp:831-840, cited at
 //   `Resolver::expand`), so `makeblastdb -out sub/db` over an existing
 //   `sub/db.pal` removes the files `./db.00.*` of the current directory when
 //   they exist, although they are not the files of `sub/db`. The files to
@@ -1929,43 +1072,7 @@ pub(crate) fn find_volume_paths(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1592
-// ```c++
-//     TVarList::const_iterator value =
-//         m_Values.find(walker->GetFileKey());
-//
-//     if (value != m_Values.end()) {
-//         walker->AddString( (*value).second );
-//         return;
-//     }
-//
-//     ITERATE(TSubNodeList, node, m_SubNodes) {
-//         (*node)->WalkNodes( walker, volset );
-//     }
-//
-//     ITERATE(TVolNames, volname, m_VolNames) {
-//         if (const CSeqDBVol * vptr = volset.GetVol(volname->GetBasePathS())) {
-//             walker->Accumulate( *vptr );
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:480-506
-// ```c++
-// void SeqDB_JoinDelim(string & a, const string & b, const string & delim)
-// {
-//     if (b.empty()) {
-//         return;
-//     }
-//
-//     if (a.empty()) {
-//         // a has no size - but might have capacity
-//         s_SeqDB_QuickAssign(a, b);
-//         return;
-//     }
-//     ...
-//     a += delim;
-//     a += b;
-// }
-// ```
 // `CSeqDB_TitleWalker` (seqdbalias.cpp:1011-1026) passes a volume's title and
 // an alias file's `TITLE` to `SeqDB_JoinDelim(m_Value, value, "; ")`.
 /// Appends the title of `node` to `title`: its `TITLE` when it has one, else
@@ -1990,29 +1097,6 @@ pub(super) fn walk_title(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1575-1596
-// ```c++
-// CSeqDBAliasNode::WalkNodes(CSeqDB_AliasWalker * walker,
-//                            const CSeqDBVolSet & volset) const
-// {
-//     TVarList::const_iterator value =
-//         m_Values.find(walker->GetFileKey());
-//
-//     if (value != m_Values.end()) {
-//         walker->AddString( (*value).second );
-//         return;
-//     }
-//
-//     ITERATE(TSubNodeList, node, m_SubNodes) {
-//         (*node)->WalkNodes( walker, volset );
-//     }
-//
-//     ITERATE(TVolNames, volname, m_VolNames) {
-//         if (const CSeqDBVol * vptr = volset.GetVol(volname->GetBasePathS())) {
-//             walker->Accumulate( *vptr );
-//         }
-//     }
-// }
-// ```
 // Every volume a node names is in the volume set (`volumes_in_order` takes them all), so
 // `GetVol` finds it; a volume that several nodes name is accumulated once per node.
 /// What NCBI's `WalkNodes` hands its walker: the value of a node that has the walker's key
@@ -2101,61 +1185,9 @@ impl AliasTotals {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1189-1204
-// ```c++
-//     virtual void Accumulate(const CSeqDBVol & vol)
-//     {
-//         m_Value += vol.GetNumOIDs();
-//     }
-//     ...
-//     virtual void AddString(const string & value)
-//     {
-//         m_Value += NStr::StringToInt8(value);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1257-1260
-// ```c++
-//     virtual void Accumulate(const CSeqDBVol & vol)
-//     {
-//         // only alias file data is included.
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1290-1305
-// ```c++
-//     virtual void Accumulate(const CSeqDBVol & vol)
-//     {
-//         m_Value += vol.GetVolumeLength();
-//     }
-//     ...
-//     virtual void AddString(const string & value)
-//     {
-//         m_Value += NStr::StringToUInt8(value);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1107-1147
-// ```c++
-//     CSeqDB_MinLengthWalker()
-//     {
-//         m_Value = INT4_MAX;
-//     }
-//     ...
-//     virtual void Accumulate(const CSeqDBVol & vol)
-//     {
-//         int new_min = vol.GetMinLength();
-//
-//         if (new_min < m_Value) {
-//             m_Value = new_min;
-//         }
-//     }
-//     ...
-//     virtual void AddString(const string & value)
-//     {
-//         int new_min = NStr::StringToUInt(value);
-//
-//         if (new_min < m_Value) {
-//             m_Value = new_min;
-//         }
-//     }
-// ```
 // `CSeqDB_NSeqsStatsWalker` and `CSeqDB_TotalLengthStatsWalker` are the `NSEQ` and `LENGTH`
 // walkers with the keys `STATS_NSEQ` and `STATS_TOTLEN` and the empty `Accumulate` quoted
 // above (seqdbalias.cpp:1241-1262, 1342-1363). A volume's `GetMinLength` is its index file's
@@ -2225,40 +1257,21 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64))
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-1980
-// ```c++
-//     if (! m_DBList.empty()) {
-//         if (oid_iter   != m_Values.end() ||
-//             gil_iter   != m_Values.end() ||
-//             til_iter   != m_Values.end() ||
-//             sil_iter   != m_Values.end() ||
-//             f_oid_iter != m_Values.end() ||
-//             l_oid_iter != m_Values.end() ||
-//             mbit_iter  != m_Values.end() ||
-//             taxid_iter != m_Values.end()) {
-//
-//             has_filters = true;
-//
-//             int first_oid = 0;
-//             int last_oid  = INT_MAX;
-//             bool has_range = false;
-//
-//             if (f_oid_iter != m_Values.end()) {
-//                 first_oid = NStr::StringToUInt(f_oid_iter->second);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-2014
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:2094-2097
-// ```c++
-//     NON_CONST_ITERATE(TSubNodeList, sn, m_SubNodes) {
-//         (**sn).ComputeMasks(has_filters);
-//     }
-// }
-// ```
-// The rest of the range is quoted at `OidRange::bounds`. NCBI's constructor runs this first
-// (`m_Aliases.HasFilters()`, seqdbimpl.cpp:96), before any count walk. The other filter keys
-// are refused when the alias file is read, so a node's filters are its range alone.
-/// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID`, of every node from the top
-/// down, a node before its sub-nodes (`NStr::StringToUInt`); the first value that does not
-/// convert is the error.
+// The rest of the range is cited at `OidRange::bounds`. NCBI's constructor runs this first
+// (`m_Aliases.HasFilters()`, seqdbimpl.cpp:96), before any count walk. The keys of the lists of
+// ids and `MEMB_BIT` are refused when the alias file is read, so the filters of a node are its
+// range and its OID list. The path of `OIDLIST` is its value joined to the directory of the alias
+// file (`combine_path`: an absolute value stays as it is, an empty one is the directory); when
+// that is not a regular file (`exists`) and the node names volumes itself, it is the value joined
+// to the directory of the first of them (probes I5, I7, I8 and I1b of line RG D1b: a volume
+// found through `BLASTDB` or in the current directory moves it there). The file is read where
+// NCBI builds its OID list (`alias_oids`). `OID_MASK_TYPE`, which NCBI converts here after
+// `OIDLIST`, is refused when the alias file is read.
+/// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID` (`NStr::StringToUInt`), then the
+/// path of `OIDLIST`, of every node from the top down, a node before its sub-nodes; the first value
+/// that does not convert is the error.
 pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
     let first_oid = node.value("FIRST_OID").map(string_to_uint).transpose()?;
     let last_oid = node.value("LAST_OID").map(string_to_uint).transpose()?;
@@ -2268,165 +1281,196 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
             last_oid,
         });
     }
+    if let Some(value) = node.value("OIDLIST") {
+        let value = String::from_utf8_lossy(value).into_owned();
+        let mut path = combine_path(&node.db_path, &value);
+        if !exists(Path::new(&path)) {
+            if let Some(first) = node.vol_names.first() {
+                path = combine_path(dir_name(first), &value);
+            }
+        }
+        node.oid_list = Some(path);
+    }
     for subnode in &mut node.subnodes {
         compute_masks(subnode)?;
     }
     Ok(())
 }
 
-/// Whether some node of the tree has an OID range (`CSeqDB_FilterTree::HasFilter`, the filters
-/// being ranges alone).
-pub(super) fn has_ranges(node: &AliasNode) -> bool {
-    node.range.is_some() || node.subnodes.iter().any(has_ranges)
+/// Whether some node of the tree has a filter, an OID range or an OID list
+/// (`CSeqDB_FilterTree::HasFilter`).
+pub(super) fn has_filters(node: &AliasNode) -> bool {
+    node.range.is_some() || node.oid_list.is_some() || node.subnodes.iter().any(has_filters)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:91-99
-// ```c++
-//     for(int i = 0; i < volset.GetNumVols(); i++) {
-//         const CSeqDBVolEntry * v1 = volset.GetVolEntry(i);
-//
-//         CRef<CSeqDB_BitSet> vol_bits =
-//             x_ComputeFilters(filters, *v1, gi_list_set, locked, lmdb_set.IsBlastDBVersion5());
-//
-//         m_AllBits->UnionWith(*vol_bits, true);
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
-// ```c++
-//     const string & vn = vol.Vol()->GetVolName();
-//     CRef<CSeqDB_FilterTree> ft = filters.Specialize(vn);
-//
-//     int vol_start = vol.OIDStart();
-//     int vol_end   = vol.OIDEnd();
-//     ...
-//     if (vols > 0) {
-//         ...
-//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
-//                                      vol_end,
-//                                      CSeqDB_BitSet::eAllSet));
-//     } else {
-//         ...
-//         ITERATE(vector< CRef< CSeqDB_FilterTree > >, sub, ft->GetNodes()) {
-//             CRef<CSeqDB_BitSet> sub_bits =
-//                 x_ComputeFilters(**sub, vol, gis, locked, isBlastDBv5);
-//
-//             volume_map->UnionWith(*sub_bits, true);
-//         }
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
-// ```c++
-//     CRef<CSeqDB_BitSet> filter(new CSeqDB_BitSet(vol_start,
-//                                                  vol_end,
-//                                                  CSeqDB_BitSet::eAllSet));
-//
-//     // First, apply any 'range' filters, because they can be combined
-//     // very efficiently.
-//
-//     typedef CSeqDB_FilterTree::TFilters TFilters;
-//
-//     ITERATE(TFilters, range, ft->GetFilters()) {
-//         const CSeqDB_AliasMask & mask = **range;
-//
-//         if (mask.GetType() == CSeqDB_AliasMask::eOidRange) {
-//             CSeqDB_BitSet r2(mask.GetBegin(),
-//                                 mask.GetEnd(),
-//                                 CSeqDB_BitSet::eAllSet);
-//             filter->IntersectWith(r2, true);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:38-55
-// ```c++
-// CRef<CSeqDB_FilterTree> CSeqDB_FilterTree::Specialize(string volname) const
-// {
-//     CRef<CSeqDB_FilterTree> clone(new CSeqDB_FilterTree);
-//     clone->SetName(m_Name);
-//     clone->AddFilters(m_Filters);
-//
-//     ITERATE(vector< CRef<CSeqDB_FilterTree> >, iter, m_SubNodes) {
-//         CRef<CSeqDB_FilterTree> sub = (**iter).Specialize(volname);
-//
-//         if (sub.NotEmpty()) {
-//             if (! sub->GetFilters().empty()) {
-//                 clone->AddNode(sub);
-//             } else {
-//                 clone->AddNodes(sub->GetNodes());
-//                 clone->AddVolumes(sub->GetVolumes());
-//             }
-//         }
-//     }
-// ```
-// The tree of one volume keeps the branches that reach it and lifts a node without a filter
-// into its parent. A node's OIDs of the volume are its range (the whole volume without one)
-// intersected with the volume when the node names the volume, else with the union of its
-// sub-nodes' OIDs; a sub-node's OIDs below a node that names the volume are inside the whole
-// volume, so ignoring them changes nothing. By distribution the OIDs of a volume are therefore
-// the union, over the paths from the top node to each node that names the volume, of the
-// intersection of the ranges on the path with the volume, which is what is computed here.
-// The ranges count the OIDs of the whole volume set (`vol_start`, `vol_end` are global).
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
-// ```c++
-//     CSeqDB_BitSet(size_t start, size_t end, ESpecialCase sp = eNone)
-//         : m_Start  (start),
-//           m_End    (end),
-//           m_Special(sp)
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-220
-// ```c++
-//     if (m_Special == eAllSet && other.m_Special == eAllSet) {
-//         size_t start = std::max(m_Start, other.m_Start);
-//         size_t end   = std::min(m_End,   other.m_End);
-//
-//         if (start >= end) {
-//             // The intersected ranges don't overlap.
-//             m_Special = eAllClear;
-//         } else {
-//             m_Start = start;
-//             m_End = end;
-//         }
-//         return;
-//     }
-// ```
-// (The whole of `IntersectWith` is quoted at `BitSetShape::intersect_with`.)
-// The `int` bounds of a range become `size_t`: a negative one is sign-extended past every OID
-// (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
-// `LAST_OID` is no upper bound, as `bound` reads them.
-/// The OIDs that the OID ranges of the tree include, one bit per OID of the volume set (bit
-/// `oid % 64` of word `oid / 64`); `volume` gives the global OIDs `[start, end)` of a volume
-/// path. `None` when no node has a range: NCBI builds no OID list then, and every OID is
-/// included.
-pub(super) fn range_mask(
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1510-1556
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1598-1611
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-112
+// The explorer looks at the keys, not at their values (probe K1: `NSEQ abc` beside `OIDLIST`
+// is never converted), and the walk does not go below a node whose `Explore` ends it. The
+// other keys of lists are refused, so `OIDLIST` is the one that asks for a scan here.
+/// Whether NCBI's constructor scans the totals of the included OIDs for the alias tree under
+/// `node` (`NeedTotalsScan`): a node with `OIDLIST` is reached without passing a node that has
+/// both `NSEQ` and `LENGTH`.
+pub(super) fn needs_totals_scan(node: &AliasNode) -> bool {
+    if node.value("NSEQ").is_some() && node.value("LENGTH").is_some() {
+        return false;
+    }
+    if node.value("OIDLIST").is_some() {
+        return true;
+    }
+    node.subnodes.iter().any(needs_totals_scan)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:338-348
+// `x_Setup` ORs the bit set of each volume (`volume_set`) into `m_AllBits`, a bit array over
+// every OID, all clear. That set becomes the special all-set only by the copy of a volume's
+// special all-set that covers every OID: the `-db` names reach one volume (that holds OIDs), and
+// at least one path of the alias tree to it crosses no `FIRST_OID`-`LAST_OID` range that cuts
+// the volume and no OID list (a union of special sets stays special only when one covers the
+// others; two ranges whose union is the volume make a bit array; an OID list is a bit array).
+// Its `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
+// its capacity (`vector::operator=` reuses the storage).
+/// What the filters of an alias tree make of NCBI's OID list (`CSeqDBOIDList::x_Setup`,
+/// [`alias_oids`]).
+#[derive(Debug)]
+pub(super) struct AliasOids {
+    /// The OIDs the tree includes, one bit per OID of the volume set (bit `oid % 64` of word
+    /// `oid / 64`). `None` when no node has a filter: NCBI builds no OID list then, and every
+    /// OID is included.
+    pub words: Option<Vec<u64>>,
+    /// Whether NCBI's bit set of the volume set (`m_AllBits`) is the special all-set one.
+    pub all_bits_special_set: bool,
+}
+
+/// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
+/// `volumes` are the volume paths in NCBI's order with their global OIDs `[start, end)`. The
+/// OID list files are read once each (`files`), in NCBI's order ([`volume_set`]): the first
+/// that fails is the error.
+pub(super) fn alias_oids(
     root: &AliasNode,
-    volume: &dyn Fn(&str) -> (u32, u32),
+    volumes: &[(&str, u32, u32)],
     num_oids: u32,
-) -> Option<Vec<u64>> {
-    if !has_ranges(root) {
-        return None;
-    }
-    fn mark(
-        node: &AliasNode,
-        lo: u64,
-        hi: u64,
-        volume: &dyn Fn(&str) -> (u32, u32),
-        words: &mut [u64],
-    ) {
-        let (lo, hi) = match node.range {
-            Some(range) => {
-                let (begin, end) = range.bounds();
-                (lo.max(bound(begin)), hi.min(bound(end)))
-            }
-            None => (lo, hi),
+) -> Result<AliasOids, OidListError> {
+    let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
+    let mut all = Shape::new(0, u64::from(num_oids), Special::None);
+    let mut files = std::collections::HashMap::new();
+    for &(name, start, end) in volumes {
+        let Some(node) = specialize(root, name) else {
+            continue;
         };
-        for path in &node.vol_names {
-            let (start, end) = volume(path);
-            set_bits(words, lo.max(u64::from(start)), hi.min(u64::from(end)));
-        }
-        for subnode in &node.subnodes {
-            mark(subnode, lo, hi, volume, words);
+        let frame = Frame {
+            start: u64::from(start),
+            end: u64::from(end),
+        };
+        let set = volume_set(&node, frame, &mut files)?;
+        all = match all.union_with(set.shape) {
+            Union::Left => all,
+            Union::Right => set.shape,
+            Union::Array(shape) => shape,
+        };
+        if let Some(words) = &mut words {
+            set.or_into(words, frame);
         }
     }
-    let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
-    mark(root, 0, u64::MAX, volume, &mut words);
-    Some(words)
+    Ok(AliasOids {
+        words,
+        all_bits_special_set: all.special == Special::AllSet,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:219-234
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:464-505
+// For each volume in order, the tree specialised to it (`specialize`): a node that names the
+// volume starts from all of its OIDs and does not look at its sub-nodes, any other node from the
+// union of its sub-nodes; the node's filter, every OID of the volume ANDed with its range and
+// then with its OID list, is then ANDed in. So the OID lists are read in that order, a
+// sub-node's before its parent's, and only on the branches that reach the volume without passing
+// a node that names it: the first file that fails is NCBI's error (`oid_list::OidListError`).
+// An OID list is read relative to each volume (bit `i` is the volume's OID `i`, probe F1 of line
+// RG D1b), a bit array over the volume's OIDs (`x_GetOidMask`); the ranges count the OIDs of the
+// whole volume set. The `int` bounds of a range become `size_t`: a negative one is sign-extended
+// past every OID (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a
+// negative `LAST_OID` is no upper bound, as `bound` reads them.
+/// NCBI's bit set of the OIDs of one volume (`frame`) that the specialised tree `node` keeps
+/// (`CSeqDBOIDList::x_ComputeFilters`).
+fn volume_set<'a>(
+    node: &VolumeNode<'a>,
+    frame: Frame,
+    files: &mut std::collections::HashMap<&'a str, OidListFile>,
+) -> Result<OidSet, OidListError> {
+    let map = if node.volumes > 0 {
+        OidSet::special(frame.start, frame.end, Special::AllSet)
+    } else {
+        let mut map = OidSet::special(frame.start, frame.end, Special::AllClear);
+        for sub in &node.nodes {
+            let sub = volume_set(sub, frame, files)?;
+            map = map.union_with(sub, frame);
+        }
+        map
+    };
+    let mut filter = OidSet::special(frame.start, frame.end, Special::AllSet);
+    if let Some(range) = node.range {
+        let (first, last) = range.bounds();
+        let range = OidSet::special(bound(first), bound(last), Special::AllSet);
+        filter = filter.intersect_with(range, frame);
+    }
+    if let Some(path) = node.oid_list {
+        let file = match files.entry(path) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(oid_list::read(path)?),
+        };
+        let bits = file.volume_words((frame.end - frame.start) as u32)?;
+        filter = filter.intersect_with(OidSet::array(frame, bits), frame);
+    }
+    if map.clears_outside(&filter) {
+        return Err(OidListError::RangeOutsideBits(std::path::PathBuf::from(
+            node.name.unwrap_or("-"),
+        )));
+    }
+    Ok(map.intersect_with(filter, frame))
+}
+
+/// The global OIDs `[start, end)` of the volume whose bit sets are computed ([`volume_set`]).
+#[derive(Debug, Clone, Copy)]
+struct Frame {
+    start: u64,
+    end: u64,
+}
+
+impl Frame {
+    /// An empty array of bits over the volume's OIDs (bit `oid - start`).
+    fn clear_words(self) -> Vec<u64> {
+        vec![0u64; ((self.end - self.start) as usize).div_ceil(64)]
+    }
+
+    /// The bits over the volume's OIDs of the global OIDs `[from, to)`.
+    fn range_words(self, from: u64, to: u64) -> Vec<u64> {
+        let mut words = self.clear_words();
+        let from = from.max(self.start) - self.start;
+        let to = to.min(self.end).saturating_sub(self.start);
+        set_bits(&mut words, from, to);
+        words
+    }
+}
+
+/// ORs the volume-relative bits `bits` into the global bits `words` from OID `start`.
+fn or_at(words: &mut [u64], bits: &[u64], start: u32) {
+    let shift = start % 64;
+    let first = (start / 64) as usize;
+    for (at, &word) in bits.iter().enumerate() {
+        if word == 0 {
+            continue;
+        }
+        words[first + at] |= word << shift;
+        if shift > 0 && first + at + 1 < words.len() {
+            words[first + at + 1] |= word >> (64 - shift);
+        }
+    }
 }
 
 /// NCBI's `size_t` of an `int` bound of an OID range (`CSeqDB_BitSet(mask.GetBegin(), ...)`).
@@ -2454,62 +1498,13 @@ fn set_bits(words: &mut [u64], from: u64, to: u64) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:142-177
-// ```c++
-// void CSeqDB_BitSet::UnionWith(CSeqDB_BitSet & other, bool consume)
-// {
-//     if (other.m_Special == eAllClear) {
-//         // Nothing to do.
-//         return;
-//     }
-//
-//     if (m_Special == eAllClear) {
-//         // Result is just 'other'.
-//         x_Copy(other, consume);
-//         return;
-//     }
-//
-//     // Our all-1s mask covers the other.
-//
-//     if (other.m_Start >= m_Start &&
-//         other.m_End   <= m_End   &&
-//         m_Special     == eAllSet) {
-//
-//         return;
-//     }
-//
-//     // The other all-1s mask covers ours.
-//
-//     if (other.m_Start   <= m_Start &&
-//         other.m_End     >= m_End   &&
-//         other.m_Special == eAllSet) {
-//
-//         // Copy is probably better than swap here.
-//         x_Copy(other, consume);
-//         return;
-//     }
-//
-//     // Adjust the range if needed; convert special cases to eNone.
-//
-//     x_Normalize(other.m_Start, other.m_End);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:309-319
-// ```c++
-// void CSeqDB_BitSet::x_Normalize(size_t start, size_t end)
-// {
-//     ...
-//     if (m_Start > start || m_End < end || m_Special != eNone) {
-//         CSeqDB_BitSet dup(std::min(m_Start, start),
-//                           std::max(m_End,   end));
-//
-//         Swap(dup);
-// ```
-/// The shape of an NCBI `CSeqDB_BitSet` that its operations decide by: the OIDs
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:248-251
+/// The shape of an NCBI `CSeqDB_BitSet`, which its operations decide by: the OIDs
 /// `[start, end)` and whether it is a special set (all of them set, `eAllSet`, or none,
-/// `eAllClear`) or a bit array (`eNone`), whose bits do not matter here
-/// ([`all_bits_special_set`]).
+/// `eAllClear`) or a bit array (`eNone`) of one bit per OID, rounded up to whole bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BitSetShape {
+struct Shape {
     start: u64,
     end: u64,
     special: Special,
@@ -2526,7 +1521,18 @@ enum Special {
     AllClear,
 }
 
-impl BitSetShape {
+/// The result of `UnionWith` ([`Shape::union_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Union {
+    /// The set itself.
+    Left,
+    /// A copy of the other set.
+    Right,
+    /// A bit array of this shape (`x_Normalize` widens the range to both).
+    Array(Shape),
+}
+
+impl Shape {
     fn new(start: u64, end: u64, special: Special) -> Self {
         Self {
             start,
@@ -2535,147 +1541,208 @@ impl BitSetShape {
         }
     }
 
-    /// `UnionWith`: `x_Normalize` widens the range to both and makes a bit array.
-    fn union_with(self, other: Self) -> Self {
+    /// The bytes of the bit array (`x_Alloc`).
+    fn bytes(self) -> u64 {
+        (self.end - self.start).div_ceil(8)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:142-189
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:309-334
+    /// `UnionWith`: which set the union is, by the shapes.
+    fn union_with(self, other: Self) -> Union {
         if other.special == Special::AllClear {
-            return self;
+            return Union::Left;
         }
         if self.special == Special::AllClear {
-            return other;
+            return Union::Right;
         }
         if other.start >= self.start && other.end <= self.end && self.special == Special::AllSet {
-            return self;
+            return Union::Left;
         }
         if other.start <= self.start && other.end >= self.end && other.special == Special::AllSet {
-            return other;
+            return Union::Right;
         }
-        Self::new(
+        Union::Array(Self::new(
             self.start.min(other.start),
             self.end.max(other.end),
             Special::None,
-        )
+        ))
+    }
+}
+
+/// An NCBI `CSeqDB_BitSet` of OIDs of one volume ([`volume_set`]): its shape and, for a bit
+/// array, its OIDs.
+#[derive(Debug, Clone)]
+struct OidSet {
+    shape: Shape,
+    /// The OIDs of a bit array (`Special::None`), bit `oid - frame.start` of the volume's
+    /// [`Frame`]; empty for a special set, whose OIDs its shape gives.
+    bits: Vec<u64>,
+}
+
+impl OidSet {
+    fn special(start: u64, end: u64, special: Special) -> Self {
+        Self {
+            shape: Shape::new(start, end, special),
+            bits: Vec::new(),
+        }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:193-243
-    // ```c++
-    // void CSeqDB_BitSet::IntersectWith(CSeqDB_BitSet & other, bool consume)
-    // {
-    //     // All clear cases
-    //
-    //     if (m_Special == eAllClear) {
-    //         return;
-    //     }
-    //
-    //     if (other.m_Special == eAllClear) {
-    //         x_Copy(other, consume);
-    //         return;
-    //     }
-    //
-    //     // All set cases.
-    //
-    //     if (m_Special == eAllSet && other.m_Special == eAllSet) {
-    //         size_t start = std::max(m_Start, other.m_Start);
-    //         size_t end   = std::min(m_End,   other.m_End);
-    //
-    //         if (start >= end) {
-    //             // The intersected ranges don't overlap.
-    //             m_Special = eAllClear;
-    //         } else {
-    //             m_Start = start;
-    //             m_End = end;
-    //         }
-    //         return;
-    //     }
-    //
-    //     if (other.m_Special == eAllSet || m_Special == eAllSet) {
-    //         CSeqDB_BitSet result;
-    //         CSeqDB_BitSet range;
-    //
-    //         if (m_Special == eAllSet) {
-    //             result.x_Copy(other, consume);
-    //             range.x_Copy(*this, true);
-    //         } else {
-    //             Swap(result);
-    //             range.x_Copy(other, consume);
-    //         }
-    //
-    //         if (result.m_Start < range.m_Start)
-    //             result.AssignBitRange(result.m_Start, range.m_Start, false);
-    //
-    //         if (result.m_End > range.m_End)
-    //             result.AssignBitRange(range.m_End, result.m_End, false);
-    //
-    //         Swap(result);
-    //
-    //         return;
-    //     }
-    // ```
-    /// `IntersectWith`: of a special all-set and a bit array, the bit array (its range).
-    fn intersect_with(self, other: Self) -> Self {
-        if self.special == Special::AllClear {
+    /// A bit array over the OIDs of the volume (`x_GetOidMask`).
+    fn array(frame: Frame, bits: Vec<u64>) -> Self {
+        Self {
+            shape: Shape::new(frame.start, frame.end, Special::None),
+            bits,
+        }
+    }
+
+    /// The OIDs of the set, as bits over the volume's OIDs.
+    fn into_words(self, frame: Frame) -> Vec<u64> {
+        match self.shape.special {
+            Special::None => self.bits,
+            Special::AllClear => frame.clear_words(),
+            Special::AllSet => frame.range_words(self.shape.start, self.shape.end),
+        }
+    }
+
+    /// ORs the OIDs of the set into the global bits `words`.
+    fn or_into(self, words: &mut [u64], frame: Frame) {
+        match self.shape.special {
+            Special::AllClear => {}
+            Special::AllSet => set_bits(
+                words,
+                self.shape.start.max(frame.start),
+                self.shape.end.min(frame.end),
+            ),
+            Special::None => or_at(words, &self.bits, frame.start as u32),
+        }
+    }
+
+    /// `UnionWith`: the union of the OIDs, in the shape [`Shape::union_with`] gives.
+    fn union_with(self, other: Self, frame: Frame) -> Self {
+        match self.shape.union_with(other.shape) {
+            Union::Left => self,
+            Union::Right => other,
+            Union::Array(shape) => {
+                let mut bits = self.into_words(frame);
+                for (word, other) in bits.iter_mut().zip(other.into_words(frame)) {
+                    *word |= other;
+                }
+                Self { shape, bits }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:222-243
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:376-405
+    // Of a bit array and a special all-set, NCBI clears the array's bits from its first OID up
+    // to the range's start and from the range's end up to its last OID, one bit or one byte at a
+    // time at the OID less the array's first. A range that ends before the array's first OID
+    // makes the first index wrap below 0: NCBI writes far outside the array and crashes (probes
+    // D1a_P, D1a_R of line RG D1b-1, SIGSEGV); one that starts past the array's bytes writes past
+    // them, over NCBI's heap: NCBI aborts or crashes (probes RB9_T200 to RB9_T19990 of review B of
+    // D1b-1), or, where the cleared bytes stay in the unused end of the array's allocation, keeps
+    // no OID (RB_S, RB9_T21), as where it reads past an OID list file's page
+    // (`OidListError::PastPage`). Inside the array's last byte the clearing is harmless (probe
+    // D1a_Q: no OID).
+    /// Whether NCBI's `IntersectWith` of this set with `other` clears bits outside this bit
+    /// array (`OidListError::RangeOutsideBits`).
+    fn clears_outside(&self, other: &Self) -> bool {
+        let (a, b) = (self.shape, other.shape);
+        if a.special != Special::None || b.special != Special::AllSet {
+            return false;
+        }
+        b.end < a.start || (b.start > a.end && (b.start - 1 - a.start) / 8 >= a.bytes())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:191-294
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:90-140
+    // Of a special all-set and a bit array, the bit array keeps its shape and loses its bits
+    // outside the all-set's range (where NCBI's clearing stays inside the array:
+    // `clears_outside`). Two bit arrays with the same first OID and the same bytes
+    // are ANDed byte by byte. Any other two bit arrays take NCBI's last loop, which walks the set
+    // bits of this set and passes its index by reference to the other set's search for its next
+    // set bit: where the other set has one, the index jumps there and no bit is cleared, so the
+    // only bits cleared are those past the other set's last set bit (probes B1 of review A of line
+    // RG D1b-1: OIDs 2-4 and 8-10 under an OID list of OID 2 keep OIDs 1 and 2, under one of OID 8
+    // the OIDs 1-3, 7, 8). The result keeps this set's shape. That loop is modeled for an `other`
+    // that starts at or before this set (the filter over the volume's OIDs of `volume_set`): of an
+    // `other` without set bits that starts later, NCBI keeps this set's bits before it.
+    /// `IntersectWith`: this set ANDed with `other` as NCBI computes it.
+    fn intersect_with(self, other: Self, frame: Frame) -> Self {
+        let (a, b) = (self.shape, other.shape);
+        if a.special == Special::AllClear {
             return self;
         }
-        if other.special == Special::AllClear {
+        if b.special == Special::AllClear {
             return other;
         }
-        match (self.special, other.special) {
+        match (a.special, b.special) {
             (Special::AllSet, Special::AllSet) => {
-                let start = self.start.max(other.start);
-                let end = self.end.min(other.end);
+                let start = a.start.max(b.start);
+                let end = a.end.min(b.end);
                 if start >= end {
-                    Self {
-                        special: Special::AllClear,
-                        ..self
-                    }
+                    Self::special(a.start, a.end, Special::AllClear)
                 } else {
-                    Self::new(start, end, Special::AllSet)
+                    Self::special(start, end, Special::AllSet)
                 }
             }
-            (Special::AllSet, _) => other,
-            _ => self,
+            (Special::AllSet, _) => other.and_words(frame.range_words(a.start, a.end)),
+            (_, Special::AllSet) => self.and_words(frame.range_words(b.start, b.end)),
+            _ if a.start == b.start && a.bytes() == b.bytes() => self.and_words(other.bits),
+            _ => {
+                debug_assert!(b.start <= a.start, "the other set starts after this one");
+                let last = other
+                    .bits
+                    .iter()
+                    .rposition(|&word| word != 0)
+                    .map(|at| at as u64 * 64 + 63 - u64::from(other.bits[at].leading_zeros()));
+                let kept = match last {
+                    Some(last) => frame.range_words(frame.start, frame.start + last + 1),
+                    None => frame.clear_words(),
+                };
+                self.and_words(kept)
+            }
         }
+    }
+
+    /// The bit array with only its OIDs that `kept` (bits over the volume's OIDs) holds.
+    fn and_words(mut self, kept: Vec<u64>) -> Self {
+        for (word, kept) in self.bits.iter_mut().zip(kept) {
+            *word &= kept;
+        }
+        self
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:57-78
-// ```c++
-//     ITERATE(vector<CSeqDB_BasePath>, iter, m_Volumes) {
-//         if (iter->GetBasePathS() == volname) {
-//             clone->AddVolume(*iter);
-//         }
-//     }
-//
-//     // If this node is an placeholder with a single child node,
-//     // replace this node with the child node.
-//
-//     while(clone->m_Filters.empty() &&
-//           clone->m_Volumes.empty() &&
-//           clone->m_SubNodes.size() == 1) {
-//
-//         CRef<CSeqDB_FilterTree> sub = clone->m_SubNodes[0];
-//         clone = sub;
-//     }
-//
-//     if (clone->m_SubNodes.empty() && clone->m_Volumes.empty()) {
-//         clone.Reset();
-//     }
-//
-//     return clone;
-// ```
-// (The first half of `Specialize` is quoted at `range_mask`.) The filters of a node are its
-// OID range, the only alias filter LOSAT reads (`UNSUPPORTED_KEYS`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:38-55
+// The filters of a node are its OID range and its OID list, the alias filters LOSAT reads
+// (`UNSUPPORTED_KEYS`).
 /// A node of NCBI's filter tree specialised to one volume (`CSeqDB_FilterTree::Specialize`):
-/// its OID range, its sub-nodes, and how many times it names the volume.
-struct VolumeNode {
+/// its OID range and OID list, its sub-nodes, and how many times it names the volume.
+struct VolumeNode<'a> {
+    /// The alias file of the node (`m_ThisName`), `None` for the top node.
+    name: Option<&'a str>,
     range: Option<OidRange>,
-    nodes: Vec<VolumeNode>,
+    oid_list: Option<&'a str>,
+    nodes: Vec<VolumeNode<'a>>,
     volumes: usize,
 }
 
+impl VolumeNode<'_> {
+    /// Whether the node has a filter of its own (`GetFilters()` not empty).
+    fn has_filters(&self) -> bool {
+        self.range.is_some() || self.oid_list.is_some()
+    }
+}
+
 /// `Specialize(volume)` of the tree under `node`; `None` when no branch reaches the volume.
-fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
+fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
     let mut clone = VolumeNode {
+        name: node.this_name.as_deref(),
         range: node.range,
+        oid_list: node.oid_list.as_deref(),
         nodes: Vec::new(),
         volumes: 0,
     };
@@ -2684,7 +1751,7 @@ fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
         .iter()
         .filter_map(|sub| specialize(sub, volume))
     {
-        if sub.range.is_some() {
+        if sub.has_filters() {
             clone.nodes.push(sub);
         } else {
             clone.nodes.extend(sub.nodes);
@@ -2692,171 +1759,30 @@ fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
         }
     }
     clone.volumes += node.vol_names.iter().filter(|name| *name == volume).count();
-    while clone.range.is_none() && clone.volumes == 0 && clone.nodes.len() == 1 {
+    while !clone.has_filters() && clone.volumes == 0 && clone.nodes.len() == 1 {
         clone = clone.nodes.pop().expect("one sub-node");
     }
     (!clone.nodes.is_empty() || clone.volumes > 0).then_some(clone)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:145-177
-// ```c++
-//     if (vols > 0) {
-//         ...
-//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
-//                                      vol_end,
-//                                      CSeqDB_BitSet::eAllSet));
-//     } else {
-//         // Since this node did not have a volume, we OR together all
-//         // of its subnodes.
-//
-//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
-//                                      vol_end,
-//                                      CSeqDB_BitSet::eAllClear));
-//
-//         ITERATE(vector< CRef< CSeqDB_FilterTree > >, sub, ft->GetNodes()) {
-//             CRef<CSeqDB_BitSet> sub_bits =
-//                 x_ComputeFilters(**sub, vol, gis, locked, isBlastDBv5);
-//
-//             volume_map->UnionWith(*sub_bits, true);
-//         }
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
-// ```c++
-//     CRef<CSeqDB_BitSet> filter(new CSeqDB_BitSet(vol_start,
-//                                                  vol_end,
-//                                                  CSeqDB_BitSet::eAllSet));
-//     ...
-//         if (mask.GetType() == CSeqDB_AliasMask::eOidRange) {
-//             CSeqDB_BitSet r2(mask.GetBegin(),
-//                                 mask.GetEnd(),
-//                                 CSeqDB_BitSet::eAllSet);
-//             filter->IntersectWith(r2, true);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
-// ```c++
-//     volume_map->IntersectWith(*filter, true);
-//     return volume_map;
-// ```
-/// The shape of the OIDs `[start, end)` of one volume that the specialised tree `node` keeps
-/// (`CSeqDBOIDList::x_ComputeFilters`).
-fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
-    let map = if node.volumes > 0 {
-        BitSetShape::new(start, end, Special::AllSet)
-    } else {
-        node.nodes.iter().fold(
-            BitSetShape::new(start, end, Special::AllClear),
-            |map, sub| map.union_with(volume_bits(sub, start, end)),
-        )
-    };
-    let mut filter = BitSetShape::new(start, end, Special::AllSet);
-    if let Some(range) = node.range {
-        let (first, last) = range.bounds();
-        filter =
-            filter.intersect_with(BitSetShape::new(bound(first), bound(last), Special::AllSet));
-    }
-    map.intersect_with(filter)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
-// ```c++
-//     m_NumOIDs = volset.GetNumOIDs();
-//
-//     m_AllBits.Reset(new CSeqDB_BitSet(0, m_NumOIDs));
-//     ...
-//     for(int i = 0; i < volset.GetNumVols(); i++) {
-//         const CSeqDBVolEntry * v1 = volset.GetVolEntry(i);
-//
-//         CRef<CSeqDB_BitSet> vol_bits =
-//             x_ComputeFilters(filters, *v1, gi_list_set, locked, lmdb_set.IsBlastDBVersion5());
-//
-//         m_AllBits->UnionWith(*vol_bits, true);
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:338-348
-// ```c++
-// void CSeqDB_BitSet::x_Copy(CSeqDB_BitSet & other, bool consume)
-// {
-//     if (consume && other.m_Special == eNone) {
-//         Swap(other);
-//     } else {
-//         m_Start   = other.m_Start;
-//         m_End     = other.m_End;
-//         m_Special = other.m_Special;
-//         m_Bits    = other.m_Bits;
-//     }
-// }
-// ```
-// `m_AllBits` starts as a bit array over every OID, all clear. It becomes the special all-set
-// only by the copy of a volume's special all-set that covers every OID: the `-db` names reach
-// one volume (that holds OIDs), and at least one path of the alias tree to it crosses no
-// `FIRST_OID`-`LAST_OID` range that cuts the volume (a union of special sets stays special only
-// when one covers the others; two ranges whose union is the volume make a bit array). Its
-// `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
-// its capacity (`vector::operator=` reuses the storage).
-/// Whether NCBI's OID bit set of the volume set (`CSeqDBOIDList::m_AllBits`) is the special
-/// all-set one after the OID ranges of the alias tree `root` (`x_Setup`), the volumes `names`
-/// (in NCBI's order) holding the global OIDs `starts[i]..starts[i + 1]`.
-pub(super) fn all_bits_special_set(root: &AliasNode, names: &[String], starts: &[u32]) -> bool {
-    let mut all = BitSetShape::new(0, u64::from(starts[names.len()]), Special::None);
-    for (at, name) in names.iter().enumerate() {
-        let node = specialize(root, name).expect("the alias tree reaches every volume");
-        all = all.union_with(volume_bits(
-            &node,
-            u64::from(starts[at]),
-            u64::from(starts[at + 1]),
-        ));
-    }
-    all.special == Special::AllSet
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:247-258
-// ```c++
-//         // Handle the case where FIRST_OID and LAST_OID is set on a top level
-//         // alias file and that's the only alias file present
-//         if (ft->HasFilter()) {
-//             const vector< CRef<CSeqDB_FilterTree> >& nodes = ft->GetNodes();
-//             if (nodes.size() == 1) {
-//                 const CSeqDB_FilterTree::TFilters& filters = nodes.front()->GetFilters();
-//                 if (filters.size() == 1 && filters.front()->GetType() == CSeqDB_AliasMask::eOidRange) {
-//                     const CSeqDB_AliasMask& alias_mask = *filters.front();
-//                     SetIterationRange(alias_mask.GetBegin(), alias_mask.GetEnd());
-//                 }
-//             }
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:183-201
-// ```c++
-// void CSeqDBImpl::SetIterationRange(int oid_begin, int oid_end)
-// {
-//     ...
-//     m_RestrictBegin = (oid_begin < 0) ? 0 : oid_begin;
-//     m_RestrictEnd   = (oid_end   < 0) ? 0 : oid_end;
-//
-//     if ((oid_begin == 0) && (oid_end == 0)) {
-//         m_RestrictEnd = m_VolSet.GetNumOIDs();
-//     } else {
-//         if ((oid_end == 0) || (m_RestrictEnd > m_VolSet.GetNumOIDs())) {
-//             m_RestrictEnd = m_VolSet.GetNumOIDs();
-//         }
-//         if (m_RestrictBegin > m_RestrictEnd) {
-//             m_RestrictBegin = m_RestrictEnd;
-//         }
-//     }
-// }
-// ```
 // The filter tree's top node has one sub-node per alias file of the top node
-// (`BuildFilterTree`, seqdbalias.cpp:1880-1894), and a node's only filter is its range (the
-// other filter keys are refused). The bounds are NCBI's `int`s (`OidRange::bounds`), negative
+// (`BuildFilterTree`, seqdbalias.cpp:1880-1894); a node with an OID list besides its range has
+// two filters (the other filter keys are refused). The bounds are NCBI's `int`s
+// (`OidRange::bounds`), negative
 // for a value of 2^31 or more: a negative `oid_begin` starts at 0, a negative `oid_end` ends at
 // 0, and `LAST_OID 0` (`oid_end` 0) ends at the last OID.
 /// The iteration range NCBI sets on its first OID-list build when the top node has exactly one
-/// alias file and that file has an OID range: `[begin, end)` as `SetIterationRange` clamps it
+/// alias file and that file's only filter is an OID range: `[begin, end)` as `SetIterationRange` clamps it
 /// to the `num_oids` OIDs of the volume set. `None` in every other case.
 pub(super) fn top_iteration_range(root: &AliasNode, num_oids: u32) -> Option<(u32, u32)> {
     let [only] = root.subnodes.as_slice() else {
         return None;
     };
+    if only.oid_list.is_some() {
+        return None;
+    }
     let (oid_begin, oid_end) = only.range?.bounds();
     let num_oids = i64::from(num_oids);
     let mut restrict_begin = i64::from(oid_begin.max(0));
@@ -2890,38 +1816,6 @@ pub(super) fn test_read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-958
-// ```c++
-// void CSeqDBAliasNode::FindVolumePaths(vector<string> & vols, vector<string> * alias, bool recursive) const
-// {
-//
-//     set<string> volset;
-//     set<string> aliset;
-//
-//     if (recursive) {
-//         x_FindVolumePaths(volset, aliset);
-//     } else {
-//         // No alias file list is populated in the non-recursive mode
-//         ITERATE(vector<CSeqDB_BasePath>, path, m_VolNames) {
-//             volset.insert(path->GetBasePathS());
-//         }
-//         ITERATE(TSubNodeList, iter, m_SubNodes) {
-//             ITERATE(vector<CSeqDB_BasePath>, path, (*iter)->m_VolNames) {
-//                 volset.insert(path->GetBasePathS());
-//             }
-//             ITERATE(TSubNodeList, sub, (*iter)->m_SubNodes) {
-//                 volset.insert(((*sub)->m_ThisName).GetPathS());
-//             }
-//         }
-//     }
-//
-//     vols.clear();
-//     ITERATE(set<string>, iter, volset) {
-//         vols.push_back(*iter);
-//     }
-//
-//     // Sort to insure deterministic order.
-//     sort(vols.begin(), vols.end(), SeqDB_CompareVolume);
-// ```
 // blastdbcmd prints this list under "Volumes:" (`FindVolumePaths(volumes,
 // false)`, blastdbcmd.cpp:568): the volumes of the first two levels of the
 // alias tree and the alias files of the third. The tests compare it with what

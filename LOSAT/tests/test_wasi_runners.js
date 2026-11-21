@@ -13,12 +13,8 @@ const GUARD_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-test
 process.env.LOSAT_WASI_GUARD_CACHE = GUARD_CACHE;
 process.on("exit", () => fs.rmSync(GUARD_CACHE, { recursive: true, force: true }));
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status)
-// return status;
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-// LOG_POST(Error << "Error: " << e.what());
-// exit_code = BLAST_UNKNOWN_ERROR;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // Exercise the host failure boundary with tiny real Wasm commands, including
 // a worker trap while its parent waits in Wasm. No BLAST behavior is simulated.
 // Encode fixtures directly so this test needs only Node, not a Wasm compiler.
@@ -51,8 +47,7 @@ const body = (instructions, locals = 0) => {
   return [...uleb(bytes.length), ...bytes];
 };
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Entry/export/memory variations exercise Wasm ABI inspection only. `writes` appends that many
 // fd_write calls of 4,096 bytes to descriptor `fd` (standard output, or 2 for standard error)
 // after the worker part, exiting with the first nonzero WASI errno; a command that writes ends
@@ -119,8 +114,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
   ]);
 }
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Host memory boundary only: one WASI call whose pointer argument is above 2 GiB.
 // clock_time_get writes the time to 0x80000008; the command exits with the call's
 // errno, or with 99 if no time arrived there. The serial memory starts at 2 GiB and
@@ -218,7 +212,7 @@ test("successful worker releases its parent and exits successfully", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
 // The native command's write to standard output or error blocks while a slow reader drains a full
 // pipe. Node can leave a piped descriptor 1 or 2 non-blocking (wasi_artifact.js, the comment above
@@ -241,12 +235,17 @@ for (const threaded of [false, true]) {
           assert.ok(WebAssembly.validate(bytes));
           fs.writeFileSync(fixture, bytes);
           // Descriptor 4 keeps the test's stderr for the exit line; for fd 2 the host's standard
-          // error is the slow pipe and its standard output /dev/null.
+          // error is the slow pipe and its standard output /dev/null. The pipeline is a script file
+          // run by `sh`, not a `sh -c` string: the paths reach it only as its arguments, and CodeQL
+          // (js/shell-command-injection-from-environment, alerts #41 and #45) reads every argument
+          // of `sh -c` as part of the command.
           const redirect = fd === 1 ? "4>&2" : "4>&2 2>&1 >/dev/null";
-          const result = spawnSync("sh", ["-c",
-            `{ python3 -c "$3" ${fd} && "$0" "$1" "$2"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }`,
+          const pipeline = path.join(directory, "slow-reader.sh");
+          fs.writeFileSync(pipeline,
+            `{ python3 -c "$4" "$5" && "$1" "$2" "$3"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }\n`);
+          const result = spawnSync("sh", [pipeline,
             process.execPath, path.join(__dirname, threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js"),
-            fixture, NONBLOCK], {
+            fixture, NONBLOCK, String(fd)], {
             env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
           });
           assert.ifError(result.error);
@@ -259,8 +258,7 @@ for (const threaded of [false, true]) {
   }
 }
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // node:wasi answers EINVAL (28) to a pointer argument that JavaScript sees as negative;
 // both runners pass WASI arguments as unsigned values (wasi_artifact.js).
 for (const threaded of [false, true]) {
@@ -284,8 +282,7 @@ test("WASI imports receive i32 arguments as unsigned values", () => {
   assert.deepEqual(seen, [[1, 1n, 2147483656], [4294967295]]);
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host memory only: when the declared maximum cannot be reserved, the host provides a
 // shared memory with a smaller one. An engine either refuses to create the memory or
 // creates one that cannot grow; an explicit maximum is never replaced.
@@ -329,8 +326,7 @@ test("shared memory steps down when the declared maximum cannot be reserved", ()
   assert.ok(real.memory.buffer instanceof SharedArrayBuffer);
 });
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Check the Wasm-host preparation boundary independently from search behavior:
 // metadata stays serializable and the returned module executes with the same status.
 test("prepared serial module preserves metadata and executes the inspected bytes", async () => {
@@ -357,8 +353,7 @@ test("prepared serial module preserves metadata and executes the inspected bytes
   assert.equal(secondWasi.start(second), 23);
 });
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Wasm validation and ABI errors remain errors in both public entry points.
 test("artifact preparation preserves validation and ABI rejection", () => {
   const { prepareArtifact, inspectArtifact } = require("./wasi_artifact");
@@ -441,8 +436,7 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
 // does not guard it again and writes nothing to the guard cache.
 test("the host runs an artifact guarded at build time as it is, without a guard cache entry", () => {
@@ -559,8 +553,7 @@ test("the guard cache keeps the entries used last", () => {
   }
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // The guard cache's index: a run compiles the cached bytes that the input file's index names at
 // once, and the checks that fail (cached bytes changed, another input's entry under this file's
 // index, an index that is not JSON) send it the way without the index, to its own input's output.
@@ -638,24 +631,34 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
   }
 });
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// The join of the test modules (spawner, reactorSpawner): wait until the thread count at address
+// 0 is `spawns` (the instructions that push it), keeping the count it compares in the i32 local
+// `counted`:
+//   block { loop { counted = count; if (counted == spawns) break; memory.atomic.wait32(0, counted, -1) } }
+// The wait expects the count that was compared, not a second load of it. With a second load, a
+// thread that adds the last count between the two loads and notifies before the wait starts left
+// the wait on a count that no thread changes again, with no notify to come: 20 of 22,000 runs of
+// the guard cache index test's 2-thread command with 2 standby workers hung so until killed, and
+// 0 of 22,000 with this form (2026-11-19, Node 24.21.0).
+// `late` puts the compare and the wait apart until every thread has added its count, as when
+// the threads end in that gap (spawner's `late`).
+function awaitCount(spawns, counted, late = false) {
+  const load = [...i32(0), 0xfe, 0x10, 2, 0];                                   // i32.atomic.load(0)
+  const apart = late ? [0x03, 0x40, ...load, ...spawns, 0x47, 0x0d, 0, 0x0b] : []; // loop { if (count != spawns) again }
+  return [0x02, 0x40, 0x03, 0x40, ...load, 0x22, counted, ...spawns, 0x46, 0x0d, 1, ...apart,
+    ...i32(0), 0x20, counted, 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b];
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
-// ```c++
-//     // Create the threads ...
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         thread->Reset(new CPrelimSearchThread(internal_data,
-//     ...
-//     // ... launch the threads ...
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     ...
-//         (*thread)->Join(&result);
-// ```
 // A command that starts `spawns` threads (start_arg 1, 2, 4, ...; exit 90 when a spawn
-// fails) and waits until every thread has added its start_arg and tid. It prints the
-// thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
+// fails) and waits until every thread has added its start_arg and tid (awaitCount). It prints
+// the thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
 // repeated or misdirected start changes stdout or the status. `bulk` adds a memory.fill
-// and a memory.copy for the shared-memory guard. The host options under test change
-// when workers boot, never this output.
+// and a memory.copy for the shared-memory guard. `late`: the threads do not notify, and the
+// command waits only after every thread has added (awaitCount's `late`), so a join that waits
+// for a count already reached never returns. The host options under test change when workers
+// boot, never this output.
 // A module on the shared memory with no instruction for the shared-memory guard.
 function nothingToGuard() {
   return Buffer.from([
@@ -667,7 +670,7 @@ function nothingToGuard() {
   ]);
 }
 
-function spawner(spawns, { bulk = false } = {}) {
+function spawner(spawns, { bulk = false, late = false } = {}) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
     [0x60, 0, 0],                                // _start()
@@ -690,9 +693,7 @@ function spawner(spawns, { bulk = false } = {}) {
     main.push(...i32(1 << i), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b);
   }
   main.push(
-    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
-    0x02, 0x40, 0x03, 0x40, ...load(0), ...i32(spawns), 0x46, 0x0d, 1,
-    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(i32(spawns), 0, late),                                       // local 0 = counted
     ...byte(32, [...load(0), ...i32(48), 0x6a]), ...byte(33, [...load(8), ...i32(97), 0x6a]),
     ...byte(34, i32(10)),
     ...i32(16), ...i32(32), 0x36, 2, 0, ...i32(20), ...i32(3), 0x36, 2, 0,  // iovec {32, 3}
@@ -702,7 +703,7 @@ function spawner(spawns, { bulk = false } = {}) {
     ...load(4), 0x10, 0,                                                       // proc_exit(sum)
   );
   const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
-    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                             // notify(0, 1)
+    ...(late ? [] : [...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a])];           // notify(0, 1)
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, types),
@@ -710,7 +711,7 @@ function spawner(spawns, { bulk = false } = {}) {
     ...section(3, vector([[1], [3]])),
     ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 3],
       [...name("wasi_thread_start"), 0, 4]])),
-    ...section(10, vector([body(main), body(thread)])),
+    ...section(10, vector([body(main, 1), body(thread)])),
   ]);
 }
 
@@ -771,8 +772,7 @@ const tidsOf = (events, type) => events.filter((e) => e.event === type).map((e) 
 const countOf = (events, type) => events.filter((e) => e.event === type).length;
 const outcome = (result) => ({ status: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr });
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // The lifecycle events keep their meaning for the guest's threads; standby workers have
 // their own events, and the unused ones are terminated at close.
 function checkLifecycle(events, spawned, standby, label) {
@@ -846,8 +846,7 @@ test("invalid LOSAT_WASI_PRESPAWN values fail before the command starts", () => 
   }
 });
 
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-// LOG_POST(Error << "Error: " << e.what()); exit_code = BLAST_UNKNOWN_ERROR;
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // Each test-only fault ends the command the same way with and without standby workers.
 for (const [fault, message] of [
   ["startup-timeout", /timed out waiting for WASI thread 1 to start/],
@@ -875,11 +874,6 @@ for (const [fault, message] of [
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-// ```c++
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     }
-// ```
 // A spawn that takes a standby worker which already waits for its thread returns the tid without
 // waiting for the start confirmation; the threads, the output and the lifecycle are the same.
 test("a spawn returns at once when its standby worker waits, with the same threads and output", () => {
@@ -895,6 +889,21 @@ test("a spawn returns at once when its standby worker waits, with the same threa
     // After 3 s all three standby workers wait; without the delay a spawn may still wait for one.
     if (startDelayMs) assert.deepEqual(events.filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2, 3]);
   }
+});
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// The test modules' join (awaitCount) when every thread adds its count between the join's compare
+// and its wait and notifies nobody (spawner's `late`): the wait sees a count other than the one
+// compared and the join compares again. A wait that expected a second load of the count slept on
+// the reached count until spawnSync's timeout. Both standby workers wait for their threads, so
+// each spawn returns before its thread runs and the first compare comes before the threads' counts.
+test("the test modules' join ends when the threads add their counts between its compare and its wait", () => {
+  const result = runThreaded(spawner(2, { late: true }), ["-num_threads", "3"], { LOSAT_WASI_THREADS_DEBUG: "1" },
+    { startDelayMs: 3000 });
+  // 2 threads, tid sum 3 ('a' + 3), start_arg sum 1 + 2.
+  assert.equal(result.status, 3, result.stderr);
+  assert.equal(result.stdout, "2d\n");
+  assert.deepEqual(hostEvents(result.stderr).filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2]);
 });
 
 test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
@@ -918,8 +927,7 @@ test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   }
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // The guard cache returns exactly the guard's bytes, cold or warm, and rebuilds an entry
 // whose bytes or sidecar do not check out.
 test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry", () => {
@@ -1008,17 +1016,6 @@ test("LOSAT_WASI_GUARD_CACHE runs give the default host's output, cold and warm"
 });
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
-// ```c++
-//     // Create the threads ...
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         thread->Reset(new CPrelimSearchThread(internal_data,
-//     ...
-//     // ... launch the threads ...
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     ...
-//         (*thread)->Join(&result);
-// ```
 // A threaded reactor whose `run(spawns)` export clears its counters, starts `spawns` threads
 // (start_arg 1, 2, 4, ...; -1 when a spawn fails), waits until every thread has added its
 // start_arg and tid, releases them, and returns the start_arg sum (the tid sum stays at
@@ -1038,22 +1035,16 @@ function reactorSpawner() {
   const load = (address) => [...i32(address), 0xfe, 0x10, 2, 0];                   // i32.atomic.load
   const store = (address, value) => [...i32(address), ...value, 0xfe, 0x17, 2, 0];  // i32.atomic.store
   const add = (address, value) => [...i32(address), ...value, 0xfe, 0x1e, 2, 0, 0x1a]; // atomic add; drop
-  const spawns = [0x20, 0], i = 1;                                             // local 0 = spawns, local 1 = i
+  const spawns = [0x20, 0], i = 1;                                 // locals: 0 spawns, 1 i, 2 counted
   const run = [...store(0, i32(0)), ...store(4, i32(0)), ...store(8, i32(0)), ...store(12, i32(0)),
     // block { loop { if (i >= spawns) break; if (thread-spawn(1 << i) < 1) return -1; i += 1 } }
     0x02, 0x40, 0x03, 0x40, 0x20, i, ...spawns, 0x4e, 0x0d, 1,
     ...i32(1), 0x20, i, 0x74, 0x10, 0, ...i32(1), 0x48, 0x04, 0x40, ...i32(-1), 0x0f, 0x0b,
     0x20, i, ...i32(1), 0x6a, 0x21, i, 0x0c, 0, 0x0b, 0x0b,
-    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
-    0x02, 0x40, 0x03, 0x40, ...load(0), ...spawns, 0x46, 0x0d, 1,
-    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(spawns, 2),
     ...store(12, i32(1)), ...i32(12), ...spawns, 0xfe, 0x00, 2, 0, 0x1a,          // release; notify(12, spawns)
     ...load(4),
   ];
-  const withLocal = (instructions) => {                                          // one i32 local
-    const bytes = [1, 1, 0x7f, ...instructions, 0x0b];
-    return [...uleb(bytes.length), ...bytes];
-  };
   const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
     ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a,                              // notify(0, 1)
     // block { loop { if (released) break; memory.atomic.wait32(12, 0, -1) } }
@@ -1069,7 +1060,7 @@ function reactorSpawner() {
     ...section(7, vector([[...name("memory"), 2, 0], [...name("_initialize"), 0, 1],
       ...api.map((alias) => [...name(alias), 0, 1]), [...name("run"), 0, 2],
       [...name("wasi_thread_start"), 0, 3]])),
-    ...section(10, vector([body([]), withLocal(run), body(thread)])),
+    ...section(10, vector([body([]), body(run, 2), body(thread)])),
   ]);
 }
 
@@ -1134,11 +1125,6 @@ test("LOSAT_WASI_PRESPAWN is auto when unset and 0 boots no worker", () => {
 });
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
-// ```c++
-// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
-// ...
-//     m_FileMemMap[fileName].reset(file);
-// ```
 // A command whose main thread opens `file` (path_open on the preopened "/") and whose one
 // thread reads up to 64 bytes of it with that descriptor (fd_read); the main thread waits,
 // writes what the thread read to standard output and exits with the thread's errno.
@@ -1211,12 +1197,6 @@ test("a descriptor that the main thread opened reads on a thread worker (-num_th
 });
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
-// ```c++
-//         CBlastFormat formatter(opt, *db_adapter,
-//                                fmt_args->GetFormattedOutputChoice(),
-//                                query_opts->GetParseDeflines(),
-//                                m_CmdLineArgs->GetOutputStream(),
-// ```
 // A command whose main thread creates `file` (path_open on the preopened "/" with create and
 // truncate, for writing) and writes "main\n" to it, whose one thread writes "thread\n" with that
 // descriptor (fd_write), and whose main thread then writes "main again\n", closes it and exits with
@@ -1293,9 +1273,6 @@ test("a file that the main thread created is written on a thread worker (-num_th
 });
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
-// ```c++
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-// ```
 // The hosts' table of files (wasi_files.js, the comment above SHARED_FD_BASE) writes a
 // regular file at the OS's offset, as native write() does, until the guest seeks or reads it, and
 // at the table's position from then on. Another write to the same open file (as the descriptor 1

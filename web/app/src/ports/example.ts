@@ -20,6 +20,12 @@ export interface DownloadRequest {
 export interface DownloadProgress {
   readonly bytes: number;
   readonly total?: number;
+  /**
+   * The body is downloaded and the engine's decoders inflate it, which first loads their part of LOSAT: the line said
+   * "Downloading 43 bytes of 43 bytes…" while the engine file was on its way (the sixth review of line WQA's D1 and D2,
+   * 2026-11-20).
+   */
+  readonly inflating?: true;
 }
 
 export type DownloadResult =
@@ -31,6 +37,11 @@ export type DownloadResult =
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
   /** The gzip data could not be decompressed (cut short or damaged): the engine's sentence. */
   | { readonly ok: false; readonly reason: 'corrupt'; readonly detail: string }
+  /**
+   * A part of LOSAT that the decompression needs could not be loaded or stopped (an UnavailableError's message): no
+   * fault of the file (line WQA's sweep, D1; its review, M2, 2026-11-19).
+   */
+  | { readonly ok: false; readonly reason: 'unavailable'; readonly detail: string }
   | { readonly ok: false; readonly reason: 'too-large' };
 
 export interface FileDownloader {

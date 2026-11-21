@@ -51,8 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
-      # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-      # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+      # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
       - name: Install optional serial compatibility target
         if: ${{ inputs.include_serial_compatibility }}
         run: rustup target add wasm32-wasip1
@@ -63,14 +62,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install comparison test dependencies
-        run: python3 -m pip install matplotlib pandas 'seaborn>=0.12'
+        # Every package fixed by version and wheel hash: a run cannot pick up a new release, and a
+        # changed file fails the install.
+        run: |
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: \
+            -r LOSAT/tests/requirements-wasm-threading.txt
       - name: Host and evidence parser tests
         run: |
           node --test LOSAT/tests/test_wasi_runners.js LOSAT/tests/test_wasi_shared_memory.js
           python3 -m unittest discover -s LOSAT/tests -p test_wasm_performance.py
           python3 -m unittest discover -s LOSAT/tests -p test_simple_comparison.py
-      # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-      # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+      # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
       # Commands and CRT-initialized reactors have distinct artifacts and gates.
       - name: Build separate artifacts in both orders
         run: |
@@ -104,8 +106,7 @@ jobs:
           sha256sum --check executables.sha256
       - name: Real command and reactor matrix
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
-          # (*thread)->Run(); (*thread)->Join(&result);
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
             compat_args=(--native-serial LOSAT/target/native-serial/release/losat
@@ -124,8 +125,7 @@ jobs:
       # showed no slowdown of the threaded Wasm (E2g gate record), so the limit is doubled.
       - name: Frozen default and approved genetic-code regressions
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
-          # (*thread)->Run(); (*thread)->Join(&result);
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
             compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)

@@ -23,49 +23,7 @@ use super::{database_error, refusal, Diag};
 /// diagnostics already posted.
 pub(super) struct Ended(pub i32);
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:320-357
-// ```c++
-// void
-// CBlastDBCmdApp::x_InitBlastDB_TaxIdList()
-// {
-//    	const CArgs& args = GetArgs();
-//     vector<string> ids;
-//     if(args[kArgTaxIdList].HasValue()) {
-//     	string input = args[kArgTaxIdList].AsString();
-//     	NStr::Split(input, ",", ids);
-//     }
-//     else {
-//     	CNcbiIstream& input = args[kArgTaxIdListFile].AsInputFile();
-//     	while (input) {
-//     		string line;
-//     	    NcbiGetlineEOL(input, line);
-//     	    if ( !line.empty() ) {
-//     	       	ids.push_back(line);
-//     	    }
-//     	}
-//     }
-//
-//     unique_ptr<ITaxonomy4Blast> tb;
-//     if( ! args[kArgNoTaxIdExpansion].AsBoolean() ){
-//         try{
-//             tb.reset(new CTaxonomy4BlastSQLite());
-//         }
-//         catch(CException &){
-//             LOG_POST(Warning << "The -taxids command line option requires additional data files. Please see the section 'Taxonomic filtering for BLAST databases' in https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.");
-//         }
-//     }
-//
-//     for (auto id : ids) {
-//         auto taxid = NStr::StringToNumeric<TTaxId>(id, NStr::fAllowLeadingSpaces | NStr::fAllowTrailingSpaces);
-//     	m_TaxIdList.insert(taxid);
-//         if (tb) {
-//             vector<int> descendants;
-//             tb->GetLeafNodeTaxids(taxid, descendants);
-//             for (auto d: descendants)
-//                 m_TaxIdList.insert(static_cast<TTaxId>(d));
-//         }
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:319-357
 // `NStr::Split` keeps the empty pieces of `1,,2` and `1,` and gives none for the empty
 // string (probes J101, J102, S36 of line BDC). The lines of the file are those of
 // `NcbiGetlineEOL` (`args::input_lines`), as `-entry_batch` reads them: on Linux a line
@@ -92,12 +50,6 @@ pub(super) fn tax_id_list(
         (None, Some(file)) => {
             let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                // ```c++
-                //     catch (const CArgException& e) {                                        \
-                //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-                //         exit_code = BLAST_INPUT_ERROR;                                      \
-                //     }                                                                       \
-                // ```
                 diag.post(&format!(
                     "Command line argument error: {}",
                     arg_message("taxidlist", "File is not accessible", file)
@@ -182,57 +134,7 @@ struct TaxFields {
     need_num_seqs: bool,
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:592-647
-// ```c++
-// 	CPrintTaxFields(CNcbiOstream & out, const string & fmt): m_Out(out), m_NeedTaxInfoLookup(false), m_NeedNumSeqs(false) {
-// 		vector<string> fields;
-//         string sp = kEmptyStr;
-// 	    for (unsigned int i = 0; i < fmt.size(); i++) {
-// 	    	if (fmt[i] == '%') {
-// 		        if (fmt[i+1] == '%') {
-// 		            sp += fmt[i];
-// 		            continue;
-// 		        }
-// 		        i++;
-// 		        switch (fmt[i]) {
-// 		        case 'f' :
-// 		        	m_NeedTaxInfoLookup = true;
-// 		      		m_Seperators.push_back(sp);
-// 		      		for(unsigned int i=eTaxID; i < eMaxFields; i++){
-// 		                if ( i == eNumSeqs ) continue;
-// 		      		    m_Fields.push_back(i);
-// 		      		    m_Seperators.push_back("\t");
-// 		      		}
-// 		        break;
-// 		        case 'T' :
-//        				m_Fields.push_back(eTaxID);
-//        			break;
-// 		        ...
-// 		        case 'n' :
-// 		        	m_Fields.push_back(eNumSeqs);
-//                     m_NeedNumSeqs = true;
-// 		        break;
-// 		        default:
-// 	                sp += fmt[i-1];
-// 	                sp += fmt[i];
-// 	                continue;
-// 	            break;
-// 		        }
-// 	            m_Seperators.push_back(sp);
-// 	            sp = kEmptyStr;
-// 	    	}
-// 	    	else {
-// 		        sp += fmt[i];
-// 	    	}
-// 	    }
-// 		m_Seperators.push_back(sp);
-//
-// 		if(m_Fields.empty()) {
-// 			NCBI_THROW(CInputException, eInvalidInput,
-// 				       "Invalid format options for tax_info.");
-// 		}
-// 	}
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:592-653
 // Ported as it reads, the quirks with it (probes T10-T12, J140-J159 of line BDC): `%f`
 // pushes the text before it and a tab per field, then the text after the `switch` again,
 // so after `%f` the fields shift onto the tabs (`%f %n` is `T\tS\tL\tK\tB\tN`); `%%` adds one
@@ -318,26 +220,7 @@ impl TaxFields {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:665-697
-    // ```c++
-    // 	void PrintEntry(const SSeqDBTaxInfo & t, int num_seqs){
-    // 		for(unsigned int i=0; i < m_Fields.size(); i++) {
-    // 			m_Out << m_Seperators[i];
-    // 			switch (m_Fields[i]){
-    // 				case eTaxID:
-    // 					m_Out << t.taxid;
-    // 				break;
-    // 				...
-    // 				case eNumSeqs:
-    // 					m_Out << num_seqs;
-    // 				break;
-    // 				...
-    // 			}
-    // 		}
-    // 		m_Out << m_Seperators.back();
-    // 		m_Out << "\n";
-    // 	}
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:657-697
     /// `PrintEntry`: the line of `taxid` with its `names` and its number of sequences.
     fn line(&self, taxid: i32, names: &LineNames, num_seqs: usize, out: &mut Vec<u8>) {
         let name = |pick: fn(&TaxNames) -> &[u8]| -> &[u8] {
@@ -376,41 +259,7 @@ enum LineNames {
     NotAvailable,
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:700-733
-// ```c++
-//     CNcbiOstream& out = args[kArgOutput].AsOutputFile();
-//     const string& kFmt = args["outfmt"].AsString();
-//     CPrintTaxFields tf(out, kFmt);
-//     set<TTaxId> tax_ids;
-//     m_BlastDb->GetDBTaxIds(tax_ids);
-//
-//     // Print basic database information
-//     out << "# of Tax IDs in Database: " << tax_ids.size() << endl;
-// 	SSeqDBTaxInfo info;
-//     ITERATE(set<TTaxId>, itr, tax_ids) {
-//     	SSeqDBTaxInfo info;
-//     	if(tf.NeedTaxNames()){
-//     		CSeqDBTaxInfo::GetTaxNames(*itr, info);
-//     		if(info.taxid == ZERO_TAX_ID){
-//     			info.taxid = *itr;
-//    				info.scientific_name = NA;
-//    				...
-//    			}
-//     	}
-//     	else {
-//    			info.taxid = *itr;
-//     	}
-//         int num_seqs = 0;
-//         if(tf.NeedNumSeqs()) {
-//             vector<blastdb::TOid> rv;
-//             set<TTaxId> ti;
-//             ti.insert(*itr);
-//             m_BlastDb->TaxIdsToOids(ti, rv);
-//             num_seqs = rv.size();
-//         }
-//    		tf.PrintEntry(info, num_seqs);
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:699-733
 // NCBI's exceptions escape to `Run`: the format's (`CInputException`, exit status 1), the
 // reader's (`CSeqDBException`, exit status 2) after the lines already written. Taxid 0 (the
 // sequences without one) is a taxid like any other; taxdb has no names for it (T12). The
@@ -426,15 +275,9 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
     let fmt = args.value("outfmt").unwrap_or("%f");
     let Ok(fields) = TaxFields::parse(fmt.as_bytes()) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
-        // ```c++
-        //     catch (const blast::CInputException& e) {                               \
-        //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-        //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-        //         exit_code = BLAST_INPUT_ERROR;                                      \
-        //     }                                                                       \
-        // ```
         diag.post("BLAST query/options error: Invalid format options for tax_info.");
-        diag.post("Please refer to the BLAST+ user manual.");
+        // Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12).
+        diag.post(crate::wording::USER_MANUAL_FOOTER);
         return 1;
     };
     let lookup = match db.tax_id_lookup() {
@@ -514,69 +357,5 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn line(fmt: &str) -> Vec<u8> {
-        let fields = TaxFields::parse(fmt.as_bytes()).unwrap();
-        let names = TaxNames {
-            taxid: 9606,
-            scientific_name: b"Homo sapiens".to_vec(),
-            common_name: b"human".to_vec(),
-            blast_name: b"primates".to_vec(),
-            super_kingdom: Ok(b"Eukaryota".to_vec()),
-        };
-        let mut out = Vec::new();
-        fields.line(9606, &LineNames::Named(names), 3, &mut out);
-        out
-    }
-
-    // NCBI's lines for these formats: probes T10-T12, J140-J159 of line BDC.
-    #[test]
-    fn the_format_is_read_as_ncbi_s_loop_reads_it() {
-        assert_eq!(
-            line("%f"),
-            b"9606\tHomo sapiens\thuman\tEukaryota\tprimates\n"
-        );
-        assert_eq!(
-            line("%f %n"),
-            b"9606\tHomo sapiens\thuman\tEukaryota\tprimates\t3\n"
-        );
-        assert_eq!(
-            line("%T %f"),
-            b"9606 9606\tHomo sapiens\thuman\tEukaryota\tprimates\n"
-        );
-        assert_eq!(
-            line("%T|%S|%L|%K|%B|%n"),
-            b"9606|Homo sapiens|human|Eukaryota|primates|3\n"
-        );
-        assert_eq!(line("%T%n%S"), b"96063Homo sapiens\n");
-        assert_eq!(line("%%T"), b"%9606\n");
-        assert_eq!(line("%%x %T"), b"%%x 9606\n");
-        assert_eq!(line("%x %T %n"), b"%x 9606 3\n");
-        assert_eq!(line("%T %"), b"9606 %\0\n");
-        assert_eq!(line("%T %%"), b"9606 %%\0\n");
-        assert_eq!(line("%n"), b"3\n");
-        assert!(TaxFields::parse(b"abc").is_err());
-        assert!(TaxFields::parse(b"").is_err());
-        assert!(TaxFields::parse(b"%x").is_err());
-    }
-
-    #[test]
-    fn missing_names_are_not_available() {
-        let fields = TaxFields::parse(b"%f").unwrap();
-        let mut out = Vec::new();
-        fields.line(0, &LineNames::NotAvailable, 0, &mut out);
-        assert_eq!(out, b"0\tN/A\tN/A\tN/A\tN/A\n");
-    }
-
-    // NCBI's lines for a taxid found in the index without names (probe of line RG T5b,
-    // `T/t5b/out/extra/tabs0.taxinfo.ncbi.out`: `9606||||`).
-    #[test]
-    fn a_taxid_found_without_names_has_empty_names() {
-        let fields = TaxFields::parse(b"%T|%S|%L|%K|%B").unwrap();
-        let mut out = Vec::new();
-        fields.line(9606, &LineNames::Empty, 0, &mut out);
-        assert_eq!(out, b"9606||||\n");
-    }
-}
+#[path = "taxonomy_tests.rs"]
+mod tests;

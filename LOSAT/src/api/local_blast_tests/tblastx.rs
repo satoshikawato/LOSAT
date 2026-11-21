@@ -88,20 +88,8 @@ fn queries(path: &std::path::Path) -> Vec<FastaRecord> {
 fn subjects(path: &std::path::Path) -> Vec<FastaRecord> {
     reader_records(path, ReaderConfig::subject("TBLASTX", false, true))
 }
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -124,13 +112,7 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c
-// arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                        kOutputFormatDescription,
-//                        CArgDescriptions::eString,
-//                        NStr::IntToString(dft_outfmt));
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
@@ -154,6 +136,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -167,7 +150,7 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -190,6 +173,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -254,6 +238,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -263,14 +248,6 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
-// ```c
-//     if (options->word_size <= 0)
-//     {
-//         if ( !Blast_ProgramIsRpsBlast(program_number)) {
-//             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-//                                      "Word-size must be greater than zero");
-//             return BLASTERR_OPTION_VALUE_INVALID;
-// ```
 // The command line's `-word_size` is at least 2 (clap's `protein_word_size`); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core. A word size of 0 with
 // `-lcase_masking` and a lowercase subject took the reference scan, whose loop over the first
@@ -310,6 +287,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -328,7 +306,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
     assert!(sink.is_empty());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1325 (quoted above):
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1325 (cited above):
 // NCBI's core refuses a word size of 0 or less, and below 4 only for a nucleotide comparison,
 // which TBLASTX (translated, `Blast_ProgramIsNucleotide`, blast_program.c:82-84) is not. So a
 // caller of `run_local` that sets a word size of 1 (the command line's `-word_size` is at least 2)
@@ -370,6 +348,7 @@ fn a_word_size_of_one_searches() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -395,10 +374,13 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
-// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
 // only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved
@@ -443,13 +425,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // A batch whose queries all have fewer letters than a codon stops NCBI after the prolog
 // when one of them has no letters, with one message per query without letters; a batch of
 // queries of one or two letters only is not searched.
@@ -502,21 +478,7 @@ fn a_batch_without_valid_contexts_and_with_queries_without_letters_stops() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
-// ```c
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
 // Subjects with fewer letters than subjects (every subject without residues; AUTHORITY
 // §E3, BI-44) stop NCBI when it searches the first batch with a valid context, after the
 // subjects' warnings and the prolog.
@@ -555,12 +517,7 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
-// ```c++
-//     // set sequence range
-//     retval->SetInt().SetFrom(from);
-//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
 // A range that starts just past a record's end gives an interval without letters, which
 // NCBI sets up as a record without residues.
 #[test]
@@ -596,7 +553,7 @@ fn intervals_without_letters_are_records_without_residues() {
     );
 }
 
-// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
 // not an IUPAC nucleotide letter is removed with a warning). NCBI's check of the hit saving
 // options (blast_options.c:1518-1523) comes before `Query is Empty!`.
 // This is the half about the entry: a hand-set expect value of 0 (or one that underflows to 0) is
@@ -620,8 +577,63 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
         for queries in [&queries[..], &[]] {
             assert_eq!(
                 run(&["-evalue", evalue], queries),
-                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
+                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n"
             );
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1951-1957, 1975-1991
+// (`-strand` of a nucleotide query: `both`, `plus` or `minus`)
+// The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so it
+// checks the value itself: an unknown strand is the parser's argument error and nothing is
+// written, while `plus` and `minus` search one strand of the query and `both` is the plain search.
+#[test]
+fn run_local_reads_the_query_strand() {
+    let inputs = Inputs::new();
+    let queries = queries(&inputs.query.0);
+    let subjects = subjects(&inputs.subject.0);
+    for strand in ["foo", "", "PLUS", "plus "] {
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("6", OutputSink::Writer(&mut report), &mut diagnostics);
+        let mut args = inputs.args(&[]);
+        args.strand = strand.to_string();
+        let result = run_local_tblastx(args, &queries, &subjects, &mut outputs);
+        drop(outputs);
+        assert_eq!(
+            result
+                .expect_err("an unknown strand is an error")
+                .to_string(),
+            format!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{strand}'"
+            )
+        );
+        assert!(report.is_empty() && diagnostics.is_empty(), "{strand:?}");
+    }
+    // Checked first, as at parsing: before the output format is read.
+    let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+    let mut outputs =
+        ReportOutputs::single("99", OutputSink::Writer(&mut report), &mut diagnostics);
+    let mut args = inputs.args(&[]);
+    args.strand = "x".to_string();
+    let error = run_local_tblastx(args, &queries, &subjects, &mut outputs)
+        .expect_err("an unknown strand is an error")
+        .to_string();
+    drop(outputs);
+    assert!(error.starts_with("Argument \"strand\""), "{error}");
+    let plain = inputs.run(&["6 qseqid sseqid qframe"], &[], false);
+    let both = inputs.run(&["6 qseqid sseqid qframe"], &["-strand", "both"], false);
+    assert_eq!(both.outputs, plain.outputs);
+    for (strand, sign) in [("plus", '-'), ("minus", '+')] {
+        let run = inputs.run(&["6 qseqid sseqid qframe"], &["-strand", strand], false);
+        let rows = String::from_utf8(run.outputs[0].clone()).unwrap();
+        assert!(!rows.is_empty(), "{strand}");
+        // No row of a query frame of the other strand (`qframe` is the last field).
+        assert!(
+            rows.lines()
+                .all(|row| !row.rsplit('\t').next().unwrap().starts_with(sign)),
+            "{strand}: {rows}"
+        );
     }
 }

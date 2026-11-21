@@ -11,11 +11,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'v
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
-import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
+import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
+import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
 import CommandText from './CommandText.vue';
@@ -32,6 +33,7 @@ import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
 import RunFiles from './RunFiles.vue';
 import RunStatus from './RunStatus.vue';
+import { vScrollFocus } from './scroll-focus';
 import SubjectTable from './SubjectTable.vue';
 import TabList from './TabList.vue';
 import VerificationBadge from './VerificationBadge.vue';
@@ -77,15 +79,18 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 type DownloadItem = { readonly key: string; readonly label: string; readonly testid: string } & (
   | { readonly format: RunOutput }
   | { readonly runFile: number }
+  | { readonly printed: true }
 );
 const downloads = computed(() => {
-  const items: DownloadItem[] = ([0, 6, 7] as const).map((format) => ({
+  // A run that printed the command line's help or version has that text alone, and the files of the run (line WQA's D14).
+  const prints = loaded.value?.run.snapshot.prints;
+  const items: DownloadItem[] = prints !== undefined ? [{ key: 'printed', printed: true, label: prints === 'help' ? 'Help' : 'Version', testid: 'results-download-printed' }] : ([0, 6, 7] as const).map((format) => ({
     key: `format-${format}`,
     format,
     label: `${FORMAT_NAMES[format]} (outfmt ${format})`,
     testid: `results-download-${format}`,
   }));
-  const custom = customOutfmt(loaded.value?.run.snapshot.argv ?? []);
+  const custom = prints === undefined ? customOutfmt(loaded.value?.run.snapshot.argv ?? []) : undefined;
   if (custom !== undefined) {
     const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
     items.push({ key: 'format-custom', format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
@@ -109,6 +114,7 @@ function download(item: DownloadItem): void {
   const run = loaded.value?.run;
   if (run === undefined) return;
   if ('format' in item) void saver.save(run, item.format);
+  else if ('printed' in item) void saver.savePrinted(run);
   else void saver.saveRunFile(run, item.runFile);
 }
 
@@ -276,15 +282,15 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <template v-if="selected.snapshot.query.records.length === 1">
               <dt>Query ID</dt>
-              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0) }}</dd>
+              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
               <dt>Query Length</dt>
-              <dd data-testid="results-query-length">{{ formatCount(selected.snapshot.query.records[0]!.length) }} {{ units.query }}</dd>
+              <dd data-testid="results-query-length">{{ withUnit(formatCount(selected.snapshot.query.records[0]!.length), units.query) }}</dd>
             </template>
             <template v-if="selected.snapshot.subject.records.length === 1">
               <dt>Subject ID</dt>
-              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0) }}</dd>
+              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
               <dt>Subject Length</dt>
-              <dd data-testid="results-subject-length">{{ formatCount(selected.snapshot.subject.records[0]!.length) }} {{ units.subject }}</dd>
+              <dd data-testid="results-subject-length">{{ withUnit(formatCount(selected.snapshot.subject.records[0]!.length), units.subject) }}</dd>
             </template>
             <template v-else>
               <dt>Subjects</dt>
@@ -315,6 +321,27 @@ async function toAlignments(id: HspId): Promise<void> {
       >
         {{ state.message }}
       </p>
+      <!-- A failed run keeps the output that the command line leaves before its error, as the Outputs of a completed
+           run show it (line WQA's sweep, D15, 2026-11-20). -->
+      <section
+        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.result !== undefined && keptOutputsWritten(selected)"
+        class="results-group failed-outputs"
+        data-testid="results-failed-outputs"
+      >
+        <h3>Outputs</h3>
+        <OutputsView :key="selected.snapshot.runId" :coordinator="coordinator" :run="selected" :files="false" />
+      </section>
+      <!-- A failed run keeps the warnings that it wrote to the command line's standard error before its
+           error (NCBI's "Subject sequence contains no data" before "The average subject length is too
+           short"), as the engine wrote them (line WQA's sweep, D3, 2026-11-19). -->
+      <section
+        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.record.diagnostics?.trim()"
+        class="results-group failed-warnings"
+        data-testid="results-failed-warnings"
+      >
+        <h3>Warnings</h3>
+        <pre v-scroll-focus="'Warnings'" class="output" data-testid="results-failed-diagnostics">{{ selected.record.diagnostics }}</pre>
+      </section>
       <!-- A failed run keeps the file of its -logfile (TBLASTX's holds NCBI's error; line RG E1w-3b). -->
       <RunFiles
         v-if="state.phase === 'unavailable' && selected?.status === 'failed' && (selected.record.runFiles?.length ?? 0) > 0"
@@ -324,8 +351,8 @@ async function toAlignments(id: HspId): Promise<void> {
       />
 
       <template v-if="state.phase === 'ready' && loaded">
-        <!-- A dry run (-dryrun) searched no query: its notice says so. -->
-        <QueryPicker v-if="multiQuery && !loaded.run.snapshot.dryRun" :results="results" :state="state" />
+        <!-- A dry run (-dryrun), and a run that printed the command line's help or version, searched no query: its notice says so. -->
+        <QueryPicker v-if="multiQuery && !loaded.run.snapshot.dryRun && !loaded.run.snapshot.prints" :results="results" :state="state" />
         <ResultNotices :state="state" @clear="results.setFilters({ queriesWithHitsOnly: state.filters.queriesWithHitsOnly ?? false })" />
 
         <TabList v-model="view" class="results-tabs" label="Results view" :tabs="TABS" />

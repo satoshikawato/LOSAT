@@ -14,7 +14,10 @@ import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type Results
 import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
+import { placeParts } from './message-place-text';
+import PlaceWords from './PlaceWords.vue';
 import LosatLoader from './LosatLoader.vue';
+import OptionName from './OptionName.vue';
 import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -35,8 +38,11 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
-const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; undefined where it was written. */
+const outfmt0Error = computed(() => {
+  const loaded = props.state.loaded;
+  return loaded?.outfmt0Error === undefined ? undefined : placeParts(loaded.outfmt0Error, loaded.run);
+});
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 /** The subjects whose alignments outfmt 0 shows, "3 subjects" or "subjects" where -num_alignments cannot be read. */
 const alignedSubjects = computed(() => (outfmt0.value?.alignments === undefined ? 'subjects' : plural(outfmt0.value.alignments, 'subject')));
@@ -315,29 +321,29 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
               >{{ detail.section }}</pre
             >
           </template>
-          <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">
-            No outfmt 0 alignment is linked to this HSP: the search of outfmt 0 failed, and its error is in the diagnostics. The outfmt 6 row
+          <p v-else-if="outfmt0Error !== undefined" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP: outfmt 0 could not be written, and its error is <PlaceWords :parts="outfmt0Error" />. The outfmt 6 row
             below and outfmt 7 hold the HSP.
           </p>
           <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
             No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
               ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
-            >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
+            >, because <OptionName name="-num_descriptions" /> and <OptionName name="-num_alignments" /> give it another size
             than outfmt 6 and 7, and it shows the alignments of its first {{ alignedSubjects }}<template v-if="sorted">
-              in its order of <span class="option-name">-sorthits</span></template
+              in its order of <OptionName name="-sorthits" /></template
             >
-            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or another set of HSPs of a subject (which may
+            (<OptionName name="-num_alignments" />). Those can be other subjects, or another set of HSPs of a subject (which may
             include this one), than outfmt 6 and 7 keep. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
             outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query<template
               v-if="sorted"
             >
-              in its order of <span class="option-name">-sorthits</span></template
+              in its order of <OptionName name="-sorthits" /></template
             >
-            (BLAST+'s <span class="option-name">-num_alignments</span>: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
+            (<OptionName name="-num_alignments" />: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
             ><template v-else>250</template
-            ><template v-if="limitGiven">, here <span class="option-name">-max_target_seqs</span></template
+            ><template v-if="limitGiven">, here <OptionName name="-max_target_seqs" /></template
             >), and this subject <template v-if="sorted">is not one of them</template><template v-else>comes after them</template>. The outfmt 6
             row below and outfmt 7 hold the HSP.
           </p>

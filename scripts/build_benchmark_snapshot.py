@@ -171,7 +171,7 @@ def parse_wall_seconds(path: Path) -> float:
     return float(minutes or 0) * 60 + float(seconds)
 
 
-# NCBI reference: ncbi-blast/c++/src/app/blastdb/makeblastdb.cpp:236-247
+# NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:236-247
 # dbtype and parse_seqids are explicit database-build inputs. Preserve every
 # warmup/timed build as separate provenance while excluding it from search time.
 def load_database_build(
@@ -221,9 +221,7 @@ def read_cases() -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
-# qaccver saccver pident length mismatch gapopen qstart qend sstart send
-# evalue bitscore
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 # Preserve recorded outfmt 6 pident/length values without biological filtering.
 def build_alignment_dataset(
     distribution_run: Path, snapshot: Path
@@ -311,7 +309,7 @@ def timing_output_path(directory: Path, case: TimingCase, mode: tuple[str, ...])
     return directory / subdirectory / f"{stem}{suffix}.out"
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
 # NCBI forces local-subject searches to its minimum thread count. Timing inputs
 # therefore select only the separately recorded database-search n1/n8 outputs.
 def build_timing_dataset(

@@ -102,20 +102,8 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new(8);
@@ -146,18 +134,13 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new(1);
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
-    // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851 and c++/src/objtools/align_format/tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
     // run as "0" and "6"); SAM (17) is NCBI's error for blastp (blast_args.cpp:2876-2879; LOSAT's
     // BLASTP writes every other format of NCBI's blastp since line RG T3a), and a delimiter that a
@@ -178,6 +161,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -192,53 +176,17 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// A library call reads a format value as given: words after outfmt 0 to 4 are a field list,
-// which these formats do not take, refused before the search (the command line drops them, as
-// NCBI's application does: `FormatChoice::normalized`; line RG T3a review N2).
+// A library call reads a format value as given, as NCBI reads `-outfmt`: the words after outfmt 0
+// to 4 are dropped (blast_args.cpp:2845-2851 keeps a field list for the tables only), so each
+// writes the report of its number alone, as the command line does (`FormatChoice::normalized`;
+// NCBI 2.17.0, line RG F/d36 review 1b S1: `"0 std"`, `"0 delim=@"`, `"00 qseqid"`,
+// `"1 qseqid"` are outfmt 0 and 1, rc 0).
 #[test]
-fn a_field_list_after_a_pairwise_format_is_refused() {
+fn the_words_after_a_pairwise_format_are_dropped() {
     let inputs = Inputs::new(1);
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
-    for (outfmt, number) in [
-        ("0 qseqid", 0),
-        ("1 qseqid", 1),
-        ("2 std", 2),
-        ("3 delim=,", 3),
-        (" 4 qseqid sseqid ", 4),
-    ] {
-        let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
-        let mut outputs = ReportOutputs {
-            formats: vec![
-                FormatOutput {
-                    outfmt: "6",
-                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                    sink: OutputSink::Writer(&mut valid),
-                },
-                FormatOutput {
-                    outfmt,
-                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                    sink: OutputSink::Writer(&mut invalid),
-                },
-            ],
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
-        };
-        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
-        let result = run_local_blastp(args, &queries, &subjects, "", "", &mut outputs);
-        drop(outputs);
-        let error = format!("{:#}", result.expect_err(outfmt));
-        assert!(
-            error.contains(&format!(
-                "blastp outfmt {number} does not accept custom field lists"
-            )),
-            "{outfmt:?}: {error}"
-        );
-        assert!(valid.is_empty() && invalid.is_empty(), "{outfmt:?}");
-    }
-    // Without words, each writes its report.
-    for outfmt in ["1", "2", " 3 ", "4"] {
+    let report_of = |outfmt: &str| {
         let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
@@ -247,17 +195,32 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 sink: OutputSink::Writer(&mut report),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
         let args = blastp_args(&inputs.query, &inputs.subject, &[]);
         run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
         drop(outputs);
-        assert!(report.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
+        (report, diagnostics)
+    };
+    for (outfmt, bare) in [
+        ("0 qseqid", "0"),
+        ("0 std", "0"),
+        ("0 delim=@", "0"),
+        ("00 qseqid", "0"),
+        ("1 qseqid", "1"),
+        ("2 std", "2"),
+        ("3 delim=,", "3"),
+        (" 4 qseqid sseqid ", "4"),
+    ] {
+        let report = report_of(outfmt);
+        assert!(report.0.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
+        assert_eq!(report, report_of(bare), "{outfmt:?}");
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -280,6 +243,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -362,6 +326,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -377,13 +342,7 @@ fn run_local_outputs(
     (sinks, diagnostics, result)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // A batch of queries without residues only stops NCBI after the prolog, with one message
 // per query (oracle `blastp.rec_empty_all.q.*`). This half checks the entry's own error (NCBI's
 // error with exit code 3 and its message), the prolog it wrote and that no other report has a
@@ -406,7 +365,7 @@ fn a_batch_of_queries_without_residues_stops() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
@@ -418,9 +377,6 @@ fn a_batch_of_queries_without_residues_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c++
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
 // The rendered rows of blastp's final hits made a window of queries at a time
 // (`src/algorithm/blastp/blast_engine/query_rows.rs`): outfmt 0, BLAST XML and the tabular fields
 // that show the alignment write the bytes of the rows made for every query up front.
@@ -741,6 +697,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -812,6 +769,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: None,
         };
@@ -833,4 +791,86 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
         debug(&blocked.hits) == debug(&unblocked),
         "the hit records of the blocks differ from those of the search of all queries"
     );
+}
+
+// Line WQA's sweep, D7, 2026-11-19: with `-parse_deflines`, LOSAT refuses outfmt 0 of a query that
+// is also a subject and has masks (`believed::refuse_shared_masks_in`), that format's alone. Over
+// queries that would make blocks, a call in which outfmt 0 fails alone (`FormatRefusal::FailsAlone`,
+// LOSAT Web's outfmt 0 when the argv asks for another format) takes the search of all queries
+// (`x_query_block_plan`), refuses outfmt 0 and writes outfmt 6 as the call of outfmt 6 alone does;
+// a call in which outfmt 0 fails the call (the command line's one format) fails with the refusal.
+#[test]
+fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
+    use crate::api::local_blast::FormatRefusal;
+    let (query, _) = block_inputs();
+    let first = read_records(&query.0).remove(0);
+    let mut letters = first.seq().to_vec();
+    letters[..20].make_ascii_lowercase();
+    let subject = TempFasta::new("blocks_shared_subject.faa", &[("c0q0", &letters)]);
+    let extra = ["-parse_deflines", "-lcase_masking", "-evalue", "0.001"];
+    let args = || blastp_args(&query.0, &subject.0, &extra);
+    let command = Commands::Blastp(args());
+    let (queries, subjects) = crate::api::input::read_search_inputs(
+        crate::api::Program::Blastp,
+        &command,
+        Some(false),
+        true,
+        &std::fs::read(&query.0).unwrap(),
+        &std::fs::read(&subject.0).unwrap(),
+    )
+    .map_err(|error| error.to_string())
+    .unwrap();
+    assert!(queries[0]
+        .believed()
+        .is_some_and(|ids| ids.shared.is_some()));
+    let refusal = "is both a query and a subject under -parse_deflines and has masks";
+    let alone = run_formats(&["6"], false, |outputs| {
+        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+    });
+    assert!(
+        !alone.outputs[0].is_empty(),
+        "the fixture must produce hits"
+    );
+    for fails_alone in [true, false] {
+        let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut six),
+                    refusal: FormatRefusal::FailsCall,
+                },
+                FormatOutput {
+                    outfmt: "0",
+                    sink: OutputSink::Writer(&mut zero),
+                    refusal: if fails_alone {
+                        FormatRefusal::FailsAlone
+                    } else {
+                        FormatRefusal::FailsCall
+                    },
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            later_warnings: None,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs);
+        if fails_alone {
+            result.expect("outfmt 0 fails alone");
+            let error = outputs.formats[1]
+                .refusal
+                .take_refused()
+                .expect("outfmt 0 refused");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+            drop(outputs);
+            assert!(
+                six == alone.outputs[0],
+                "outfmt 6 as the call of outfmt 6 alone"
+            );
+        } else {
+            let error = result.expect_err("outfmt 0 fails the call");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+        }
+    }
 }

@@ -3,16 +3,6 @@
 //! `sequence::stdaa_letters`.
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:2149-2178
-// ```c++
-// const Uint1 CIupacnaCmp::scm_Table[256] = {
-//     ...
-//     'T', 'V', 'G', 'H', 'D', 'E', 'F', 'C',    // A B C D E F G H
-//     'I', 'J', 'M', 'L', 'K', 'N', 'O', 'P',    // I J K L M N O P
-//     'Q', 'Y', 'S', 'A', 'A', 'B', 'W', 'X',    // Q R S T U V W X
-//     'R', 'Z', ...
-//     't', 'v', 'g', 'h', 'd', 'e', 'f', 'c',    // a b c d e f g h
-//     ...
-// ```
 /// The complement of one IUPAC letter (`CIupacnaCmp`): `A`/`T`, `C`/`G`, `M`/`K`, `R`/`Y`,
 /// `V`/`B`, `H`/`D`, `U` to `A`, the case kept, every other byte itself. The FASTA path
 /// complements the stored 4-bit codes (the Seq-code table of ncbi4na), which gives the same
@@ -74,18 +64,6 @@ fn crc32_zip(bytes: &[u8]) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1037-1046
-// ```c++
-// Uint4 CBlastSeqUtil::GetSeqHash(const char* buffer, int length)
-// {
-//     CChecksum crc(CChecksum::eCRC32ZIP);
-//
-//     for(int ii = 0; ii < length; ii++) {
-//         if (buffer[ii] != '\n')
-//             crc.AddChars(buffer+ii,1);
-//     }
-//     return (crc.GetChecksum() ^ (0xFFFFFFFFL));
-// }
-// ```
 /// `CBlastSeqUtil::GetSeqHash` of the letters of a whole sequence (the `GetSequenceAsString`
 /// letters), the line feeds skipped.
 pub(super) fn sequence_hash(letters: &[u8]) -> u32 {
@@ -97,16 +75,6 @@ pub(super) fn sequence_hash(letters: &[u8]) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:265-272
-// ```c++
-// string CBlastDB_SeqFormatter::x_GetSeqHash(CSeqDB::TOID oid)
-// {
-// 	string seq;
-// 	m_BlastDb.GetSequenceAsString(oid, seq);
-// 	CNcbiOstrstream os;
-// 	os << std::showbase << std::hex << std::uppercase << CBlastSeqUtil::GetSeqHash(seq.c_str(), seq.size());
-// 	return CNcbiOstrstreamToString(os);
-// }
-// ```
 /// The text of `-outfmt %h`: the hash in upper-case hexadecimal with the prefix `0X`
 /// (`showbase`), which the stream leaves out for zero.
 pub(super) fn hash_text(hash: u32) -> String {
@@ -132,35 +100,5 @@ pub(super) fn apply_masks(letters: &mut [u8], masks: &[(u32, u32)], range: Optio
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reverse_complement_keeps_case_and_ambiguity() {
-        let mut letters = b"ACGTMRWSYKVHDBN-acgtu".to_vec();
-        reverse_complement(&mut letters);
-        assert_eq!(letters, b"aacgt-NVHDBMRSWYKACGT");
-    }
-
-    #[test]
-    fn crc32_is_zlib_s() {
-        // The CRC-32 of "123456789" is the standard check value 0xCBF43926.
-        assert_eq!(crc32_zip(b"123456789"), 0xCBF4_3926);
-        assert_eq!(sequence_hash(b"1234\n56789"), !0xCBF4_3926);
-        assert_eq!(hash_text(0), "0");
-        assert_eq!(hash_text(0x09E5_E1FA), "0X9E5E1FA");
-    }
-
-    #[test]
-    fn masks_are_lower_case_inside_the_letters() {
-        let masked = |length: usize, masks: &[(u32, u32)], range| {
-            let mut letters = vec![b'A'; length];
-            apply_masks(&mut letters, masks, range);
-            String::from_utf8(letters).unwrap()
-        };
-        assert_eq!(masked(10, &[(2, 4), (8, 10)], None), "AAaaAAAAaa");
-        assert_eq!(masked(6, &[(2, 4), (8, 10)], Some((3, 8))), "aAAAAa");
-        assert_eq!(masked(5, &[(2, 4)], Some((4, 8))), "AAAAA");
-        assert_eq!(masked(4, &[(2, 100), (3, 2), (1, 1)], None), "AAaa");
-    }
-}
+#[path = "letters_tests.rs"]
+mod tests;

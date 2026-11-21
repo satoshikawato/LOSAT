@@ -1,0 +1,60 @@
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id local str "x"
+  },
+  {
+    from 430,
+    to 480,
+    id local str "x"
+  },
+  {
+    from 578,
+    to 670,
+    id local str "x"
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id gi 0
+  },
+  {
+    from 430,
+    to 480,
+    id gi 0
+  },
+  {
+    from 578,
+    to 670,
+    id gi 0
+  }
+}

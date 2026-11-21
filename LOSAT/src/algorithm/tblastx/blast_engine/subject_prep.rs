@@ -7,7 +7,7 @@
 //! of `BLAST_PreliminarySearchEngine` skips a subject shorter than `s_GetMinimumSubjSeqLen`,
 //! :1318-1330) and :772-775 (`s_BlastSearchEngineCore` translates the subject with
 //! `BLAST_GetAllTranslations`, c++/src/algo/blast/core/blast_util.c:1045). The unit path has no
-//! NCBI counterpart: it returns the HSP list of NCBI's frame loop, blast_engine.c:805-855
+//! NCBI counterpart: it returns the HSP list of NCBI's frame loop, c++/src/algo/blast/core/blast_engine.c:805-855
 //! (tblastx/x_pair_par.rs).
 //!
 //! This module is a child of `run_impl` for the modules it keeps private (`x_pair_par`,
@@ -38,6 +38,10 @@ pub(super) struct SubjectFrames {
     pub(super) s_frames_preliminary_owned: Option<Vec<QueryFrame>>,
     pub(super) x_kept: XKept,
     pub(super) x_letter_frames_later: bool,
+    /// A `-db` search with `-db_soft_mask` or `-db_hard_mask` (series NP, M4b PR 2): the
+    /// subject's ranges in bases (`XDbStream::mask_ranges`), from which its frames' scan ranges
+    /// or hard chunks follow (`frame_chunks::search_subject_frames`); `None` otherwise.
+    pub(super) x_db_mask: Option<Vec<(i32, i32)>>,
 }
 
 /// The preliminary frames of subject `s_idx` (`Subjects::x_preliminary_frames`, the genetic code
@@ -53,16 +57,7 @@ pub(super) fn subject_frames(
     db_code: &GeneticCode,
     wordsize: i32,
 ) -> Result<Option<SubjectFrames>> {
-    // NCBI reference (translate all frames for subject sequences):
-    // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1296-1308
-    // ```c
-    // for (context = 0; context < num_frames; ++context) {
-    //    int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //    retval->translations[context] = (Uint1*) malloc(...);
-    //    BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
-    //       subject_blk->length, frame, retval->translations[context], gen_code_string);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1296-1308 (translate all frames for subject sequences)
     // Only the frames the preliminary stage translates are made here, in windows
     // (`Subjects::x_preliminary_frames`). For a subject with ambiguous bases the frames of
     // its letters (`s_frames`) are made after the seed stage, once the preliminary frames
@@ -74,8 +69,7 @@ pub(super) fn subject_frames(
     // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
     // letters (`Subjects::x_letter_frames`).
     let x_kept;
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
-    // return word_length * 3 + 2;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
     // if (subject->length < min_subj_seq_length) { ... continue; }
     // Statistics include all records, including ones too short to search: such a subject
     // gets no frame (`None`). A `-db` sequence's length is read with its block, in the
@@ -96,12 +90,19 @@ pub(super) fn subject_frames(
             (Vec::new(), Some(frames))
         }
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:315-320, 393-402
+    // In a masked search every fetched sequence carries the complement of its masks.
+    let x_db_mask = match subjects {
+        Subjects::Stream(stream) => stream.mask_ranges(s_idx, s_len)?,
+        _ => None,
+    };
     Ok(Some(SubjectFrames {
         s_len,
         s_frames,
         s_frames_preliminary_owned,
         x_kept,
         x_letter_frames_later,
+        x_db_mask,
     }))
 }
 
@@ -129,6 +130,8 @@ pub(super) struct UnitPathArgs<'a> {
     pub(super) x_pair_lut_is_stub: bool,
     /// The search's failure, where the units' extensions refuse a search (extension/query_batch.rs).
     pub(super) x_read_failure: &'a XReadFailure,
+    /// `-subject_besthit` (`x_pair_par::XSubject::subject_besthit`).
+    pub(super) subject_besthit: bool,
 }
 
 /// Dispatch points 2 and 3 of PAIRPAR and of the seed release (per subject): when the batch has a
@@ -165,6 +168,7 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
         x_seed_end,
         x_pair_lut_is_stub,
         x_read_failure,
+        subject_besthit,
     } = args;
     // The batch's unit path, borrowed from the subject's units stage (dispatch point 2 of the
     // seed release): it cannot be used after `x_units_stage.end()` (dispatch point 3).
@@ -174,13 +178,6 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
     // frame loop (unchanged) runs zero times.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805,835-844
-    // ```c
-    // for (context=first_context; context<=last_context; context++) {
-    // ...
-    //     status = s_BlastSearchEngineOneContext(program_number, query, query_info,
-    // ...
-    //     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-    // ```
     // The unit path returns the list this frame loop builds (same calls, same order of
     // the appended frame lists); see x_pair_par.rs for why it is the same list.
     //
@@ -194,10 +191,6 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
     // memory peaks.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562
-    // ```c
-    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //         hit_params->options, &hsp_list);
-    // ```
     // NCBI converts and merges its init HSPs with the lookup table still allocated (freed
     // with the search's internal data); that conversion reads no lookup table.
     let x_pair_par_stub = x_pair_par_ref.is_some_and(|x| x.stub());
@@ -215,6 +208,7 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
                 s_len,
                 failure: x_read_failure,
                 passed: None,
+                subject_besthit,
             };
             x_lap.lap(XStage::Prepare);
             let x_units = x.run_subject_units(&x_subject, parallel_pool);
@@ -247,11 +241,6 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
     // taken the subject (empty frame slice); anything else stops the run here.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
-    // ```c
-    //     /* scan the subject sequence for hits */
-    //     hits = scansub(lookup_wrap, subject,
-    //                               offset_pairs, array_size, scan_range);
-    // ```
     if x_pair_lut_is_stub {
         assert!(
             s_frames_preliminary.is_empty() && x_pair_par_stub,

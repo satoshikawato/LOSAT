@@ -16,12 +16,7 @@ sys.modules[SPEC.name] = AUDIT
 SPEC.loader.exec_module(AUDIT)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
-# ```c++
-# const char* kDfltArgTabularOutputFmt =
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
-# ```
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-45
 class TblastxAuditClassifierTests(unittest.TestCase):
     def classify(self, ncbi: str, losat: str) -> tuple[str, dict[str, object]]:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,0 +1,1 @@
+- docs: a user manual (`docs/manual`, built with mdBook into a website): installation, a quick start, moving from NCBI BLAST+ and from LOSAT v0.1.0, one page for each program, and reference pages on databases, output formats, platforms, differences from NCBI BLAST+ and what LOSAT refuses. `scripts/check_manual_links.py` checks its links before each build.

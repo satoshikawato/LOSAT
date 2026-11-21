@@ -40,14 +40,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use {super::TblastxArgs, crate::blastinput::fasta_reader::FastaRecord, std::sync::Arc};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-// ```c
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    ...
-//    status = s_BlastSearchEngineCore(...);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1475
 /// Runs `body` for the subjects `0..subjects` in their order on this thread, with one worker state
 /// made by `init`.
 fn for_each_subjects<FInit, FBody, S>(subjects: usize, init: FInit, mut body: FBody)
@@ -63,23 +56,8 @@ where
 
 impl<S> WorkerState<S> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-    // ```c
-    //     /* iterate over all subject sequences */
-    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //            != BLAST_SEQSRC_EOF) {
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1040-1041
-    // ```c
-    //     aux_struct->offset_pairs =
-    //       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:60-63
-    // ```c
-    //                 diag_table->diag_array_length = diag_array_length;
-    //                 diag_table->diag_mask = diag_array_length-1;
-    //                 diag_table->multiple_hits = multiple_hits;
-    //                 diag_table->offset = window_size;
-    // ```
     // Each thread of NCBI's search sets up its own offset pairs and diagonal table
     // (`s_BlastSetUpAuxStructures`) before its iterations of the subject loop.
     /// The state of one thread's iterations of the subject loop: the channel to the writer thread
@@ -105,10 +83,6 @@ impl<S> WorkerState<S> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//          /* Save the results. */
-//          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// Starts the writer thread of a parallel subject loop: it takes each subject's message from `rx`
 /// until the channel closes and returns the batch's hit lists in report order.
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -118,14 +92,7 @@ pub(super) fn spawn_writer(
     query_records: &[FastaRecord],
     sorts_results: bool,
 ) -> std::thread::JoinHandle<Vec<TblastxHsp>> {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
     // The writer thread is NCBI's collector (tblastx/hit_collector.rs): it takes each
     // subject's message and returns the batch's hit lists in report order after the join,
     // for the one place that writes every output.
@@ -139,19 +106,6 @@ pub(super) fn spawn_writer(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
-// ```c
-//       	seq_arg.oid = subject_blk->oid;
-// ...
-//         seq_arg.check_oid_exclusion = TRUE;
-// ...
-//       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-//       		for (index = 0; index < hspcnt; ++index) {
-//       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-//       		}
-//       		Blast_HSPListPurgeNullHSPs(hsp_list);
-//       		return 0;
-//       	}
-// ```
 // The re-evaluation's fetch of a subject with HSPs excludes one that the negative seqid
 // list keeps without a line (`FetchExcluded`): its HSPs are freed before anything else of the
 // re-evaluation reads it (`SubjectEmit::reevaluation_fetch_keeps`), one check for the batch.
@@ -167,10 +121,6 @@ pub(super) struct SubjectEmit<'a> {
 
 impl SubjectEmit<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-    // ```c
-    //          /* Save the results. */
-    //          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-    // ```
     // NCBI writes a subject's list when it holds HSPs (:1480); the collector takes one message per
     // subject, with none too, to keep the subjects' order.
     /// One message per subject of the loop, with its final HSPs or none, so that the collector
@@ -190,21 +140,7 @@ impl SubjectEmit<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2659-2665
-    // ```c
-    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    // ...
-    //       		return 0;
-    //       	}
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-311
-    // ```c
-    //     if (args->check_oid_exclusion) {
-    //         if (! seqdb.GetIdSet().Blank()) {
-    //             list< CRef<CSeq_id> > seqids = seqdb.GetSeqIDs(oid);
-    //
-    //             if (seqids.empty()) {
-    //                 return BLAST_SEQSRC_EXCLUDED;
-    // ```
     // NCBI's re-evaluation (`Blast_HSPListReevaluateUngapped`, called for every subject that has
     // HSPs after the first linking call and the preliminary E-value, blast_engine.c:1480-1497)
     // fetches the subject first, reading its Seq-ids before its letters: one that the negative
@@ -223,14 +159,6 @@ impl SubjectEmit<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2672-2677,2700
-    // ```c
-    //    if (kTranslateSubject) {
-    // ...
-    //       BlastTargetTranslationNew(subject_blk, gen_code_string, program,
-    //                    score_params->options->is_ooframe, &target_t);
-    // ...
-    //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-    // ```
     // After the fetch (`reevaluation_fetch_keeps`, then the subject's letters), NCBI's
     // re-evaluation reads the translation of the first HSP's frame, which it never makes for a
     // subject (its `-subject_loc` range) of fewer than 12 bases
@@ -238,8 +166,9 @@ impl SubjectEmit<'_> {
     // `Blast_HSPReevaluateWithAmbiguitiesUngapped` reads the HSP's letters (blast_hits.c:692-700),
     // and NCBI BLAST+ 2.17.0 dies with SIGSEGV. Every HSP that reaches LOSAT's re-evaluation has a
     // length of 1 or more (those of length 0 or less, which read nothing in NCBI's, are dropped
-    // after the first linking call, `subject_link::link_subject_hits_int4`), so NCBI dies at the
-    // first HSP of every such list. The query batch fails with LOSAT's refusal
+    // after the first linking call, `subject_link::link_subject_hits_int4`, or without sum
+    // statistics before this refusal, `subject_link::drop_unread_without_linking`), so NCBI dies
+    // at the first HSP of every such list. The query batch fails with LOSAT's refusal
     // (PD-LOSAT-NCBI-DEFECTS 1.51, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
     /// The refusal of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation
@@ -262,15 +191,6 @@ impl SubjectEmit<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
-// ```c
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-//             }
-//         }
-//
-//         formatter.PrintEpilog(opt);
-// ```
 // A header that NCBI's fetch cannot read throws in `GetSeqIDs` (a `CSerialException`), which
 // NCBI reports as a `BLAST engine error` (exit 3) after it has printed the query batches before;
 // LOSAT's refusal comes there too (`ErrorAfterBatchReports`; the Owner's decision of 2026-11-16
@@ -365,20 +285,8 @@ where
         x_seed_end,
         x_board,
     } = lp;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    ...
-    //    status = s_BlastSearchEngineCore(...);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1475
     // LOSAT_X_TBXNEXT: its loop takes the subjects of a parallel search of several subjects.
     if x_subject_next::on() {
         crate::utils::xreach::x_reach!(
@@ -389,16 +297,7 @@ where
 
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
-        // ```c
-        // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-        // /* iterate over all subject sequences */
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-        //        continue;
-        //    }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427
         // The threads' subjects go to the collector the subject loop keeps (`SubjectEmit::emit`;
         // no writer thread on this target), which takes them in OID order.
         if x_subject_next::on() {

@@ -22,9 +22,10 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
    output or engine records.
 2. Store and export outfmt 0, 6 and 7 byte for byte. Never rewrite, filter or
    regenerate them. Filtered or selected exports use application formats (CSV, JSON).
-3. Give the engine only an argv and FASTA bytes made of whole original records (the
-   run snapshot). Never split one search into independent searches and join the
-   results.
+3. Give the engine only an argv, FASTA bytes made of whole original records (the
+   run snapshot), and the files that the argv names, as the user gave them
+   (`PD-LOSAT-WEB-APP-BOUNDARY` 1.2, invariant 2.1). Never split one search into
+   independent searches and join the results.
 4. Never send research data (sequences, headers, file names, results, notes) over the
    network. A fetch the user asks for (an accession, an Example set, the WindowMasker
    counts of a taxonomy ID; lines WF and WW, `docs/web/fetch_design.md`) sends only

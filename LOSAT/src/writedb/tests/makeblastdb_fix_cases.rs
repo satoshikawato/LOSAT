@@ -32,6 +32,7 @@ pub(super) struct FixCase {
 
 pub(super) const FIX_CASES: &[FixCase] = &[
     FixCase {
+        // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
         name: "L_bytes_prot",
         input: b"\
             >a\x02b t1\nMKTAYIAKQRQISFVKSHFSRQ\n>c\x1fd t2\nMKTAYIAKQRQISFVKSHFSRQ\n>ab\xc3\xa9 t3\n\

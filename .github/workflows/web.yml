@@ -110,9 +110,10 @@ jobs:
       # (2026-11-11 its DNS failed and jobs hung for hours; 2026-11-18 its mirror delivered
       # 50-100 kB/s and the install step timed out at 10, then at 25 minutes). The tag must be
       # @playwright/test's version in web/app/package.json: the "Playwright image matches" step.
-      # The digest pins the image as the actions here are pinned by SHA (the image that the green
-      # runs of 2026-11-18 pulled); a bump changes the tag and the digest together.
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      # The digest pins the image as the actions here are pinned by SHA; a bump changes the tag and
+      # the digest together (the tag's multi-arch index digest, the Docker-Content-Digest header of
+      # https://mcr.microsoft.com/v2/playwright/manifests/<tag>).
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
       # Playwright's CI advice for Chromium in a container: a shared IPC namespace, and an init
       # process that reaps the browsers' children.
       # Firefox's sandbox makes a user namespace, which Docker's default seccomp profile refuses
@@ -190,6 +191,17 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+      # The texts of a database file that does not open or read in LOSAT Web: the WASI error codes
+      # give the native CLI's texts on Linux (utils::os_error_text), and the reader's errors carry
+      # them as NCBI's (seqdb::tests::ncbis_errors_are_told_from_losats; line WQA D18,
+      # 2026-11-21). Same build as the step above.
+      - name: Database reader error texts on wasm32-wasip1
+        working-directory: LOSAT
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
+        run: >-
+          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
+          seqdb::tests::ncbis_errors_are_told_from_losats utils::os_error_text
       # The lib tests of the 128-bit SIMD kernels on the target that ships them (simd128: the
       # wasm32 layer of utils/xdrop_simd.rs and the kernels written over it); the native
       # `cargo test` runs them only in their x86-64 SSE form. Same build as the step above.
@@ -199,6 +211,8 @@ jobs:
       # loops are the Web's scan for sparse tables, with the index loop vectorized to simd128 and
       # 32-bit pointer and room arithmetic, which the native `cargo test` runs only in 64 bits
       # (about 2 s more, 2026-11-17).
+      # x_seed_fused_clut::tests: blastp-fast's staged loop on the flat table (its copy in 128-bit
+      # loads and stores on simd128), which wasm32 takes since 2026-11-18, against the reference.
       - name: SIMD kernel tests on wasm32-wasip1
         working-directory: LOSAT
         env:
@@ -206,8 +220,8 @@ jobs:
         run: >-
           cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
           x_restricted_gap::tests xdrop_simd::x_w128::tests
-          x_w128_loops_write_the_residues_of_the_word_loop x_same_matrix
-          x_seed_fused::tests x_seed_diag::tests
+          tblastn::x_subject_translate::tests::x_w128_loops x_same_matrix
+          x_seed_fused::tests x_seed_diag::tests x_seed_fused_clut::tests
           tblastx::x_scan_byte::tests tblastx::x_scan_bf::tests
 
   # The engine adapter (web/adapter) over five jobs that run side by side: the build identity

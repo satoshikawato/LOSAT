@@ -102,25 +102,12 @@ pub(super) trait SequenceSource {
 /// What the application posts and returns for a failure: the diagnostic lines and the exit
 /// status, or LOSAT's refusal.
 pub(super) enum Report {
-    Posts { lines: String, status: i32 },
+    Posts { lines: Vec<u8>, status: i32 },
     Refused(String),
     Arg(crate::ncbi_app::args::ArgException),
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:668-690 (AppMain's handlers of `Run`)
-// ```c++
-//         catch (CException& e) {
-//             NCBI_REPORT_EXCEPTION_X(16,
-//                                     "Application's execution failed", e);
-//             *got_exception = true;
-//             *exit_code = 3;
-//         }
-//         catch (exception& e) {
-//             ERR_POST_X(7, "Application's execution failed: " << e.what());
-//             *got_exception = true;
-//             *exit_code = 3;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:668-690,725-731 (AppMain's handlers of `Run`)
 // (`NCBI_USE_ERRCODE_X` of ncbiapp.cpp is `Corelib_App`, 106.)
 /// The report of `failure`.
 pub(super) fn report(failure: Failure) -> Report {
@@ -130,67 +117,24 @@ pub(super) fn report(failure: Failure) -> Report {
             status: 3,
         },
         Failure::Std(what) => Report::Posts {
-            lines: err_post_x(106, 7, &format!("Application's execution failed: {what}")),
+            lines: err_post_x(106, 7, &format!("Application's execution failed: {what}"))
+                .into_bytes(),
             status: 3,
         },
         Failure::Refused(reason) => Report::Refused(reason),
         Failure::Arg(error) => Report::Arg(error),
         Failure::ClosedPipe => Report::Posts {
-            lines: String::new(),
+            lines: Vec::new(),
             status: 0,
         },
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:180-202
-// ```c++
-// string BuildAlgorithmParametersString(const CArgs& args)
-// {
-//     CNcbiOstrstream os;
-//     if (args.Exist("locut") &&
-//     ...
-//     } else if (args.Exist("level") &&
-//                args.Exist("linker") &&
-//                args.Exist("window")) {
-//         // DUST
-//         os << "window=" << args["window"].AsInteger() << "; "
-//            << "level=" << args["level"].AsInteger() << "; "
-//            << "linker=" << args["linker"].AsInteger();
-//     }
-//     return CNcbiOstrstreamToString(os);
-// }
-// ```
 /// `x_GetWriter`: the writer of `-outfmt`, or `Hard masking can only be applied for fasta
 /// output`.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:116-164
-/// ```c++
-///     if (args["hard_masking"].AsBoolean() && (format != "fasta")) {
-///         throw runtime_error("Hard masking can only be applied for fasta output");
-///     }
-///     if (format == "interval") {
-///         ...
-///         retval = new CMaskWriterInt(output);
-///     } else if (format == "acclist") {
-///         ...
-///         retval = new CMaskWriterTabular(output);
-///     } else if (format == "fasta") {
-///         ...
-///         retval = new CMaskWriterFasta(output, hard_masking);
-///     } else if (NStr::StartsWith(format, "seqloc_asn1_binary")) {
-///         ...
-///     } else if (NStr::StartsWith(format, "seqloc_")) {
-///         ...
-///         retval = new CMaskWriterSeqLoc(output, format);
-///     } else if (NStr::StartsWith(format, "maskinfo_asn1_bin")) {
-///         ...
-///         retval =
-///             new CMaskWriterBlastDbMaskInfo(output, format, 2,
-///                                eBlast_filter_program_dust,
-///                                BuildAlgorithmParametersString(args));
-///     } else if (NStr::StartsWith(format, "maskinfo_")) {
-///         ... (the same)
-/// ```
 /// (`-outfmt` takes only the nine values of its constraint, and the `seqloc_asn1_binary` branch
 /// opens the stream in binary mode, which changes nothing on POSIX.)
 fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
@@ -231,35 +175,7 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
 /// FASTA reader of `-in -` reads (`CMaskFastaReader`). The `maskinfo_*` writer writes its object even when the run
 /// fails after the writer was made (its destructor runs as the exception leaves `Run`).
 ///
-/// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:281-317
-/// ```c++
-///     CNcbiOstream& output_stream = GetArgs()[kOutput].AsOutputFile();
-///     ...
-///     unique_ptr<CMaskWriter> writer(x_GetWriter());
-///     CMaskReader * reader = x_GetReader();
-///
-///     while( (aSeqEntry = reader->GetNextSequence()).NotEmpty() )
-///     {
-///         CScope scope( *om );
-///         CSeq_entry_Handle seh = scope.AddTopLevelSeqEntry( *aSeqEntry );
-///         CBioseq_CI bs_iter(seh, CSeq_inst::eMol_na);
-///         for ( ;  bs_iter;  ++bs_iter)
-///         {
-///             CBioseq_Handle bsh = *bs_iter;
-///             if (bsh.GetBioseqLength() == 0)
-///                 continue;
-///             CSeqVector data
-///                 = bsh.GetSeqVector( CBioseq_Handle::eCoding_Iupac );
-///             std::unique_ptr< duster_type::TMaskList > res = GetDustMasks_SkipNs(data, level, window, linker);
-///             if (res.get()) {
-///                 writer->Print(bsh, *res, GetArgs()["parse_seqids"] );
-///             }
-///         }
-///     }
-///
-///     output_stream << flush;
-///     return 0;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:276-317
 pub(super) fn run(
     options: &Options<'_>,
     stdin: &mut Cin<'_>,
@@ -300,6 +216,7 @@ fn masks_of_input(
         let mask = dust_masks_skip_ns(&record.iupac, level, window, linker);
         let seq = MaskedBioseq {
             ids: &record.ids,
+            handle_seq_id: None,
             title: record.title.as_deref(),
             taxname: record.taxname.as_ref(),
             has_source: record.has_source,
@@ -316,19 +233,6 @@ fn masks_of_input(
 /// `Unknown input format`.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:167-182
-/// ```c++
-///     if( format == "fasta" ) {
-///         CNcbiIstream& input_stream  = GetArgs()[kInput].AsInputFile();
-///         return new CMaskFastaReader(
-///                 input_stream, true, args["parse_seqids"] );
-///     }
-///     else if( format == "blastdb" ) {
-///         return new CMaskBDBReader( args[kInput].AsString() );
-///     }
-///     else {
-///         throw runtime_error( "Unknown input format" );
-///     }
-/// ```
 ///
 /// `-in` is opened here, as `x_GetReader` asks for it (`AsInputFile`, fasta input only), after
 /// the writer: an `-in` that does not open still lets a `maskinfo_*` writer write its object.

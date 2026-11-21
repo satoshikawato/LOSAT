@@ -5,6 +5,7 @@
 //! each alignment), then `s_HSPListPostTracebackUpdate`: the roles swapped back, the e-values at
 //! the database's scale, the scores divided back and the bit scores.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::engine::RpsQuery;
@@ -15,7 +16,8 @@ use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
-use crate::algorithm::pssm_search::redo1::smith_waterman::SwRedoScratch;
+use crate::algorithm::pssm_search::redo1::smith_waterman::RpsSwScratch;
+use crate::algorithm::pssm_search::redo1::{FrameSubject, ProteinSubject};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::traceback0::{trace_hsps, TraceHsps, TraceSubject};
 use crate::common::GapEditOp;
@@ -59,7 +61,7 @@ pub(crate) struct RpsTraceScratch {
     /// The bytes of those rows as the `.freq` file holds them.
     pub(super) freq_bytes: Vec<u8>,
     /// The Smith-Waterman redo's memory (`-use_sw_tback`).
-    pub(super) sw: SwRedoScratch,
+    pub(super) sw: RpsSwScratch,
 }
 
 impl RpsTraceScratch {
@@ -69,16 +71,48 @@ impl RpsTraceScratch {
             pssm: QueryPssm { rows: Vec::new() },
             ratios: Vec::new(),
             freq_bytes: Vec::new(),
-            sw: SwRedoScratch::new(),
+            sw: RpsSwScratch::new(),
         }
     }
 }
 
-/// The final hit list of a query and the highest profile whose rescaled PSSM it wrote the K of
-/// (the K the query's batch may print, `engine.rs`).
+/// The final hit list of a query and the profile of the last list, in the stream's order
+/// (`stream_lists`), that wrote its K (without composition-based statistics, the highest profile
+/// whose rescaled PSSM exists): the K the query's batch may print (`batch_gapped_k`).
 pub(crate) struct RpsTraced {
     pub(crate) hit_list: Option<BlastpHitList>,
     pub(crate) k_mark: Option<u32>,
+}
+
+/// The letters of a query's contexts without their sentinels, in the context order (NCBI's
+/// `translation_buffer + frame_offsets[context] + 1`; a protein query's one context).
+fn frame_letters<'q>(query: &'q RpsQuery<'_>) -> Vec<&'q [u8]> {
+    query
+        .frames
+        .iter()
+        .map(|frame| &frame.aa_seq[1.min(frame.aa_seq.len())..frame.aa_seq.len().max(1) - 1])
+        .collect()
+}
+
+/// A translated query's translation buffer as the redo reads it (NCBI's `one_query->sequence`,
+/// `RpsQuery::translation_length` bytes): the frames' letters in the context order, each frame
+/// with letters followed by its sentinel but the last context (an empty frame takes no byte).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:378-381
+/// (`query_offset` is the first context's, blast_setup_cxx.cpp:72-77 the layout, cited at
+/// `RpsQuery::translation_length`.)
+fn translation_buffer(query: &RpsQuery<'_>) -> Vec<u8> {
+    let (last, earlier) = query.frames.split_last().expect("a query has a context");
+    let mut buffer = Vec::with_capacity(query.translation_length());
+    for frame in earlier {
+        let length = frame.length();
+        if length > 0 {
+            buffer.extend_from_slice(&frame.aa_seq[1..length + 2]);
+        }
+    }
+    buffer.extend_from_slice(&last.aa_seq[1.min(last.aa_seq.len())..last.aa_seq.len().max(1) - 1]);
+    debug_assert_eq!(buffer.len(), query.translation_length());
+    buffer
 }
 
 /// `s_BlastHSPListRPSUpdate`'s part before the sort: the query and the subject of each HSP
@@ -88,29 +122,6 @@ pub(crate) struct RpsTraced {
 /// HSP's query frame: the length of the user query or of its frame).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:165-184
-/// ```c
-///    hsp = hsplist->hsp_array;
-///    for (i = 0; i < hsplist->hspcnt; i++) {
-///
-///       /* switch query and subject (which are already in local coordinates) */
-///       tmp = hsp[i]->query;
-///       hsp[i]->query = hsp[i]->subject;
-///       hsp[i]->subject = tmp;
-///
-///       /* Change the traceback information to reflect the query and subject
-///          sequences getting switched */
-///       s_BlastHSPRPSUpdate(hsp[i]);
-///
-///
-///       /* If query was nucleotide, set context, because it is needed in order
-///          to pick correct Karlin block for calculating bit scores. There are
-///          6 contexts corresponding to each nucleotide query sequence. */
-///       if (program == eBlastTypeRpsTblastn) {
-///           hsp[i]->context = BLAST_FrameToContext(hsp[i]->query.frame, program);
-///       }
-///    }
-///    Blast_HSPListSortByScore(hsplist);
-/// ```
 /// (The sort is the caller's.)
 pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: impl Fn(i32) -> usize) {
     for hsp in &mut hsp_list.hsps {
@@ -147,40 +158,7 @@ pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: impl Fn(i32
 /// (`swap_roles`: query offsets on the user query, subject offsets on the profile).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1007
-/// ```c++
-///     if (x_IsFieldRequested(eQuerySeq) ||
-///         ...
-///         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
-///         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
-///         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
-///
-///         alnVec->SetGapChar('-');
-///         ...
-///         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-///         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-///         ...
-///             num_ident = 0;
-///             ...
-///             for (unsigned int i = 0;
-///                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
-///                  ++i) {
-///                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
-///                     ++num_ident;
-/// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2135
-/// ```c++
-/// void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
-///                                           const string& sequence ,
-///                                           int& match, int& positive,
-///                                           string& middle_line)
-/// {
-///     match = 0;
-///     ...
-///     for(int i=0; i<min_length; i++){
-///         if(sequence_standard[i]==sequence[i]){
-///             ...
-///             match ++;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2140
 pub(super) fn formatter_identities(
     hit_list: &mut BlastpHitList,
     query: &RpsQuery<'_>,
@@ -231,55 +209,39 @@ pub(super) fn formatter_identities(
     }
 }
 
+/// A query's preliminary lists in the order the traceback reads them from NCBI's HSP stream:
+/// sorted by E-value (`BlastpHitList::sort_by_evalue`, the lists without HSPs dropped) where the
+/// stream sorts by score (`by_score`: a protein query with composition-based statistics, so
+/// rpsblast's redo), else by ordinal id, up (the stream of the batch's queries sorts them down
+/// and reads from the end; a query has one list per profile).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:676-686
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:196-203
+fn stream_lists(
+    mut prelim: BlastpHitList<XPrelimHsp>,
+    by_score: bool,
+) -> Vec<BlastpHspList<XPrelimHsp>> {
+    if by_score {
+        prelim.sort_by_evalue();
+    }
+    let count = prelim.hsplist_count;
+    let mut lists: Vec<BlastpHspList<XPrelimHsp>> =
+        prelim.hsplist_array.into_iter().take(count).collect();
+    if !by_score {
+        lists.sort_by_key(|list| list.oid);
+    }
+    lists
+}
+
 impl RpsTraceback<'_> {
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from
     /// its preliminary hit list.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1191-1236
-    /// ```c
-    ///          else {
-    ///
-    ///              /* for no CBS option rescale PSSM matrix with the half-way CBS */
-    ///              /* replace the PSSM and the Karlin values for this DB sequence
-    ///                 and this query sequence. */
-    ///              sbp->psi_matrix->pssm->data =
-    ///                  RPSRescalePssm(score_params->scale_factor,
-    ///                                 one_query->length, one_query->sequence,
-    ///                                 seq_arg.seq->length,
-    ///                                 rpsblast_pssms + db_seq_start, sbp);
-    ///              /* The composition of the query could have caused this one
-    ///                 subject sequence to produce a bad PSSM. This should
-    ///                 not be a fatal error, so just go on to the next subject
-    ///                 sequence */
-    ///              if (sbp->psi_matrix->pssm->data == NULL) {
-    ///                  ...
-    ///                  hsp_list = Blast_HSPListFree(hsp_list);
-    ///                  BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    ///                  continue;
-    ///              }
-    ///          }
-    ///
-    ///          sbp->kbp_gap[0]->K = RPS_K_MULT * karlin_k[hsp_list->oid];
-    ///          sbp->kbp_gap[0]->logK = log(RPS_K_MULT * karlin_k[hsp_list->oid]);
-    ///       }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1272-1305
-    /// ```c
-    ///       if (hsp_list->hspcnt == 0) {
-    ///          hsp_list = Blast_HSPListFree(hsp_list);
-    ///          continue;
-    ///       }
-    ///
-    ///       /* Save this HSP list in the results structure. */
-    ///       Blast_HSPResultsInsertHSPList(results, hsp_list,
-    ///                                     hit_params->options->hitlist_size);
-    ///    }
-    ///    ...
-    ///    Blast_HSPResultsSortByEvalue(results);
-    /// ```
-    /// The lists are read by ordinal id (the stream of a batch without composition-based
-    /// statistics sorts them so); a list's traceback reads nothing another writes, and the hit
-    /// list's order is total, so the read order does not change the hit list.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1272-1306
+    /// The lists are read in the stream's order (`stream_lists`); a list's traceback reads
+    /// nothing another writes, and the hit list's order is total, so the read order changes only
+    /// the K that the last list leaves (`RpsTraced::k_mark`).
     pub(crate) fn trace_query(
         &self,
         prelim: BlastpHitList<XPrelimHsp>,
@@ -297,27 +259,43 @@ impl RpsTraceback<'_> {
         } else {
             &[]
         };
+        // NCBI's stream sorts by score a protein query's lists with composition-based statistics
+        // (the redo); it reads every other query's by ordinal id.
+        let lists = stream_lists(prelim, self.redo.is_some() && !translated);
         if let Some(redo) = self.redo.as_ref() {
+            // Without the Gumbel block the redo reads context 0's search space (the redo's copy
+            // of the query information keeps it, blast_traceback.c:1238-1245).
             let statistics = RpsQueryStats {
                 batch_kbp: &query.batch_kbp,
                 stats: first.stats(gumbel),
+                context_0_valid: first.valid,
             };
-            return self.trace_query_redo(redo, prelim, letters, q_idx, statistics, scratch);
+            return if translated {
+                let frames = frame_letters(query);
+                let buffer = translation_buffer(query);
+                self.trace_query_redo(
+                    redo,
+                    lists,
+                    &buffer,
+                    FrameSubject { frames: &frames },
+                    q_idx,
+                    statistics,
+                    scratch,
+                )
+            } else {
+                self.trace_query_redo(
+                    redo,
+                    lists,
+                    letters,
+                    ProteinSubject,
+                    q_idx,
+                    statistics,
+                    scratch,
+                )
+            };
         }
         let probabilities = residue_probabilities(letters);
-        // The frames' letters without their sentinels, in the context order (NCBI's
-        // `translation_buffer + frame_offsets[context] + 1`).
-        let frames: Vec<&[u8]> = query
-            .frames
-            .iter()
-            .map(|frame| &frame.aa_seq[1.min(frame.aa_seq.len())..frame.aa_seq.len().max(1) - 1])
-            .collect();
-        let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim
-            .hsplist_array
-            .into_iter()
-            .take(prelim.hsplist_count)
-            .collect();
-        lists.sort_by_key(|list| list.oid);
+        let frames = frame_letters(query);
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
         for list in lists {
@@ -347,11 +325,6 @@ impl RpsTraceback<'_> {
                             // c++/src/algo/blast/core/blast_traceback.c:371-373 (the subject's
                             // length is 0 for a translated subject: `subject_blk->length`, the
                             // frames with their sentinels, over `CODON_LENGTH`)
-                            // ```c
-                            //    tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-                            //                                  0, (subject_length > 0 ? subject_length :
-                            //                                  subject_blk->length / CODON_LENGTH) + 1);
-                            // ```
                             tree_bound: (query.translation_length() / 3) as i32 + 1,
                         },
                         gap_open: self.gap_open,
@@ -426,7 +399,7 @@ impl RpsTraceback<'_> {
     /// the length of the HSP's frame, whose search space it reads without the Gumbel block), the
     /// reap by `-evalue`, the scores rescaled and the bit scores.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1876-1883 (quoted at
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1876-1883 (cited at
     /// `EvalueStats::e_value`: `isRPS` for both RPS programs, `subject_length` the traceback's
     /// `stat_length`, `query_info` the user query's, whose contexts are a translated query's
     /// frames)
@@ -465,12 +438,7 @@ impl RpsTraceback<'_> {
         }
         sort_by_score(&mut hsp_list.hsps);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
-        // ```c
-        //       hsp->bit_score =
-        //          (hsp->score*kbp[hsp->context]->Lambda -
-        //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
-        // ```
-        let log_k = karlin.k.ln();
+        let log_k = karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
                 (f64::from(hsp.raw_score) * karlin.lambda - log_k) / std::f64::consts::LN_2;
@@ -485,22 +453,11 @@ impl RpsTraceback<'_> {
 
 /// The lengths `m` and `n` of an HSP's e-value in a list's traceback (`Blast_HSPListGetEvalues`
 /// with `isRPS`: `m` the traceback's `stat_length`, `n` the length of the HSP's context of the
-/// user query; quoted at `EvalueStats::e_value`): a protein query's length and the profile's;
+/// user query; cited at `EvalueStats::e_value`): a protein query's length and the profile's;
 /// for a translated query the frame length of the list's last HSP aligned past the containment
 /// test and the HSP's frame length, but the profile's length for frame +1 (DECISIONS 46):
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:346-354
-/// ```c
-///    if (Blast_ProgramIsRpsBlast(program_number)) {
-///       /* Create a local BlastQueryInfo structure for this subject sequence
-/// 	 that has been switched with the query. */
-///       BlastQueryInfo* qi = BlastMemDup(query_info_in, sizeof(BlastQueryInfo));
-///       qi->first_context = qi->last_context = 0;
-///       qi->num_queries = 1;
-///       offsets[0] = 0;
-///       offsets[1] = query_blk->length + 1;
-///       OffsetArrayToContextOffsets(qi, offsets, program_number);
-/// ```
 /// The copy shares the user query's contexts (`BlastMemDup` copies the structure
 /// only), so context 0 holds the profile's length in the e-values of the list:
 /// an HSP of frame +1 reads the profile's length, the other frames their own.
@@ -525,14 +482,6 @@ fn evalue_lengths(
 /// as glibc's qsort.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1350
-/// ```c
-///     if (0 == (result = BLAST_CMP(h2->score, h1->score)) &&
-///         0 == (result = BLAST_CMP(h1->subject.offset, h2->subject.offset)) &&
-///         0 == (result = BLAST_CMP(h2->subject.end, h1->subject.end)) &&
-///         0 == (result = BLAST_CMP(h1->query.offset, h2->query.offset))) {
-///         result = BLAST_CMP(h2->query.end, h1->query.end);
-///     }
-/// ```
 pub(super) fn sort_by_score(hsps: &mut [BlastpHsp]) {
     let compare = |a: &BlastpHsp, b: &BlastpHsp| {
         b.raw_score
@@ -555,60 +504,8 @@ pub(super) fn sort_by_score(hsps: &mut [BlastpHsp]) {
 /// HSP: the length of the first query of the batch (`first_query_length`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-866
-/// ```c
-///       for (subject_index = 0;
-///            subject_index < hit_list->hsplist_count; ++subject_index) {
-///     	  	  BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
-///     	  	  if(hit_options->max_hsps_per_subject) {
-///     	  		  Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
-///     	  	  }
-///     	  	  if(hit_options->query_cov_hsp_perc) {
-///     	  		  Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
-///     	  		  if(hsp_list->hspcnt == 0){
-///     	  			hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
-///     	  		  }
-///     	  	  }
-///          ...
-///        }
-///        if(hit_options->query_cov_hsp_perc) {
-///             Blast_HitListPurgeNullHSPLists(hit_list);
-///        }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2026-2044
-/// ```c
-///    for (index = 0; index < hsp_list->hspcnt; index++) {
-///       hsp = hsp_array[index];
-///       ASSERT(hsp != NULL);
-///       if ( Blast_HSPQueryCoverageTest(hsp, hit_options->query_cov_hsp_perc,
-/// 			                          query_info->contexts[hsp->context].query_length)) {
-///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-///          removed = TRUE;
-///       ...
-///    if (removed) {
-///        hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
-///    }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1051
-/// ```c
-/// double Blast_HSPGetQueryCoverage(const BlastHSP* hsp, Int4 query_length)
-/// {
-/// 	double pct = 0;
-///     if(query_length > 0) {
-///             pct = 100.0 * (double) (hsp->query.end - hsp->query.offset)/ (double) query_length;
-///             if(pct < 99)
-///             	pct +=0.5;
-///     }
-///     return pct;
-/// }
-///
-/// Boolean Blast_HSPQueryCoverageTest(BlastHSP* hsp,
-///         						   double min_query_coverage_pct,
-///         						   Int4 query_length)
-/// {
-///      double hsp_coverage = Blast_HSPGetQueryCoverage( hsp, query_length);
-///      return (hsp_coverage < min_query_coverage_pct);
-/// }
-/// ```
 pub(crate) fn filter_results(
     hit_list: &mut BlastpHitList,
     max_hsps: usize,
@@ -654,24 +551,5 @@ pub(crate) fn filter_results(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // blast_traceback.c:346-354 (quoted at `evalue_lengths`, DECISIONS 46): with `isRPS`, `m` is
-    // the traceback's `stat_length` and `n` the HSP's context of the user query, which the
-    // shallow copy of the query info turns into the profile's length for context 0 (frame +1).
-    #[test]
-    fn a_translated_lists_evalues_read_the_profile_length_for_frame_plus_1_only() {
-        // rpsblast: the query's length and the profile's.
-        assert_eq!(evalue_lengths(false, 0, 200, 180, 999), (200, 180));
-        // rpstblastn: m = stat_length (the frame length of the list's last HSP aligned).
-        assert_eq!(evalue_lengths(true, 1, 190, 180, 189), (189, 180));
-        for (frame, length) in [(2, 189), (3, 188), (-1, 190), (-2, 189), (-3, 188)] {
-            assert_eq!(
-                evalue_lengths(true, frame, length, 180, 189),
-                (189, length),
-                "{frame}"
-            );
-        }
-    }
-}
+#[path = "traceback_tests.rs"]
+mod tests;

@@ -9,17 +9,7 @@
 //! only that the output is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-//! ```c
-//! word_params = BlastInitialWordParametersFree(word_params);
-//! s_BlastCoreAuxStructFree(aux_struct);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:110-113
-//! ```c
-//! static BlastCoreAuxStruct*
-//! s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)
-//! {
-//!     BlastExtendWordFree(aux_struct->ewp);
-//! ```
 //! NCBI keeps its lookup table and its diagonal table until every subject has been searched and
 //! linked. Freeing LOSAT's copies earlier must give the same report. For the fixture pair the
 //! expected output (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was
@@ -163,10 +153,6 @@ impl Drop for TempFasta {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-// ```c
-// word_params = BlastInitialWordParametersFree(word_params);
-// s_BlastCoreAuxStructFree(aux_struct);
-// ```
 // The search of the fixture pair with `LOSAT_X_PAIRPARGATE=0` (the helper's default) runs on the
 // unit path: one batch, its unit path released when the units of the only subject have run, its
 // lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal table. The
@@ -187,12 +173,6 @@ fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:110-113
-// ```c
-// static BlastCoreAuxStruct*
-// s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)
-// {
-//     BlastExtendWordFree(aux_struct->ewp);
-// ```
 // The cost rule (`FRAME_LOOP`, at one thread) leaves the search to the reference frame loop, which
 // needs the worker's diagonal table (NCBI's `ewp`): the worker has it and drops it when the
 // batch's lookup table is released. There is no unit path to release (`units=0`). The report is
@@ -208,12 +188,6 @@ fn the_frame_loop_releases_the_tables_and_its_worker_table() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
-// ```c
-// if (seq_arg.seq->length < min_subj_seq_length) {
-//     BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-//     continue;
-// }
-// ```
 // Several subject records, one of them shorter than a word of three codons plus two bases (not
 // searched: its seed stage ends without a scan), as the last record and between the others.
 // With one thread the subjects are searched in order by one worker; with four, by the pool.

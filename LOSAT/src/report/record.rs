@@ -8,40 +8,7 @@
 //! The fields are those of NCBI's `BlastHSP` that the Seq-align conversion reads.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-148
-//! ```c
-//! typedef struct BlastHSP {
-//!    Int4 score;           /**< This HSP's raw score */
-//!    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-//!    double bit_score;     /**< Bit score, calculated from score */
-//!    double evalue;        /**< This HSP's e-value */
-//!    BlastSeg query;       /**< Query sequence info. */
-//!    BlastSeg subject;     /**< Subject sequence info. */
-//!    Int4     context;     /**< Context number of query */
-//!    GapEditScript* gap_info;/**< ALL gapped alignment is here */
-//!    Int4 num;             /**< How many HSP's are linked together for sum
-//!                               statistics evaluation? If unset (0), this HSP is
-//!                               not part of a linked set, i.e. value 0 is treated
-//!                               the same way as 1. */
-//!    Int2		comp_adjustment_method;  /**< which mode of composition
-//!                                               adjustment was used; relevant
-//!                                               only for blastp and tblastn */
-//!    SPHIHspInfo* pat_info; /**< In PHI BLAST, information about this pattern
-//!                                  match. */
-//!    Int4 num_positives;
-//!
-//!    BlastHSPMappingInfo* map_info;
-//!
-//! } BlastHSP;
-//! ```
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101
-//! ```c
-//! typedef struct BlastSeg {
-//!    Int2 frame;  /**< Translation frame */
-//!    Int4 offset; /**< Start of hsp */
-//!    Int4 end;    /**< End of hsp */
-//!    Int4 gapped_start;/**< Where the gapped extension started. */
-//! } BlastSeg;
-//! ```
 
 use crate::blastinput::app::{Program, ReportFormat};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -165,25 +132,6 @@ impl RunRecord<'_> {
     /// whose sequence source can return partial sequences (a database's cannot).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1630-1645
-    /// ```c++
-    /// 	if (seqinfo_src->CanReturnPartialSequence() == true)
-    /// 	{
-    ///         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
-    ///         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
-    ///              	   RemapToQueryLoc(*iter, query_loc);
-    ///              	   if ( !is_ooframe )
-    ///                    	s_RemapToSubjectLoc(*iter, *subj_loc);
-    ///              	   seq_aligns->Set().push_back(*iter);
-    /// 		}
-    ///         }
-    /// 	else
-    /// 	{
-    /// 		NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
-    ///            	    RemapToQueryLoc(*iter, query_loc);
-    ///            	    seq_aligns->Set().push_back(*iter);
-    /// 		}
-    /// 	}
-    /// ```
     pub fn remaps_subjects(&self) -> bool {
         self.db_title.is_none()
     }

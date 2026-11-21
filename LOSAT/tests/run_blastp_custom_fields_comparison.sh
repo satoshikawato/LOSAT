@@ -2,18 +2,7 @@
 
 set -euo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-145
-# ```c
-# const char* kDfltArgTabularOutputFmtTag("std");
-# const SFormatSpec sc_FormatSpecifiers[] = {
-#     SFormatSpec("qlen", ...),
-#     SFormatSpec("slen", ...),
-#     SFormatSpec("positive", ...),
-#     SFormatSpec("ppos", ...),
-#     SFormatSpec("btop", ...),
-#     SFormatSpec("stitle", ...)
-# };
-# ```
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:39-145
 
 LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp_custom_fields"

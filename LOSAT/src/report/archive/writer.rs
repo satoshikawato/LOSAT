@@ -85,19 +85,25 @@ impl RequestInputs<'_> {
     /// Whether `encoding` writes the strings of the request's Bioseqs and Seq-locs as they are
     /// (`BioseqInput::written_as_is`); the `LCaseMask` parameters, the masks and the Seq-aligns
     /// of the archive hold the same Seq-ids (the subjects of `-db` have the database's, which
-    /// its reader refuses or replaces where NCBI would post). A PSSM query's strings are visible
-    /// ASCII, written as they are: NCBI's reader of `-in_pssm` replaces any other byte by `#`, with
-    /// its own error message, before the request is made (`CObjectIStreamAsn`), and LOSAT refuses
-    /// such a PSSM where it reads it (`pssm_search::in_pssm::psi_search_and_object`).
+    /// its reader refuses or replaces where NCBI would post). The strings of a PSSM query are
+    /// those of the PSSM's own text document (`pssm::asn_text_with_karlin`: one owner of what the
+    /// ASN.1 text stream replaces): an `-in_pssm` file's are visible ASCII (NCBI's reader replaces
+    /// any other byte before the request is made), a title that `-in_msa` takes from a defline
+    /// need not be. The PSSM is only ever a strategy file's (ASN.1 text) here.
     pub fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
-        let queries = match self.queries {
-            RequestQueries::Bioseqs(queries) => queries,
-            RequestQueries::Pssm(_) => &[],
+        let (queries, pssm_as_is) = match self.queries {
+            RequestQueries::Bioseqs(queries) => (queries, true),
+            RequestQueries::Pssm(pssm) => (
+                &[][..],
+                encoding != ArchiveEncoding::Text
+                    || crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok(),
+            ),
         };
-        queries
-            .iter()
-            .chain(self.subjects)
-            .all(|bioseq| bioseq.written_as_is(encoding))
+        pssm_as_is
+            && queries
+                .iter()
+                .chain(self.subjects)
+                .all(|bioseq| bioseq.written_as_is(encoding))
     }
 }
 
@@ -301,21 +307,6 @@ fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:352-364
-// ```c++
-// CRef<objects::CBlast4_request> CExportStrategy::GetSearchStrategy(void)
-// {
-// 	CRef<CBlast4_request> retval(new CBlast4_request);
-// 	if (!m_ClientId.empty())
-// 	{
-//         retval->SetIdent(m_ClientId);
-//     }
-//
-//     CRef<CBlast4_request_body> body(new CBlast4_request_body);
-//     body->SetQueue_search(*m_QueueSearchRequest);
-//     retval->SetBody(*body);
-//     return retval;
-// }
-// ```
 /// Writes the `body` member of a `Blast4-request`: the `queue-search` request of one query
 /// batch. The archive (`write_search_archive`) and the search strategy file
 /// (`strategy::StrategyExport::write_request`) share it, as NCBI builds both with
@@ -345,14 +336,7 @@ fn write_request_body<E: Encoder>(
     out.enc.member("queries", 2);
     match batch.queries {
         RequestQueries::Bioseqs(queries) => write_bioseq_queries(out, queries),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-559
-        // ```c++
-        //     CRef<CBlast4_queries> queries_p(new CBlast4_queries);
-        //     queries_p->SetPssm(*pssm);
-        //
-        //     m_QueueSearchRequest->SetQueries(*queries_p);
-        //     m_QueueSearchRequest->SetService(new_service);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-560
         // The object that the application read (`x_Process_Pssm` takes the application's `CRef`,
         // serialized at once), written with the request's encoder.
         RequestQueries::Pssm(pssm) => {
@@ -393,25 +377,6 @@ fn write_request_body<E: Encoder>(
 /// The `queries` of a request of FASTA queries: the batch's Seq-locs, or its Bioseqs.
 fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[BioseqInput<'_>]) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
-    // ```c++
-    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
-    //         {
-    //             if (IsLocalId((*itr)->GetId()))
-    //             {
-    //                 has_local_ids = true;
-    //                 break;
-    //             }
-    //         }
-    //     ...
-    //     if (has_local_ids)
-    //     {
-    //         Q->SetBioseq_set(*bioseq_set);
-    //     }
-    //     else
-    //     {
-    //     	Q->SetSeq_loc_list() = seqloc_list;
-    //     }
-    // ```
     if queries.iter().all(|query| query.seq_loc.is_some()) {
         out.enc.variant("Blast4-queries", "seq-loc-list", 1);
         out.enc.begin_list(false);
@@ -499,11 +464,6 @@ fn write_request_options<E: Encoder>(
             out.enc.end_sequence();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:318-320
-        // ```c++
-        //     x_Process_BlastOptions(opts_handle);
-        //     x_Process_Query(query);
-        //     x_Process_SearchDb(db);
-        // ```
         // The database's list and masking come after the parameters of the query
         // (search_strategy.cpp:480-516: `TaxidList` or `NegativeTaxidList`, then
         // `DbFilteringAlgorithmKey` or `DbFilteringAlgorithmId`, then `SubjectMaskingType`).
@@ -515,19 +475,6 @@ fn write_request_options<E: Encoder>(
         out.enc.end_member();
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-755
-    // ```c++
-    // void CExportStrategy::x_AddPsiNumOfIterationsToFormatOptions(unsigned int num_iters)
-    // {
-    // 	CRef<CBlast4_parameter> p(new CBlast4_parameter);
-    // 	p->SetName(CBlast4Field::GetName(eBlastOpt_Web_StepNumber));
-    //
-    // 	CRef<CBlast4_value> v(new CBlast4_value);
-    // 	v->SetInteger(num_iters);
-    // 	p->SetValue(*v);
-    //
-    // 	m_QueueSearchRequest->SetFormat_options().Set().push_back(p);
-    // }
-    // ```
     if let Some(step) = request.step_number {
         out.enc.member("format-options", 7);
         out.enc.begin_named("Blast4-parameters");
@@ -634,14 +581,6 @@ fn write_strategy_document<E: Encoder>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-505
-// ```c++
-//     // Set the filtering algorithms
-//     string algo_key = db->GetFilteringAlgorithmKey();
-//     if (algo_key != kEmptyStr)
-//     {
-//     	int mask_type = (int) db->GetMaskType();
-//        	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_DbFilteringAlgorithmKey), algo_key);
-// ```
 /// Whether `encoding` writes every string of a request's document as it is: the command line's
 /// (`ArchiveRequest::written_as_is`), the batch's Bioseqs (`RequestInputs::written_as_is`) and the
 /// string options that the run's handle adds (`sets`, and `database_params`: the
@@ -730,11 +669,15 @@ pub fn write_archive<A: AlignSource>(
     sink: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    let messages = handle.take_messages();
     let sets = handle.request_sets(batch.searched_space);
-    let params = handle.options().database_params();
     let request = handle.request();
     let encoding = handle.encoding();
+    // A big integer of -2^63 (`-dbsize`), which NCBI's ASN.1 text and XML writers print as `-0` (a
+    // signed overflow of `COStreamBuffer::PutInt8`), is written as its digits: PD-LOSAT-NCBI-DEFECTS
+    // approved exception 17, Int8 -2^63 written as digits (the Owner's Q1 = A of 2026-11-17,
+    // `big_int`).
+    let messages = handle.take_messages();
+    let params = handle.options().database_params();
     let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);
     let post = |replaced: &ReplacedChar| {
         super::post_replaced(

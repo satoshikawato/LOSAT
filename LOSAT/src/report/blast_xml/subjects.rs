@@ -118,26 +118,7 @@ impl SubjectNames {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
-    // ```c++
-    //     } catch (const CException&) {
-    //         // If Bioseq handle didn't return some of the information, and not all
-    //         // mandatory couldn't be filled, skip this hit completely.
-    //         //hit.Reset(NULL);
-    //         hit->SetId(kSeqId.AsFastaString());
-    //         hit->SetDef("Unknown");
-    //         hit->SetAccession("Unknown");
-    //         hit->SetLen(0);
-    //     };
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417
-    // ```c++
-    //     } catch (const CException&) {
-    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //     	hit_exp->SetId(kSeqId.AsFastaString());
-    //         hit->SetDescription().push_back(hit_exp);
-    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
-    //     };
-    // ```
     /// The names of a `-subject` record whose `GenerateDefline` threw (`NStr::HtmlDecode` cannot
     /// guess its title's encoding), as NCBI's catch writes them: outfmt 5's `Hit_id`
     /// `kSeqId.AsFastaString()` (`fasta_id`), `Hit_def` and `Hit_accession` `Unknown` and `Hit_len`
@@ -183,17 +164,6 @@ impl SubjectNames {
             return Err(Refusal::ReadsPastEnd);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:393-406
-        // ```c++
-        //         	CRef<CSeq_id> best_id = FindBestChoice(ids, CSeq_id::Score);
-        //         	if(!best_id->IsLocal()) {
-        //         		CSeq_id_Handle id_handle = CSeq_id_Handle::GetHandle(*best_id);
-        //         		string accession = CAlignFormatUtil::GetLabel(id_handle.GetSeqId());
-        //         		if(accession != kEmptyStr)
-        //         			hit_exp->SetAccession(accession);
-        //         	}
-        //
-        //    			hit_exp->SetTitle(sequence::CDeflineGenerator().GenerateDefline(subj_handle));
-        // ```
         // The XML2 `HitDescr` of a record whose best id is not local has its accession too.
         let descriptions = if subject.has_local_best_id() {
             Vec::new()
@@ -239,24 +209,7 @@ impl SubjectNames {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-388, 422-428
-    // ```c++
-    //         		if(defline.IsSetTaxid() && defline.GetTaxid() != ZERO_TAX_ID) {
-    //         			TTaxId tax_id = defline.GetTaxid();
-    //        				hit_exp->SetTaxid(tax_id);
-    //         			if(hasTaxDB) {
-    //         				 SSeqDBTaxInfo taxinfo;
-    //         				 CSeqDB::GetTaxInfo(tax_id, taxinfo);
-    //         				 hit_exp->SetSciname(taxinfo.scientific_name);
-    //         			}
-    //         		}
-    //         		descr_list.push_back(hit_exp);
-    //     ...
-    //     } catch (const CException&) {
-    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //     	hit_exp->SetId(kSeqId.AsFastaString());
-    //         hit->SetDescription().push_back(hit_exp);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-415,422-428
     /// The names of a database sequence with parsed Seq-ids (`ParsedSubject::xml_hit` and
     /// `hit_descriptions`): `Hit_id`, `Hit_def` and `Hit_accession` of outfmt 5, and the
     /// `HitDescr` of each definition line of XML2 and JSON with what the taxonomy database said
@@ -295,7 +248,7 @@ impl SubjectNames {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360, 412-417
-// (quoted at `report::db_subject::ParsedSubject::lookup_throws`: the `Hit` loads its subject by
+// (cited at `report::db_subject::ParsedSubject::lookup_throws`: the `Hit` loads its subject by
 // the Seq-align id, and a lookup that throws there throws again outside the hit's `catch`)
 /// What a `Hit` shows of its subject, made before the report (`SubjectNameCache`, and TBLASTN's
 /// and BLASTX's names of the subjects with hits), by what the reports do at it
@@ -437,29 +390,6 @@ impl XmlSubjects<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:465-487
-// ```c++
-//     int index = 1;
-//     bool incremental_output = (bool)out_stream;
-//     while (iter != alnset.Get().end()) {
-//         CRef<CHit> new_hit;
-//         // Retrieve the next set of results for a single subject sequence.
-//         // If the next Seq-align is discontinuous, then take it as is,
-//         // otherwise go along the chain of Seq-aligns until the subject Seq-id
-//         // changes, then wrap the single subject list into a discontinuous
-//         // Seq-align.
-//         if ((*iter)->GetSegs().IsDisc()) {
-//             s_SeqAlignToXMLHit(new_hit, *(*iter), scope, matrix, mask_info,
-//                                ungapped, master_gentice_code, slave_genetic_code);
-//             ++iter;
-//         } else {
-//             CSeq_align_set one_subject_alnset;
-//             CConstRef<CSeq_id> current_id(s_GetSubjectId(*(*iter)));
-//             for ( ; iter != alnset.Get().end(); ++iter) {
-//                 CConstRef<CSeq_id> next_id(s_GetSubjectId(*(*iter)));
-//                 if (!current_id->Match(*next_id)) {
-//                     break;
-//                 }
-// ```
 // (XML2 and JSON: blastxml2_format.cpp:480-497, the same.)
 /// The HSP lists of a query's hit list `lists` that the XML, XML2 and JSON reports show as one
 /// `Hit` each, in order: ranges of the lists, each of a subject and the copies that follow it
@@ -518,115 +448,5 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Line DBID pfoff-1 (DECISIONS 62; review 1, M1): the `Hit` of a database sequence whose
-    // lookup throws where a batch's prefetch is off has no names: by the one answer of the reports'
-    // loads (`HitLoads`), the cache keeps the lookup's exception for the `Hit` and raises it there
-    // (`CaughtException`); a subject shown only after it gets no names (nothing of it is made or
-    // refused); the others are named as before.
-    #[test]
-    fn the_hit_of_a_subject_whose_lookup_throws_raises_the_lookup_exception() {
-        use crate::report::db_subject::{FoundInstead, HitLoads, LookupFailure};
-        let set = |accession: &str| crate::seqid::DeflineSet {
-            deflines: vec![crate::seqid::BlastDefline {
-                title: Some(b"t".to_vec()),
-                ids: vec![crate::seqid::ParsedSeqId::Genbank(
-                    crate::seqid::model::TextseqId {
-                        accession: Some(accession.as_bytes().to_vec()),
-                        version: Some(1),
-                        ..Default::default()
-                    },
-                )],
-                ..Default::default()
-            }],
-            utf8: false,
-        };
-        let failure = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
-        let exception = failure.exception().unwrap();
-        let thrown = ParsedSubject::new(set("AAA00001"))
-            .unwrap()
-            .found_instead(Some(FoundInstead::Failed(failure)));
-        let found = |accession| Some(Arc::new(ParsedSubject::new(set(accession)).unwrap()));
-        let parsed = vec![Some(Arc::new(thrown)), found("AAA00002"), found("AAA00003")];
-        // One report read one by one: rank 1, then rank 0 (whose lookup throws), then rank 2.
-        let loads = HitLoads::of(
-            Some(crate::report::db_subject::RunThrow::every_row(
-                crate::report::db_subject::AfterThrow::EndsReport,
-            )),
-            [(true, vec![Some(1), Some(0), Some(2)])],
-            |rank: usize| parsed[rank].as_deref(),
-            |_, _| 0,
-        );
-        let titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"t"[..]); 3];
-        let subjects = XmlSubjects::Database {
-            ordinals: &[0, 1, 2],
-            oids: crate::seqdb::OidMap::unrestricted(),
-            titles: XmlTitles::Shared(&titles),
-            taxids: &[],
-            taxonomy: &[],
-            length: &|_| 10,
-            parsed: &parsed,
-            parsed_taxonomy: &[],
-            loads: &loads,
-        };
-        // The names themselves do not decide the throw.
-        assert!(subjects.names(0, "BLASTP").is_ok());
-        let mut cache = SubjectNameCache::new(&subjects);
-        // Made before the report (a refusal would be the error), raised at the `Hit`.
-        let held = cache.get(0, "BLASTP").unwrap();
-        assert!(matches!(held, HitNames::Throws(kept) if *kept == exception));
-        let raised = held.names().err().unwrap();
-        assert!(raised.is::<crate::report::blast_xml::CaughtException>());
-        assert!(cache.get(1, "BLASTP").unwrap().names().is_ok());
-        let unread = cache.get(2, "BLASTP").unwrap();
-        assert!(matches!(unread, HitNames::Unread));
-        assert!(!unread
-            .names()
-            .err()
-            .unwrap()
-            .is::<crate::report::blast_xml::CaughtException>());
-        // A refusal of the names of a loaded subject passes through; nothing is made for one that
-        // no report loads.
-        assert!(HitNames::of(&loads, 1, || Err(anyhow::anyhow!("refused"))).is_err());
-        assert!(matches!(
-            HitNames::of(&loads, 2, || Err(anyhow::anyhow!("refused"))),
-            Ok(HitNames::Unread)
-        ));
-        // Where the run writes another format, every subject is loaded and named.
-        let every = HitLoads::of(
-            None,
-            [(true, vec![Some(0), Some(2)])],
-            |rank: usize| parsed[rank].as_deref(),
-            |_, _| 0,
-        );
-        assert!(matches!(
-            HitNames::of(&every, 0, || subjects.names(0, "BLASTP")),
-            Ok(HitNames::Names(_))
-        ));
-    }
-
-    // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list
-    // without HSPs shows nothing and does not part them.
-    #[test]
-    fn lists_of_joined_subjects_make_one_hit() {
-        let lists = [
-            Some(4),
-            Some(4),
-            None,
-            Some(9),
-            Some(2),
-            None,
-            Some(3),
-            Some(5),
-        ];
-        let joins = |previous: usize, s_idx: usize| matches!((previous, s_idx), (4, 9) | (3, 5));
-        assert_eq!(hit_ranges(&lists, |list| *list, joins), [0..4, 4..5, 6..8]);
-        assert_eq!(
-            hit_ranges(&lists, |list| *list, |_, _| false),
-            [0..2, 3..4, 4..5, 6..7, 7..8]
-        );
-        assert!(hit_ranges(&[None::<usize>], |list| *list, joins).is_empty());
-    }
-}
+#[path = "subjects_tests.rs"]
+mod tests;

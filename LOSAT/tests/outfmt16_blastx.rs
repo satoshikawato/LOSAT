@@ -148,7 +148,11 @@ fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start:
         for &mode in modes {
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastx", "-query", query];
                 args.extend(match mode {
@@ -424,7 +428,11 @@ fn a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it()
     for format in ["15", "16"] {
         let name = format!("taxbad_blastx_db_{format}");
         let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-        let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+        // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+        let err = losat::wording::losat_output_bytes(
+            &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+        )
+        .into_owned();
         for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastx",
@@ -476,7 +484,11 @@ fn a_taxid_that_is_in_the_database_but_never_reported_writes_no_name() {
         for (case, taxdb) in [("good", "good"), ("badname", "high_bytes_utf8")] {
             let name = format!("mixtax_blastx_{case}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/seqdb/taxdb")
                 .join(taxdb);
@@ -566,7 +578,11 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
             }
             let frozen = engine.join("tests/fixtures/db_search");
             let out = fs::read(frozen.join(format!("{id}.out"))).unwrap();
-            let err = fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default();
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             assert!(
                 output.stdout == out,
                 "{id} threads {threads}: stdout differs"

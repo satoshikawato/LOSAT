@@ -1,0 +1,295 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">allx a query of X only"
+                  }
+                }
+              },
+              title "allx a query of X only"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 60,
+              seq-data ncbieaa "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXX"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">oj_tk TK-TMK with an O at 30 and a J at 60"
+                  }
+                }
+              },
+              title "oj_tk TK-TMK with an O at 30 and a J at 60"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 398,
+              seq-data ncbieaa "MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLF
+VKHSLETRYGCGTJTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDG
+TSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKG
+KLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK
+QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARA
+LFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE"
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">rr_part ribonucleotide reductase residues
+ 281-520"
+                  }
+                }
+              },
+              title "rr_part ribonucleotide reductase residues 281-520"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 240,
+              seq-data ncbieaa "KGSPISSWSGTHPGLMAFLQIFNVSVKKVSQGGDKRRGAAAIYISD
+WHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGK
+EVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKYSP
+IPSLRPYVDYREMKRVVKIMTRNLDKVIDVNFYAVDKT"
+            }
+          }
+        }
+      },
+      subject database "rps_mini",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -5 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 0
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 824
+          },
+          {
+            id str "blast_score",
+            value int 824
+          },
+          {
+            id str "e_value",
+            value real { 861290141194113, 10, -129 }
+          },
+          {
+            id str "bit_score",
+            value real { 321715655060337, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 188
+          },
+          {
+            id str "num_positives",
+            value int 188
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 482386934673367, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 4,
+          ids {
+            local str "Query_2",
+            general {
+              db "CDD",
+              tag id 101
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            59,
+            59,
+            -1,
+            60,
+            60
+          },
+          lens {
+            59,
+            1,
+            1,
+            130
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 876
+          },
+          {
+            id str "blast_score",
+            value int 876
+          },
+          {
+            id str "e_value",
+            value real { 224636440338056, 10, -139 }
+          },
+          {
+            id str "bit_score",
+            value real { 341722377124016, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "num_positives",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 755, 10, -1 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_3",
+            general {
+              db "CDD",
+              tag id 102
+            }
+          },
+          starts {
+            20,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 0",
+      "Effective search space used: 0",
+      "Length adjustment: 0"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [rpsblast] rps_mini contain(s) no freq ratios needed
+ for composition-based statistics. RPSBLAST will be run without
+ composition-based statistics."
+    }
+  }
+}

@@ -2,7 +2,7 @@
 //! blobs that `makeblastdb` writes next to the sequence files, among them the mask data
 //! of `-mask_data` (the column titled `BlastDb/MaskData`).
 //!
-//! NCBI reads them with `CSeqDBColumn` (`seqdbcol.cpp`) and `CBlastDbBlob`
+//! NCBI reads them with `CSeqDBColumn` (`c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp`) and `CBlastDbBlob`
 //! (`seqdbblob.cpp`); a volume opens all its columns the first time one is asked for
 //! (`CSeqDBVol::x_OpenAllColumns`). This module does the same with positioned reads.
 //!
@@ -51,37 +51,11 @@ impl<'a> Blob<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:547-550
-    // ```c++
-    // void CBlastDbBlob::SeekRead(int offset)
-    // {
-    //     m_ReadOffset = offset;
-    // }
-    // ```
     pub(super) fn seek_read(&mut self, offset: i64) {
         self.offset = offset;
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:209-226
-    // ```c++
-    // const char * CBlastDbBlob::x_ReadRaw(int size, int * offsetp) const
-    // {
-    //     _ASSERT(offsetp);
-    //     _ASSERT(size >= 0);
-    //
-    //     CTempString s = Str();
-    //
-    //     int begin = *offsetp;
-    //     int end = begin + size;
-    //
-    //     if (begin > end || end > (int)s.size()) {
-    //         NCBI_THROW(CSeqDBException,
-    //                    eFileErr,
-    //                    "CBlastDbBlob::x_ReadRaw: hit end of data");
-    //     }
-    //
-    //     *offsetp = end;
-    //     return s.data() + begin;
-    // ```
     /// `x_ReadRaw`. A read that starts before the data, which NCBI would perform on the
     /// bytes in front of its buffer, is LOSAT's own error.
     pub(super) fn read_raw(&mut self, size: i64) -> Result<&'a [u8], String> {
@@ -100,46 +74,6 @@ impl<'a> Blob<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbblob.hpp:386-423
-    // ```c++
-    //     /// @param offsetp The offset to read at.
-    //     /// @return The value that was read.
-    //     template<typename TValue, int TBytes>
-    //     TValue x_ReadIntFixed(int * offsetp) const
-    //     {
-    //         // Check that the value fits in the specified range.
-    //         unsigned char * buf = (unsigned char*) x_ReadRaw(TBytes, offsetp);
-    //         unsigned char * vbuf = buf - 8 + TBytes;
-    //
-    //         TValue x = vbuf[7];
-    //
-    //         switch(TBytes) {
-    //         case 8: x |= Uint8(vbuf[0]) << 56;
-    //         case 7: x |= Uint8(vbuf[1]) << 48;
-    //         case 6: x |= Uint8(vbuf[2]) << 40;
-    //         case 5: x |= Uint8(vbuf[3]) << 32;
-    //         case 4: x |= Uint4(vbuf[4]) << 24;
-    //         case 3: x |= Uint4(vbuf[5]) << 16;
-    //         case 2: x |= Uint4(vbuf[6]) << 8;
-    //         case 1:
-    //             break;
-    //         default:
-    //             _ASSERT(0);
-    //         }
-    //
-    //         if (TBytes < sizeof(TValue)) {
-    //             // This only applies to 'shortened' formats, such as an
-    //             // Int8 packed in 5 bytes or an Int4 packed in 3 bytes.
-    //             // It only affects signed values, its purposes is to fix
-    //             // the numeric sign.  The current design does not use
-    //             // shortened formats anywhere.
-    //
-    //             int bits = (sizeof(TValue)-TBytes) * 8;
-    //             x = (x << bits) >> bits;
-    //         }
-    //
-    //         return x;
-    //     }
-    // ```
     /// `ReadInt4`: four bytes, most significant first.
     pub(super) fn read_i32(&mut self) -> Result<i32, String> {
         let bytes = self.read_raw(4)?;
@@ -155,32 +89,6 @@ impl<'a> Blob<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:92-115
-    // ```c++
-    // Int8 CBlastDbBlob::x_ReadVarInt(int * offsetp) const
-    // {
-    //     CTempString all = Str();
-    //     Int8 rv(0);
-    //
-    //     for(size_t i = *offsetp; i < all.size(); i++) {
-    //         int ch = all[i];
-    //
-    //         if (ch & 0x80) {
-    //             // middle
-    //             rv = (rv << 7) | (ch & 0x7F);
-    //         } else {
-    //             // end
-    //             rv = (rv << 6) | (ch & 0x3F);
-    //             *offsetp = static_cast<int>(i+1);
-    //
-    //             return (ch & 0x40) ? -rv : rv;
-    //         }
-    //     }
-    //
-    //     NCBI_THROW(CSeqDBException,
-    //                eFileErr,
-    //                "CBlastDbBlob::ReadVarInt: eof while reading integer.");
-    // }
-    // ```
     /// `ReadVarInt`. The shifts wrap where NCBI's `Int8` arithmetic overflows.
     pub(super) fn read_varint(&mut self) -> Result<i64, String> {
         let mut value: i64 = 0;
@@ -204,47 +112,6 @@ impl<'a> Blob<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:169-207
-    // ```c++
-    // CTempString CBlastDbBlob::x_ReadString(EStringFormat fmt, int * offsetp) const
-    // {
-    //     int sz = 0;
-    //
-    //     if (fmt == eSize4) {
-    //         sz = x_ReadIntFixed<int,4>(offsetp);
-    //     } else if (fmt == eSizeVar) {
-    //         sz = static_cast<int>( x_ReadVarInt(offsetp));
-    //     }
-    //
-    //     const char * datap = "";
-    //
-    //     if (fmt == eNUL) {
-    //         CTempString ts = Str();
-    //         int zoffset = -1;
-    //
-    //         for(size_t i = *offsetp; i < ts.size(); i++) {
-    //             if (ts[i] == (char)0) {
-    //                 zoffset = static_cast<int>(i);
-    //                 break;
-    //             }
-    //         }
-    //
-    //         if (zoffset == -1) {
-    //             NCBI_THROW(CSeqDBException,
-    //                        eFileErr,
-    //                        "CBlastDbBlob::ReadString: Unterminated string.");
-    //         }
-    //
-    //         datap = ts.data() + *offsetp;
-    //         sz = zoffset - *offsetp;
-    //         *offsetp = zoffset+1;
-    //     } else {
-    //         datap = x_ReadRaw(sz, offsetp);
-    //     }
-    //
-    //     return CTempString(datap, sz);
-    // }
-    // #endif
-    // ```
     /// `ReadString(eSizeVar)`: a variable-length size, then that many bytes. The size is
     /// truncated to an `int` as NCBI does.
     pub(super) fn read_string_var(&mut self) -> Result<&'a [u8], String> {
@@ -350,29 +217,6 @@ impl Column {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:102-145
-    // ```c++
-    // CSeqDBColumn::CSeqDBColumn(const string   & basename,
-    //                            const string   & index_extn,
-    //                            const string   & data_extn,
-    //                            CSeqDBLockHold * lockedp)
-    //     : m_AtlasHolder      (lockedp, true),
-    //     ...
-    //     try {
-    //         CSeqDB_Path fn1(basename + "." + index_extn);
-    //         CSeqDB_Path fn2(basename + "." + data_extn);
-    //
-    //         bool found1 = m_IndexFile.Open(fn1);
-    //         bool found2 = m_DataFile.Open(fn2);
-    //
-    //         if (! (found1 && found2)) {
-    //             NCBI_THROW(CSeqDBException, eFileErr,
-    //                        "Could not open database column files.");
-    //         }
-    //
-    //         x_ReadFields(*lockedp);
-    //         x_ReadMetaData(*lockedp);
-    //     }
-    // ```
     /// Opens the column whose index file is `index_path` and data file `data_path`.
     pub(super) fn open(index_path: &Path, data_path: &Path) -> Result<Self, SeqDbError> {
         let index = DbFile::open(index_path)?;
@@ -395,74 +239,6 @@ impl Column {
     /// `x_ReadFields`. Returns `m_MetaDataStart`.
     fn read_fields(&mut self) -> Result<i32, SeqDbError> {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:206-271
-        // ```c++
-        // void CSeqDBColumn::x_ReadFields(CSeqDBLockHold & locked)
-        // {
-        //     const int kFixedFieldBytes = 32;
-        //
-        //     m_Atlas.Lock(locked);
-        //
-        //     // First, get the 32 bytes of fields that we know exist.
-        //
-        //     CBlastDbBlob header;
-        //     x_GetFileRange(0, kFixedFieldBytes, e_Index, false, header, locked);
-        //
-        //     int fmt_version = header.ReadInt4();
-        //
-        //     if (fmt_version != 1) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "Column file uses unknown format_version.");
-        //     }
-        //
-        //     int column_type = header.ReadInt4();
-        //
-        //     if (column_type != 1) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "Column file uses unknown data type.");
-        //     }
-        //
-        //     int offset_size = header.ReadInt4();
-        //
-        //     if (offset_size != 4) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "Column file uses unsupported offset size.");
-        //     }
-        //
-        //     m_NumOIDs = header.ReadInt4();
-        //     m_DataLength = header.ReadInt8();
-        //     m_MetaDataStart = header.ReadInt4();
-        //     m_OffsetArrayStart = header.ReadInt4();
-        //
-        //     SEQDB_FILE_ASSERT(m_NumOIDs || (! m_DataLength));
-        //
-        //     SEQDB_FILE_ASSERT(m_MetaDataStart >= 0);
-        //     SEQDB_FILE_ASSERT(m_OffsetArrayStart >= m_MetaDataStart);
-        //     SEQDB_FILE_ASSERT(m_IndexFile.GetFileLength() >= m_OffsetArrayStart);
-        //
-        //     // Now we know how long the header actually is, so expand the blob
-        //     // to reference the whole thing.  (The memory lease should already
-        //     // hold the data, so this will just adjust a few integer fields.)
-        //
-        //     x_GetFileRange(0, m_MetaDataStart, e_Index, false, header, locked);
-        //
-        //     // Get string type header fields.
-        //
-        //     m_Title = header.ReadString (kStringFmt);
-        //     m_Date  = header.ReadString (kStringFmt);
-        //
-        //     SEQDB_FILE_ASSERT(m_Title.size());
-        //     SEQDB_FILE_ASSERT(m_Date.size());
-        //
-        //     if (header.GetReadOffset() != m_MetaDataStart) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "CSeqDBColumn: File format error.");
-        //     }
-        // }
-        // ```
         // Reading 32 bytes of a shorter file fails `SEQDB_FILE_ASSERT(m_Length >= end)`.
         if self.index.len() < FIXED_FIELD_BYTES {
             return Err(self.integrity_error(format!(
@@ -546,56 +322,6 @@ impl Column {
     /// `x_ReadMetaData`.
     fn read_metadata(&mut self, meta_data_start: i32) -> Result<(), SeqDbError> {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:273-320
-        // ```c++
-        // void CSeqDBColumn::x_ReadMetaData(CSeqDBLockHold & locked)
-        // {
-        //     m_Atlas.Lock(locked);
-        //
-        //     int begin = m_MetaDataStart;
-        //     int end = m_OffsetArrayStart;
-        //
-        //     _ASSERT(begin > 0 && end > begin);
-        //
-        //     CBlastDbBlob metadata;
-        //     x_GetFileRange(begin, end, e_Index, false, metadata, locked);
-        //
-        //     Int8 count8 = metadata.ReadVarInt();
-        //
-        //     if (count8 >> 31) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "CSeqDBColumn: File format error.");
-        //     }
-        //
-        //     int count = (int) count8;
-        //
-        //     for(int j = 0; j < count; j++) {
-        //         string key = metadata.ReadString(kStringFmt);
-        //         string value = metadata.ReadString(kStringFmt);
-        //
-        //         if (m_MetaData.find(key) != m_MetaData.end()) {
-        //             NCBI_THROW(CSeqDBException,
-        //                        eFileErr,
-        //                        "CSeqDBColumn: Error; duplicate metadata key.");
-        //         }
-        //
-        //         m_MetaData[key] = value;
-        //     }
-        //
-        //     // Align to an 8 byte multiple; eString means that we can change
-        //     // the alignment of this field without losing compatibility.
-        //
-        //     metadata.SkipPadBytes(8, CBlastDbBlob::eString);
-        //
-        //     int header_bytes = m_OffsetArrayStart - m_MetaDataStart;
-        //
-        //     if (metadata.GetReadOffset() != header_bytes) {
-        //         NCBI_THROW(CSeqDBException,
-        //                    eFileErr,
-        //                    "CSeqDBColumn: File format error.");
-        //     }
-        // }
-        // ```
         // Reading the range `begin..end` fails `SEQDB_FILE_ASSERT(start < end)` when it is
         // empty.
         if self.offset_array_start <= meta_data_start {
@@ -634,39 +360,6 @@ impl Column {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:322-352
-    // ```c++
-    // void CSeqDBColumn::GetBlob(int              oid,
-    //                            CBlastDbBlob   & blob,
-    //                            bool             keep,
-    //                            CSeqDBLockHold * lockedp)
-    // {
-    //     _ASSERT(0 == blob.Size());
-    //
-    //     CSeqDBLockHold locked2(m_Atlas);
-    //
-    //     if (lockedp == NULL) {
-    //         lockedp = & locked2;
-    //     }
-    //
-    //     int item_size = 4;
-    //     int istart = m_OffsetArrayStart + item_size*oid;
-    //     int iend = istart + (2 * item_size);
-    //
-    //     CBlastDbBlob offsets;
-    //     x_GetFileRange(istart, iend, e_Index, false, offsets, *lockedp);
-    //
-    //     int dstart = offsets.ReadInt4();
-    //     int dend = offsets.ReadInt4();
-    //
-    //     SEQDB_FILE_ASSERT(dend >= dstart);
-    //
-    //     if (dend > dstart) {
-    //         x_GetFileRange(dstart, dend, e_Data, keep, blob, *lockedp);
-    //     } else {
-    //         _ASSERT(! blob.Size());
-    //     }
-    // }
-    // ```
     /// The blob of the sequence `oid` (volume-relative); empty when the sequence has none
     /// ([`Column::read_blobs`] of the one sequence).
     pub fn blob(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
@@ -833,105 +526,8 @@ impl Column {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3325-3392
-// ```c++
-// void CSeqDBVol::x_OpenAllColumns(CSeqDBLockHold & locked)
-// {
-//     //m_Atlas.Lock(locked);
-//
-//     if (m_HaveColumns) {
-//         return;
-//     }
-//
-//     string alpha("abcdefghijklmnopqrstuvwxyz");
-//     string ei("??a"), ed("??b"), ed2("??c");
-//
-//     ei[0] = ed[0] = ed2[0] = (m_IsAA ? 'p' : 'n');
-//
-//     map<string,int> unique_titles;
-//
-//     for(size_t i = 0; i < alpha.size(); i++) {
-//         ei[1] = ed[1] = ed2[1] = alpha[i];
-//
-//         if (CSeqDBColumn::ColumnExists(m_VolName, ei, m_Atlas)) {
-//
-//             bool big   = CSeqDBColumn::ColumnExists(m_VolName, ed, m_Atlas);
-//             bool small = CSeqDBColumn::ColumnExists(m_VolName, ed2, m_Atlas);
-//
-//             if ( ! (big || small)) continue;
-//
-//             CRef<CSeqDBColumn> col;
-//
-//             const Int2 bytetest = 0x0011;
-//             const char * ptr = (const char *) &bytetest;
-//             if (ptr[0] == 0x11 && small) {
-//                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed2, & locked));
-//             } else {
-//                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed, & locked));
-//             }
-//
-//             string errmsg, errarg;
-//
-//             string title = col->GetTitle();
-//
-//             if (unique_titles[title]) {
-//                 errmsg = "duplicate column title";
-//                 errarg = title;
-//             } else {
-//                 unique_titles[title] = 1;
-//             }
-//
-//             int noidc(col->GetNumOIDs()), noidv(m_Idx->GetNumOIDs());
-//
-//             if (noidc != noidv) {
-//                 errmsg = "column has wrong #oids";
-//                 errarg = NStr::IntToString(noidc) + " vs "
-//                     + NStr::IntToString(noidv);
-//             }
-//
-//             if (errmsg.size()) {
-//                 if (errarg.size()) {
-//                     errmsg += string(" [") + errarg + "].";
-//                 }
-//                 NCBI_THROW(CSeqDBException, eFileErr,
-//                            string("Error: ") + errmsg);
-//             }
-//
-//             m_Columns.push_back(col);
-//         }
-//     }
-//
-//     m_HaveColumns = true;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:311-318
-// ```c++
-//     for(int col_i = 0; col_i < (int)m_Columns.size(); col_i++) {
-//         _ASSERT(col_i * 2 < (int) blobs.size());
-//         if (col_i == maskcol_id) {
-//              m_Columns[col_i]->AddBlob(*blobs[col_i * 2], *blobs[col_i * 2 + 1]);
-//         } else {
-//              m_Columns[col_i]->AddBlob(*blobs[col_i * 2]);
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:93-107
-// ```c++
-// void CWriteDB_Column::AddBlob(const CBlastDbBlob & blob)
-// {
-//     // Note that data size is the size *after* the blob has been
-//     // written.  The initial (zero) offset is written during file
-//     // creation.
-//
-//     Int8 data_size = m_DFile->WriteBlob(blob);
-//     m_IFile->WriteBlobIndex(data_size);
-// }
-//
-// void CWriteDB_Column::AddBlob(const CBlastDbBlob & blob, const CBlastDbBlob & blob2)
-// {
-//     AddBlob(blob);
-//     if (m_UseBothByteOrder) m_DFile2->WriteBlob(blob2);
-// }
-// ```
 // The index file holds the offsets of the `.?xb` blobs (`WriteInt4`, big-endian), and the
 // `.?xc` blob of a sequence has the size of its `.?xb` blob, so one index serves either
 // data file. Only the mask column writes a `.?xc` (`blob2`, its ranges `WriteInt4_LE`); a
@@ -963,22 +559,6 @@ pub(super) fn open_all(
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3345-3358
-        // ```c++
-        //             bool big   = CSeqDBColumn::ColumnExists(m_VolName, ed, m_Atlas);
-        //             bool small = CSeqDBColumn::ColumnExists(m_VolName, ed2, m_Atlas);
-        //
-        //             if ( ! (big || small)) continue;
-        //
-        //             CRef<CSeqDBColumn> col;
-        //
-        //             const Int2 bytetest = 0x0011;
-        //             const char * ptr = (const char *) &bytetest;
-        //             if (ptr[0] == 0x11 && small) {
-        //                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed2, & locked));
-        //             } else {
-        //                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed, & locked));
-        //             }
-        // ```
         // `ptr[0] == 0x11` is a little-endian host.
         let data_path = if cfg!(target_endian = "little") && small {
             small_path
@@ -1064,5 +644,112 @@ impl ColumnBlobs {
                 "LOSAT internal error: the blob of sequence {oid} was read"
             )),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1955-2052
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2082-2115
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:368-375
+// NCBI numbers a column of the database by its title (`GetColumnId`: one entry per title,
+// holding each volume's own column of that title or none); LOSAT names it by the title. The
+// metadata of the database's column is made once from the volumes in their order, and a key
+// keeps the value of the first volume that has it. A sequence of a volume without a column of
+// the title has an empty blob.
+impl super::SeqDb {
+    /// `ListColumns`: the titles of the columns of all the volumes, each once, in the byte
+    /// order of the titles. Every volume opens its columns (`Volume::columns`), in the order of
+    /// the volumes, so the first volume whose columns cannot be opened gives the error.
+    pub fn column_titles(&self) -> Result<Vec<Vec<u8>>, SeqDbError> {
+        let mut all = std::collections::BTreeSet::new();
+        for volume in self.volumes() {
+            for column in volume.columns()? {
+                all.insert(column.title().to_vec());
+            }
+        }
+        Ok(all.into_iter().collect())
+    }
+
+    /// `GetColumnMetaData(GetColumnId(title))`: the metadata of the columns titled `title` of
+    /// all the volumes, a key with the value of the first volume (in the order of the volumes)
+    /// that has it.
+    pub fn column_meta_data(&self, title: &[u8]) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SeqDbError> {
+        let mut merged = BTreeMap::new();
+        for volume in self.volumes() {
+            let Some(column) = volume
+                .columns()?
+                .iter()
+                .find(|column| column.title() == title)
+            else {
+                continue;
+            };
+            for (key, value) in column.metadata() {
+                merged.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        Ok(merged)
+    }
+
+    /// The blobs of the column titled `title` (`GetColumnBlob`) for the sequences of `range`,
+    /// read into `block` with one read of the column's offset array and one of its data
+    /// ([`Column::read_blobs`]); none when the volume of `range` has no column of the title.
+    /// [`ColumnBlock::blob`] gives each sequence's.
+    pub fn read_column_block(
+        &self,
+        title: &[u8],
+        range: super::BlockRange,
+        block: &mut ColumnBlock,
+    ) {
+        block.error = None;
+        block.present = false;
+        let Some(volume) = self.volumes().get(range.volume) else {
+            block.error = Some(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes().len()
+            )));
+            return;
+        };
+        let columns = match volume.columns() {
+            Ok(columns) => columns,
+            Err(error) => {
+                block.error = Some(error);
+                return;
+            }
+        };
+        let Some(column) = columns.iter().find(|column| column.title() == title) else {
+            return;
+        };
+        block.present = true;
+        column.read_blobs(range.first, range.end, &mut block.blobs);
+    }
+}
+
+/// The blobs of one column of the database for the sequences of a block
+/// ([`super::SeqDb::read_column_block`]), kept with their buffers from one block to the next.
+/// No NCBI counterpart: NCBI points into its mapping of the column for each sequence.
+#[derive(Debug, Default)]
+pub struct ColumnBlock {
+    /// The error of every sequence of the block: the volume's columns could not be opened.
+    error: Option<SeqDbError>,
+    /// Whether the volume has a column of the title (none: every blob is empty).
+    present: bool,
+    blobs: ColumnBlobs,
+}
+
+impl ColumnBlock {
+    /// `GetColumnBlob` of the sequence `vol_oid` (volume-relative) of the block read: its blob
+    /// as the data file holds it, empty when it has none. An error is given once, owned: the
+    /// caller stops at it.
+    pub fn blob(&mut self, vol_oid: u32) -> Result<&[u8], SeqDbError> {
+        if let Some(error) = self.error.take() {
+            return Err(error);
+        }
+        if !self.present {
+            return Ok(&[]);
+        }
+        if self.blobs.blob(vol_oid).is_err() {
+            return Err(std::mem::take(&mut self.blobs).into_error(vol_oid));
+        }
+        Ok(self.blobs.blob(vol_oid).unwrap_or(&[]))
     }
 }

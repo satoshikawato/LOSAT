@@ -78,7 +78,8 @@ fn blastdbcmd(words: &[&str], config: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed.
+/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed, in LOSAT's words
+/// (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
     let root = run_dir();
@@ -91,7 +92,7 @@ fn expected(name: &str) -> Vec<u8> {
         rest = &rest[at + 3..];
     }
     placed.extend_from_slice(rest);
-    placed
+    losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
 /// The probe's cases: id, words, exit status. `db/nm5` and `db/nm4` have the dust masks 11 and

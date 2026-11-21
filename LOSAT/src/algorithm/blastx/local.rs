@@ -29,16 +29,6 @@ use anyhow::{bail, ensure, Result};
 use std::io::{self, Write};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c++
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
 // NCBI formats one result set without searching again; several requested formats are several
 // CBlastFormat printers over the same result set.
 /// Runs one BLASTX search over already parsed records and writes every requested output format
@@ -48,8 +38,10 @@ use std::io::{self, Write};
 /// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the options and
 /// of the subjects come in the command line's order, before the search. The `-query` and
 /// `-subject` values of `args` are used only as display names. Each format is the command line's
-/// writer of it (`report::render_queries`); the side files of outfmt 13 and 14, `-db`, and
-/// `-parse_deflines` for records without their ids are refused. LOSAT Web asks for outfmt 0, 6 and
+/// writer of it (`report::render_queries`); the side files of outfmt 13 and 14 and `-db` are
+/// refused. Under `-parse_deflines` the records are those that the reader read with the ids of
+/// their deflines (`api::input::read_search_inputs`, which LOSAT Web reads them with too), as for
+/// the other programs. LOSAT Web asks for outfmt 0, 6 and
 /// 7, 6 and 7 with a custom field list or delimiter too. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
@@ -67,14 +59,8 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
-    let requested = requested_formats(&args, outputs);
-    // LOSAT Web registers records before it knows the options: they keep no ids of their
-    // deflines. The library API's `read_inputs` reads them.
-    let ids_read = query_records
-        .iter()
-        .chain(subject_records)
-        .any(|record| record.believed().is_some());
-    let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
+    let requested = requested_formats(outputs);
+    let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(
@@ -140,14 +126,6 @@ fn search_records(
         subjects.push(subject);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // ```c++
-    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-    //     : m_QueryVector(& queries)
-    // {
-    //     if (queries.Empty()) {
-    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-    //     }
-    // ```
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
@@ -162,12 +140,6 @@ fn search_records(
     // The taxonomy database of the reports, where the command line asks (`native::run`).
     subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
-    // ```c++
-    //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-    //            	ERR_POST(Warning << "Query is Empty!");
-    //            	return BLAST_EXIT_SUCCESS;
-    //         }
-    // ```
     if query_records.is_empty() {
         diagnostics.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         return Ok(());
@@ -186,6 +158,9 @@ fn search_records(
         xml_matrix,
     )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
+    // NCBI's error of an XInclude format without a file name, where the command line gives it
+    // (`native::run_inner`, blastx_app.cpp:251).
+    outputs.xinclude_check(args.out.as_deref())?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true)?;
@@ -439,13 +414,7 @@ fn reader_batches(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
-// ```c++
-//         formatter.PrintProlog();
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
-// ```c++
-//         formatter.PrintEpilog(opt);
-// ```
 /// The prologs, the query batches (`run_query_batches`) with the reports of each in every format,
 /// the epilogs and the hit list of a search of records.
 fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Result<()> {
@@ -459,12 +428,19 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     } = run;
     // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
     let only_archive = outputs.only_archive();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // Whether the queries' warnings that a structured first format does not write go to the
+    // caller's receivers of the later formats that write them, each format's to its own
+    // (`ReportOutputs::later_warnings`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let ReportOutputs {
         formats,
         diagnostics,
+        later_warnings,
         hits: hits_sink,
         observer,
     } = outputs;
+    let mut later = later_warnings.as_deref_mut().filter(|_| keeps_later);
     // The caller's receivers of the side files of outfmt 13 and 14.
     let side_sinks: Vec<_> = formats
         .iter()
@@ -533,6 +509,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         wants_hits,
         only_archive,
         diagnostics,
+        &mut later,
         observer,
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
@@ -560,12 +537,38 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     Ok(())
 }
 
+/// The run's diagnostics as the writer of a query batch's shared warnings for one format
+/// (`write_run`): it tells whether the format wrote any text there, which marks the batch as
+/// warned whatever became of the format's report afterwards. No NCBI counterpart: NCBI's
+/// command line writes one format. It counts any text, not only the queries' warnings: the
+/// formats that share the diagnostics in LOSAT Web (outfmt 6 and 7 of the other search) run the
+/// same checks and stop at the same row (review r3 of 2026-11-20, L1).
+struct SharedWarnings<'a> {
+    diagnostics: &'a mut dyn Write,
+    wrote: bool,
+}
+
+impl Write for SharedWarnings<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.diagnostics.write(bytes)?;
+        self.wrote |= written > 0;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.diagnostics.flush()
+    }
+}
+
 /// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
 /// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
 /// document): whatever ends it, `report_batches` then ends the hold. `refusals` say what a
 /// refusal of each format's checks does (`FormatRefusal`): a format that fails alone writes
 /// nothing after it, and the first format that is still written writes the warnings that the
 /// formats share. `only_archive`: every format is the archive (`ReportOutputs::only_archive`).
+/// `later`: by format, the receivers of the queries' warnings that the first format does not write
+/// (a structured format): each later format that writes them writes its own there, as the
+/// command line's run of it writes them to standard error (`ReportOutputs::later_warnings`).
 /// Returns the run's hit list (`wants_hits`) and the database sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
@@ -576,6 +579,7 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
+    later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
 ) -> Result<(
     Vec<crate::report::pairwise::PairwiseHit>,
@@ -627,9 +631,6 @@ fn write_run(
         },
     );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
-    // ```c++
-    //         formatter.PrintProlog();
-    // ```
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
         let mut quiet = io::sink();
         let warnings: &mut dyn Write = if index == 0 {
@@ -682,14 +683,6 @@ fn write_run(
         )
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
-    // ```c++
-    //         formatter.PrintProlog();
-    //         ...
-    //         /*** Process the input ***/
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //         ...
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    // ```
     // What the run writes before its query batches ends here.
     if let Some(observer) = observer.as_deref_mut() {
         observer.queries_begin();
@@ -719,7 +712,7 @@ fn write_run(
         }
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
-        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (quoted at
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback
         // (`native::batch_titles`). Then the prefetch before the batch's reports reads
@@ -775,16 +768,6 @@ fn write_run(
             false => None,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-        // ```c++
-        //     // find the first valid context corresponding to this query
-        //     for (i = 0; i < context_per_query; i++) {
-        //         BlastContextInfo *ctx = query_info->contexts +
-        //                                 query_number * context_per_query + i;
-        //         if (ctx->is_valid) {
-        //             m_SearchSpace = ctx->eff_searchsp;
-        //             m_LengthAdjustment = ctx->length_adjustment;
-        //             break;
-        // ```
         // The statistics of each query of the batch for the observer.
         if let Some(observer) = observer.as_deref_mut() {
             super::blast_xml::observe_query_stats(
@@ -795,11 +778,15 @@ fn write_run(
             );
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
-        // ```c++
-        //             	ITERATE(CSearchResultSet, result, *results) {
-        //                	    formatter.PrintOneResultSet(**result, query_batch);
-        // ```
-        // Whether a format of the batch wrote the warnings that the formats share.
+        // Whether a format of the batch wrote the warnings that the formats share. This is
+        // LOSAT's own: NCBI's command line writes one format. The first format that is written
+        // writes them, and the diagnostics hold that format's standard error of the batch. The
+        // batch is warned once a format wrote its report of the batch whole or wrote any text to
+        // the diagnostics, also where its report then stopped (it failed alone after a query's
+        // warning: the formats after it do not write that warning again). A format that its
+        // checks refused before its first text there leaves the warnings to the next
+        // (`SharedWarnings`; line WQA, 2026-11-20: the flag was read off the refusal, so a format
+        // that stopped after a warning left the next one to write the same warning again).
         let mut warned = false;
         for (index, ((writer, options), refusal)) in writers
             .iter_mut()
@@ -816,14 +803,29 @@ fn write_run(
             // 9; the only text that their writer writes to it, `seqalign::write_blastx_seqalign`)
             // at every format, as the other programs write them.
             let mut quiet = io::sink();
-            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
+            let report_format = app::ReportFormat::from_number(i32::from(options.outfmt));
+            let seq_annot = report_format
                 .and_then(crate::report::serial::SerialFormat::of)
                 .is_some();
+            let writes = report_format.is_none_or(app::ReportFormat::writes_query_warnings);
             let warns = !warned;
-            let warnings: &mut dyn Write = if warns || seq_annot {
-                &mut *diagnostics
-            } else {
-                &mut quiet
+            // A later format that writes the queries' warnings where the first, a structured
+            // one, does not, writes its standard error of the batch's reports to its own
+            // receiver (`later`): one whose report stops has given what it wrote until then, and
+            // the caller keeps each line of the formats' texts once (line WQA's sweep, D3 review
+            // r3, 2026-11-19).
+            let own_later = later
+                .as_deref_mut()
+                .and_then(|later| later.get_mut(index))
+                .filter(|_| writes);
+            let mut shared = SharedWarnings {
+                diagnostics: &mut *diagnostics,
+                wrote: false,
+            };
+            let warnings: &mut dyn Write = match (warns || seq_annot, own_later) {
+                (true, _) => &mut shared,
+                (false, Some(later)) => later,
+                _ => &mut quiet,
             };
             // The values of a custom tabular field list are each format's (`reported_batch`
             // read the first format's).
@@ -864,16 +866,15 @@ fn write_run(
                         names,
                     },
                     writer,
-                    &mut *diagnostics,
+                    &mut shared,
                 )
                 .map_err(archive_error)
                 .and_then(|()| writer.flush().map_err(output_error));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
-                if refusal.check(archived)? {
-                    warned |= warns;
-                }
+                let written = refusal.check(archived)?;
+                warned |= warns && (written || shared.wrote);
                 continue;
             }
             let mut probe = observer
@@ -905,10 +906,11 @@ fn write_run(
             .and_then(|()| writer.flush().map_err(output_error));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
-            refusal.check(rendered)?;
+            let written = refusal.check(rendered)?;
             // A format refused by its checks wrote no warning (they come before its warnings and
-            // rows, `report::render_queries_with`).
-            warned |= warns && !refusal.refused();
+            // rows, `report::render_queries_with`); one whose report stopped after a warning
+            // wrote it.
+            warned |= warns && (written || shared.wrote);
         }
         first_hsp += match &hits {
             Some(hits) => hits.len(),
@@ -955,9 +957,6 @@ fn write_run(
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
-    // ```c++
-    //         formatter.PrintEpilog(opt);
-    // ```
     // The first format that is still written writes the warnings of the epilogs.
     let first = refusals.iter().position(|refusal| !refusal.refused());
     for (index, ((writer, options), refusal)) in writers
@@ -994,14 +993,6 @@ fn write_run(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
-// ```c++
-//         /*** Initialize the database/subject ***/
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 /// Runs one BLASTX search of the records `query_records` against the database of `args` and
 /// writes every requested output format from the same result (the library API's entry; the
 /// command line's is `native::run`). `settings` are the NCBI application settings, which find the
@@ -1020,7 +1011,7 @@ pub fn run_local_database(
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
     args.matrix_search = Some(settings.matrix_search.clone());
-    let requested = requested_formats(&args, outputs);
+    let requested = requested_formats(outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(
@@ -1083,6 +1074,7 @@ fn search_database(
         name,
         &settings,
         list.as_ref(),
+        args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
@@ -1137,8 +1129,26 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    // The formatter resolves the database masking before its other work (`native::run_inner`).
+    if let Some(option) = args.db_mask.option() {
+        let mask =
+            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        if let Some(mask) = &mask {
+            database.check_mask_limits(mask)?;
+        }
+        for options in &mut resolved {
+            options.db_mask = mask.clone();
+        }
+    }
+    // NCBI's error of an XInclude format without a file name, where the command line gives it
+    // (`native::run_inner`, blastx_app.cpp:251).
+    outputs.xinclude_check(args.out.as_deref())?;
     app::check_search_environment("BLASTX", false)?;
-    let pairwise = database.pairwise_database();
+    let pairwise = database.pairwise_database_masked(
+        resolved
+            .first()
+            .and_then(|options| options.db_mask.as_ref()),
+    );
     let no_reported = ReportedSubjects::default();
     let shown = ShownSubjects::Database {
         name: database.name(),
@@ -1210,10 +1220,10 @@ fn search_database(
 /// so for an argv and records that both fail the run reports the records' error.
 ///
 /// Outfmt 13 and 14 are read as in a run that gives them the caller's receiver of their side files
-/// (`OutputSink::Files`, which LOSAT Web gives them).
+/// (`OutputSink::Files`, which LOSAT Web gives them): a run without one gives NCBI's error after the
+/// records are read (`ReportOutputs::xinclude_check`).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let requested: Vec<(&str, bool)> = outfmts.iter().map(|&outfmt| (outfmt, true)).collect();
-    let (choices, resolutions) = read_options(args, &requested, false)?;
+    let (choices, resolutions) = read_options(args, outfmts)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1222,14 +1232,6 @@ pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2540-2545
-// ```c++
-//         TSeqRange subj_range;
-//         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-//             subj_range =
-//                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-//                             "Invalid specification of subject location");
-//         }
-// ```
 /// `-subject_loc`, which the command line reads after it opened the subject file and before it
 /// reads the subjects (`native::run_inner`).
 fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
@@ -1237,21 +1239,7 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
-// ```c++
-//     // set the sequence range
-//     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
-//         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
-//                                      "Invalid specification of query location");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:87-88,106-107
-// ```c++
-//     arg.Reset(new CFilteringArgs( !kQueryIsProtein ));
-//     m_Args.push_back(arg);
-// ...
-//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-//     arg.Reset(m_QueryOptsArgs);
-// ```
 /// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
 /// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
 /// `resolve_with_format` keeps it with the other deferred errors).
@@ -1274,59 +1262,36 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// subjects are read (`native::run_inner`).
 fn read_options(
     args: &BlastxArgs,
-    outfmts: &[(&str, bool)],
-    ids_read: bool,
+    outfmts: &[&str],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The records keep no ids read from their deflines (the host registers them before it knows
-    // the options).
-    if args.parse_deflines && !ids_read {
-        bail!("-parse_deflines is not supported in the browser yet");
-    }
+    // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
+    // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
+    // records that kept none, which also refused two empty inputs that the command line ends with
+    // NCBI's `Empty CBlastQueryVector`, is gone.
     read_format_options(args, outfmts)
 }
 
-/// The `-outfmt` value of each output of `outputs`, and whether the side files of outfmt 13 and 14
-/// have somewhere to go: a file next to which they are written (`api::run_to_file`), or the
-/// caller's receiver of them (`FormatOutput::side_out`).
-fn requested_formats<'o>(
-    args: &BlastxArgs,
-    outputs: &'o ReportOutputs<'_>,
-) -> Vec<(&'o str, bool)> {
-    outputs
-        .formats
-        .iter()
-        .map(|format| {
-            (
-                format.outfmt,
-                format.side_out(args.out.as_deref()).is_some(),
-            )
-        })
-        .collect()
+/// The `-outfmt` value of each output of `outputs`.
+fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
+    outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
-/// `read_options` without its refusals of what a search of records in memory cannot do: each
-/// format comes with whether its side files have somewhere to go (`requested_formats`).
+/// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
+/// and 14 whose side files have no file name to go by get NCBI's error later, where the command
+/// line gives it (`ReportOutputs::xinclude_check`).
 fn read_format_options(
     args: &BlastxArgs,
-    outfmts: &[(&str, bool)],
+    outfmts: &[&str],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
     let mut choices = Vec::with_capacity(outfmts.len());
-    for &(outfmt, side_files) in outfmts {
+    for &outfmt in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-        // No NCBI counterpart: the side files of outfmt 13 and 14 have nowhere to go without a file
-        // or a receiver of them.
-        if !side_files && matches!(choice.number, 13 | 14) {
-            bail!(
-                "output format {} is not supported in memory for BLASTX",
-                choice.number
-            );
-        }
         choices.push(choice);
     }
     ensure!(!choices.is_empty(), "no output format was requested");
@@ -1382,17 +1347,6 @@ fn check_resolutions(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-// ```c++
-//     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
-// }
-//
-// void CFastaReader::x_CloseMask(void)
-// {
-//     _ASSERT(m_MaskRangeStart != kInvalidSeqPos);
-//     m_CurrentMask->SetPacked_int().AddInterval
-//         (GetBestID(), m_MaskRangeStart, GetCurrentPos(ePosWithGapsAndSegs) - 1,
-//          eNa_strand_plus);
-// ```
 /// A record of NCBI's reader (`fasta_reader`, the records that LOSAT Web registers) as BLASTX's
 /// reader (`input.rs`) reads the same input: the residues in upper case and, with
 /// `-lcase_masking` (`lowercase`), the lowercase mask's intervals, which `fasta_reader` keeps as

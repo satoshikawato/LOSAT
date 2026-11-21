@@ -23,6 +23,9 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
+mod temp_support;
+pub(crate) use temp_support::expected_losat_bytes;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -31,12 +34,14 @@ fn engine() -> PathBuf {
 }
 
 fn frozen(name: &str, ext: &str) -> Vec<u8> {
-    std::fs::read(
-        engine()
-            .join("tests/fixtures/outfmt11")
-            .join(format!("bx_{name}.{ext}")),
+    expected_losat_bytes(
+        std::fs::read(
+            engine()
+                .join("tests/fixtures/outfmt11")
+                .join(format!("bx_{name}.{ext}")),
+        )
+        .unwrap_or_default(),
     )
-    .unwrap_or_default()
 }
 
 fn input(name: &str) -> String {
@@ -492,8 +497,8 @@ fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
 /// tokens whose exponents are equal and whose mantissas have 15 digits and differ by exactly 1.
 /// Apple's libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last
 /// of the 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property. A shorter
-/// mantissa (NCBI drops its trailing zeros) 1 away is not that. The Python copy of the rule, for
-/// the WASI guard, is `libm_last_digit_differences` in `LOSAT/tests/xinclude_fixtures.py`.
+/// mantissa (NCBI drops its trailing zeros) 1 away is not that. WASI has no such rule: its output
+/// is compared byte for byte.
 pub(crate) fn archives_match_allowing_libm_last_digit(
     got: &[u8],
     want: &[u8],

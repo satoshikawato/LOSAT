@@ -338,6 +338,12 @@ impl<R: Read> AsnSource for StreamSource<R> {
     }
 }
 
+/// The number of `' '` at the start of `bytes`.
+#[inline]
+fn spaces_at_start(bytes: &[u8]) -> usize {
+    bytes.iter().position(|&c| c != b' ').unwrap_or(bytes.len())
+}
+
 /// `FirstIdChar` (objistrasn.cpp:118-121).
 pub(crate) fn is_first_id_char(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
@@ -570,11 +576,14 @@ impl<S: AsnSource> Reader<S> {
             let rest = self.src.rest(pos);
             let mut i = 0;
             let c = loop {
+                // A run of spaces (the indentation of a text written with line ends) in one
+                // tight loop.
+                i += spaces_at_start(&rest[i..]);
                 let Some(&c) = rest.get(i) else {
                     break None;
                 };
                 match c {
-                    b' ' | b'\t' => i += 1,
+                    b'\t' => i += 1,
                     b'\r' | b'\n' => {
                         i += 1;
                         line += 1;

@@ -129,7 +129,7 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): per context, in context order, the
 /// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
 /// empty one and the whole interval), with the context's frame, which counts from the ends of the
-/// searched letters (`-query_loc`).
+/// searched letters (`-query_loc`); none for a batch that NCBI did not search.
 pub(super) fn query_masks(
     batch: &BatchResults,
     qidx: usize,
@@ -137,6 +137,12 @@ pub(super) fn query_masks(
 ) -> Vec<QueryMask> {
     let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
+    // The result of a batch that NCBI did not search has no masks (RPSTBLASTN's merge of several
+    // volumes takes volume 0's, rpsblast_local.cpp:174-175).
+    if batch.search_skipped {
+        return masks;
+    }
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
         for &(from, to) in &context.dna_masks {
             let Some((from, to)) =
@@ -1338,7 +1344,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     lists,
                     batch.query_ordinal + qidx,
                     options,
-                    |_| true,
+                    |_, _| true,
                     crate::algorithm::common::database::XML_EFFECT,
                 )?;
             }
@@ -1414,8 +1420,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
-                // Read by XML2 and JSON alone: the query of a batch NCBI did not search.
-                searched: !batch.search_skipped,
+                // Read by XML2 and JSON alone: a query without NCBI's alignment set
+                // (`BatchResults::has_alignment_set`).
+                searched: batch.has_alignment_set(options),
                 masks: &masks,
             };
             // The texts of the subjects that the query's report reads one by one, written where

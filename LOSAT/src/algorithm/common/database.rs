@@ -2482,11 +2482,12 @@ pub(crate) const XML_EFFECT: &str =
     "takes that query for it in BLAST XML, XML2 and JSON (outfmt 5, 13 to 16)";
 
 /// What NCBI does with it in the organism report and in the comma-separated values with a header
-/// line of the RPS programs whose fields read the sequence found by its Seq-align id or, in
-/// RPSTBLASTN, the alignment (`refuse_generated_query_id`).
+/// line of the RPS programs where they differ for it (`report::tabular::TabularSpec::
+/// refuses_generated_id`, `refuse_generated_query_id`).
 pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the organism report (outfmt \
-     18) and in comma-separated values with a header line (outfmt 20) whose fields read it \
-     (RPSTBLASTN's outfmt 20 can stop with an exception)";
+     18) of a profile with a taxid and in comma-separated values with a header line (outfmt 20) \
+     whose fields show what it finds by that id (RPSTBLASTN's outfmt 20 can stop with an \
+     exception)";
 
 /// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
 /// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same

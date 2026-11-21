@@ -434,7 +434,7 @@ pub(crate) fn write_blastx_archive(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
-        rps: false,
+        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),

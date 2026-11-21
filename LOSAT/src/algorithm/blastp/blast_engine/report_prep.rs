@@ -698,6 +698,7 @@ pub(super) fn refuse_unreportable(
         hit_lists,
         pairwise_hits,
         psi_found_before,
+        engine_counts,
         ..
     } = *prep;
     // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
@@ -854,24 +855,32 @@ pub(super) fn refuse_unreportable(
         && format_plans
             .iter()
             .any(|outfmt| matches!(outfmt, BlastpReport::Xml | BlastpReport::Xml2(_)));
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
     // rpsblast's organism report (outfmt 18) and comma-separated values with a header line
-    // (outfmt 20) whose fields read the sequence that NCBI's formatter finds by the entry's
-    // Seq-align id (`TabularSpec::reads_subject`; the organism report reads every one): NCBI's
-    // rows show the query's letters, titles, ids and taxonomy for it (PS15a-2). Refused as the
-    // documents above; a table of other fields is NCBI's bytes.
-    let rps_tables = args.rps_search.is_some()
-        && format_plans.iter().any(|outfmt| {
-            matches!(outfmt, BlastpReport::CustomTabular(spec)
-                if matches!(
-                    spec.kind,
-                    crate::report::tabular::TabularKind::CsvWithHeader
-                        | crate::report::tabular::TabularKind::TaxReport
-                ) && spec.reads_subject(crate::blastinput::app::Program::Blastp))
-        });
+    // (outfmt 20) where NCBI's rows show what its formatter finds by such an id, the query
+    // (`TabularSpec::refuses_generated_id`, PS15a-2): refused as the documents above; a table of
+    // other fields, and the organism report of a profile without a taxid, are NCBI's bytes.
+    // The reports that can refuse (an HSP with identities, a profile with a taxid).
+    let rps_tables: Vec<&crate::report::tabular::TabularSpec> = if args.rps_search.is_some() {
+        format_plans
+            .iter()
+            .filter_map(|outfmt| match outfmt {
+                BlastpReport::CustomTabular(spec)
+                    if spec.refuses_generated_id(
+                        crate::blastinput::app::Program::Blastp,
+                        1,
+                        true,
+                    ) =>
+                {
+                    Some(*spec)
+                }
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if let (true, false, Some(titles)) = (
-        anchored_view.is_some() || rps_xml || rps_tables,
+        anchored_view.is_some() || rps_xml || !rps_tables.is_empty(),
         args.parse_deflines,
         listed_titles.as_ref(),
     ) {
@@ -898,13 +907,38 @@ pub(super) fn refuse_unreportable(
             titles.refuse_generated_ids(
                 hit_lists,
                 &scope_of,
+                |_, _, _| true,
                 crate::algorithm::common::database::XML_EFFECT,
             )?;
         }
-        if rps_tables {
+        if !rps_tables.is_empty() {
             titles.refuse_generated_ids(
                 hit_lists,
                 &scope_of,
+                |query, list_index, subject| {
+                    let taxid = subject.first_source_taxid().is_some();
+                    let Some(Some(hit_list)) = hit_lists.get(query) else {
+                        return false;
+                    };
+                    hit_list.hsplist_array[list_index]
+                        .hsps
+                        .iter()
+                        .enumerate()
+                        .any(|(index_in_list, hsp)| {
+                            // The Seq-align's `num_ident` (`EngineCounts`).
+                            let num_ident = engine_counts.num_ident(
+                                (query as u32, list_index as u32, index_in_list as u32),
+                                hsp.num_ident,
+                            );
+                            rps_tables.iter().any(|spec| {
+                                spec.refuses_generated_id(
+                                    crate::blastinput::app::Program::Blastp,
+                                    num_ident,
+                                    taxid,
+                                )
+                            })
+                        })
+                },
                 crate::algorithm::common::database::TABLE_EFFECT,
             )?;
         }

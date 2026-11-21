@@ -9430,13 +9430,15 @@ fn run_call(
         outputs,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
-    // The merge of several volumes gives each query an alignment set, empty for a batch
-    // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
-    // PS12a, S2's rpsblast half).
-    let merged_unsearched;
-    let tabular_unsearched: &[bool] = if rps_multi_volume {
-        merged_unsearched = vec![false; query_batch_skipped.len()];
-        &merged_unsearched
+    // Whether NCBI's result of each query has no alignment set: a query of a batch that was
+    // not searched, but the merge of several volumes gives each query a set, empty for such a
+    // batch, so outfmt 7 counts `# 0 hits found` there (review A of PS12a, S2's rpsblast
+    // half), XML2 and JSON write `hits` and the plain message, the organism report its header
+    // (PS15a-2 review B1).
+    let merged_sets;
+    let no_alignment_set: &[bool] = if rps_multi_volume {
+        merged_sets = vec![false; query_batch_skipped.len()];
+        &merged_sets
     } else {
         &query_batch_skipped
     };
@@ -10413,7 +10415,7 @@ fn run_call(
         psiblast_hits_found: &psiblast_hits_found,
         psi_found_before: &psi_found_before,
         rps_gapped_k: &rps_gapped_k,
-        tabular_unsearched,
+        no_alignment_set,
         context: &context,
         call_batches: &call_batches,
         filtered_empty,

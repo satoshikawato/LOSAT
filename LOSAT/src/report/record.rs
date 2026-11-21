@@ -123,7 +123,7 @@ pub struct RunRecord<'a> {
     /// Whether the search is the RPS search of `program` (rpsblast: BLASTP's, rpstblastn:
     /// BLASTX's), whose subjects are the profiles of an RPS database: the Seq-annot's "Blast
     /// Type" (outfmt 8, 9, 12) names the RPS program. Nothing else reads it (the archive's
-    /// Seq-aligns carry no Blast Type, and its writers leave it false).
+    /// Seq-aligns carry no Blast Type).
     pub rps: bool,
     /// The database title (`-db`), or `None` for a `-subject` search.
     pub db_title: Option<&'a [u8]>,

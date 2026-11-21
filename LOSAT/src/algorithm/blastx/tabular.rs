@@ -438,8 +438,8 @@ pub(super) fn write_blastx_tabular(
                     &mut buf,
                     &query.query_line(),
                     &database,
-                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
-                    (!batch.search_skipped || options.merged_volumes()).then_some(count),
+                    // A query with an alignment set (`BatchResults::has_alignment_set`).
+                    batch.has_alignment_set(options).then_some(count),
                 )?;
                 writer.write_all(&buf)?;
                 buf.clear();
@@ -841,16 +841,18 @@ fn write_blastx_tax_report(
                 (
                     batch.query_ordinal + qidx,
                     lists.as_slice(),
-                    batch.search_skipped,
+                    batch.has_alignment_set(options),
                 )
             })
         })
         .zip(&titles)
-        .map(|((ordinal, lists, skipped), title)| TaxQuery {
+        .map(|((ordinal, lists, alignment_set), title)| TaxQuery {
             title,
             length: queries[ordinal].placement().length,
-            // A query of a batch that NCBI did not search has no Seq-align-set.
-            hsps: (!skipped).then(|| {
+            // A query without an alignment set (`BatchResults::has_alignment_set`: of a batch
+            // that NCBI did not search, but for the merge of several volumes) has no
+            // Seq-align-set.
+            hsps: alignment_set.then(|| {
                 lists
                     .iter()
                     .flat_map(|list| {

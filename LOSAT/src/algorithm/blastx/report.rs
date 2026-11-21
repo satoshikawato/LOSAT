@@ -104,16 +104,16 @@ pub(super) fn rps_generated_scopes(
 }
 
 /// The refusal of a reported list of the query `ordinal` (`lists`, those that `reported` keeps
-/// and `takes_query` picks) whose profile has the generated id of a query of its batch
-/// (`rps_generated_scopes`, `common::database::refuse_generated_query_id`), with what NCBI does
-/// with it in the format asked for (`effect`).
+/// and where the format differs for its profile, `differs`) whose profile has the generated id of
+/// a query of its batch (`rps_generated_scopes`, `common::database::refuse_generated_query_id`),
+/// with what NCBI does with it in the format asked for (`effect`).
 pub(super) fn refuse_rps_generated_ids(
     scopes: &crate::blastinput::query_batch::AnchoredBatchScopes,
     shown: &ShownSubjects<'_>,
     lists: &[super::results::HspList],
     ordinal: usize,
     options: &ResolvedOptions,
-    takes_query: impl Fn(&super::results::HspList) -> bool,
+    differs: impl Fn(&super::results::HspList, &crate::report::db_subject::ParsedSubject) -> bool,
     effect: &str,
 ) -> Result<()> {
     let ShownSubjects::Database {
@@ -122,11 +122,11 @@ pub(super) fn refuse_rps_generated_ids(
     else {
         return Ok(());
     };
-    for list in lists
-        .iter()
-        .filter(|list| reported(list, options.gapped) && takes_query(list))
-    {
-        if let Some(subject) = names.parsed_subject(list.oid) {
+    for list in lists.iter().filter(|list| reported(list, options.gapped)) {
+        if let Some(subject) = names
+            .parsed_subject(list.oid)
+            .filter(|subject| differs(list, subject))
+        {
             crate::algorithm::common::database::refuse_generated_query_id(
                 subject,
                 names.oid(list.oid),
@@ -864,24 +864,13 @@ pub(super) fn render_queries_with(
             options.outfmt
         )
     })?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-924
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:964-968
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
     // RPSTBLASTN's organism report (outfmt 18) and comma-separated values with a header line
     // (outfmt 20, item PS15a-2): a profile whose Seq-align id is the generated id of a query of
-    // its batch is that query for NCBI's formatter. Rows that read the sequence found by that id
-    // (`TabularSpec::reads_subject`, every one of the organism report) show the query's for it,
-    // and a row of outfmt 20 that enters the alignment block (`TabularSpec::opens_counts`) makes
-    // the translated Dense-seg of two nucleotide sequences from one that has its widths and stops
-    // with an exception after the header line. Refused before any byte, as the documents above;
-    // outfmt 6, 7 and 10 of the same rows are line RG item X7's.
-    if matches!(
-        spec.kind,
-        crate::report::tabular::TabularKind::CsvWithHeader
-            | crate::report::tabular::TabularKind::TaxReport
-    ) {
+    // its batch is that query for NCBI's formatter, whose rows then differ or stop with an
+    // exception (`TabularSpec::refuses_generated_id`). Refused before any byte, as the documents
+    // above; outfmt 6, 7 and 10 of the same rows are line RG item X7's.
+    if spec.refuses_generated_id(crate::blastinput::app::Program::Blastx, 1, true) {
         if let Some(scopes) = rps_generated_scopes(options, queries, shown, batches) {
-            let reads = spec.reads_subject(crate::blastinput::app::Program::Blastx);
             for batch in batches.iter() {
                 for qidx in 0..batch.queries.len() {
                     refuse_rps_generated_ids(
@@ -890,12 +879,16 @@ pub(super) fn render_queries_with(
                         batch.shown_lists(qidx, options),
                         batch.query_ordinal + qidx,
                         options,
-                        |list| {
-                            reads
-                                || list.hsps.iter().any(|hsp| {
-                                    has_seqalign(hsp, options.gapped)
-                                        && spec.opens_counts(&hsp.identity)
-                                })
+                        |list, subject| {
+                            let taxid = subject.first_source_taxid().is_some();
+                            list.hsps.iter().any(|hsp| {
+                                has_seqalign(hsp, options.gapped)
+                                    && spec.refuses_generated_id(
+                                        crate::blastinput::app::Program::Blastx,
+                                        hsp.identity,
+                                        taxid,
+                                    )
+                            })
                         },
                         crate::algorithm::common::database::TABLE_EFFECT,
                     )?;

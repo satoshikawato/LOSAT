@@ -150,10 +150,10 @@ impl RpstblastnArgs {
     }
 
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after NCBI's reading
-    /// of `-outfmt`, which comes before its option handlers. The refusals of the options that a later item runs (`-use_sw_tback`
-    /// with composition-based statistics) come once per run before the first byte, after NCBI's
-    /// own errors of the options and the database (`TranslatedRpsSearch::check_options`; review
-    /// A of PS12a, N1).
+    /// of `-outfmt`, which comes before its option handlers. The refusals of the options that a
+    /// later item runs (`-use_sw_tback` with composition-based statistics) come once per run
+    /// before the first byte, after NCBI's own errors of the options and the database
+    /// (`TranslatedRpsSearch::check_options`; review A of PS12a, N1).
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
         // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`).
         check_rps_outfmt(&self.outfmt)?;

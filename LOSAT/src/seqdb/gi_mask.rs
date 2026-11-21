@@ -317,7 +317,7 @@ impl GiMaskFiles {
     }
 
     /// The `(vol, off)` of the record of `key`, or `None` without one: the index, then the page
-    /// of the offset file (`GetMaskData`, quoted at [`GiMaskFiles::ranges_into`]).
+    /// of the offset file (`GetMaskData`, cited at [`GiMaskFiles::ranges_into`]).
     fn locate(&self, key: u32) -> Result<Option<(i32, i32)>, SeqDbError> {
         let index_start = i64::from(self.index_start);
         let num_index = i64::from(self.num_index);

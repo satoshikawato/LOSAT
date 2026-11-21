@@ -348,24 +348,6 @@ impl ColumnAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2244-2259
-    // ```c++
-    // int CSeqDB_IdRemapper::RealToVol(int vol_idx, int algo_id)
-    // {
-    //     if (! s_Contains(m_RealIdToVolumeId, vol_idx)) {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Cannot find volume in algorithm map.");
-    //     }
-    //
-    //     map<int,int> & trans = m_RealIdToVolumeId[vol_idx];
-    //
-    //     if (! s_Contains(trans, algo_id)) {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Cannot find volume algorithm in algorithm map.");
-    //     }
-    //
-    //     return trans[algo_id];
-    // }
-    // ```
     /// `RealToVol`: the id the volume `volume` (index in the database) uses for the
     /// database-wide `algo_id`; `None` where NCBI throws ("Cannot find volume in algorithm
     /// map." or "Cannot find volume algorithm in algorithm map.").
@@ -413,16 +395,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2173-2180
-    // ```c++
-    // void CSeqDB_IdRemapper::GetIdList(vector<int> & algorithms)
-    // {
-    //     typedef map<int,string> TIdMap;
-    //
-    //     ITERATE(TIdMap, iter, m_IdToDesc) {
-    //         algorithms.push_back(iter->first);
-    //     }
-    // }
-    // ```
     /// The database-wide algorithm ids, ascending (for GI masks 0 to N-1, `GiMasks::ids`).
     pub fn ids(&self) -> Vec<i32> {
         match &self.kind {
@@ -508,43 +480,6 @@ impl MaskAlgorithms {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2344-2378
-// ```c++
-// static const string s_RestoreColon(const string &in) {
-//     const char l = 0x1;
-//     return NStr::Replace(in, string(l,1), ":");
-// }
-//
-// static
-// void s_GetDetails(const string          & desc,
-//                   string                & program,
-//                   string                & program_name,
-//                   string                & algo_opts)
-// {
-//     static const CEnumeratedTypeValues* enum_type_vals = NULL;
-//     if (enum_type_vals == NULL) {
-//         enum_type_vals = GetTypeInfo_enum_EBlast_filter_program();
-//     }
-//     _ASSERT(enum_type_vals);
-//
-//     vector<string> items;
-//     NStr::Split(desc, ":", items);
-//
-//     if (items.size() == 2) {
-//         EBlast_filter_program
-//            pid = (EBlast_filter_program) NStr::StringToInt(items[0]);
-//         program.assign(items[0]);
-//         program_name.assign(enum_type_vals->FindName(pid, false));
-//         algo_opts.assign(s_RestoreColon(items[1]));
-//     } else if (items.size() == 4) {
-//         program.assign(s_RestoreColon(items[0]));
-//         program_name.assign(s_RestoreColon(items[2]));
-//         algo_opts.assign(s_RestoreColon(items[1]));
-//     } else {
-//         NCBI_THROW(CSeqDBException, eArgErr,
-//                    "Error in stored mask algorithm description data.");
-//     }
-// }
-// ```
 /// `s_GetDetails` of the stored description `description` of the algorithm `id` (`source`: the
 /// file that holds it, for LOSAT's errors).
 fn parse_details(id: i32, description: &str, source: &Path) -> Result<MaskAlgorithm, SeqDbError> {
@@ -775,12 +710,6 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2520-2523
-    // ```c++
-    //     if (m_UseGiMask) {
-    //         m_GiMask->GetMaskData(algo_id, x_GetSeqGI(oid, locked), ranges, locked);
-    //         return;
-    //     }
-    // ```
     // For each sequence the GI comes first, then `x_Open` of the algorithm (its files are kept
     // once opened; a failed opening is tried again, as NCBI's is), then the lookup.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of

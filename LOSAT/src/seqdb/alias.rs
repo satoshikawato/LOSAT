@@ -589,50 +589,7 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
-// ```c++
-//     // Skip gi mask if more than one DBs are specified.
-//     if (m_DBList.size() != 1) {
-//         m_HasGiMask = false;
-//     }
-//
-//     x_ResolveNames(prot_nucl, locked);
-//
-//     CSeqDBAliasStack recurse;
-//
-//     x_ExpandAliases(CSeqDB_BasePath("-"), prot_nucl, recurse, locked);
-//
-//
-//
-//     _ASSERT(recurse.Size() == 0);
-//
-//     // When we get here, the subnodes tree has been built
-//     if (m_HasGiMask) {
-//         if (m_SubNodes.size() != 1 ||
-//             m_SubNodes[0]->m_Values.find("MASKLIST")
-//             == m_SubNodes[0]->m_Values.end()) {
-//             m_HasGiMask = false;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1743-1757
-// ```c++
-// void CSeqDBAliasFile::
-// GetMaskList(vector <string> & mask_list)
-// {
-//     if (!m_HasGiMask) {
-//         return;
-//     }
-//
-//     mask_list.clear();
-//
-//     // parse the white spaces...
-//     vector <CTempString> masks;
-//     SeqDB_SplitQuoted(m_SubNodes[0]->m_Values["MASKLIST"], masks);
-//     ITERATE(vector <CTempString>, mask, masks) {
-//         mask_list.push_back(string(*mask));
-//     }
-// }
-// ```
 // `m_HasGiMask` starts true (seqdbalias.cpp:106). `MASKLIST` anywhere else (an alias file over
 // the database, a database among several names, a deeper alias file) is passed over without a
 // word: the volumes' mask columns are then the database's masks.

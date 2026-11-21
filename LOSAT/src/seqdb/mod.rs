@@ -398,11 +398,6 @@ impl SeqDbError {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:890-892
-    // ```c++
-    //     catch (const CException& e) {
-    //     	ERR_POST(Error << e.GetMsg());
-    //         err_found = 1;
-    // ```
     /// The text that blastdbcmd's catch of a request prints (`e.GetMsg()`): the text of a
     /// [`SeqDbError::MemoryMap`] alone, otherwise [`SeqDbError::ncbi_message`].
     pub fn ncbi_request_message(&self) -> Option<Vec<u8>> {

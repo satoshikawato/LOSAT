@@ -30,7 +30,7 @@ fn letter_by_letter(letters: &[u8]) -> (Vec<u8>, Vec<(u32, u32)>) {
 
 /// Letters of every kind, in runs of both lengths around a byte, from a fixed generator.
 fn letters(len: usize) -> Vec<u8> {
-    const KINDS: &[u8] = b"ACGTACGTACGTNRYacgtn-*";
+    const KINDS: &[u8] = b"ACGTACGTACGTNRYacgtn-*\x00\xc1";
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -63,6 +63,25 @@ fn bases_match_letter_by_letter_for_every_block_split() {
                 "len {len} block {block}"
             );
         }
+        // Blocks of mixed sizes, empty ones among them.
+        let mut bases = Bases::default();
+        let mut rest = letters.as_slice();
+        for size in [1, 0, 6, 2, 3, 0, 9].iter().cycle() {
+            if rest.is_empty() {
+                break;
+            }
+            let (part, after) = rest.split_at((*size).min(rest.len()));
+            bases.push(part);
+            rest = after;
+        }
+        bases.push(&[]);
+        bases.finish();
+        assert_eq!(bases.packed(), packed.as_slice(), "len {len} mixed blocks");
+        assert_eq!(
+            bases.invalid(),
+            invalid.as_slice(),
+            "len {len} mixed blocks"
+        );
         let whole = Bases::of_letters(&letters);
         assert_eq!(whole.packed(), packed.as_slice(), "len {len}");
         assert_eq!(whole.invalid(), invalid.as_slice(), "len {len}");

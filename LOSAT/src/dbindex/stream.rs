@@ -54,7 +54,7 @@ const CODES: [u8; 256] = {
 const CR: usize = super::CR as usize;
 
 /// The letters of a sequence as the index reads them: whether each is A, C, G or T
-/// (`base_value` above 0), and the sequence packed as `seq_store_` holds it. The letters
+/// (NCBI's `base_value` above 0), and the sequence packed as `seq_store_` holds it. The letters
 /// themselves (one byte each) are not kept.
 #[derive(Debug, Default)]
 pub(crate) struct Bases {
@@ -80,8 +80,8 @@ impl Bases {
         bases
     }
 
-    /// Adds the next letters of the sequence: four at a time into a byte of their own, the
-    /// letters before and after those one at a time.
+    /// Adds the next letters of the sequence: the letters that complete a partly filled byte one
+    /// at a time, then each whole group of four as one byte, then the rest one at a time.
     fn push(&mut self, letters: &[u8]) {
         let mut rest = letters;
         while self.pending != 0 {
@@ -94,6 +94,8 @@ impl Bases {
         let (groups, tail) = rest.as_chunks::<CR>();
         let start = self.len;
         let invalid = &mut self.invalid;
+        // One byte more for the letters that `finish` packs.
+        self.packed.reserve(groups.len() + 1);
         self.packed
             .extend(groups.iter().enumerate().map(|(group, letters)| {
                 let codes = letters.map(|r| CODES[usize::from(r)]);
@@ -148,7 +150,7 @@ impl Bases {
         &self.packed
     }
 
-    /// The runs of letters other than A, C, G and T (`base_value` 0).
+    /// The runs of letters other than A, C, G and T (NCBI's `base_value` 0).
     pub(crate) fn invalid(&self) -> &[(u32, u32)] {
         &self.invalid
     }

@@ -111,7 +111,10 @@ fn the_last_oid_list_node_above_a_volume_decides() {
     assert_eq!(lines(&open("j2", SeqType::Protein).unwrap()), MASKED_LINES);
     // Two siblings over one volume: the later one's type, 0 (ompy) here, 1 (ompx) the other way.
     assert_eq!(lines(&open("j5", SeqType::Protein).unwrap()), ALL_LINES);
-    let dir = std::env::temp_dir().join(format!("losat-oidmask-{}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-oidmask-{}",
+        crate::utils::test_dir::process_id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let reversed = dir.join("j5r.pal");
     let fixtures = fixtures();

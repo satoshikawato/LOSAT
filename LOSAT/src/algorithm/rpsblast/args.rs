@@ -756,7 +756,7 @@ mod tests {
                 .unwrap_err();
             assert_eq!(
                 format!("{error:#}"),
-                "BLAST query/options error: x_dropoff must be greater than zero\nPlease refer to the BLAST+ user manual.\n",
+                "BLAST query/options error: x_dropoff must be greater than zero\nPlease refer to the LOSAT user manual.\n",
                 "{value}"
             );
         }

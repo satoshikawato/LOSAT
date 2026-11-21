@@ -107,6 +107,10 @@ fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
     text.replace("{R}", run_dir().to_str().unwrap())
+        .replace(
+            "Please refer to the BLAST+ user manual.",
+            "Please refer to the LOSAT user manual.",
+        )
         .into_bytes()
 }
 

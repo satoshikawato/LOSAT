@@ -106,8 +106,8 @@ fn equals_ncbi(case: &str, args: &[&str], status: i32) {
 /// `equals_ncbi` with `stdin` on the pipe (the standard input of NCBI's run).
 fn equals_ncbi_with_stdin(case: &str, args: &[&str], stdin: &[u8], status: i32) {
     let (out, err) = (
-        fixture(&format!("{case}.out")),
-        fixture(&format!("{case}.err")),
+        temp_support::expected_losat_bytes(fixture(&format!("{case}.out"))),
+        temp_support::expected_losat_bytes(fixture(&format!("{case}.err"))),
     );
     for threads in ["1", "4", "8", "16"] {
         let output = run_with_stdin(args, threads, stdin);

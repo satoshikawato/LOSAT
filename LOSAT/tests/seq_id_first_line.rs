@@ -267,7 +267,7 @@ fn with_the_data_loaders_off_the_line_is_read_as_ncbi_reads_it() {
                     _ => (
                         1,
                         b"",
-                        "BLAST query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the BLAST+ user manual.\n",
+                        "BLAST query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the LOSAT user manual.\n",
                     ),
                 };
                 let (status, stdout, stderr) = &runs[0];

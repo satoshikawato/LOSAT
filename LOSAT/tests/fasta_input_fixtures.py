@@ -1518,8 +1518,15 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     first_err = result["stderr"].split(b"\n")[0][:140].decode(errors="replace")
     if row.stdout_sha256 == "pending":
         return row, "pending", re.sub(r"[\t\r\n]+", " ", f"rc {result['rc']}: {first_err}")
-    actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(result["stdout"]),
-              "stderr_sha256": sha256(result["stderr"]), "combined_sha256": sha256(result["combined"])}
+    ncbi_footer = b"Please refer to the BLAST+ user manual."
+    losat_footer = b"Please refer to the LOSAT user manual."
+    if row.kind == "ncbi":
+        for stream_name in ("stdout", "stderr", "combined"):
+            if ncbi_footer in result[stream_name]:
+                return row, "differs", f"{stream_name} still names the BLAST+ user manual"
+    norm = (lambda b: b.replace(losat_footer, ncbi_footer)) if row.kind == "ncbi" else (lambda b: b)
+    actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(norm(result["stdout"])),
+              "stderr_sha256": sha256(norm(result["stderr"])), "combined_sha256": sha256(norm(result["combined"]))}
     names = {"rc": "exit", "stdout_sha256": "stdout", "stderr_sha256": "stderr", "combined_sha256": "combined"}
     differing = [names[f] for f in EXPECTED if actual[f] != getattr(row, f)]
     if not differing:
@@ -1531,6 +1538,8 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     for name in ("stdout", "stderr", "combined"):
         if name in differing and expected_dir is not None and (expected_dir / f"{row.row_id}.{files[name][0]}").exists():
             expected = (expected_dir / f"{row.row_id}.{files[name][0]}").read_bytes()
+            if row.kind == "ncbi":
+                expected = expected.replace(ncbi_footer, losat_footer)
             detail.append(f"{name} {first_difference(expected, files[name][1])}")
             break
     else:

@@ -2374,13 +2374,13 @@ mod tests {
         }
         assert_eq!(
             custom("blastn", "abc").unwrap_err(),
-            "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(
             custom("blastn", "99").unwrap_err(),
             "Error: Formatting choice is out of range\n"
         );
-        assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the BLAST+ user manual.\n");
+        assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the LOSAT user manual.\n");
         assert_eq!(custom("blastn", "17 SQ"), Ok(Some("17 SQ".to_string())));
     }
 
@@ -3612,7 +3612,7 @@ mod tests {
 
     // The CLI's standard error for `-outfmt 6` with `-num_descriptions 3`: the formatting
     // handler's two warnings, then NCBI's error for a hit list of 0 (`-num_alignments 0`).
-    const ERR6_ND3_NA0: &str = "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n";
+    const ERR6_ND3_NA0: &str = "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n";
     const SPLIT_ND3_NA0_OUT0: &[u8] =
         include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_nd3_na0.out");
     const SPLIT_ND3_NA0_ERR0: &[u8] =
@@ -3894,7 +3894,7 @@ mod tests {
         // The CLI's standard error for `-outfmt 6`: the hit list size's warning, then NCBI's error.
         assert_eq!(
             text(&zero[&3]),
-            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         // Both searches fail, each for its own reason (the tabular formats' hit list is checked
         // before the e-value): the run fails with the tabular search's error, as validate.

@@ -750,9 +750,15 @@ fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
     for line in lines.filter(|line| line.starts_with("db.of18.bp.batch.")) {
         let cells: Vec<&str> = line.split('\t').collect();
         let row = cells[id];
-        let expected_err =
-            std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
-        let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+        let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+            .unwrap_or_default()
+            .replace(
+                "Please refer to the BLAST+ user manual.",
+                "Please refer to the LOSAT user manual.",
+            );
+        let expected_out = temp_support::expected_losat_bytes(
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        );
         // `NAME=VALUE` tokens are variables of the run, the others arguments.
         let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
             .split_whitespace()

@@ -126,7 +126,7 @@ fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
                 format!(
-                    "{ignored}Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+                    "{ignored}Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
                 ),
                 "{program} {extra:?}"
             );

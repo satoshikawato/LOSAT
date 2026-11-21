@@ -352,8 +352,14 @@ fn check(threads: &str) {
         command.args(&case.args).args(["-num_threads", threads]);
         command.envs(case.env.iter().map(|(key, value)| (key, value)));
         let output = command.output().expect("run losat");
-        let read =
-            |ext: &str| std::fs::read(fixtures().join(format!("{}.{ext}", case.name))).unwrap();
+        let read = |ext: &str| {
+            let bytes = std::fs::read(fixtures().join(format!("{}.{ext}", case.name))).unwrap();
+            if ext == "err" || ext == "out" {
+                temp_support::expected_losat_bytes(bytes)
+            } else {
+                bytes
+            }
+        };
         let rc: i32 = String::from_utf8(read("rc"))
             .unwrap()
             .trim()

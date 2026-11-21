@@ -23,6 +23,9 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
+mod temp_support;
+pub(crate) use temp_support::expected_losat_bytes;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -31,12 +34,14 @@ fn engine() -> PathBuf {
 }
 
 fn frozen(name: &str, ext: &str) -> Vec<u8> {
-    std::fs::read(
-        engine()
-            .join("tests/fixtures/outfmt11")
-            .join(format!("bx_{name}.{ext}")),
+    expected_losat_bytes(
+        std::fs::read(
+            engine()
+                .join("tests/fixtures/outfmt11")
+                .join(format!("bx_{name}.{ext}")),
+        )
+        .unwrap_or_default(),
     )
-    .unwrap_or_default()
 }
 
 fn input(name: &str) -> String {

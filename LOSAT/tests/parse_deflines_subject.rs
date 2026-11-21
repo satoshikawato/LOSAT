@@ -463,7 +463,7 @@ fn the_same_files_without_the_option_are_searched() {
 /// (probe `ncbi-parity-20261019/SM/subnodef`, the `*.s.*.pd.f11` runs of the five programs).
 fn no_defline_archive(line: u64) -> String {
     format!(
-        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the BLAST+ user manual.\"\n    }}\n  }}\n}}\n"
+        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the LOSAT user manual.\"\n    }}\n  }}\n}}\n"
     )
 }
 
@@ -521,7 +521,7 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
         for (subject, line) in &subjects {
             let message = format!(
                 "BLAST query/options error: Query input doesn't start with a defline or comment, \
-                 line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+                 line {line}\0\nPlease refer to the LOSAT user manual.\n"
             );
             for threads in ["1", "4", "8", "16"] {
                 for query in [&clean_query, &bad_query] {

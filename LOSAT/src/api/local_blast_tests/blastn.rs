@@ -513,7 +513,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
             native_error(result),
             (
                 1,
-                format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
             ),
             "-task {task} word size {word}"
         );

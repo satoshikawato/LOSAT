@@ -833,6 +833,15 @@ def prepare_runtime_inputs() -> None:
         path.write_text(expected)
 
 
+NCBI_MANUAL_FOOTER = b"Please refer to the BLAST+ user manual."
+LOSAT_MANUAL_FOOTER = b"Please refer to the LOSAT user manual."
+
+
+def expected_losat_bytes(frozen: bytes) -> bytes:
+    """Map NCBI's user-manual footer in frozen bytes to LOSAT's footer directionally."""
+    return frozen.replace(NCBI_MANUAL_FOOTER, LOSAT_MANUAL_FOOTER)
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -918,6 +927,8 @@ def check_one(losat: str, row: dict[str, str], threads: int | None = None) -> tu
     problems = []
     if sha256(expected_out) != row["stdout_sha256"]:
         problems.append("frozen stdout file does not match the manifest")
+    expected_out = expected_losat_bytes(expected_out)
+    expected_err = expected_losat_bytes(expected_err)
     if str(result.returncode) != row["exit"]:
         problems.append(f"exit {result.returncode}, expected {row['exit']}")
     if result.stdout != expected_out:

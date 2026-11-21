@@ -138,9 +138,13 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             ));
         }
         Ok(_) | Err(_) => {
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
             return Err(NativeError {
                 exit: 1,
-                message: "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the BLAST+ user manual.\n".to_string(),
+                message: format!(
+                    "BLAST query/options error: Only optimized binary windowmasker stat files are supported\n{}\n",
+                    crate::blastinput::app::USER_MANUAL_FOOTER
+                ),
             });
         }
     }
@@ -519,7 +523,7 @@ mod tests {
             assert_eq!(directory.exit, 1);
             assert_eq!(
                 directory.message,
-                "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the BLAST+ user manual.\n"
+                "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
             );
         } else {
             assert_eq!(directory.exit, 255);

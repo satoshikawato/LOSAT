@@ -679,10 +679,18 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
+    expected_out_losat = out.replace(
+        b"Please refer to the BLAST+ user manual.",
+        b"Please refer to the LOSAT user manual.",
+    )
+    expected_err_losat = err.replace(
+        b"Please refer to the BLAST+ user manual.",
+        b"Please refer to the LOSAT user manual.",
+    )
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
-            and run.stderr.startswith(b"BLAST query error:") and run.stderr in err:
+            and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
         return "library-input-error", ""
     problems = []
     if files:
@@ -695,13 +703,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
     # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
     if not files:
-        expected_out, observed_out = (out, run.stdout)
+        expected_out, observed_out = (expected_out_losat, run.stdout)
         if is_sam_outfmt(row["outfmt"]):
-            expected_out, observed_out = strip_sam_cl(out), strip_sam_cl(run.stdout)
+            expected_out, observed_out = strip_sam_cl(expected_out_losat), strip_sam_cl(run.stdout)
         if observed_out != expected_out:
             problems.append("stdout " + first_difference(expected_out, observed_out))
-    if run.stderr != err:
-        problems.append("stderr " + first_difference(err, run.stderr))
+    if run.stderr != expected_err_losat:
+        problems.append("stderr " + first_difference(expected_err_losat, run.stderr))
     accepted: list[str] = []
     if pssm:
         reference = None

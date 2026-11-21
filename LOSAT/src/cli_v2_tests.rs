@@ -1296,7 +1296,7 @@ const SHARED: &[&str] = ALL;
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
-    "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the BLAST+ user manual.\n",
+    "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the LOSAT user manual.\n",
 );
 
 /// The programs, `-outfmt` value, `-out` file and result of each case. A change that makes a
@@ -1338,11 +1338,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (SHARED, "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
         (SHARED, "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
-        (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
-        (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
-        (ALL, "6\u{a0}", None, Ncbi(1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
-        (ALL, "6\tqseqid", None, Ncbi(1, "BLAST query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
-        (ALL, " ", None, Ncbi(1, "BLAST query/options error: '' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\u{a0}", None, Ncbi(1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\tqseqid", None, Ncbi(1, "BLAST query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, " ", None, Ncbi(1, "BLAST query/options error: '' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
         (ALL, "-1", None, OUT_OF_RANGE),
         (ALL, "22", None, OUT_OF_RANGE),
         (ALL, "99", None, OUT_OF_RANGE),
@@ -1462,7 +1462,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );
@@ -1474,7 +1474,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );

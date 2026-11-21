@@ -927,12 +927,13 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         );
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
-    // several lines (an exception's chain), and the macro of an invalid input posts the line
-    // "Please refer to the BLAST+ user manual." as a second one.
-    const REFER: &str = "Please refer to the BLAST+ user manual.";
+    // several lines (an exception's chain), and the macro of an invalid input posts the user
+    // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11) as a
+    // second one.
+    let refer_line = crate::blastinput::app::USER_MANUAL_FOOTER;
     let text = native.message.trim_end_matches('\n');
-    let (first, refer) = match text.strip_suffix(REFER) {
-        Some(head) if head.ends_with('\n') => (head, Some(REFER)),
+    let (first, refer) = match text.strip_suffix(refer_line) {
+        Some(head) if head.ends_with('\n') => (head, Some(refer_line)),
         _ => (text, None),
     };
     Some(

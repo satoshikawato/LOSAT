@@ -1046,9 +1046,14 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
         let row = cells[id];
         let mut expected_err = String::new();
         if let Ok(text) = std::fs::read_to_string(frozen.join(format!("{row}.err"))) {
-            expected_err = text;
+            expected_err = text.replace(
+                "Please refer to the BLAST+ user manual.",
+                "Please refer to the LOSAT user manual.",
+            );
         }
-        let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+        let expected_out = temp_support::expected_losat_bytes(
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        );
         for threads in THREADS {
             let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
             for (name, _) in std::env::vars_os() {
@@ -1141,9 +1146,15 @@ fn the_frozen_rows_of_a_database_length_of_0_are_written_by_blocks() {
         for line in lines.filter(|line| line.starts_with("db.cnt.l0paja.")) {
             let cells: Vec<&str> = line.split('\t').collect();
             let row = cells[id];
-            let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
-            let expected_err =
-                std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
+            let expected_out = temp_support::expected_losat_bytes(
+                std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+            );
+            let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+                .unwrap_or_default()
+                .replace(
+                    "Please refer to the BLAST+ user manual.",
+                    "Please refer to the LOSAT user manual.",
+                );
             // The sides (new, ref) of LOSAT_X_BPQBLOCK the row records (above).
             let sides = match cells[format].split_whitespace().next() {
                 Some("6") => (true, false),
@@ -1467,8 +1478,15 @@ fn the_archive_of_two_or_more_batches_is_written_by_blocks_as_by_the_search_of_a
         ("db.sa.arch.bp.pajab.11", Some(("BATCH_SIZE", "3000"))),
     ];
     for (row, batch) in rows {
-        let want = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
-        let want_err = std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap();
+        let want = temp_support::expected_losat_bytes(
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        );
+        let want_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+            .unwrap()
+            .replace(
+                "Please refer to the BLAST+ user manual.",
+                "Please refer to the LOSAT user manual.",
+            );
         for threads in THREADS {
             let what = format!("{row} threads {threads}");
             let mut vars: Vec<(&str, &str)> = batch.into_iter().collect();
@@ -1988,8 +2006,12 @@ fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
         }
         let (row, spec) = (cells[id], cells[format]);
         let extension = if spec == "13" { "json" } else { "xml" };
-        let expected_err =
-            std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
+        let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+            .unwrap_or_default()
+            .replace(
+                "Please refer to the BLAST+ user manual.",
+                "Please refer to the LOSAT user manual.",
+            );
         let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
             .split_whitespace()
             .partition(|token| token.starts_with("BLASTDB="));

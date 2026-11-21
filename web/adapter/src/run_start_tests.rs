@@ -312,7 +312,7 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
         run_files(&streams),
         Some(vec![(
             "run.log".to_string(),
-            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n".to_string()
         )])
     );
     for program in ["tblastx", "blastn"] {

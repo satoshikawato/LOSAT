@@ -1819,11 +1819,13 @@ pub(super) fn database_search_error(
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 // ```
 /// NCBI's error of the options that `BlastxArgs::resolve` defers (`SemanticOptionsError`).
+/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 11): uses `USER_MANUAL_FOOTER`.
 pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
     NativeError {
         exit: 1,
         message: format!(
-            "BLAST query/options error: {error}\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: {error}\n{}\n",
+            crate::blastinput::app::USER_MANUAL_FOOTER
         ),
     }
     .into()
@@ -3214,7 +3216,7 @@ mod archive_error_tests {
             (
                 1,
                 "BLAST query/options error: Query input doesn't start with a defline or comment, \
-                 line 4\0\nPlease refer to the BLAST+ user manual.\n"
+                 line 4\0\nPlease refer to the LOSAT user manual.\n"
             )
         );
         let texts = |error: &anyhow::Error| -> Vec<Vec<u8>> {
@@ -3228,7 +3230,7 @@ mod archive_error_tests {
             texts(&subject),
             [
                 b"BLAST query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
-                b"Please refer to the BLAST+ user manual.".to_vec(),
+                b"Please refer to the LOSAT user manual.".to_vec(),
             ]
         );
         let query = input_error(NoDeflineError(4).into());

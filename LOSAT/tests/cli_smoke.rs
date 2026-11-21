@@ -1466,7 +1466,7 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
         ">p\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n",
     )
     .unwrap();
-    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the BLAST+ user manual.\n";
+    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the LOSAT user manual.\n";
     for extra in [&["-num_descriptions", "5"][..], &["-query_loc", "5-1"], &[]] {
         let output = clean_losat_command()
             .current_dir(&dir)
@@ -1478,7 +1478,10 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
             .expect("run LOSAT");
         assert_eq!(output.status.code(), Some(1), "{extra:?} {output:?}");
         assert!(output.stdout.is_empty(), "{extra:?}");
-        assert_eq!(String::from_utf8_lossy(&output.stderr), error, "{extra:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Please refer to the LOSAT user manual."));
+        assert!(!stderr.contains("Please refer to the BLAST+ user manual."));
+        assert_eq!(stderr, error, "{extra:?}");
     }
     fs::remove_dir_all(&dir).unwrap();
 }

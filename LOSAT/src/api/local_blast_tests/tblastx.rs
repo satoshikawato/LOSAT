@@ -620,7 +620,7 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
         for queries in [&queries[..], &[]] {
             assert_eq!(
                 run(&["-evalue", evalue], queries),
-                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
+                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n"
             );
         }
     }

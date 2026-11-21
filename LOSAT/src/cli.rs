@@ -2621,7 +2621,10 @@ pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
         return std::borrow::Cow::Borrowed(message);
     }
     if message.starts_with("BLAST query/options error: ")
-        && message.ends_with("\nPlease refer to the BLAST+ user manual.\n")
+        && message
+            .strip_suffix('\n')
+            .and_then(|s| s.strip_suffix(crate::blastinput::app::USER_MANUAL_FOOTER))
+            .is_some_and(|s| s.ends_with('\n'))
     {
         std::borrow::Cow::Borrowed("\n\n")
     } else {

@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.21
+- Version: 1.22
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -37,7 +37,10 @@
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
-  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-20 (exception 11:
+  query/options and error-archive footers print `Please refer to the LOSAT user manual.` in place
+  of NCBI's `Please refer to the BLAST+ user manual.`, decided by the Owner on 2026-11-19 after PR
+  #1342 review)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -225,6 +228,15 @@ BLAST+.
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
+11. **User-manual footer on query/options errors** (version 1.22, 2026-11-20, Owner decision
+   2026-11-19). Where NCBI's query, input, filtering, scoring, formatting, strategy, archive, or
+   `blastdbcmd` taxonomy errors append `Please refer to the BLAST+ user manual.`, LOSAT prints
+   `Please refer to the LOSAT user manual.` (`crate::blastinput::app::USER_MANUAL_FOOTER`). The
+   error category prefixes (`BLAST query/options error:`, `BLAST engine error:`,
+   `BLAST Database error:`, `BLAST options error:`) and all error conditions, bodies, and exit
+   codes remain unchanged for downstream-tool compatibility. Release-notes sentence: Error messages
+   refer to the LOSAT user manual instead of the BLAST+ user manual while preserving `BLAST ... error:`
+   prefixes.
 
 ## Decided handling that is not an exception
 

@@ -69,7 +69,12 @@ authoritative, current guidance for agent behavior in LOSAT.
      text and stops at its first line; exception 8); a failed write of `losat rpsbproc`'s
      report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
      stops LOSAT with a message and exit 4, and a failed write to its standard error
-     (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
+     (NCBI: SIGPIPE) with exit 4 and no message (exception 9); a closed pipe in
+     `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, and version/help/argument
+     errors stops with exit 0 or ignores the closed pipe (exception 10); query/options and
+     error-archive footers print `Please refer to the LOSAT user manual.` in place of
+     `Please refer to the BLAST+ user manual.` while keeping `BLAST ... error:` prefixes
+     intact (exception 11). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not

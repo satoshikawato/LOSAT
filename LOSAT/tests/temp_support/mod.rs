@@ -226,3 +226,25 @@ pub fn worker_log_if_unset(command: &mut Command, label: &str) -> Option<TempFil
             log
         })
 }
+
+/// Maps NCBI's query/options manual footer in frozen fixture bytes to LOSAT's branded footer.
+/// See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+pub fn expected_losat_bytes(frozen: Vec<u8>) -> Vec<u8> {
+    const NCBI: &[u8] = b"Please refer to the BLAST+ user manual.";
+    const LOSAT: &[u8] = b"Please refer to the LOSAT user manual.";
+    if !frozen.windows(NCBI.len()).any(|window| window == NCBI) {
+        return frozen;
+    }
+    let mut out = Vec::with_capacity(frozen.len());
+    let mut i = 0;
+    while i < frozen.len() {
+        if frozen[i..].starts_with(NCBI) {
+            out.extend_from_slice(LOSAT);
+            i += NCBI.len();
+        } else {
+            out.push(frozen[i]);
+            i += 1;
+        }
+    }
+    out
+}

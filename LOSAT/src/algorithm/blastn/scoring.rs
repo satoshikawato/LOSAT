@@ -238,11 +238,11 @@ fn check_scoring_options_with(
     } else {
         return Ok(());
     };
+    // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+    let footer = crate::blastinput::app::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,
-        message: format!(
-            "BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n"
-        ),
+        message: format!("BLAST query/options error: {message}\n{footer}\n"),
     }
     .into())
 }
@@ -870,7 +870,7 @@ mod tests {
         assert!(check_scoring_options(&args(&["-task", "blastn", "-no_greedy"])).is_ok());
         assert_eq!(
             message(check_scoring_options(&args(&["-off_diagonal_range", "2"]))),
-            "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the LOSAT user manual.\n"
         );
         assert!(check_scoring_options(&args(&["-off_diagonal_range", "0"])).is_ok());
         assert!(
@@ -906,7 +906,7 @@ mod tests {
     // NCBI blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
     #[test]
     fn min_raw_gapped_score_above_zero_allows_an_evalue_of_zero() {
-        const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n";
+        const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n";
         for words in [
             &["-evalue", "0"][..],
             &["-evalue", "0", "-min_raw_gapped_score", "0"],
@@ -932,7 +932,7 @@ mod tests {
             message(check_scoring_options(&args(&[
                 "-task", "blastn", "-penalty", "0", "-gapopen", "0", "-gapextend", "0"
             ]))),
-            "BLAST query/options error: BLASTN penalty must be negative\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: BLASTN penalty must be negative\nPlease refer to the LOSAT user manual.\n"
         );
         assert!(message(check_scoring_options(&args(&["-gapopen", "3"])))
             .contains("BLASTN gap extension penalty cannot be 0"));
@@ -998,7 +998,7 @@ mod tests {
         ]));
         assert_eq!(
             error,
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         // The hit list of format 0 is the larger of the two numbers.
         assert!(run_checks(&["-num_alignments", "0"]).is_ok());

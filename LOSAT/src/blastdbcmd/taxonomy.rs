@@ -434,7 +434,8 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
         //     }                                                                       \
         // ```
         diag.post("BLAST query/options error: Invalid format options for tax_info.");
-        diag.post("Please refer to the BLAST+ user manual.");
+        // Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 11).
+        diag.post(crate::blastinput::app::USER_MANUAL_FOOTER);
         return 1;
     };
     let lookup = match db.tax_id_lookup() {

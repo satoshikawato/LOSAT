@@ -294,6 +294,24 @@ pub struct FinalKarlin {
     pub h_ungapped: f64,
 }
 
+impl PssmWithParameters {
+    /// A copy of the object with `karlin` written back into its `finalData` (what the writers'
+    /// `karlin` writes in place of the six values; an object without `finalData` stays without):
+    /// the PSSM that psiblast's archive of a round holds (`algorithm::blastp::archive::PsiArchive`).
+    pub fn with_final_karlin(&self, karlin: FinalKarlin) -> Self {
+        let mut value = self.clone();
+        if let Some(data) = value.pssm.final_data.as_mut() {
+            data.lambda = karlin.lambda;
+            data.kappa = karlin.kappa;
+            data.h = karlin.h;
+            data.lambda_ungapped = Some(karlin.lambda_ungapped);
+            data.kappa_ungapped = Some(karlin.kappa_ungapped);
+            data.h_ungapped = Some(karlin.h_ungapped);
+        }
+        value
+    }
+}
+
 /// The document of a PSSM (`WriteFileHeader`, the object, `EndOfWrite` and the separator), with
 /// `karlin` in place of the six values of `finalData`.
 fn write_document<E: Encoder>(

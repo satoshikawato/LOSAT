@@ -40,8 +40,8 @@ use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
-    write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    RequestInputs, SearchedContext0,
+    write_archive, write_error_archive, AlignSource, ArchiveOut, ArchiveRound, BatchArchive,
+    KaBlock, RequestInputs, SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.

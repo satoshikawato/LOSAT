@@ -324,6 +324,7 @@ fn for_each_batch(
                 search_space,
                 length_adjustment,
                 searched_space: batch_searched_space(searched, stats),
+                round: None,
             };
             each(span, &batch)
         })?;

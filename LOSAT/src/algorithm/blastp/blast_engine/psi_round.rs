@@ -460,7 +460,9 @@ fn run_queries(
                     identity_warned: 0,
                     epilog: false,
                     x_prolog: calls == 0,
-                    x_queries_before: 0,
+                    // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
+                    // each round's `Iteration` after them and writes its header with the first.
+                    x_queries_before: calls,
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: Some(&io),
@@ -730,7 +732,8 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238 (cited at
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
 /// The epilog of each report after the last round: outfmt 0's, outfmt 7's `# BLAST processed R
-/// queries` (R the rounds formatted, `m_QueriesFormatted`), nothing for outfmt 6, 10 and 20.
+/// queries` (R the rounds formatted, `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt
+/// 6, 8 to 11 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -762,6 +765,19 @@ fn write_round_epilogs(
         }
         match crate::blastinput::app::parse_formatting_string(format.outfmt)?.number {
             0 => {}
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2246
+            // BLAST XML's end, after the rounds' `Iteration`s (`BlastXmlWriter::finish`).
+            5 => {
+                let mut bytes = Vec::new();
+                crate::report::blast_xml::StructuredXml::finish(
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(rounds),
+                    &mut bytes,
+                )?;
+                let mut writer = format.sink.open()?;
+                writer.write_all(&bytes)?;
+                writer.flush()?;
+                continue;
+            }
             7 => {
                 // The default outfmt 7 (`write_blastp_tabular_hit_lists`' epilog).
                 let mut writer = format.sink.open()?;

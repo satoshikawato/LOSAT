@@ -418,6 +418,7 @@ fn with_batch(
                 search_space: first.search_space,
                 length_adjustment: first.length_adjustment,
                 searched_space: batch_searched_space(call.batches, options),
+                round: None,
             })
         },
     )

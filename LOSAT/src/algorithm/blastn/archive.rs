@@ -452,6 +452,7 @@ pub(crate) fn for_each_batch(
                         space: context.context0_space,
                         query_length: context.context0_length,
                     }),
+                    round: None,
                 };
                 each(span, &batch)
             },

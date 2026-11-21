@@ -350,6 +350,7 @@ fn for_each_batch(
                     &data.queries[first],
                     data.query_validity[first],
                 ),
+                round: None,
             };
             each(span, &batch)
         })?;

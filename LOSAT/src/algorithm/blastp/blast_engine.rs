@@ -4354,6 +4354,13 @@ pub fn run(
                         &lines,
                         &mut stream,
                     );
+                } else if let Some(lines) = crate::report::archive::silent_end_lines(handle, error)
+                {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:573-576
+                    // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
+                    // psiblast's `-in_pssm` reader, NCBI's object manager): the archive of the
+                    // messages saved before it, with no text before it, as tblastn's end writes.
+                    let _ = crate::report::archive::write_error_archive(handle, &lines, &mut stream);
                 }
             }
             Ok(()) => {

@@ -132,7 +132,7 @@ pub(super) fn check_limits(
     // The query-anchored formats 1 to 4 are outfmt 0's report with another alignment section
     // (line RG T3b: NCBI 2.17.0's `-in_pssm` sections, probes `tn.t3b.pssm.*`, are those of the
     // PSSM's query).
-    if searched && !matches!(outfmt, 0..=4 | 6 | 7 | 10) {
+    if searched && !matches!(outfmt, 0..=10 | 20) {
         bail!(
             "output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet{}",
             if outfmt == 11 {

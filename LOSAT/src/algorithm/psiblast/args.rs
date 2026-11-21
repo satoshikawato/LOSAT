@@ -496,13 +496,17 @@ impl PsiblastArgs {
             if !matches!(
                 format,
                 ReportFormat::Pairwise
+                    | ReportFormat::Xml
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
                     | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::ArchiveFormat
                     | ReportFormat::CommaSeparatedValuesWithHeader
             ) {
                 bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST",
+                    "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
                 );
             }

@@ -428,6 +428,7 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
             search_space: 0,
             length_adjustment: 0,
             searched_space: None,
+            round: None,
         };
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();

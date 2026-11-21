@@ -1308,7 +1308,7 @@ rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
     losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
     rm tests/db_search/mejo.njs
 
-The row `db.blastn.ungapped_rej.17` (outfmt 17 with `-ungapped`) is a refusal until O4a-2; the rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search.
+The rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search; the rows `db.blastn.ungapped.mb.17` and `db.blastn.ungapped.bn.17b` (O4a-2) are its SAM (outfmt 17: one record per subject, its HSPs joined).
 
 ## Several databases in -db (DI-8f)
 

@@ -1189,16 +1189,7 @@ fn write_seq_align_dendiag<E: Encoder>(
     for hsp in hsps {
         let q_strand = Strand::of_frame(hsp.q_frame);
         let s_strand = Strand::of_frame(hsp.s_frame);
-        let q_start = if hsp.q_frame >= 0 {
-            hsp.q_offset
-        } else {
-            query.searched_length - hsp.q_end
-        };
-        let s_start = if hsp.s_frame >= 0 {
-            hsp.s_offset
-        } else {
-            subject.searched_length - hsp.s_end
-        };
+        let (q_start, s_start) = dendiag_starts(query, subject, hsp);
         enc.element();
         enc.begin_sequence("Dense-diag");
         enc.member("dim", 0);
@@ -1247,6 +1238,57 @@ fn write_seq_align_dendiag<E: Encoder>(
     enc.end_member();
     write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The starts (query, subject) of the Dense-diag of an ungapped HSP (`x_UngappedHSPToDenseDiag`)
+/// in the searched letters, minus the range starts that the caller adds
+/// (`QueryRecord::offset`, `SubjectRecord::offset`): a row of a plus frame (or of no frame)
+/// starts at its offset, a row of a minus frame at `searched_length - end`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1295-1305
+fn dendiag_starts(
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+) -> (i32, i32) {
+    let q_start = if hsp.q_frame >= 0 {
+        hsp.q_offset
+    } else {
+        query.searched_length - hsp.q_end
+    };
+    let s_start = if hsp.s_frame >= 0 {
+        hsp.s_offset
+    } else {
+        subject.searched_length - hsp.s_end
+    };
+    (q_start, s_start)
+}
+
+/// The Dense-seg that NCBI's SAM formatter makes of the Seq-align of an ungapped search's
+/// subject (`CreateDensegFromDendiag`): one segment per HSP in the Seq-align's order, each with
+/// the starts (`dendiag_starts`), length and strands of the HSP's Dense-diag
+/// (`write_seq_align_dendiag`), minus the range starts that the caller adds. The SAM formatter
+/// reads them as it reads a gapped HSP's (`gapped_segments`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1150-1206
+pub(crate) fn ungapped_segments(
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsps: &[HspRecord<'_>],
+    segments: &mut Segments,
+) {
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    for hsp in hsps {
+        let (q_start, s_start) = dendiag_starts(query, subject, hsp);
+        segments.starts.extend([q_start, s_start]);
+        segments.lens.push(hsp.q_end - hsp.q_offset);
+        segments
+            .strands
+            .extend([Strand::of_frame(hsp.q_frame), Strand::of_frame(hsp.s_frame)]);
+    }
 }
 
 /// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word

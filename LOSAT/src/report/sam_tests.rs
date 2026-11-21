@@ -378,3 +378,95 @@ fn an_empty_document_writes_nothing_and_finish_empties_it() {
     assert!(out.is_empty());
     assert!(!document.has_records());
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80 and
+// c++/src/objtools/align_format/align_format_util.cpp:1150-1206 (`CreateDensegFromDendiag`): an
+// ungapped search's Seq-align of a subject holds a Dense-diag per HSP, which the formatter joins
+// into one Dense-seg: one record per subject. Its tags are the first HSP's (the first of each
+// score, sam_formatter.cpp:246-279), PI over the summed lengths; the sort key is
+// `min(GetSeqStart(0), GetSeqStop(0))` by the strand of the first segment (Dense_seg.cpp:165-238),
+// ties broken by the last HSP's e-value (`GetAlnScores` keeps the last one, :229-268).
+// NCBI 2.17.0 shows the same on O/O4a2/probe (megablast_17: k3 sorts after k1 though its
+// lowest query start is lower; tie1 sorts before tie2).
+#[test]
+fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
+    let run = RunRecord {
+        gapped: false,
+        ..run_record()
+    };
+    let at = |subject: u32, q: (i32, i32), s: (i32, i32), frame: i8, evalue: f64, score: i32| {
+        HspRecord {
+            subject,
+            evalue,
+            score,
+            ..hsp(q, s, frame, q.1 - q.0, &[])
+        }
+    };
+    let hsps = [
+        // Subject_1: key min(30, 20 + 5 - 1) = 24, though an HSP starts at 2.
+        HspRecord {
+            num_ident: 18,
+            ..at(0, (30, 50), (0, 20), 1, 1e-9, 21)
+        },
+        at(0, (2, 12), (40, 50), 1, 1e-3, 22),
+        at(0, (20, 25), (70, 75), 1, 1e-2, 23),
+        // Subject_2: key min(10, 40 + 10 - 1) = 10, last e-value 1e-4.
+        at(1, (10, 20), (5, 15), 1, 1e-10, 31),
+        at(1, (40, 50), (30, 40), 1, 1e-4, 32),
+        // Subject_3: the first HSP on the minus strand (query start 60 - 30 = 30), so the key
+        // is min(40, 30 + 20 - 1) = 40 and the flag 16.
+        at(2, (10, 30), (50, 70), -1, 1e-7, 41),
+        at(2, (40, 48), (10, 18), 1, 1e-4, 42),
+        // Subject_4: key 10, e-value 1e-8: before Subject_2, whose first e-value is lower.
+        at(3, (10, 20), (60, 70), 1, 1e-8, 51),
+    ];
+    let subjects = [
+        subject_seq(0, "Subject_1"),
+        subject_seq(1, "Subject_2"),
+        subject_seq(2, "Subject_3"),
+        subject_seq(3, "Subject_4"),
+    ];
+    let records = |spec: SamSpec| {
+        let mut document = SamDocument::new(spec, "2.17.0+", None);
+        document
+            .query(
+                &run,
+                &query_seq(0, "Query_1"),
+                &subjects,
+                &hsps,
+                &mut NoLetters,
+            )
+            .unwrap();
+        let mut out = Vec::new();
+        document.finish(&mut out).unwrap();
+        String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .filter(|line| !line.starts_with('@'))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let lines = records(SamSpec::default());
+    let names: Vec<&str> = lines
+        .iter()
+        .map(|l| l.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(names, ["Subject_4", "Subject_2", "Subject_1", "Subject_3"]);
+    let fields: Vec<&str> = lines[2].split('\t').collect();
+    // POS: the lowest query start + 1; the clips from the union of the subject rows [0, 75).
+    assert_eq!(fields[1..6], ["0", "Query_1", "3", "255", "35M25H"]);
+    assert_eq!(
+        fields[11..],
+        ["AS:i:21", "EV:f:1e-09", "NM:i:0", "PI:f:51.43", "BS:f:75.8"]
+    );
+    // Reversed: the subject rows [10, 70) clip 100 - 70 in front and 10 behind.
+    let fields: Vec<&str> = lines[3].split('\t').collect();
+    assert_eq!(fields[1..6], ["16", "Query_1", "31", "255", "30H28M10H"]);
+    // `SR` keeps the Seq-align order: one record per subject.
+    let lines = records(SamSpec::parse("SR"));
+    let names: Vec<&str> = lines
+        .iter()
+        .map(|l| l.split('\t').nth(2).unwrap())
+        .collect();
+    assert_eq!(names, ["Subject_1", "Subject_2", "Subject_3", "Subject_4"]);
+}

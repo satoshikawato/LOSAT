@@ -1,0 +1,6 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:1000
+@SQ	SN:Query_2	LN:600
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -query tests/fixtures/blastn_regression/inputs/sam_ug_q.fa -subject tests/fixtures/blastn_regression/inputs/sam_ug_s.fa -ungapped -strand minus -outfmt 17 	PN:blastn
+Subject_5	16	Query_1	401	255	40H272M38H	*	0	0	*	*	AS:i:202	EV:f:2.04189e-111	NM:i:0	PI:f:74.26	BS:f:389.07
+Subject_7	16	Query_2	20	255	24H71M245H	*	0	0	*	*	AS:i:71	EV:f:8.04857e-36	NM:i:0	PI:f:100.00	BS:f:137.198

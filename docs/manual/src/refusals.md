@@ -143,7 +143,6 @@ Strategy files:
 | `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-gapopen` or `-gapextend` above 32767 with `-task megablast` | Refused. |
-| `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-index_name` | Refused. |
 | `-filtering_db` in LOSAT Web | Refused. LOSAT Web does not read BLAST databases yet. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |

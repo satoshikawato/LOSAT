@@ -196,7 +196,8 @@ def test_an_alignment_that_fails_is_the_command_lines_error(name, words, options
         pylosat.Search("psiblast", **options).run(
             pylosat.Alignment.from_file(alignment), pylosat.Sequences.from_fasta(subject), outfmt="6"
         )
-    assert raised.value.message_bytes == stderr.rstrip(b"\n")
+    # The engine's error is the command line's standard error, its last line feed included.
+    assert raised.value.message_bytes == stderr
 
 
 def test_an_alignment_is_psiblasts_query():

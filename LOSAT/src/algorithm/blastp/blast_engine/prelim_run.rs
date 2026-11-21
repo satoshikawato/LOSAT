@@ -6,7 +6,9 @@
 //! set on the pool (in LOSAT_X_BPSUBJRUN's runs or one task per subject), or the one-thread loop,
 //! with the writer of `-culling_limit` or `-best_hit_*` or with the collector (`run_preliminary`). The
 //! function is the statements of `run_call` at its place, in their order: `run_call` calls it
-//! once, with the kernels and the hit lists, and its `?` passes the stage's errors on.
+//! once, with the kernels and the hit lists, and its `?` passes the stage's errors on. The close
+//! of the call's stream (`close_stream`) and the sort of its lists (`sort_preliminary_lists`),
+//! which `run_call` calls after the stage, are here too.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1336
 //!
@@ -316,8 +318,8 @@ where
     // outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
     let mut rps_unlisted: Vec<usize> = Vec::new();
-    // A database of several volumes: its merged lists are not sorted or cut in `run_call` after
-    // this stage, and it prints no query warnings; so even when no batch is searched (every query
+    // A database of several volumes: its merged lists are not sorted or cut after this stage
+    // (`traceback::finish_hit_lists`), and it prints no query warnings; so even when no batch is searched (every query
     // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
     let mut rps_multi_volume = args.rps_search.is_some()
         && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
@@ -720,4 +722,67 @@ where
         rps_multi_volume,
         rps_unlisted,
     })
+}
+
+/// The close of the call's stream after its preliminary stage (`run_call`, after a split batch's
+/// chunks merged their lists into the batch's).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+/// `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+/// (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
+/// trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
+/// preliminary size, 1500 or more here, so it never trims.
+pub(super) fn close_stream(
+    args: &ResolvedBlastpArgs,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) {
+    if args.rps_search.is_none()
+        && crate::core::blast_hspstream::adaptive_cbs_close(
+            args.comp_based_stats.is_enabled(),
+            args.traceback_hitlist_size(),
+        )
+    {
+        let hitlist_size = args.traceback_hitlist_size();
+        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+    }
+}
+
+/// The e-value sort of the preliminary lists, but rpsblast's (`run_call`, after `close_stream`):
+/// the lists in the order in which the redo or the traceback reads them, before a database's
+/// subjects are listed: the lists that its fetch excludes keep their place in that order as marks
+/// (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
+/// the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
+pub(super) fn sort_preliminary_lists(
+    args: &ResolvedBlastpArgs,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    timing: Option<&BlastpTiming>,
+) {
+    let merge_sort_start = blastp_timing_start(timing.is_some());
+    // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
+    // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
+    if args.rps_search.is_none() {
+        for hit_list_opt in preliminary_hit_lists.iter_mut() {
+            if let Some(hit_list) = hit_list_opt.as_mut() {
+                hit_list.sort_by_evalue();
+            }
+        }
+        // The same sort of the compact lists.
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.sort_by_evalue();
+        }
+    }
+    if let Some(timing) = timing {
+        BlastpTiming::record_call(
+            &timing.prelim_merge_sort_ns,
+            &timing.prelim_merge_sort_calls,
+            merge_sort_start,
+        );
+    }
 }

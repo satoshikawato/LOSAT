@@ -662,7 +662,7 @@ describe('Coordinator', () => {
   it("runs an argv that prints the command line's help or version without inputs, and keeps and saves its text", async () => {
     const engine = new ManualEngine();
     engine.startResult = startOf({ prints: 'version' });
-    engine.printed = new TextEncoder().encode('blastn: 2.17.0+\n');
+    engine.printed = new TextEncoder().encode('blastn: LOSAT 0.2.0\n');
     const { coordinator, saved } = setup(engine);
     const runId = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: ['-version'] })).runId!;
     const snapshot = viewOf(coordinator, runId)!.snapshot;
@@ -672,9 +672,9 @@ describe('Coordinator', () => {
     await waitFor(coordinator, runId, 'running');
     engine.finish(runId);
     await waitFor(coordinator, runId, 'completed');
-    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: 2.17.0+\n');
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: LOSAT 0.2.0\n');
     await coordinator.exportPrinted(runId);
-    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: 2.17.0+\n', type: 'text/plain' }]);
+    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: LOSAT 0.2.0\n', type: 'text/plain' }]);
     // NCBI's XML and JSON are saved as what they are (the bytes unchanged).
     for (const [word, kind, text, name, type] of [
       ['-xmlhelp', 'help', '<?xml version="1.0"?>\n<ncbi_application/>\n', 'help.xml', 'application/xml'],

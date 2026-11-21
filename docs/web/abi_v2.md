@@ -82,7 +82,10 @@ memory is not reserved in advance and can grow to wasm32's 4 GiB as well.
 
 All functions return `i32`: `0` (or a non-negative handle) on success, `-1` on failure.
 On failure, `losat_web2_last_error_ptr/len` hold a UTF-8 message. Engine errors use the
-CLI's wording: argv errors are the message of the engine's parser as the command line
+CLI's wording, which is NCBI's in LOSAT's words (`LOSAT/src/wording.rs`, AGENTS.md rule 8): every
+message that this document quotes as NCBI's (`BLAST query/options error: …`, `BLAST engine error: …`)
+reaches the host with LOSAT's prefix (`LOSAT query/options error: …`, `LOSAT engine error: …`), and a
+printed version states LOSAT's (`blastn: LOSAT 0.2.0`) where NCBI's states `2.17.0+`. Argv errors are the message of the engine's parser as the command line
 writes it, ending with a line end (`losat::web_adapter::command_line_message`), search errors are the error and its causes joined by
 `: ` (as ABI v1 reports them). The adapter parses the argv exactly as the command line
 (every program accepts the CLI's default `-outfmt 0`), so an argv error of `validate`, an

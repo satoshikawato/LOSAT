@@ -35,27 +35,27 @@ Seq-annot ::= {
       score {
         {
           id str "score",
-          value int 367
+          value int 550
         },
         {
           id str "blast_score",
-          value int 367
+          value int 550
         },
         {
           id str "e_value",
-          value real { 190876657906153, 10, -67 }
+          value real { 132452400973603, 10, -94 }
         },
         {
           id str "bit_score",
-          value real { 145976476641713, 10, -12 }
+          value real { 216467999034588, 10, -12 }
         },
         {
           id str "num_ident",
-          value int 76
+          value int 104
         },
         {
           id str "num_positives",
-          value int 76
+          value int 104
         },
         {
           id str "hsp_percent_coverage",
@@ -72,71 +72,14 @@ Seq-annot ::= {
           loc {
             int {
               from 0,
-              to 79,
+              to 111,
               strand unknown,
               id local str "Query_1"
             },
             int {
               from 2,
-              to 241,
+              to 337,
               strand plus,
-              id local str "Subject_1"
-            }
-          }
-        }
-      }
-    },
-    {
-      type partial,
-      dim 2,
-      score {
-        {
-          id str "score",
-          value int 18
-        },
-        {
-          id str "blast_score",
-          value int 18
-        },
-        {
-          id str "e_value",
-          value real { 198718892413164, 10, -14 }
-        },
-        {
-          id str "bit_score",
-          value real { 115418246465564, 10, -13 }
-        },
-        {
-          id str "num_ident",
-          value int 2
-        },
-        {
-          id str "num_positives",
-          value int 3
-        },
-        {
-          id str "hsp_percent_coverage",
-          value real { 55, 10, -1 }
-        }
-      },
-      segs std {
-        {
-          dim 2,
-          ids {
-            local str "Query_1",
-            local str "Subject_1"
-          },
-          loc {
-            int {
-              from 44,
-              to 47,
-              strand unknown,
-              id local str "Query_1"
-            },
-            int {
-              from 28,
-              to 39,
-              strand minus,
               id local str "Subject_1"
             }
           }

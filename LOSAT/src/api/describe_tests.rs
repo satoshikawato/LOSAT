@@ -13,7 +13,7 @@ fn api_owned_options_are_not_described_and_search_options_are() {
         for owned in API_OWNED
             .iter()
             .chain(file_options(program))
-            .chain(alignment_options(program))
+            .chain(alignment_owned(program))
         {
             assert!(
                 !flags.contains(&format!("-{owned}").as_str()),

@@ -58,3 +58,7 @@ nmer_abc	-input s1db/s1 -nmer abc
 vol0	-input s1db/s1 -volsize 0
 legacy_missing	-legacy
 positional	-show_filters x
+titles_fa_idmap	-old_style_index true -input titles.fa -output o -idmap true -nmer 8
+titles_db_idmap	-input titlesdb/t -idmap true -nmer 8
+titles_pdb_idmap	-input titlespdb/p -idmap true -nmer 8
+tx_idmap	-input txdb/tx -idmap true -nmer 8

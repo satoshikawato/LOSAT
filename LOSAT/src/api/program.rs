@@ -9,9 +9,9 @@ use std::fmt;
 use super::error::Error;
 
 /// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`,
-/// `windowmasker` and `convert2blastmask` are not searches: they have functions of their own
-/// (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
-/// `run_windowmasker`, `run_convert2blastmask`).
+/// `windowmasker`, `convert2blastmask` and `makembindex` are not searches: they have functions of
+/// their own (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
+/// `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Program {
@@ -58,7 +58,7 @@ impl Program {
 
     /// The program of a command-line name. A program that the command line runs and the API
     /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`, `segmasker`,
-    /// `windowmasker`, `convert2blastmask`) is named in the error.
+    /// `windowmasker`, `convert2blastmask`, `makembindex`) is named in the error.
     pub fn parse(name: &str) -> Result<Self, Error> {
         match name {
             "blastn" => Ok(Program::Blastn),
@@ -84,6 +84,9 @@ impl Program {
             )),
             "convert2blastmask" => Err(Error::Argv(
                 "convert2blastmask is not a search program: run_convert2blastmask runs it".into(),
+            )),
+            "makembindex" => Err(Error::Argv(
+                "makembindex is not a search program: run_makembindex runs it".into(),
             )),
             // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
             // for it yet (its results and options are those of a later item).

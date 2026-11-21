@@ -48,6 +48,7 @@ pub mod isam_num;
 pub mod lmdb_read;
 pub mod lookup;
 pub mod mask;
+pub(crate) mod oid_mask;
 pub(crate) mod rps;
 pub mod seqidlist;
 pub mod tax_files;
@@ -939,7 +940,9 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-936
     /// `FindVolumePaths(paths, alias, true)` of the database that [`SeqDb::open_in`] opens
     /// with the same arguments: every volume path (without extension) and every alias file
-    /// of its alias tree, each once, sorted. No volume file is opened.
+    /// of its alias tree, each once, in NCBI's order (`SeqDB_CompareVolume`:
+    /// [`SeqDb::compare_volume_paths`]). No volume file is opened.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:952-966
     pub fn volume_and_alias_paths(
         name: &str,
         seqtype: SeqType,
@@ -949,28 +952,45 @@ impl SeqDb {
         let volumes: std::collections::BTreeSet<String> = tree.volumes.into_iter().collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
-        Ok((
-            volumes.into_iter().collect(),
-            alias_files.into_iter().collect(),
-        ))
+        // `std::sort` of the set's (distinct) members: no two compare equal, so the order is
+        // that of the comparison alone.
+        let sorted = |set: std::collections::BTreeSet<String>| {
+            let mut paths: Vec<String> = set.into_iter().collect();
+            paths.sort_by(|a, b| Self::compare_volume_paths(Path::new(a), Path::new(b)));
+            paths
+        };
+        Ok((sorted(volumes), sorted(alias_files)))
     }
 
     /// The order in which NCBI searches and numbers the volumes of a database
-    /// (`SeqDB_CompareVolume`, the sort at the end of `FindVolumePaths`): by file name (the
-    /// text after the last path separator), then by the whole path. For volumes in one
-    /// directory it is the byte order of the paths.
+    /// (`SeqDB_CompareVolume`, the sort at the end of `FindVolumePaths`): by base name (the
+    /// text after the last path separator, without an extension `.nal`, `.pal`, `.nin`,
+    /// `.pin`, `.ndb` or `.pdb` after at least one other byte), then by the whole path. For
+    /// volumes in one directory it is the byte order of the paths.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:190-197
+    /// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:975-979
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:76-108
     pub fn compare_volume_paths(a: &Path, b: &Path) -> std::cmp::Ordering {
         fn bytes(path: &Path) -> &[u8] {
             path.as_os_str().as_encoded_bytes()
         }
         fn base_name(path: &[u8]) -> &[u8] {
             let separator = |byte: &u8| *byte == b'/' || (cfg!(windows) && *byte == b'\\');
-            match path.iter().rposition(separator) {
+            let name = match path.iter().rposition(separator) {
                 Some(at) => &path[at + 1..],
                 None => path,
+            };
+            if name.len() > 4 {
+                let (stem, extension) = name.split_at(name.len() - 4);
+                if extension[0] == b'.'
+                    && matches!(extension[1], b'n' | b'p')
+                    && matches!(&extension[2..], b"al" | b"in" | b"db")
+                {
+                    return stem;
+                }
             }
+            name
         }
         let (a, b) = (bytes(a), bytes(b));
         base_name(a).cmp(base_name(b)).then_with(|| a.cmp(b))

@@ -160,6 +160,52 @@ fn identity_resets_the_composition_mode_to_0() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-501 (an ungapped search
+// takes any `-matrix` name; the score block of the first query batch fails for an unknown
+// one, `unknown_matrix`). NCBI BLAST+ 2.17.0 exits 139 on `IDENTITYX` (a name that starts
+// with IDENTITY, as BLASTX's `-matrix` refusal says), which LOSAT refuses. A gapped search
+// stops at the matrix error of the options.
+#[test]
+fn ungapped_search_takes_an_unknown_matrix_name() {
+    let resolve = |extra: &[&str]| {
+        let mut words = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
+        words.extend_from_slice(extra);
+        let cli = parse_cli(words);
+        let TestCommand::Blastp(args) = cli.command;
+        args.resolve()
+    };
+    let unknown = resolve(&["-ungapped", "-comp_based_stats", "0", "-matrix", "FOO"])
+        .expect("an ungapped search with an unknown matrix");
+    assert!(unknown.unknown_matrix);
+    assert!(
+        !unknown.has_gumbel(),
+        "no Gumbel block in an ungapped search"
+    );
+    assert!(!unknown.old_fsc, "`old_fsc` is -searchsp or OLD_FSC only");
+    let known = resolve(&["-ungapped", "-comp_based_stats", "0"]).expect("resolved");
+    assert!(!known.unknown_matrix);
+    assert!(!known.has_gumbel());
+    assert!(known.matrix_file.is_none());
+    let searchsp =
+        resolve(&["-ungapped", "-comp_based_stats", "0", "-searchsp", "1000"]).expect("resolved");
+    assert!(searchsp.old_fsc && !searchsp.has_gumbel());
+    let refused = resolve(&[
+        "-ungapped",
+        "-comp_based_stats",
+        "0",
+        "-matrix",
+        "IDENTITYX",
+    ])
+    .expect_err("IDENTITYX");
+    assert_eq!(
+        refused.to_string(),
+        "-matrix IDENTITYX is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP"
+    );
+    // A gapped search keeps its own default: the Gumbel block.
+    let gapped = resolve(&["-comp_based_stats", "0"]).expect("resolved");
+    assert!(!gapped.old_fsc && gapped.has_gumbel());
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
 // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); a task does not
 // change it (`blastp-short`'s `ClearFilterOptions` comes before the handler).

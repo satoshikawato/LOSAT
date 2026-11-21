@@ -134,6 +134,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `windowmasker` | Makes the unit counts file of a genome (`-mk_counts`), converts it (`-convert`), masks repeats of nucleotide sequences with it (`-ustat`) | counts files, intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
 | `segmasker` | Masks low-complexity protein regions | intervals, FASTA, mask files for `makeblastdb` | [segmasker](docs/manual/src/programs/segmasker.md) |
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
+| `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).

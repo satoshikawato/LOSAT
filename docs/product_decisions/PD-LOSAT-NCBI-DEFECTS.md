@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.65
+- Version: 1.66
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -277,7 +277,14 @@
   rule 3, of an empty first MegaBLAST index volume, whose header NCBI reads through a null
   pointer, of a new-style index volume whose sequence count NCBI reads from words its stream never
   set, and of an `-index_name` range of volumes whose loop NCBI never ends; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.66 2026-11-21 (approved exception 19, hit list sizes past `Int4`, NCBI parity line O1c, PR
+  #1448: the preliminary hit list size, and the best-hit writer's twice that size, computed without
+  NCBI's `Int4` overflow, which ends the rule-2
+  reproduction of its wrapped sizes and the rule-3 rejection of the sizes on which NCBI crashes;
+  proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of
+  2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, and accepted by the
+  maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked; numbered after 1.65)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -458,8 +465,8 @@ Explicit rejections (rule 3):
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
-  exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
-  list size not positive. A query length plus `-window_size` in (2^30, 2^31 - 1], where
+  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
@@ -469,7 +476,8 @@ together with D8, every sum above 2^30 is rejected).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
-more in BLASTP, whose preliminary hit list size wraps to 2 to 48. TBLASTX's culling limit
+more in BLASTP, whose preliminary hit list size wraps to 2 to 48, before version 1.66 (approved
+exception 19 computes it without the overflow). TBLASTX's culling limit
 plus 3 wrapping in `Int4` (decision D1) was reproduced until version 1.4 (exception 4).
 
 ## Approved exception (every program with `-culling_limit`, version 1.4)
@@ -1201,8 +1209,6 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   extensions with NCBI's functions on the batch's buffer.
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
-- `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
-  (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
 - A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
   or for a database sequence with an empty stored title the scientific name from which NCBI makes
   it (since version 1.38 also the name that `x_AdjustProteinTitleSuffix` writes at the end of a
@@ -1258,8 +1264,6 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
 
 - A scoring system without Karlin-Altschul values when an invalid query (such as all N)
   comes first in its batch: NCBI goes on without a gapped block and crashes (SIGSEGV).
-- `-max_target_seqs` above 2^31-51: the preliminary hit list size becomes negative and
-  NCBI crashes.
 - A reward of 32767 or a penalty of -32768 (after NCBI's 16-bit conversion):
   `BLAST_SCORE_MAX`/`BLAST_SCORE_MIN` fall outside NCBI's score range; a reward of 32767
   is counted past the end of the frequency array (invalid queries or a crash), a penalty
@@ -2254,6 +2258,44 @@ accepted by the maintainer on 2026-11-21 by marking PR #1440 ready for review, a
     end) stay refused (rule 3). The range's size has no limit: NCBI expands any range into as many
     Seq-ids, finishes up to the memory it has (2e7 ids in 115 s and 6.9 GB), and LOSAT writes the ids
     as it expands them, in less memory than NCBI.
+
+## Approved exception (hit list sizes past `Int4`, NCBI parity line O1c, version 1.66)
+
+Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), under the Owner's rules
+of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
+accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, as the PR asked.
+
+19. **A hit list size whose preliminary size, or twice it with `-best_hit_*`, passes `Int4`.** `GetPrelimHitlistSize`
+    (`core/blast_hits.c:44-70`) computes the preliminary hit list size in `Int4`:
+    `MIN(MAX(2*h,10),h+50)` for a gapped search without composition-based statistics, `2*h+50`
+    above 500 with them (from 1000 with `ADAPTIVE_CBS`), a signed overflow (undefined behavior in C)
+    from h = 2^30 without them and from h = 2^30 - 25 (1073741799) with them. NCBI BLAST+ 2.17.0's
+    build wraps: without composition-based statistics a size from 2^30 to 2^31 - 51 keeps 10
+    subjects per query and a larger one crashes (SIGSEGV); with them a size from 1073741799 to
+    2147483623 crashes and one from 2147483624 keeps 2 to 48 (probes of line O1c, `-max_target_seqs`
+    and BLASTN's `-num_descriptions` with outfmt 0, in BLASTN, BLASTP, TBLASTN, BLASTX, PSIBLAST,
+    RPSBLAST and RPSTBLASTN). The size is the one of every collector of the preliminary stage
+    (`hspfilter_collector.c`, `hspfilter_culling.c`, `hspfilter_besthit.c`, whose `2 *
+    prelim_hitlist_size` LOSAT computes in 64 bits too), and PSIBLAST's traceback takes it as its hit
+    list size (`traceback_stage.cpp:214-223`). LOSAT computes the size in 64 bits, once for every
+    program (`blastn::hsp::get_prelim_hitlist_size`; on a 32-bit target a size past `usize` is its
+    largest value, which no hit list reaches, since NCBI's OIDs are `Int4`), so each such size keeps
+    every hit, as NCBI's 1073741798 (2^30 - 26) does: NCBI's output at 1073741798 equals LOSAT's at
+    these sizes (the rows with the contract `approved_hitlist_wrap:1073741798` of
+    `LOSAT/tests/outfmt0_manifest.tsv` and the `ncbi-near` rows `db.acbs.blastx.*` and
+    `db.hitlist.*` of `LOSAT/tests/db_search_manifest/`). Ungapped searches and TBLASTX keep the
+    size itself, in NCBI as in LOSAT. With `-best_hit_overhang` or `-best_hit_score_edge` the
+    best-hit writer holds `2 * prelim_hitlist_size` HSPs of a query before it rebuilds its list
+    (`max_hsps`, `core/hspfilter_besthit.c:79`), also in `Int4`, which overflows from a smaller size:
+    1073741774 for a gapped search without composition-based statistics, 536870887 with them
+    (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
+    its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
+    probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
+    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
+    gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
+    contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT
+    reproduced the wrapped sizes (rule 2) and rejected those on which NCBI crashes (rule 3).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

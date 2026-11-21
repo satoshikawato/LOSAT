@@ -1888,10 +1888,11 @@ fn tblastx_takes_a_database_and_its_size() {
 }
 
 #[test]
-fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
+fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs; blast_hits.c:43-70: a -max_target_seqs whose preliminary size wraps to a
-    // negative int crashes NCBI.
+    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
+    // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
         let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
             unreachable!("blastp")
@@ -1908,7 +1909,6 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
         &["-evalue", "1.7976931348623157e308"],
-        &["-max_target_seqs", "1073741799"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
         assert!(
@@ -1921,6 +1921,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "1.7976931348623156e308"],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
+        // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
+        &["-max_target_seqs", "1073741799"],
     ] {
         blastp(words).unwrap();
     }

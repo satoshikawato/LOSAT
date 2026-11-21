@@ -238,17 +238,14 @@ impl HitList {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:44-70
-/// The size in NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`, with `ADAPTIVE_CBS`):
-/// a `-max_target_seqs` from 2^31 - 24 wraps to 2..48 with composition-based statistics, from
-/// 2^30 to 10 without; a size that is not positive (NCBI crashes) was refused with the options
-/// (`args.rs`).
+/// The size of `blastn/hsp.rs` `get_prelim_hitlist_size` (with `ADAPTIVE_CBS`), computed
+/// without NCBI's `int` overflow.
 pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
-    let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         o.hitlist_size as usize,
         o.composition > 0,
         o.gapped,
-    );
-    usize::try_from(size).unwrap_or(0)
+    )
 }
 
 /// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):

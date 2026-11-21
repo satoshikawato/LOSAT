@@ -1953,18 +1953,6 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.evalue
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    // An ungapped search takes the size of NCBI's ungapped case
-    // (`call_setup::prelim_cutoffs`, `get_prelim_hitlist_size`).
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.max_target_seqs,
-        args.max_target_seqs_given,
-        args.comp_based_stats.is_enabled(),
-        !args.ungapped,
-        program,
-    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based

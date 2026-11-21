@@ -1477,9 +1477,7 @@ fn give_blastn_counts(
 /// runs the argv: the run completes when that search completes, and fails with its error when it
 /// fails, with stream 3 the CLI's standard error for the argv up to that error (that search's
 /// warnings). The failure of the other search of a run of two searches (`-num_alignments 0` for the
-/// tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598 or more for format 0, where N + 50
-/// overflows the 32-bit preliminary hit list size) fails its formats alone, as the CLI fails those
-/// formats alone: their streams stay empty, what the host received of them is discarded, and
+/// tabular formats) fails its formats alone, as the CLI fails those formats alone: their streams stay empty, what the host received of them is discarded, and
 /// without the tabular search there are no records. A fault of the adapter itself (`Failed::fault`)
 /// fails the run in any search.
 ///
@@ -4654,20 +4652,15 @@ mod tests {
         }
     }
 
-    /// LOSAT's error for BLASTN's `-num_descriptions 2147483647`, whose preliminary hit list size
-    /// overflows (the CLI writes it after `Error: `).
-    const OVERFLOW: &str = "a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN";
-
-    // The reverse: a -num_descriptions of 2,147,483,598 or more (N + 50 overflows) makes BLASTN's
-    // preliminary hit list size for format 0 only (the tabular formats ignore -num_descriptions).
-    // The CLI's outfmt 6 and 7 succeed and its outfmt 0 fails with LOSAT's error (NCBI crashes
-    // there). With the argv's `-outfmt 6` the run writes the tabular formats and the records as the
-    // CLI does, stream 0 stays empty, and stream 3 is the CLI's standard error for outfmt 6 followed
-    // by that for outfmt 0. Without `-outfmt` the argv's own outfmt 0 fails the run as the CLI
-    // fails (exit 1, LOSAT's error alone), and validate rejects it (native LOSAT 16bef7acd,
-    // 2026-11-19; line WQA's sweep, D3 review, 2026-11-19).
+    // A -num_descriptions of 2,147,483,598 or more makes BLASTN's preliminary hit list size of
+    // format 0 overflow NCBI's 32-bit `int` (N + 50; NCBI crashes), while the tabular formats ignore
+    // -num_descriptions. LOSAT computes the size without overflow (PD-LOSAT-NCBI-DEFECTS, hit list
+    // sizes past `Int4`), so the run writes every format, with the argv's `-outfmt 6` and without
+    // `-outfmt`; these inputs have fewer hits than either size, so each format is the plain run's.
+    // Stream 3 is the formatting handler's warning of the tabular formats, as the CLI's standard
+    // error of `-outfmt 6`.
     #[test]
-    fn a_hit_list_size_that_overflows_fails_format_0_only() {
+    fn a_hit_list_size_past_ncbi_s_int_writes_every_format() {
         let query = fasta(SPLIT_QUERY);
         let subject = fasta(SPLIT_SUBJECT);
         let plain_words = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
@@ -4675,44 +4668,19 @@ mod tests {
         assert_eq!(discarded(&plain), [] as [u32; 0]);
         let words = [&plain_words[..], &["-num_descriptions", "2147483647"]].concat();
         let tabular = [&words[..], &["-outfmt", "6"]].concat();
-        validate(&tabular).unwrap();
-        let streams = streams(&tabular, &query, &subject).unwrap();
-        // The tabular formats are the plain run's (-num_descriptions is ignored by them).
-        for stream in [6, 7] {
-            assert_eq!(streams[&stream], plain[&stream], "stream {stream}");
+        for argv in [&words, &tabular] {
+            validate(argv).unwrap();
+            let streams = streams(argv, &query, &subject).unwrap();
+            assert_eq!(discarded(&streams), [] as [u32; 0], "{argv:?}");
+            for stream in [0, 1, 6, 7] {
+                assert_eq!(streams[&stream], plain[&stream], "{argv:?} stream {stream}");
+            }
+            assert_eq!(
+                String::from_utf8(streams[&3].clone()).unwrap(),
+                "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n",
+                "{argv:?}"
+            );
         }
-        assert!(streams.get(&0).is_none_or(|bytes| bytes.is_empty()));
-        // The host is told that stream 0 failed, once (stream 9; line WQA's sweep, D7, 2026-11-19).
-        assert_eq!(discarded(&streams), [0]);
-        // The records follow the tabular list, with no section of format 0.
-        let records = String::from_utf8(streams[&1].clone()).unwrap();
-        assert!(records.lines().count() > 0);
-        assert!(records.lines().all(|line| line.contains("\"out0\":null")));
-        assert_eq!(
-            String::from_utf8(streams[&3].clone()).unwrap(),
-            format!("Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nError: {OVERFLOW}\n")
-        );
-        // The argv's own outfmt 0: the CLI writes LOSAT's error alone.
-        let (error, failed) = failed_streams(&words, &query, &subject);
-        assert_eq!(error, OVERFLOW);
-        assert_eq!(diagnostics_of(&failed), "");
-        assert_outputs_empty(&failed, "outfmt 0");
-        assert_eq!(validate(&words).unwrap_err(), error);
-        // Both searches rejected (`-num_alignments 0` too): the run fails with the error of the
-        // argv's own search, after the warnings that it wrote, as the CLI's run of the argv: LOSAT's
-        // error alone for outfmt 0, the handler's lines and NCBI's error for `-outfmt 6`.
-        let both = [&words[..], &["-num_alignments", "0"]].concat();
-        let (error, failed) = failed_streams(&both, &query, &subject);
-        assert_eq!(error, OVERFLOW);
-        assert_eq!(diagnostics_of(&failed), "");
-        assert_eq!(validate(&both).unwrap_err(), error);
-        let both = [&both[..], &["-outfmt", "6"]].concat();
-        let (error, failed) = failed_streams(&both, &query, &subject);
-        assert_eq!(
-            format!("{}{error}", diagnostics_of(&failed)),
-            ncbi_in_losat_words("Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n")
-        );
-        assert_eq!(validate(&both).unwrap_err(), error);
     }
 
     // The argv's own search decides the run (`own_search`; line WQA's sweep, D3 review, 2026-11-19).

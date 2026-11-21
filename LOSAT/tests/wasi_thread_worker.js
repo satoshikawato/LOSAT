@@ -25,11 +25,7 @@ function writeError(err) {
   fs.writeSync(2, `${message}\n`);
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) {
-//     LOG_POST(Error << "Error: " << e.what());
-//     exit_code = BLAST_UNKNOWN_ERROR;
-// }
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // A Wasm trap cannot unwind Rust/Rayon's shared state. The main thread may be
 // blocked inside Wasm, unable to receive a Worker error/exit event. Terminate
 // this command process from the failing worker after flushing its diagnostic;
@@ -54,11 +50,6 @@ function markWorkerStart(control, state) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-// ```c++
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     }
-// ```
 // A standby or recycled worker blocks here, after instantiation, until spawnThread assigns
 // it a thread. The order is consumed, so a recycled worker waits again after this thread.
 function waitForStartOrder(control) {
@@ -69,8 +60,7 @@ function waitForStartOrder(control) {
   return order;
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // Node 18/24 lib/wasi.js initialize binds memory and optionally calls _initialize.
 // Child entry has its own thread-pointer initialization; do not rerun main CRT.
 function initializeWasiThreadInstance(wasi, instance) {
@@ -80,19 +70,12 @@ function initializeWasiThreadInstance(wasi, instance) {
 function createWasi(args) {
   return new WASI({
     version: "preview1",
-    // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    // CATCH_ALL(status)
-    // return status;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     // Handle the command's exit explicitly on every supported Node version.
     returnOnExit: true,
     args,
     env: { ...process.env, PWD: process.cwd() },
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
-// ```c++
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-// ```
 // Preserve lexical filenames at the recorded host cwd.
 // Root preopen permits absolute paths; PWD initializes the guest cwd for
 // relative filenames through std::env::set_current_dir, without rewriting argv.
@@ -100,7 +83,7 @@ function createWasi(args) {
   });
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
 // A module may import host functions besides WASI, such as the output stream of the
 // LOSAT Web adapter (docs/web/abi_v2.md). The main instance receives the functions the
@@ -152,12 +135,9 @@ if (!isMainThread && require.main === module) {
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
   const name = standby === undefined ? `tid=${tid}` : `standby=${standby}`;
-  // NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-  // LOG_POST(Error << "Error: " << e.what());
-  // exit_code = BLAST_UNKNOWN_ERROR;
+  // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
   process.on("uncaughtException", failWorker);
-  // NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-  // LOG_POST(Error << "Error: " << e.what()); exit_code = BLAST_UNKNOWN_ERROR;
+  // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
   // This handler runs in the worker even while the caller is blocked in Wasm.
   let completed = false;
   process.on("exit", code => {
@@ -203,11 +183,6 @@ if (!isMainThread && require.main === module) {
         if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
         if (fault === "abnormal-exit") process.exit(23);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-        // ```c++
-        //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-        //         (*thread)->Run();
-        //     }
-        // ```
         // Host memory only. This instance may be older than the guest's last growth of the
         // shared memory: a standby worker (or a recycled one, not measured) instantiated
         // before pthread_create allocated this thread's stack and TLS and grew the memory for

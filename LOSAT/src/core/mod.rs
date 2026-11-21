@@ -1,6 +1,6 @@
 //! BLAST Core Algorithms
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/
 //!
 //! Ports of NCBI core/ (and composition_adjustment/) code that several programs share. The
 //! lookup, scan, extension, gapped alignment and linking ports are per program, under
@@ -11,7 +11,8 @@
 //! - **Utilities** (`blast_util`, `blast_encoding`): sequence encoding and helpers
 //! - **Filtering/Masking** (`blast_seg`, a re-export of `utils::seg`)
 //! - **Composition adjustment** (`composition_adjustment`, NCBI algo/blast/composition_adjustment/)
-//! - **HSP filters** (`blast_hits`: `-max_hsps`, `-qcov_hsp_perc`; `hspfilter_culling`:
+//! - **HSP filters** (`blast_hits`: `-max_hsps`, `-qcov_hsp_perc`; `hspfilter_besthit`:
+//!   `-best_hit_overhang`, `-best_hit_score_edge`; `hspfilter_culling`:
 //!   `-culling_limit`)
 //! - **HSP stream** (`blast_hspstream`): the preliminary stage's close with `ADAPTIVE_CBS`
 //! - **Subject chunks with hard ranges** (`subject_split`, NCBI core/blast_engine.c's
@@ -30,18 +31,14 @@ pub(crate) mod x_drop;
 // Filtering/Masking
 pub mod blast_seg;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-190
-// ```c
-// typedef struct BlastCompo_Alignment { ... } BlastCompo_Alignment;
-// typedef struct BlastCompo_GappingParams { ... } BlastCompo_GappingParams;
-// typedef struct BlastCompo_SequenceRange { ... } BlastCompo_SequenceRange;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-190
 pub mod composition_adjustment;
 
 // HSP Management
 pub mod blast_hits;
 // The close of the preliminary stage's HSP stream with `ADAPTIVE_CBS` (NCBI core/blast_hspstream.c)
 pub(crate) mod blast_hspstream;
+pub(crate) mod hspfilter_besthit;
 pub mod hspfilter_culling;
 
 // The chunks of a database sequence with hard ranges (NCBI core/blast_engine.c's

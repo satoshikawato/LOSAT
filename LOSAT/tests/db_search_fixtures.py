@@ -135,9 +135,12 @@ row whose query has a reader error after the batch that the command line refuses
 (`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
 and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
 the rows of rpsblast and rpstblastn (the library API has no such program), those that give both
-`-query` and `-in_pssm` (the library's query is one or the other), those with an alignment option (`-in_msa`,
-a query cell `msa:PATH`) and those that read the query from
-standard input (the library's query is records) are `library-skip`.
+`-query` and `-in_pssm` (the library's query is one or the other), those that give `-in_msa` with either of them,
+those with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa` (the library takes the options with the
+alignment, `Inputs::msa`), those that write the search strategy file (`-export_search_strategy`, which the
+library refuses) and those that read the query from
+standard input (the library's query is records) are `library-skip`. psiblast's alignment queries
+(`-in_msa`, a query cell `msa:PATH`, the library's `Inputs::msa`) run through the library as on the command line.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -301,13 +304,41 @@ def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None
     return names.split("+"), dropped, replaced, (alias if at else None)
 
 
-def inflate_rps(cell: str) -> Path:
+DB_DIR_LEN_FILE = TESTS / "db_search" / "rps" / "db_dir_len.txt"
+
+
+def db_dir_len() -> int:
+    """The length of a `{db_dir}` directory's path in the rows that keep it (`inflate_rps`); the
+    file is read by `wording::tests::archive_messages_are_wrapped_again_as_ncbi_wraps_them` too."""
+    return int(DB_DIR_LEN_FILE.read_text())
+
+
+def temp_dir_of_length(prefix: str, length: int) -> Path:
+    """A fresh directory under the temporary directory (links resolved; `/tmp` or `/var/tmp` when that
+    path is too long) whose path is exactly `length` characters: the name's prefix is lengthened. The
+    wraps of an ASN.1 message that holds the path (NCBI's RPS errors in an archive) depend on its
+    length, so a frozen `{db_dir}` stands for one."""
+    random_part = 8  # `tempfile.mkdtemp` appends eight random characters.
+    parents = [Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve(), Path("/var/tmp").resolve()]
+    for parent in parents:
+        pad = length - len(str(parent)) - len(os.sep) - len(prefix) - random_part
+        if pad >= 0 and parent.is_dir():
+            target = Path(tempfile.mkdtemp(prefix=prefix + "p" * pad, dir=parent))
+            if len(str(target)) != length:
+                raise SystemExit(f"{target} has {len(str(target))} characters, not {length}")
+            return target
+    raise SystemExit(f"no temporary directory of {[str(p) for p in parents]} is short enough for a directory path "
+                     f"of {length} characters")
+
+
+def inflate_rps(cell: str, token: bool = False) -> Path:
     """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
     files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
-    leaves out or replaces, and the cell's alias file."""
+    leaves out or replaces, and the cell's alias file. With `token` (the row keeps the directory as
+    `{db_dir}`, `rps_dir_token`) its path has `db_dir_len()` characters."""
     names, dropped, replaced, alias = rps_cell(cell)
     rps_dir = TESTS / "db_search" / "rps"
-    target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
+    target = temp_dir_of_length("rps_db_", db_dir_len()) if token else Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
         sub, _, name = name.rpartition("/")
         into = target / sub
@@ -413,7 +444,7 @@ def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     return env
 
 
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_usage_report.cpp:195-220 (the
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-220 (the
 # report's parameters, sent to NCBI's server when the application ends unless BLAST_USAGE_REPORT, in the
 # environment or the registry, is a false value)
 NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
@@ -559,12 +590,6 @@ def expected_stdout(row: dict[str, str]) -> bytes:
 COPY_PREFIX = "COPY"
 COPY_OUTFMTS = ("0", "5", "6", "7")
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88, 135-137
-#     char* batch_sz_str = getenv("BATCH_SIZE");
-#     if (batch_sz_str) {
-#         retval = NStr::StringToInt(batch_sz_str);
-#     case eBlastp:
-#     default:
-#         retval = 10000;
 BLASTP_BATCH_SIZE = 10000
 # A full hit list does not limit a copy row. The composition-based redo ends the remaining matches early only while
 # the heap of every query of the batch is full (below), and it takes the matches in the order of their queries
@@ -572,25 +597,9 @@ BLASTP_BATCH_SIZE = 10000
 # match of an original query is ended early, only the copy's can be (the batch's last query), and its report is cut
 # out. LOSAT ends no match early with unified P-values (`BlastCompoHeap::without_early_end`).
 # NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1565-1566, 1575-1577
-#     for (i = 0;  i < numQueries;  i++) {
-#         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
-#         } else {
-#             return FALSE;
-#         }
 # The query chunks of a BLASTP batch: CHUNK_SIZE (else 10000) and OVERLAP_CHUNK_SIZE (else 100) residues.
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61, 91-93
-#     char* chunk_sz_str = getenv("CHUNK_SIZE");
-#     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-#         retval = NStr::StringToInt(chunk_sz_str);
-#         case eBlastp:
-#         default:
-#             retval = 10000;
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-57
-#     size_t retval = 100;
-#     // used for experimentation purposes
-#     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
-#     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
-#         retval = NStr::StringToInt(overlap_sz_str);
 BLASTP_CHUNK_SIZE = 10000
 QUERY_CHUNK_OVERLAP = 100
 # The variables that a copy row's oracle run may set in place of the row's own: only those that place the queries in
@@ -639,9 +648,7 @@ def query_batches(lengths: list[int], batch_size: int) -> list[list[int]]:
     their lengths is below `batch_size`; the query that brings it to `batch_size` or more is the batch's last.
 
     NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140, 163, 170
-        while (size_read < GetBatchSize()) {
-                size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-            retval->AddQuery(q);"""
+            """
     batches: list[list[int]] = []
     current: list[int] = []
     size = 0
@@ -665,14 +672,8 @@ def query_chunks(length: int, env: dict[str, str]) -> int:
     100), and 1 when that is 1 or less (19,799 residues and fewer by default).
 
     NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:124-131
-        if ((*chunk_size) > overlap_size) {
-           num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
-        }
 
-        // Only one chunk, just return;
-        if (num_chunks <= 1) {
-           *chunk_size = concatenated_query_length;
-           return 1;"""
+           """
     chunk, overlap = (int(env.get(name, "").strip() or default) for name, default in
                       (("CHUNK_SIZE", BLASTP_CHUNK_SIZE), ("OVERLAP_CHUNK_SIZE", QUERY_CHUNK_OVERLAP)))
     return max(length // (chunk - overlap) if chunk > overlap else 0, 1)
@@ -1050,7 +1051,7 @@ def freeze(args: argparse.Namespace) -> int:
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
     """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
     written as `{db_dir}` where the row says so."""
-    db_dir = inflate_rps(row["db"])
+    db_dir = inflate_rps(row["db"], rps_dir_token(row))
     try:
         run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
                          env={**row_env(row, env), "BLASTDB": str(db_dir)})
@@ -1088,17 +1089,24 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
     # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call, nor has
-    # the alignment's options (`xinclude.ALIGNMENT_OPTIONS`; the library refuses them, line PS item PS6).
+    # a row that gives `-in_msa` with either of them, or the alignment's master options
+    # (`xinclude.ALIGNMENT_OPTIONS`) without `-in_msa` (`Inputs::msa` is the library's alignment
+    # query, line LIB item 1.6), nor a row that writes the search strategy file
+    # (`-export_search_strategy`: the library writes none and refuses it, `api::search::STRATEGY_FILES`,
+    # line RG item F1b-1).
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
                     or ("-query" in argv and "-in_pssm" in argv)
-                    or any(word in xinclude.ALIGNMENT_OPTIONS for word in argv)
+                    or ("-in_msa" in argv and ("-query" in argv or "-in_pssm" in argv))
+                    or ("-in_msa" not in argv
+                        and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
+                    or "-export_search_strategy" in argv
                     or query_stdin(row)):
         return "library-skip", ""
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
-    db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
+    db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
     if db_dir is not None:
         try:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,

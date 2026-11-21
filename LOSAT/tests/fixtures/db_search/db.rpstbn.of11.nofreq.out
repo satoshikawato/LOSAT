@@ -1,0 +1,17 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: rps_mini contains no frequency ratios
+ needed for composition-based statistics. Please disable composition-based
+ statistics when searching against rps_mini."
+    }
+  }
+}

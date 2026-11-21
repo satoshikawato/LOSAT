@@ -26,7 +26,7 @@ fn align() -> Align {
     }
 }
 
-// impl/basedata_impl.hpp:2-19 and biodata_blast.cpp:23-43 (quoted at `clean_alignment` and
+// impl/basedata_impl.hpp:2-19 and biodata_blast.cpp:23-43 (cited at `clean_alignment` and
 // `parse_align`): the segments with a gap in either row are dropped; the range runs from the
 // first kept segment to the end of the last one.
 #[test]
@@ -44,7 +44,7 @@ fn parse_align_keeps_the_aligned_segments() {
     assert!(none.s_starts.is_empty());
 }
 
-// basedata.cpp:1324-1339 (quoted at `master_gaps`): query gaps of at least 35 residues.
+// basedata.cpp:1324-1339 (cited at `master_gaps`): query gaps of at least 35 residues.
 #[test]
 fn master_gaps_of_35_residues_and_more() {
     let seg = dense_seg(&[0, 0, 44, 10, 100, 20, 134, 30], &[10, 10, 10, 10]);
@@ -54,7 +54,7 @@ fn master_gaps_of_35_residues_and_more() {
     assert_eq!(gaps.total_residues(), 46);
 }
 
-// basedata.cpp:154-166 (quoted at `count_source`): one hit per source database and region;
+// basedata.cpp:154-166 (cited at `count_source`): one hit per source database and region;
 // the PRK family (PRK, CHL, MTH, PHA, PLN, PTZ) counts as one source; unknown sources always
 // count.
 #[test]
@@ -77,7 +77,7 @@ fn std_seg(query: StdLoc, hit: StdLoc) -> StdPair {
     StdPair { query, hit }
 }
 
-// biodata_blast.cpp:44-209 (quoted at `parse_std_align`): a plus-strand hit of rpstblastn
+// biodata_blast.cpp:44-209 (cited at `parse_std_align`): a plus-strand hit of rpstblastn
 // (archive c01, Query_1: 387-2582 with 0-731, a query insertion 2583-2585 with an `empty`
 // subject, 2586-2795 with 732-801): pseudo-protein starts `f / 3`, the frame of `from`.
 #[test]
@@ -173,7 +173,7 @@ fn std_seg_forms() {
     assert_eq!(length(0, 0x7fff_fffe), (0, 0x7fff_ffff));
 }
 
-// biodata_blast.cpp:63 (quoted at `parse_std_align`): `seqlocs[0]->IsNull() ||
+// biodata_blast.cpp:63 (cited at `parse_std_align`): `seqlocs[0]->IsNull() ||
 // seqlocs[1]->IsNull()` reads the second location only when the first is not `null`. A
 // segment whose only location is `null` is skipped (PS16c review oracle `nullone`: NCBI's
 // output is that of the archive without the segment); a segment without locations, or whose
@@ -211,7 +211,7 @@ fn locations_are_read_in_ncbis_order() {
     }
 }
 
-// biodata_blast.cpp:178-182 (quoted at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
+// biodata_blast.cpp:178-182 (cited at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
 // RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
 // 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
 // exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
@@ -232,7 +232,7 @@ fn a_minus_strand_hit_that_ends_at_int_max() {
     assert_eq!((dom.from, dom.to), (2_147_483_640, i64::from(i32::MAX)));
 }
 
-// basedata.cpp:1137-1177 and segset_impl.hpp:281-290 (quoted at `pr2na_ends`): a range of the
+// basedata.cpp:1137-1177 and segset_impl.hpp:281-290 (cited at `pr2na_ends`): a range of the
 // set past `int`'s range (NCBI's set arithmetic overflowed before) and, on the minus strand, a
 // residue at `INT_MIN` (`MinusPr2PlusNA`'s `pr - 1`) are computed as their values, which the
 // conversions to `unsigned int` take modulo 2^32 (PD-LOSAT-NCBI-DEFECTS exception 12).
@@ -280,7 +280,7 @@ fn ends_that_overflow_int() {
     assert_eq!(pr2na_ends(&set(min, 10), &plus), Some((-2_147_483_647, 33)));
 }
 
-// basedata.cpp:1180-1250 (quoted at `segset::SegSet::map_through`): `m_vecSStarts[idx] +
+// basedata.cpp:1180-1250 (cited at `segset::SegSet::map_through`): `m_vecSStarts[idx] +
 // m_vecLens[idx] - 1` is an `unsigned int` sum stored in the `int` `end`. A segment from model
 // position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's range (2^31 - 8
 // to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and maps the part
@@ -301,7 +301,7 @@ fn mapped_segment_ends_wrap_as_unsigned_int() {
     assert_eq!(map(2_147_483_634), vec![(6, 9)]);
 }
 
-// basedata.cpp:1252-1300 (quoted at `translated_pos_map`): a minus-strand hit's positions move
+// basedata.cpp:1252-1300 (cited at `translated_pos_map`): a minus-strand hit's positions move
 // by `aaLen - alignedLen`; an aligned length beyond the query is NCBI's exception.
 #[test]
 fn positions_on_a_minus_strand_translation() {
@@ -344,7 +344,7 @@ fn ends_on_the_plus_strand() {
 
 // `key_order`, one key of `e_value_order`: numbers as C++'s `<` and `>` compare doubles (-0.0 and
 // 0.0 equal, the infinities ordered), a NaN after every number in either direction, two NaNs equal
-// (PD-LOSAT-NCBI-DEFECTS 1.58).
+// (PD-LOSAT-NCBI-DEFECTS 1.62).
 #[test]
 fn a_key_orders_numbers_as_cpp_and_a_nan_last() {
     use std::cmp::Ordering::{Equal, Greater, Less};

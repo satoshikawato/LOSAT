@@ -9,11 +9,6 @@
 //! once, with the kernels and the hit lists, and its `?` passes the stage's errors on.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1336
-//! ```c
-//! Int4
-//! BLAST_PreliminarySearchEngine(EBlastProgramType program_number,
-//!     BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-//! ```
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`preliminary_search_error`, `run_resolved_in_pool`, `x_block_input`, `PrelimCollector`,
@@ -31,8 +26,9 @@ use anyhow::Result;
 use super::{
     blastp_timing_start, culling, database, preliminary_search_error, pssm_hooks, rps_hooks,
     run_resolved_in_pool, update_blastp_preliminary_hit_lists, x_block_input, x_lookup_ahead,
-    BlastpRanges, BlastpReports, BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult,
-    BlastpSubjectScratch, BlastpSubjectSource, BlastpTiming, PrelimCollector, PrelimOnly,
+    BlastpPrelimValues, BlastpRanges, BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters,
+    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpSubjectSource, BlastpTiming,
+    PrelimCollector, PrelimOnly,
 };
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -45,7 +41,7 @@ use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::stats::search_space::SearchSpace;
-use crate::stats::setup::SubjectSpaceOverflow;
+use crate::stats::setup::{SearchSpaceOverflow, SubjectSpaceOverflow};
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
@@ -80,6 +76,10 @@ pub(super) struct PrelimRun<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) query_batch_skipped: &'a [bool],
     pub(super) query_chunk: bool,
+    /// rpsblast: whether the engine counts each HSP's identities again for the reports
+    /// (`rps_hooks::RpsSearchRun::recount_identities`), decided from the reports that the call's
+    /// formats are (`call_setup::requested_reports`): none is a custom table.
+    pub(super) rps_recount_identities: bool,
     // The subjects, the query blocks and the queries' contexts.
     pub(super) database: Option<&'a database::BlastpDatabase>,
     pub(super) subjects: &'a [EncodedProtein],
@@ -104,6 +104,9 @@ pub(super) struct PrelimRun<'a> {
     pub(super) prelim_hitlist_size: usize,
     pub(super) prelim_evalue: f64,
     pub(super) subject_space_overflow: &'a SubjectSpaceOverflow,
+    // `-db_soft_mask` and `-db_hard_mask`: the masking whose first read error of the masks ends a
+    // database's blocks as a read error of its sequences (`db_masked.rs`).
+    pub(super) db_masking: Option<&'a super::db_masked::BlastpDbMasking<'a>>,
     // The shape of the scan's tables.
     pub(super) window: i32,
     pub(super) diag_mask: i32,
@@ -132,6 +135,79 @@ pub(super) struct PrelimOutcome {
     pub(super) rps_unlisted: Vec<usize>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+// A search without a database (`db_length` 0) recomputes the search spaces, cutoffs and links of
+// every query from the length of each subject before its scan.
+/// The preliminary stage with the search of one subject `search` (`BlastpPrelimKernel::
+/// search_subject`, or with `-db_soft_mask` or `-db_hard_mask` the masked kernels of
+/// `db_masked.rs`, chosen once per call so that a search without them keeps its kernel): with the
+/// setup's statistics `batch_values` (`process_subject`), and where NCBI computes the statistics
+/// of each subject (`per_subject`) with the subject's own, `subject_parameters` of its length with
+/// the options' E-value (`process_own_subject`; a search space that overflows is noted in the
+/// stage's `subject_space_overflow` and the subject gives no hits). A subject without letters takes
+/// the setup's.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_preliminary_with<S, P>(
+    stage: &PrelimRun<'_>,
+    search: &S,
+    batch_values: &BlastpPrelimValues<'_>,
+    subject_parameters: &P,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    culling: &mut Option<culling::PrelimCulling>,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<PrelimOutcome>
+where
+    S: Fn(
+            &mut BlastpSubjectScratch,
+            usize,
+            BlastpSubjectRef<'_>,
+            &mut BlastpSubjectResult,
+            &BlastpPrelimValues<'_>,
+        ) + Sync,
+    P: Fn(usize) -> Result<BlastpSubjectParameters, SearchSpaceOverflow> + Sync,
+{
+    let evalue = stage.args.evalue;
+    let overflow = stage.subject_space_overflow;
+    let process_subject = |scratch: &mut BlastpSubjectScratch,
+                           s_idx: usize,
+                           subject: BlastpSubjectRef<'_>,
+                           subject_result: &mut BlastpSubjectResult| {
+        search(scratch, s_idx, subject, subject_result, batch_values)
+    };
+    let process_own_subject =
+        |scratch: &mut BlastpSubjectScratch,
+         s_idx: usize,
+         subject: BlastpSubjectRef<'_>,
+         subject_result: &mut BlastpSubjectResult| {
+            if subject.aa_len == 0 {
+                return search(scratch, s_idx, subject, subject_result, batch_values);
+            }
+            match subject_parameters(subject.aa_len) {
+                Ok(parameters) => search(
+                    scratch,
+                    s_idx,
+                    subject,
+                    subject_result,
+                    &parameters.values(evalue),
+                ),
+                Err(error) => {
+                    subject_result.reset(s_idx);
+                    overflow.note(error);
+                }
+            }
+        };
+    run_preliminary(
+        stage,
+        &process_subject,
+        &process_own_subject,
+        preliminary_hit_lists,
+        x_compact_hit_lists,
+        culling,
+        outputs,
+    )
+}
+
 /// The preliminary stage of the call (module header): the statements of `run_call` from the choice
 /// of the pool to the end of the call's branch, in their order. The kernels are `run_call`'s
 /// closures, `process_subject` with the setup's statistics and `process_own_subject` with each
@@ -146,22 +222,10 @@ pub(super) struct PrelimOutcome {
 /// after its blocks (`subject_space_overflow`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:307-310
-/// ```c++
-///         if (IsMultiThreaded()) {
-///              x_LaunchMultiThreadedSearch(*m_InternalData);
-///         } else {
-///             retval = CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
-/// ```
 /// A database's threads are chosen in its driver (`database::search_blocks`). For a subject set
 /// NCBI uses one thread (`-subject` resets `-num_threads`):
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3224-3227
-/// ```c++
-///         // This is temporarily ignored (per SB-635)
-///         if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
-///             m_NumThreads != CThreadable::kMinNumThreads) {
-///             m_NumThreads = CThreadable::kMinNumThreads;
-/// ```
 /// No NCBI counterpart: `use_parallel`, the pool for a subject set, whose output is the one
 /// thread's.
 pub(super) fn run_preliminary<K, O>(
@@ -188,6 +252,7 @@ where
         query_batches,
         query_batch_skipped,
         query_chunk,
+        rps_recount_identities,
         database,
         subjects,
         x_soft_subjects,
@@ -209,6 +274,7 @@ where
         prelim_hitlist_size,
         prelim_evalue,
         subject_space_overflow,
+        db_masking,
         window,
         diag_mask,
         offset_array_size,
@@ -227,13 +293,7 @@ where
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let use_parallel = {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-        // ```c
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    status = s_BlastSearchEngineCore(...);
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
         // (A database has its own driver below, `database::search_blocks`.)
         database.is_none()
             && blastp_should_parallelize_stage(
@@ -272,6 +332,7 @@ where
                 .iter()
                 .map(|batch| batch.searched.clone())
                 .collect(),
+            recount_identities: rps_recount_identities,
         };
         let searched = rps_hooks::rps_search(
             rps,
@@ -365,26 +426,11 @@ where
         })?;
     } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-        // ```c++
-        //     int status = m_PrelimSearch->CheckInternalData();
-        //     if (status != 0)
-        //     {
-        //          // Search was not run, but we send back an empty CSearchResultSet.
-        // ```
         // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
         // batches and reads no sequence of the database (a sequence file that cannot be read
         // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
     } else if let Some(blocks) = x_blocks.as_deref() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-        // ```c++
-        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-        //             ...
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // ```
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks of whole batches, NCBI's
         // batches in order: each block a call of its own (`PrelimOnly::Block`: its lookup table,
         // diagonal table and scratch, freed when it returns), whose compact hit lists move to their
@@ -499,36 +545,45 @@ where
                 }
             };
         }
-        if per_subject {
+        let searched = if per_subject {
             search_database_blocks!(process_own_subject)
         } else {
             search_database_blocks!(process_subject)
-        }
-        .map_err(|error| {
-            // A sequence file that cannot be read: NCBI's error of the batch's
-            // preliminary search (`database::PreliminaryReadError`). EXPERIMENT
-            // (LOSAT_X_BPQBLOCK): a block of the preliminary stage hands it to the search of all
-            // queries, whose batches and reports it is (`x_blocks`).
-            match error.downcast::<database::PreliminaryReadError>() {
-                Ok(read_error) if x_block_call => anyhow::Error::new(read_error),
-                Ok(read_error) => preliminary_search_error(
-                    args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    query_batches,
-                    query_batch_skipped,
-                    query_chunk,
-                    database.name(),
-                    read_error.0,
-                ),
-                Err(other) => other,
-            }
-        })?;
+        };
+        // `-db_soft_mask` and `-db_hard_mask`: the first read error of the masks by ordinal id
+        // (`db_masked.rs`), a read error of the preliminary stage as the sequences' are.
+        searched
+            .and_then(
+                |()| match db_masking.and_then(|masking| masking.take_error()) {
+                    Some(error) => Err(error),
+                    None => Ok(()),
+                },
+            )
+            .map_err(|error| {
+                // A sequence file that cannot be read: NCBI's error of the batch's
+                // preliminary search (`database::PreliminaryReadError`). EXPERIMENT
+                // (LOSAT_X_BPQBLOCK): a block of the preliminary stage hands it to the search of all
+                // queries, whose batches and reports it is (`x_blocks`).
+                match error.downcast::<database::PreliminaryReadError>() {
+                    Ok(read_error) if x_block_call => anyhow::Error::new(read_error),
+                    Ok(read_error) => preliminary_search_error(
+                        args,
+                        query_records,
+                        subject_source,
+                        subject_label,
+                        outputs,
+                        blastp_parallel_pool,
+                        ranges,
+                        reports,
+                        query_batches,
+                        query_batch_skipped,
+                        query_chunk,
+                        database.name(),
+                        read_error.0,
+                    ),
+                    Err(other) => other,
+                }
+            })?;
         subject_space_overflow.check()?;
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(
@@ -543,27 +598,11 @@ where
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // aux_arg->gap_align = BLAST_GapAlignStructNew(...);
-            // aux_arg->hsp_stream = BlastHSPStreamNew(...);
-            // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
             let subject_diag_offsets = blastp_subject_diag_offsets(subjects, window);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // BlastScoringParameters* score_params = NULL;
-            // BlastExtensionParameters* ext_params = NULL;
-            // BlastGapAlignStruct* gap_align = NULL;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1744-1748
             let pool = blastp_parallel_pool;
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
-            // ```c
-            // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-            //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-            //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1554
             //
             // Parallel workers write one subject result into its oid-indexed
             // slot; the reducer below replays those slots in NCBI subject

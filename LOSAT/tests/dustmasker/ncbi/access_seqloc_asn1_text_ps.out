@@ -1,0 +1,112 @@
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id genbank {
+      accession "AB000001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id gi 7
+  },
+  {
+    from 430,
+    to 480,
+    id gi 7
+  },
+  {
+    from 578,
+    to 670,
+    id gi 7
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id other {
+      accession "NC_000001",
+      version 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id other {
+      accession "NC_000001",
+      version 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id other {
+      accession "NC_000001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id embl {
+      accession "AJ000009",
+      version 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id embl {
+      accession "AJ000009",
+      version 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id embl {
+      accession "AJ000009",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id gi 9
+  },
+  {
+    from 430,
+    to 480,
+    id gi 9
+  },
+  {
+    from 578,
+    to 670,
+    id gi 9
+  }
+}

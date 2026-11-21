@@ -16,24 +16,13 @@ use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::tables::KarlinParams;
 use crate::utils::matrix::BLASTAA_SIZE;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2352-2384,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,2445,
 // 2433-2479,3099-3110; composition_adjustment/redo_alignment.c:1014-1050:
-// gapping_params->gap_open = scoring->gap_open;
-// gapping_params->gap_extend = scoring->gap_extend;
-// gapping_params->x_dropoff = (Int4)
-//     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
-//         extendParams->gap_x_dropoff_final);
 // near_identical_cutoff = (1.74 * NCBIMATH_LN2)
-//                         / context->sbp->kbp_gap[index]->Lambda;
 // cutoff_s = do_link_hsps ?
-//     (int)(hitParams->cutoff_score_min * context->localScalingFactor) : 1;
 // localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)
 //                      ? SCALING_FACTOR : 1.0;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463:
-// params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*NCBIMATH_LN2/min_lambda);
-// params->gap_x_dropoff_final = (Int4)
-//     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
-//         params->gap_x_dropoff);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
 pub(super) fn local_extension_final_xdrop(
     prelim_bits: f64,
     final_bits: f64,
@@ -46,15 +35,6 @@ pub(super) fn local_extension_final_xdrop(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1324
-// ```c
-// Blast_CompositionWorkspaceInit(Blast_CompositionWorkspace * NRrecord,
-//                                const char *matrixName)
-// {
-//     if (0 == Blast_GetJointProbsForMatrix(NRrecord->mat_b,
-//                                           NRrecord->first_standard_freq,
-//                                           NRrecord->second_standard_freq,
-//                                           matrixName)) {
-// ```
 /// Makes `workspace`, BLOSUM62's (`new_blosum62`), the composition workspace of `matrix` when the
 /// search matrix is another one: from its joint probabilities (`BlastCompositionWorkspace::new`;
 /// IDENTITY has none and is searched in mode 0, `args::search_settings`). Not inlined, so that the
@@ -107,17 +87,6 @@ pub(super) fn local_kappa_redo_params(
         "TBLASTN Kappa lambda must be positive"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2428,2450-2457
-    // ```c
-    //     Boolean do_link_hsps = (hitParams->do_sum_stats);
-    //     if (do_link_hsps) {
-    //         ASSERT(hitParams->link_hsp_params != NULL);
-    //         cutoff_s =
-    //             (int) (hitParams->cutoff_score_min * context->localScalingFactor);
-    //     } else {
-    //         /* There is no cutoff score; we consider e-values instead */
-    //         cutoff_s = 1;
-    //     }
-    // ```
     // `hitParams->do_sum_stats` is the flag of the hit-saving parameters, which a
     // `-max_intron_length` of 1 to 4 clears while the option `-sum_stats` stays on
     // (blast_parameters.c:802-806, `core::link_hsps::translated_longest_intron`): the redo
@@ -128,10 +97,8 @@ pub(super) fn local_kappa_redo_params(
     } else {
         32.0
     };
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
     // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-    //     kbp_gap[i]->Lambda < min_lambda) min_lambda = kbp_gap[i]->Lambda;
-    // for (index=first_context; index<=last_context; ++index)
     //     if (contexts[index].is_valid) { near_identical_cutoff =
     //         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
     let active = gapped
@@ -144,16 +111,11 @@ pub(super) fn local_kappa_redo_params(
     let first_valid_lambda = active.map(|(p, _)| p.lambda).next().unwrap();
     let scaled_lambda = min_lambda / scale;
     let first_valid_scaled_lambda = first_valid_lambda / scale;
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2372-2384:
-    // gapping_params->x_dropoff = (Int4)
-    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
-    //         extendParams->gap_x_dropoff_final);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2372-2384:
     let redo_xdrop =
         crate::core::x_drop::redo_x_dropoff(final_xdrop_bits, scaled_lambda, extension_final_xdrop);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852;
     // blast_kappa.c:2216-2231:
-    // Blast_ScoreBlkKbpIdealCalc(sbp);
-    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // BLOSUM62's ideal block is computed once per process; another matrix's is computed as the
     // lookup table's query preparation computes it (`ideal_karlin_params_of`).
     let ideal_lambda = if matrix == ScoringMatrix::Blosum62 {
@@ -165,12 +127,11 @@ pub(super) fn local_kappa_redo_params(
         crate::algorithm::tblastx::lookup::ideal_karlin_params_of(matrix).lambda
     };
     let matrix_info = build_matrix_info(matrix, ideal_lambda / scale)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2438-2479;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2438-2479;
     // composition_adjustment/redo_alignment.c:1028-1043:
     // near_identical_cutoff = (1.74 * NCBIMATH_LN2) / kbp_gap[index]->Lambda;
     // cutoff_s = do_link_hsps ?
-    //     (int)(hitParams->cutoff_score_min * localScalingFactor) : 1;
-    // params->ccat_query_length = ccat_query_length;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1037-1037
     Ok(BlastRedoAlignParams {
         matrix_info,
         gapping_params: BlastCompoGappingParams {
@@ -200,105 +161,5 @@ pub(super) fn local_kappa_redo_params(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::stage_d_stats::LocalLinkParameters;
-    use super::*;
-
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2369-2382,
-    // 2439-2448:
-    // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-    //     kbp_gap[i]->Lambda < min_lambda) min_lambda = kbp_gap[i]->Lambda;
-    // for (index=first_context; index<=last_context; ++index)
-    //     if (contexts[index].is_valid) { near_identical_cutoff =
-    //         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
-    #[test]
-    fn first_valid_lambda_differs_from_minimum_redo_lambda() {
-        let gapped = [
-            KarlinParams {
-                lambda: 0.3,
-                ..KarlinParams::default()
-            },
-            KarlinParams {
-                lambda: 0.267,
-                ..KarlinParams::default()
-            },
-            KarlinParams {
-                lambda: 0.2,
-                ..KarlinParams::default()
-            },
-        ];
-        let initial = LocalSubjectParameters {
-            lengths: Vec::new(),
-            cutoffs: Vec::new(),
-            link: Some(LocalLinkParameters {
-                gap_decay_rate: 0.1,
-                gap_size: 40,
-                overlap_size: 9,
-                longest_intron: 40,
-                cutoff_small_gap: 0,
-            }),
-            hit_cutoff_min: 25,
-            word_cutoff_min: 25,
-            prelim_evalue: 50.0,
-        };
-        let params = local_kappa_redo_params(
-            ScoringMatrix::Blosum62,
-            11,
-            1,
-            &gapped,
-            &[false, true, true],
-            &initial,
-            120,
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            false,
-            30.0,
-            70,
-        )
-        .unwrap();
-        assert_eq!(
-            params.near_identical_cutoff.to_bits(),
-            ((1.74 * std::f64::consts::LN_2) / (0.267 / 32.0)).to_bits()
-        );
-        assert_eq!(
-            params.gapping_params.x_dropoff,
-            (((30.0 * std::f64::consts::LN_2) / (0.2 / 32.0)) as i32).max(70)
-        );
-        assert_eq!(params.cutoff_score, 800);
-        assert!(params.do_link_hsps);
-        // NCBI blast_kappa.c:2428,2450-2457: without linking parameters (`-sum_stats false`,
-        // or a `-max_intron_length` of 1 to 4) the redo does not link and its cutoff is 1.
-        let params = local_kappa_redo_params(
-            ScoringMatrix::Blosum62,
-            11,
-            1,
-            &gapped,
-            &[false, true, true],
-            &LocalSubjectParameters {
-                link: None,
-                ..initial
-            },
-            120,
-            BlastCompoAdjustMode::CompositionMatrixAdjust,
-            false,
-            30.0,
-            70,
-        )
-        .unwrap();
-        assert_eq!(params.cutoff_score, 1);
-        assert!(!params.do_link_hsps);
-    }
-
-    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:457-463:
-    // params->gap_x_dropoff_final = (Int4)
-    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
-    //         params->gap_x_dropoff);
-    #[test]
-    fn extension_final_xdrop_uses_option_bits_and_previous_cutoff() {
-        let lambda = 0.267;
-        let prelim = ((35.0 * std::f64::consts::LN_2) / lambda) as i32;
-        assert_eq!(
-            local_extension_final_xdrop(35.0, 25.0, lambda).unwrap(),
-            prelim
-        );
-    }
-}
+#[path = "stage_d_kappa_params_tests.rs"]
+mod tests;

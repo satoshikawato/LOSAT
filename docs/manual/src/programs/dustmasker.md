@@ -44,7 +44,7 @@ For every option: `losat dustmasker -help`.
 | `interval` | For each sequence, its definition line, then one line `START - END` per masked interval. Positions count from 0 and include both ends. |
 | `acclist` | One line per masked interval: the definition line, the start and the end, separated by tabs. |
 | `fasta` | The sequences with masked letters in lower case (`N` with `-hard_masking`). |
-| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. |
+| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. A sequence with several Seq-ids is named, here and in `maskinfo_*`, by its gi (not gi 0), else its first accession-type id (GenBank, RefSeq, Swiss-Prot, ...), else its first Seq-id, as NCBI's does. |
 | `maskinfo_asn1_text`, `maskinfo_asn1_bin`, `maskinfo_xml` | The intervals as masking information with the algorithm name and options. The `maskinfo_asn1_*` files are the input of `makeblastdb -mask_data`. |
 
 ## Differences from NCBI BLAST+

@@ -2,33 +2,16 @@
 
 set -euo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kArgNumThreads("num_threads");
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-# ```c
-# arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-#                        kOutputFormatDescription,
-#                        CArgDescriptions::eString,
-#                        NStr::IntToString(dft_outfmt));
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 
 LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgOutput("out");
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 #
 # Comparison-harness note: keep LOSAT outputs in a temporary directory so
 # tracked `losat_out/` artifacts cannot mask current-source divergence.
@@ -48,12 +31,7 @@ run_case() {
         -out "${OUT_DIR}/${stem}.out" \
         > "${OUT_DIR}/${stem}.log" 2>&1
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1106-1108
-    # ```c
-    #     x_PrintField(*iter);
-    # }
-    # m_Ostream << "\n";
-    # ```
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1106-1108
     # The parity assertion is on tabular fields; ignore fixture CRLF storage.
     diff -u --strip-trailing-cr "${REF_DIR}/${stem}.out" "${OUT_DIR}/${stem}.out"
 }

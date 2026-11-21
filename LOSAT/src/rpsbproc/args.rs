@@ -3,34 +3,7 @@
 //! `--target-data`, `--data-path`, `--show-families`, `--quiet`.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:152-279
-//! ```c++
-//! 	{
-//! 		"i",	//argInFile
-//! 		TArgDefinition::eKey,	//enum TArgDefinition::EArgCategory(argument type: eKey, ePos, eOpenPos, eFlag, eNegFlag)
-//! 		ncbi::CArgDescriptions::eString,	//ncbi::CArgDescriptions::EType(process type)
-//! 		"Input file(s) that holds asn data produced by rpsblast with \"-outfmt 11\" switch. If omitted, default to stdin.",	//string (description)
-//! 		true,	//if optional
-//! 		TArgDefinition::EMPTYSTR,	//Synopsis (short description)
-//! 		"-infile",	//alias (can be used to specify at command line but not indexed in program
-//! 	...
-//! ```
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/argwrapper.cpp:29-43
-//! ```c++
-//! 			case TArgDefinition::eKey:
-//! 				if (argdef.optional)
-//! 				{
-//!
-//! 					if (TArgDefinition::EMPTYSTR != argdef.def_val || TArgDefinition::EMPTYSTR != argdef.val_env)
-//! 						pMyArgs->AddDefaultKey(argdef.name, argdef.synopsis, argdef.descr, argdef.type, argdef.def_val, argdef.flags, argdef.val_env, argdef.def_val);
-//! 					else
-//!                     {
-//! 						pMyArgs->AddOptionalKey(argdef.name, argdef.synopsis, argdef.descr, argdef.type, argdef.flags);
-//!                     }
-//! 				}
-//! 				...
-//! 				if (TArgDefinition::EMPTYSTR != argdef.alias)
-//! 					pMyArgs->AddAlias(argdef.alias, argdef.name);
-//! ```
 //! An alias `-infile` of `i` is the argument `--infile` on NCBI's command line (`-` and the
 //! alias name). The parser, its errors and `-help` are LOSAT's (`PD-LOSAT-CLI-NONSEARCH-
 //! DIFFERENCES`); the values are read as NCBI reads them.
@@ -66,21 +39,9 @@ pub struct RpsbprocArgs {
     )]
     pub outfile: Option<OsString>,
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:184-199
-    // ```c++
-    // 		"e",	//argEVCutoff
-    // 		TArgDefinition::eKey,
-    // 		ncbi::CArgDescriptions::eDouble,
-    // 		"EValue cut-off. Program will only process hits with evalues better than this value.",
-    // 		...
-    // 		NumericDefVal(DEF_EVALCUTOFF),	//Default Value
-    // ```
     // (`ParseBlastOutput` skips an HSP whose E-value is above it, `offline::OfflineQuery`; the
-    // archive path does not pass it, quoted at `run_sessions`.)
+    // archive path does not pass it, cited at `run_sessions`.)
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1485-1486
-    // ```c++
-    // constexpr const double PRECALC_EVALUE = 0.01;	//default evalue cut off
-    // constexpr const double DEF_EVALCUTOFF = PRECALC_EVALUE;	//default evalue cut off
-    // ```
     #[arg(
         long = "e",
         value_name = "REAL",
@@ -90,10 +51,6 @@ pub struct RpsbprocArgs {
     )]
     pub evalue: f64,
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:103-104
-    // ```c++
-    // const char * TDataModes::dimLits[] = {rep, std, full};
-    // const char * TDataModes::dimLabels[] = {"Concise", "Standard", "Full"};
-    // ```
     #[arg(
         long = "m",
         value_name = "MODE",
@@ -103,10 +60,6 @@ pub struct RpsbprocArgs {
     )]
     pub data_mode: String,
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:198-199
-    // ```c++
-    // const char * TTargetData::dimLits[] = {"doms", "feats", "both"};
-    // const char * TTargetData::dimLabels[] = {"Domain hits", "Site annotations", "Domain hits and site annotations"};
-    // ```
     #[arg(
         long = "t",
         value_name = "DATA",

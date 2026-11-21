@@ -12,24 +12,7 @@
 /// `blastp_context_idx_for_query_offset_with_bounds` returns. The coarse table has at most
 /// `COARSE_ENTRIES` entries so that both arrays stay in the first cache levels: a table with one
 /// entry per offset (as large as the diagonal table) cost a cache miss for every candidate hit.
-// NCBI reference: c++/src/algo/blast/core/blast_query_info.c:211-232
-// ```c
-// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
-// {
-//     Int4 m=0, b=0, e=0, size=0;
-//
-//     size = A->last_context+1;
-//     ...
-//     while (b < e - 1) {
-//         m = (b + e) / 2;
-//         if (A->contexts[m].query_offset > n)
-//             e = m;
-//         else
-//             b = m;
-//     }
-//     return b;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:211-242
 pub(crate) struct XContextTable {
     /// Frame bases in context order, then `i32::MAX`.
     starts: Vec<i32>,

@@ -1,7 +1,7 @@
 // How each run of the working session ends, told to a screen reader (WA2-AX-03; announcer.ts):
 // a failed run with its reason as an alert, a cancelled run, and a completed run with its HSPs
-// and subjects. The words are those of the results page ("Run 2 failed: … A failed run keeps no
-// results."). A run whose results the page reads as it completes is told once they are read; the
+// and subjects. The words are those of the results page ("Run 2 failed: … It keeps the outputs written
+// before the error."). A run whose results the page reads as it completes is told once they are read; the
 // status of a run in progress is told by RunStatus, which shows it.
 import { watch, type Ref } from 'vue';
 import type { AppState } from '../application/coordinator';

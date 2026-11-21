@@ -1,0 +1,125 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: short pieces between masks
+Masked using: 'seg', options: 'short chunk'
+           4 sequences; 600 total letters
+
+
+
+Query= qn query back-translated
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s2 test                                                               14.2    0.67 
+s3 test                                                               13.1    2.1  
+s1 test                                                               13.1    2.3  
+s4 test                                                               12.3    4.7  
+
+
+>s2 test
+Length=150
+
+ Score = 14.2 bits (25),  Expect = 0.67, Method: Compositional matrix adjust.
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  61  WWW  69
+           WWW
+Sbjct  61  WWW  63
+
+
+ Score = 13.1 bits (22),  Expect = 2.2, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  88   YAFTIQTNYKPD  123
+            Y FT+ +  + D
+Sbjct  92   YVFTVTSISEND  103
+
+
+>s3 test
+Length=150
+
+ Score = 13.1 bits (22),  Expect = 2.1, Method: Composition-based stats.
+ Identities = 3/7 (43%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  88   YAFTIQT  108
+            Y FT+ +
+Sbjct  92   YVFTVTS  98
+
+
+>s1 test
+Length=150
+
+ Score = 13.1 bits (22),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  88   YAFTIQTNYKPD  123
+            Y FT+ +  + D
+Sbjct  92   YVFTVTSISEND  103
+
+
+>s4 test
+Length=150
+
+ Score = 12.3 bits (20),  Expect = 4.7, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+ Frame = +2
+
+Query  101  YRQIT  115
+            YRQ T
+Sbjct  45   YRQKT  49
+
+
+ Score = 11.9 bits (19),  Expect = 5.0, Method: Composition-based stats.
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  29   CIVLTC  12
+            C+V  C
+Sbjct  124  CLVCHC  129
+
+
+ Score = 11.5 bits (18),  Expect = 7.1, Method: Composition-based stats.
+ Identities = 4/7 (57%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  47   YAISCLC  27
+            Y  S LC
+Sbjct  114  YESSLLC  120
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 15120
+
+
+  Database: short pieces between masks
+  Masked using: 'seg', options: 'short chunk'
+    Posted date:  Nov 21, 2026  9:53 AM
+  Number of letters in database: 600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12

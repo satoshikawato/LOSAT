@@ -18,7 +18,7 @@
 // with `fail`, so that the Data worker keeps those of a failed run (line WQA's sweep, D3,
 // 2026-11-19).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
@@ -69,6 +69,8 @@ export interface RuntimeOptions {
 
 interface Retained {
   readonly key: string;
+  /** Whether the engine read the subject with NCBI's data loaders on (a run with them on takes no subject read with them off). */
+  readonly dataLoaders: boolean;
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
@@ -207,8 +209,10 @@ export class EngineRuntime {
       }
     };
     try {
-      const invalid = abi.validate(argv);
-      if (invalid !== undefined) throw new EngineCallError(invalid);
+      const validation = abi.validate(argv);
+      if (!validation.ok) throw new EngineCallError(validation.message);
+      // The inputs are read with the data loaders of the argv's registry, as the CLI reads them (line WQA's D16, 2026-11-20).
+      const { dataLoaders } = validation;
       const started = abi.start(argv);
       if (!started.ok) throw new EngineCallError(started.message);
 
@@ -222,12 +226,12 @@ export class EngineRuntime {
         together = abi.registerInputs(argv, request.query.bytes, request.subject.bytes);
         ownSubject = together.subject.handle;
       }
-      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
+      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
       query = registered.handle;
       const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-      const subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
-      const subject = together?.subject ?? this.subject(loaded, request);
+      const subjectRetained = together === undefined && this.retains(loaded, request, dataLoaders);
+      const subject = together?.subject ?? this.subject(loaded, request, dataLoaders);
       const subjectMismatch = recordMismatch(request.subject.records, subject.records);
       if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
       const shownIds = together?.shownIds;
@@ -398,13 +402,22 @@ export class EngineRuntime {
     return info;
   }
 
-  /** The subject handle: the retained one if its key matches, else a new registration. */
-  private subject(loaded: Loaded, request: WorkerRun): Retained {
+  /**
+   * Whether the instance retains the run's subject: the same key, read with the data loaders on, or
+   * off as the run has them (a subject read with them on is the one that a reader without them reads).
+   */
+  private retains(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): boolean {
+    const retained = loaded.retained;
+    return retained !== undefined && retained.key === request.subject.key && (retained.dataLoaders || !dataLoaders);
+  }
+
+  /** The subject handle: the retained one if it is the run's (`retains`), else a new registration. */
+  private subject(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): Retained {
     const abi = loaded.instance.abi;
-    if (loaded.retained?.key === request.subject.key) return loaded.retained;
+    if (this.retains(loaded, request, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
-    loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
+    const registered = abi.register(request.program, ROLE_SUBJECT, dataLoaders, request.subject.bytes);
+    loaded.retained = { key: request.subject.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 
@@ -469,12 +482,13 @@ function messageOf(error: unknown): string {
 /**
  * The output that the engine's signal of stream 9 names (ABI v2 §5), an output stream of the run
  * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
- * file of -logfile) or nowhere. Another number breaks the ABI.
+ * file of -logfile), nowhere, or the error that ended the run (an output that a failed run does not keep, version 7). Another
+ * number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
-  const { stream, errorStream } = discardSignal(bytes);
+function discardedOutput(bytes: Uint8Array): [RunOutput, OutputPlace] {
+  const { stream, errorStream, ended } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
+  const error: OutputPlace | undefined = ended ? 'run' : errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
   if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
   return [stream, error];
 }

@@ -348,10 +348,18 @@ volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without th
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
 also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
 queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
-BLASTX (its own check in the batch's setup) and, since fix round 3 of D1a-4, by BLASTP and
+BLASTX and, since fix round 3 of D1a-4, by BLASTP and
 PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
-`db.ak.ps.nseq0.oldfsc.allx.7`); BLASTN, TBLASTN and TBLASTX still refuse it (their check runs at
-the database's open, before the queries; probe e8 of fix round 3, line RG's next item D1a-5). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+`db.ak.ps.nseq0.oldfsc.allx.7`) and, since D1a-5 of line RG, by BLASTN, TBLASTN and TBLASTX (rows
+`db.ak.bn.nseq0.alln.*`, `db.ak.tbx.nseq0.alln.*`, `db.ak.tbn.nseq0.oldfsc.allx.*` and
+`db.ak.tbn.nseq0.ssp.allx.7`; they refused it at the database's open, probe e8 of fix round 3 of
+D1a-4). Every program makes the refusal with one test (`common::database::check_setup_count`) in
+the setup of the first query batch (BLASTN: or query chunk) with a valid context, where NCBI
+divides, before it reads a sequence (also over a volume without its `.nsq`): BLASTN, TBLASTX and
+TBLASTN after the reports of the batches before (NCBI's output before its crash in the next batch
+in the tabular formats: 150 and 152 bytes of outfmt 7 with `BATCH_SIZE=1`, two queries without
+letters to search then a valid one; the crash cuts NCBI's buffered output of the other formats
+short), BLASTP and PSI-BLAST before any output. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 
@@ -457,7 +465,7 @@ exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) n
 
 | Not written or rejected | Why |
 | --- | --- |
-| `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | not implemented; each is an explicit error that names the option (`-gi_mask` and `-gi_mask_name` write GI-indexed mask files, a later item of line NP) |
+| `-randomize`, `-gi_mask`, `-gi_mask_name` | not implemented; each is an explicit error that names the option (`-gi_mask` and `-gi_mask_name` write GI-indexed mask files, a later item of line NP) |
 | `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`, when makeblastdb uses the value (the first layer that has the entry gives a number `NStr::StringToUInt` converts, not 0; an empty, unconvertible or 0 value is ignored by makeblastdb and accepted by LOSAT); `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
 | `-input_type` other than `fasta` | FASTA only (plain, or named `.gz`, `.bz2`, `.zst`: inflated while it is read, in any case of the suffix, as makeblastdb decides it; `-in -` reads the standard input as it comes). Every gzip member, bzip2 stream and zstd frame of a concatenated file is read, where makeblastdb reads every gzip member but only the first bzip2 stream or zstd frame and drops the rest silently (`PD-LOSAT-NCBI-DEFECTS`, the makeblastdb exception). A `.gz` file is read as makeblastdb's decompressor (`CZipDecompressor`) reads it (`GzipMembers` in `LOSAT/src/blastinput/compressed.rs`, which inflates with zlib-rs, a Rust port of zlib's inflate, where makeblastdb calls the host's zlib: the official Linux build links `libz.so.1`, and a host whose `libz.so.1` is zlib-ng's zlib-compatible build could in principle differ on damaged data): neither a member's trailer (CRC-32 and length) nor its header CRC is checked, a trailer cut short reads as the whole member, a member's header must end within the next 4 KiB, bytes after the last member are read only where makeblastdb reads them (fewer than 4 KiB that inflate to no byte, such as up to four zero bytes or a line feed), and a file that does not start with a gzip header is read as a zlib stream, up to that stream's end. A file that is not what its name says, or is cut short (for `.gz`: where makeblastdb's decompressor fails too), stops the build with `losat makeblastdb: -in: 'x.gz' is named .gz but is not gzip data (...)` (exit status 1, the files removed as for another failed input); makeblastdb warns about the decompressor's error, says the file does not appear to be FASTA, and ends with `BLAST failed to write output` (exit status 6) |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |

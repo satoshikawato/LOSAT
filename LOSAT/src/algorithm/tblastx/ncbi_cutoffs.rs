@@ -19,6 +19,10 @@ const K_SMALL_FLOAT: f64 = 1.0e-297;
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:80
 pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
 
+/// Default E-value cutoff for ungapped blastp in BlastInitialWordParametersUpdate
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:77
+pub const CUTOFF_E_BLASTP: f64 = 1e-300;
+
 /// Default gap decay rate for sum statistics (`core::link_hsps` owns the constant)
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:107
 pub(crate) use crate::core::link_hsps::BLAST_GAP_DECAY_RATE;
@@ -302,6 +306,40 @@ pub fn cutoff_score_for_update_tblastx(
     ungapped_params: &KarlinParams,
     scale_factor: f64,
 ) -> i32 {
+    word_cutoff_score_for_update(
+        CUTOFF_E_TBLASTX,
+        query_len_aa,
+        subject_len_nucl,
+        gap_trigger,
+        cutoff_score_max,
+        gap_decay_rate,
+        ungapped_params,
+        scale_factor,
+    )
+}
+
+/// The word cutoff of `BlastInitialWordParametersUpdate` for a program without gapped extension of
+/// its initial words (TBLASTX; BLASTP and BLASTX with `-ungapped`), for the program's cutoff
+/// E-value `cutoff_e` (`s_GetCutoffEvalue`: `CUTOFF_E_TBLASTX` or `CUTOFF_E_BLASTP`, both 1e-300).
+/// The body of `cutoff_score_for_update_tblastx`, whose arguments are named for TBLASTX
+/// (`subject_len_nucl` is the subject length that NCBI's `subj_length` holds, whatever the
+/// program's alphabet); the same NCBI lines (blast_parameters.c:346-374).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:346-374
+/// BLASTX's word cutoff (`blastx::parameters::word_cutoff`) is the same lines with the E-value
+/// 1.0 (`CUTOFF_E_BLASTX`), but is not this function: it takes its lengths as signed `Int4`
+/// (`cutoff_score_sum_stats`) where NCBI's casts are unsigned, and has no scale factor.
+#[allow(clippy::too_many_arguments)]
+pub fn word_cutoff_score_for_update(
+    cutoff_e: f64,
+    query_len_aa: i64,
+    subject_len_nucl: i64,
+    gap_trigger: i32,
+    cutoff_score_max: i32,
+    gap_decay_rate: f64,
+    ungapped_params: &KarlinParams,
+    scale_factor: f64,
+) -> i32 {
     // NCBI: searchsp = MIN(subj_length, query_length) * subj_length
     // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
     // This is exactly what NCBI does - see blast_parameters.c:360-362
@@ -330,7 +368,7 @@ pub fn cutoff_score_for_update_tblastx(
     // `BlastKarlinEtoS_simple` takes at least (blast_stat.c:4049,4059, `K_SMALL_FLOAT` in
     // `cutoff_score_from_evalue`), so the callers pass `BLAST_GAP_DECAY_RATE` in both modes.
     let mut new_cutoff = blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
-        CUTOFF_E_TBLASTX,
+        cutoff_e,
         searchsp,
         gap_decay_rate,
         ungapped_params,

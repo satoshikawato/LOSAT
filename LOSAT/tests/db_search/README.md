@@ -2139,23 +2139,37 @@ done
 makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3a -title "parsed ids, p5 masked in the middle" -mask_data l3_mid.asnt
 makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids, p5 masked at the head" -mask_data l3_head.asnt
 blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
-python3 ../make_dbmaskp_pbh.py WORK $NCBI_BIN OLD NEW .   # pbh.faa, edge_pbh.asnt, qbh.fna, pbh
+python3 ../make_dbmaskp_pbh.py --ncbi-only WORK $NCBI_BIN .   # pbh.faa, edge_pbh.asnt, qbh.fna, qbh.faa, pbh
+makeblastdb -in pshort.faa -dbtype prot -out pshort -title "short pieces between masks" -mask_data edge_short.asnt
 rm -f *.pjs
 ```
 
 The review of PR 1 added `pl3a` and `pl3b` (parsed Seq-ids; `l3_mid.asnt` and `l3_head.asnt` are `edge_mid.asnt` and
 `edge_head.asnt` with `local str "p5"` and one algorithm text, so that the two databases share the Seq-id `p5` under
-different masks), the alias file `pal`, and `pbh` with the blastx query `qbh.fna`: subjects that hold a weaker copy of a
-query stretch, a still weaker one starting a little before it, a hard-masked stretch, and a close copy of the stretch,
-on which `-subject_besthit` after every chunk (NCBI) and once after the merge differ. `make_dbmaskp_pbh.py` (seed 20261121)
-draws rounds of 400 such subjects and keeps the first three on which LOSAT before and after the fix differ (OLD and NEW
-are those two builds; NCBI 2.17.0's rows equal NEW's).
+different masks), the alias file `pal`, and `pbh` with the blastx query `qbh.fna` and the blastp query `qbh.faa` (the
+protein that `qbh.fna` back-translates): subjects that hold a weaker copy of a query stretch, a still weaker one starting
+a little before it, a hard-masked stretch, and a close copy of the stretch, on which `-subject_besthit` after every
+chunk (NCBI) and once after the merge differ. `make_dbmaskp_pbh.py` (seed 20261121) draws rounds of 400 such subjects.
+With `--ncbi-only` (resume 2 of PR 1, run with NCBI 2.17.0 alone) it keeps the first three of a round where NCBI's rows
+with `-subject_besthit` hold fewer alignments than its rows without the option filtered once, and the first three where
+blastp's do (round 0: blastx s1, s2, s4, s6 and blastp s4, s6 of the six differ so); with OLD and NEW (LOSAT before
+and after the fix) it keeps the first three where those two builds differ.
 
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
 (several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's
 refusal of a mask that runs to the end (the Owner's question Q1 of M4b); `ph5`, `ph4` and `phmv` are the hard-mask
-databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too, and `pe_tiny` (masks of one
-and two letters) with `-window_size 0`, where a piece between two masks is shorter than the word.
+databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too.
+
+`pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
+`ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for
+a run of six `W` at 60-65, under hand masks (algorithm 21, local ids 1 to 4): `s1` [30, 60) and [62, 90), which leave the
+piece `WW` before a masked `W`; `s2` [30, 60) and [63, 90), the piece `WWW`; `s3` [30, 60) and [60, 90), touching masks;
+`s4` [1, 10), a first piece of one letter. The query `qshort.faa` (and its back-translation `qshort.fna`) holds one
+`WWW`. NCBI's one-hit scan (`-window_size 0`) aligns that `WWW` with `s2`'s piece only: it reads no word of a hard piece
+shorter than the word (aa_ungapped.c:762-766, no raise of the range's end), where a word read at the piece's start
+would have given `s1` the same alignment; with `-db_soft_mask` it reads no word of `s4` at all, whose first scan range
+is shorter than the word. The rows `*.w0.*` of `pe_tiny`, `pe_gap2` and `pe_adjacent` search the hand masks of `p5`
+with pieces of two and no letters the same way.
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

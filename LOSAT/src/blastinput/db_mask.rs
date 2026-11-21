@@ -321,9 +321,10 @@ mod db_mask_tests;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:447-448, 478-479
 // The chunker is told whether the program's subjects are nucleotide; for a protein subject it
 // takes no residual, so each chunk starts at its hard range's left.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500 (cited at
-// `blastp::blast_engine::x_soft_subject::x_for_each_hit`): the two-hit scan of a protein subject
-// reads a word of every chunk, one past a chunk shorter than a word.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500 and 762-766 (cited
+// at `blastp::blast_engine::x_soft_subject::x_for_each_hit`): the two-hit scan of a protein
+// subject raises the end of its first range to its start, so it reads one word of a chunk shorter
+// than a word, running past the chunk; the one-hit scan does not, and reads no word there.
 /// The scan of a hard-masked search, which decides the chunks of its sequences and which of
 /// their shapes LOSAT refuses (`HardMaskShape::of_scan`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,14 +343,12 @@ pub enum HardScan {
     /// on some of these sequences and gives rows that differ from the near input's on others,
     /// M/m4b/SURVEY.md §4.1); a hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into
     /// chunks that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`),
-    /// as is a mask that ends past the sequence (`HardMaskShape::PastEnd`); and in a one-hit scan (`-window_size 0`), whose word of a chunk shorter than the word can
-    /// start an extension from letters past the chunk, a chunk shorter than `one_hit_word` is
-    /// refused (`HardMaskShape::ShortChunk`; in a two-hit scan that word's hit has no other hit
-    /// on its diagonal within the window, so it extends nothing).
-    Protein {
-        /// The word of a one-hit scan; `None` for a two-hit scan.
-        one_hit_word: Option<usize>,
-    },
+    /// as is a mask that ends past the sequence (`HardMaskShape::PastEnd`). A chunk shorter than
+    /// the word is searched as NCBI searches it, in both scans: the one-hit scan
+    /// (`-window_size 0`) reads no word of it, and the one word that the two-hit scan reads at
+    /// its start has no other hit on its diagonal, so it extends nothing
+    /// (`algorithm::common::db_mask_search::SubjectPlan::next_searched_chunk`).
+    Protein,
 }
 
 impl HardScan {
@@ -386,11 +385,6 @@ pub enum HardMaskShape {
     /// ranges decides which of the final chunk's HSPs merge with the earlier chunk's across the
     /// mask.
     ShortLastMask { start: u32, end: u32 },
-    /// A chunk `[offset, offset + length)` shorter than the word of a one-hit scan, in a protein
-    /// program (`HardScan::Protein`; series NP, M4b): NCBI's scan reads one word at the chunk's
-    /// start, past its end into the next mask (or past the sequence), and its one-hit extension
-    /// starts from that word.
-    ShortChunk { offset: usize, length: usize },
     /// A hard range `[left, right)` between masks (or a sequence end) longer than
     /// `MAX_DBSEQ_LEN`, in a protein program (`HardScan::Protein`; series NP, M4b): NCBI cuts it
     /// into chunks that overlap and joins their HSPs across the overlap, which LOSAT's protein
@@ -485,10 +479,10 @@ impl HardMaskShape {
     ///
     /// The protein programs' scan (`HardScan::Protein`, series NP, M4b) has chunks that start at
     /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
-    /// never occurs, every chunk scans a word, a mask that runs to the end after the chunk from the
-    /// start is `TailMask` at every word, a mask that ends past the sequence is `PastEnd` (before
-    /// its chunks: its last hard range would be inverted), and a hard range longer than
-    /// `MAX_DBSEQ_LEN` is `LongRange`.
+    /// never occurs, every chunk counts as scanning a word, a mask that runs to the end after the
+    /// chunk from the start is `TailMask` at every word, a mask that ends past the sequence is
+    /// `PastEnd` (before its chunks: its last hard range would be inverted), and a hard range
+    /// longer than `MAX_DBSEQ_LEN` is `LongRange`.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
@@ -533,14 +527,14 @@ impl HardMaskShape {
         use crate::core::subject_split::{
             complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN,
         };
-        if matches!(scan, HardScan::Protein { .. }) {
+        if matches!(scan, HardScan::Protein) {
             if let Some(&(start, end)) = masks.iter().find(|&&(_, end)| end as usize > length) {
                 return Some(HardMaskShape::PastEnd { start, end, length });
             }
         }
         let mut ranges = std::mem::take(&mut split.ranges);
         complement_masks(masks, length, &mut ranges);
-        if matches!(scan, HardScan::Protein { .. }) {
+        if matches!(scan, HardScan::Protein) {
             // The masks are sorted and end within the sequence: no range is inverted.
             if let Some(&(left, right)) = ranges
                 .iter()
@@ -555,11 +549,7 @@ impl HardMaskShape {
             HardScan::Nucleotide { scanned_word } => {
                 (scanned_word, scanned_word < TAIL_MASK_SEARCHED_WORD)
             }
-            HardScan::Protein { .. } => (0, true),
-        };
-        let one_hit_word = match scan {
-            HardScan::Protein { one_hit_word } => one_hit_word,
-            HardScan::Nucleotide { .. } => None,
+            HardScan::Protein => (0, true),
         };
         let scans_word = |chunk: &HardChunk| {
             if chunk.full_range {
@@ -576,12 +566,6 @@ impl HardMaskShape {
                 (before_range, in_range, range) = (before_range.max(in_range), 0, chunk.range);
             }
             let scans = scans_word(&chunk);
-            if !chunk.full_range && one_hit_word.is_some_and(|word| chunk.length < word) {
-                return Some(HardMaskShape::ShortChunk {
-                    offset: chunk.offset,
-                    length: chunk.length,
-                });
-            }
             // The chunk's range ends where the mask of the same index starts.
             if chunk.full_range && chunk.length < length && scans && tail_refused {
                 let (start, end) = masks[chunk.range];
@@ -609,7 +593,7 @@ impl HardMaskShape {
                      {TAIL_MASK_SEARCHED_WORD} letters: rows that differ from a near input's, or a \
                      crash)"
                 ),
-                HardScan::Protein { .. } => format!(
+                HardScan::Protein => format!(
                     "has a mask, [{start}, {end}), running to its end after the chunk from its \
                      start, for which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk \
                      while it extends within the chunk (rows that differ from a near input's, or a \
@@ -627,12 +611,6 @@ impl HardMaskShape {
                  chunk's alignments with an earlier chunk's by an overlap read past its list of \
                  ranges",
                 end % 4
-            ),
-            HardMaskShape::ShortChunk { offset, length } => format!(
-                "has a range between its masks, [{offset}, {}), shorter than the word of the \
-                 one-hit scan (-window_size 0), whose word NCBI BLAST+ 2.17.0 reads past the range \
-                 and extends from",
-                offset + length
             ),
             HardMaskShape::LongRange { left, right } => format!(
                 "has a range between its masks, [{left}, {right}), longer than the 5,000,000 \

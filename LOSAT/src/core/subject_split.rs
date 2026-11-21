@@ -223,7 +223,7 @@ mod tests {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (quoted
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (cited
     // at `HardSplitState::next_chunk`)
     // A protein program's chunks start at their hard range's left (`residual` 0), so the overlap
     // that the merge after a chunk reads is the next range's left against that offset; the first

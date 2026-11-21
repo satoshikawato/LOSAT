@@ -149,8 +149,8 @@ impl Masked<'_> {
     // (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole sequence's list.
     /// The sequence's computation with the matrix of `scoring`: the link cutoffs of its whole
     /// length (`compute_subject_with`), and its HSPs over the soft ranges or the hard chunks. A
-    /// chunk shorter than the word holds no hit of the two-hit scan and is skipped; the one-hit
-    /// scan refuses such a chunk before the search (`HardMaskShape::ShortChunk`).
+    /// chunk shorter than the word finds nothing in NCBI's one-hit and two-hit scans alike and is
+    /// passed over (`SubjectPlan::next_searched_chunk`).
     fn compute<S: BxScoring>(
         &self,
         scoring: S,
@@ -219,10 +219,7 @@ impl Masked<'_> {
         let mut raw = Vec::new();
         let mut purged = Vec::new();
         let mut letters = Vec::new();
-        while let Some(chunk) = plan.next_chunk() {
-            if chunk.length < word {
-                continue;
-            }
+        while let Some(chunk) = plan.next_searched_chunk(word) {
             // The chunk's letters with the sentinel after them, and before them with `x_lead`.
             letters.clear();
             if x_lead {

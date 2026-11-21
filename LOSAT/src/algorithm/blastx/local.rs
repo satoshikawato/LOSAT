@@ -1130,9 +1130,7 @@ fn search_database(
         let mask =
             database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
         if let Some(mask) = &mask {
-            let window_size = resolved.first().map_or(0, |options| options.window_size);
-            let word_size = resolved.first().map_or(0, |options| options.word_size);
-            database.check_mask_limits(mask, (window_size == 0).then_some(word_size as usize))?;
+            database.check_mask_limits(mask)?;
         }
         for options in &mut resolved {
             options.db_mask = mask.clone();

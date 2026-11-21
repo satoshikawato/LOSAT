@@ -228,17 +228,15 @@ impl BlastxDatabase {
         )
     }
 
-    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
-    /// whose scan is two-hit, or one-hit with words of `one_hit_word` letters (`-window_size 0`).
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
     pub(crate) fn check_mask_limits(
         &self,
         mask: &crate::blastinput::db_mask::ResolvedMask,
-        one_hit_word: Option<usize>,
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
             self.program,
-            crate::blastinput::db_mask::HardScan::Protein { one_hit_word },
+            crate::blastinput::db_mask::HardScan::Protein,
         )
     }
 

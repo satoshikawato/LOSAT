@@ -5635,9 +5635,7 @@ fn search(
         mask.check_losat_limits(
             database.seqdb(),
             args.app.name(),
-            crate::blastinput::db_mask::HardScan::Protein {
-                one_hit_word: (args.window_size == 0).then_some(args.word_size),
-            },
+            crate::blastinput::db_mask::HardScan::Protein,
         )?;
     }
     check_blastp_environment(args.app, database.is_none())?;

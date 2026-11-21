@@ -1738,7 +1738,7 @@ before its crash (`ncbi-near`), `nseq0ns` over `aliaskeys/n_nseq0ns` (`NSEQ 0` o
 sequence file) before the error of the missing file, which NCBI meets only after the division (TBLASTN with the Gumbel
 block, which does not divide: that error). Frozen with NCBI BLAST+ 2.17.0 on the workstation (`env_blast`).
 
-Rows `db.cnt.avg2p32.bn.m*` and `db.ak.bn.rej.nseq0.mbsplit` (D1a-6 of line RG): a query batch split into chunks
+Rows `db.cnt.avg2p32.mb.*`, `db.cnt.avg2p32.mo00.split.6`, `db.cnt.avg2p32.mo52.split.6` and `db.ak.bn.rej.nseq0.mbsplit` (D1a-6 of line RG): a query batch split into chunks
 (`CHUNK_SIZE=200`) over `dbcounts/avg2p32`, whose average length is too short, with options that LOSAT refuses for the
 greedy extension (`-task megablast` with gap costs 40000 and 40000, or reward 0 and penalty 0): NCBI checks the subjects in
 the setup of the first chunk with a valid context, before the greedy set-up, so it stops with `The average subject length is

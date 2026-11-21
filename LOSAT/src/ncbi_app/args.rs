@@ -67,55 +67,129 @@ enum Number {
     Double(f64),
 }
 
+/// A text of the tables (a name, a default, an allowed value): `len` bytes of `TEXT` from `at`.
+/// The tables hold texts and lists as offsets, not as `&str` and slices, so that no address in
+/// them is relocated when LOSAT is loaded (`build/ncbi_args.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Text {
+    at: u16,
+    len: u16,
+}
+
+impl Text {
+    /// The text.
+    fn get(self) -> &'static str {
+        let at = usize::from(self.at);
+        &TEXT[at..at + usize::from(self.len)]
+    }
+
+    /// Whether the text is `value`.
+    fn is(self, value: &str) -> bool {
+        usize::from(self.len) == value.len() && self.get() == value
+    }
+}
+
+/// A list of the tables: `count` rows of an array from `first`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Span {
+    first: u16,
+    count: u16,
+}
+
+impl Span {
+    /// The rows of `table` in the span.
+    fn of<T>(self, table: &'static [T]) -> &'static [T] {
+        let first = usize::from(self.first);
+        &table[first..first + usize::from(self.count)]
+    }
+}
+
 /// One argument description (`CArgDesc`), as the program's XML gives it (`<key>` or `<flag>`).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Desc {
-    name: &'static str,
+    name: Text,
     kind: Kind,
     /// `<default>`: the value of a key of `AddDefaultKey`.
-    default: Option<&'static str>,
+    default: Option<Text>,
     /// `<constraint>`: what `SetConstraint` gave the key.
     constraint: Option<Constraint>,
     /// `AddKey` (a key without `optional="true"`): the key must be given (`CArgDescMandatory`).
     mandatory: bool,
 }
 
+impl Desc {
+    /// The argument's name.
+    fn name(&self) -> &'static str {
+        self.name.get()
+    }
+
+    /// The default of a key of `AddDefaultKey`.
+    fn default(&self) -> Option<&'static str> {
+        self.default.map(Text::get)
+    }
+}
+
 /// The argument descriptions of one program as its NCBI `-xmlhelp` XML gives them
 /// (`CArgDescriptions::PrintUsageXml`, cited at `ncbi_xmlhelp::print`), without the arguments of
 /// every `CArgDescriptions` (the help flags, `-logfile`, `-conffile`, `-version`, ...; the reader
 /// adds the ones it knows: `HELP_FLAGS`, `FILE_ARGUMENTS`).
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Arguments {
-    /// The keys, then the flags, each in the order of NCBI's `m_Args` (by name). The order in which
-    /// NCBI's `Init` described them (`m_KeyFlagArgs`), which `x_PostCheck` follows, is the one of
-    /// the usage (`usage_position`).
-    descs: &'static [Desc],
-    /// `AddAlias(alias, name)` (`CArgDesc_Alias`, `<alias>`): another name of the argument.
-    aliases: &'static [(&'static str, &'static str)],
-    /// NCBI's `m_Dependencies` (`<dependencies>`): the `multimap` that `SetDependency` fills, an
-    /// exclusion in both directions; its `eRequires` entries, then its `eExcludes` ones, each in
-    /// the map's order (ordered by the first name, in the order of insertion among equal names).
-    /// `x_PostCheck` (`post_check`) reports the first exclusion of the map that the command line
-    /// breaks, and names, for each argument required and missing, the first argument of the map
-    /// that requires it; neither depends on where the `eRequires` entries stand among the others.
-    dependencies: &'static [(&'static str, Dep, &'static str)],
+    /// The keys, then the flags, each in the order of NCBI's `m_Args` (by name; rows of `DESCS`).
+    /// The order in which NCBI's `Init` described them (`m_KeyFlagArgs`), which `x_PostCheck`
+    /// follows, is the one of the usage (`usage_position`).
+    descs: Span,
+    /// `AddAlias(alias, name)` (`CArgDesc_Alias`, `<alias>`): another name of the argument (rows
+    /// of `ALIASES`).
+    aliases: Span,
+    /// NCBI's `m_Dependencies` (`<dependencies>`, rows of `DEPENDENCIES`): the `multimap` that
+    /// `SetDependency` fills, an exclusion in both directions; its `eRequires` entries, then its
+    /// `eExcludes` ones, each in the map's order (ordered by the first name, in the order of
+    /// insertion among equal names). `x_PostCheck` (`post_check`) reports the first exclusion of
+    /// the map that the command line breaks, and names, for each argument required and missing,
+    /// the first argument of the map that requires it; neither depends on where the `eRequires`
+    /// entries stand among the others.
+    dependencies: Span,
 }
 
-// The tables of every program whose XML LOSAT embeds (`PROGRAM_ARGUMENTS`), written by
-// `LOSAT/build.rs` (`build/ncbi_args.rs`).
+impl Arguments {
+    /// The program's descriptions.
+    fn descs(self) -> &'static [Desc] {
+        self.descs.of(&DESCS)
+    }
+
+    /// The aliases: (alias, name).
+    fn aliases(self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        let aliases = self.aliases.of(&ALIASES).iter();
+        aliases.map(|&(alias, name)| (alias.get(), name.get()))
+    }
+
+    /// The entries of `m_Dependencies`: (first name, dependency, second name).
+    fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
+        let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
+        dependencies.map(|&(first, dep, second)| (first.get(), dep, second.get()))
+    }
+}
+
+// The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
+// `STRING_VALUES`, `INTEGER_VALUES`, `PROGRAMS`), written by `LOSAT/build.rs`
+// (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
+// arguments of every `CArgDescriptions` before the program's own (the help flags of its
+// constructor), `FILE_ARGUMENTS` those of every application after them
+// (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
-/// The argument descriptions of `program` (`PROGRAM_ARGUMENTS`), if LOSAT has its XML.
-pub(crate) fn arguments(program: &str) -> Option<&'static Arguments> {
-    PROGRAM_ARGUMENTS
+/// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
+pub(crate) fn arguments(program: &str) -> Option<Arguments> {
+    PROGRAMS
         .iter()
-        .find(|(name, _)| *name == program)
-        .map(|(_, arguments)| arguments)
+        .find(|(name, _)| name.is(program))
+        .map(|&(_, arguments)| arguments)
 }
 
 /// The argument descriptions of `tool`'s program: every program on NCBI's reader has its XML
 /// (`ncbi_xmlhelp`).
-fn tool_arguments(tool: &Tool) -> &'static Arguments {
+fn tool_arguments(tool: &Tool) -> Arguments {
     arguments(tool.program).expect("the -xmlhelp XML of a program on NCBI's reader")
 }
 
@@ -131,69 +205,27 @@ pub(crate) fn constraint_usage(program: &str, name: &str) -> Option<String> {
 /// NCBI's `m_Dependencies` of `program` (`Arguments::dependencies`).
 #[cfg(test)]
 pub(crate) fn dependencies(program: &str) -> Vec<(&'static str, Dep, &'static str)> {
-    arguments(program).map_or_else(Vec::new, |arguments| arguments.dependencies.to_vec())
+    arguments(program).map_or_else(Vec::new, |arguments| arguments.dependencies().collect())
 }
-
-/// `AddFlag(name, comment, true)`: a flag that its word sets.
-const fn flag(name: &'static str) -> Desc {
-    Desc {
-        name,
-        kind: Kind::Flag,
-        default: None,
-        constraint: None,
-        mandatory: false,
-    }
-}
-
-/// `AddOptionalKey(name, ..., kind)`: a key without a default or a constraint.
-const fn optional_key(name: &'static str, kind: Kind) -> Desc {
-    Desc {
-        name,
-        kind,
-        default: None,
-        constraint: None,
-        mandatory: false,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2207-2219
-/// The arguments of every `CArgDescriptions` before the program's own: the four help flags of
-/// its constructor (`s_AutoHelp`, `s_AutoHelpFull`, `s_AutoHelpShowAll`, `s_AutoHelpXml`).
-/// `HideStdArgs` takes effect later (`x_AddDefaultArgs`, after a help or an argument error,
-/// before the usage is printed): `-help-full` and `-xmlhelp` are known to the reader (probes
-/// C05, C06 of line BDC), and `-version` (which NCBI's application takes before the reader,
-/// `ncbi_environment::preparse`) is not.
-const HELP_FLAGS: &[Desc] = &[flag("h"), flag("help"), flag("help-full"), flag("xmlhelp")];
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1213-1218
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242
-/// The arguments of every application after the program's own (`AddDefaultFileArguments`):
-/// the application opens `-logfile` itself (`ncbi_environment::diag_target`), and LOSAT refuses
-/// `-conffile` before the reader (`ncbi_environment::preparse`).
-const FILE_ARGUMENTS: &[Desc] = &[
-    optional_key("logfile", Kind::OutputFile),
-    optional_key("conffile", Kind::InputFile),
-];
 
 /// The arguments that NCBI's reader of `arguments` knows (its `m_Args`): the help flags, the
 /// program's, then the file arguments.
-fn descs(arguments: &'static Arguments) -> impl Iterator<Item = &'static Desc> {
+fn descs(arguments: Arguments) -> impl Iterator<Item = &'static Desc> {
     HELP_FLAGS
         .iter()
-        .chain(arguments.descs)
+        .chain(arguments.descs())
         .chain(FILE_ARGUMENTS.iter())
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2718-2734
 /// `x_Find(name)`: the description of the argument `name`, or of the argument that `name` is an
 /// alias of.
-fn find_desc(arguments: &'static Arguments, name: &str) -> Option<&'static Desc> {
+fn find_desc(arguments: Arguments, name: &str) -> Option<&'static Desc> {
     let name = arguments
-        .aliases
-        .iter()
+        .aliases()
         .find(|(alias, _)| *alias == name)
         .map_or(name, |(_, aliased)| aliased);
-    descs(arguments).find(|desc| desc.name == name)
+    descs(arguments).find(|desc| desc.name.is(name))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2618-2629
@@ -389,18 +421,21 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
             number,
             used,
         } = create_arg(arguments, arg1, name, arg2)?;
-        if values.contains_key(desc.name) {
+        if values.contains_key(desc.name()) {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1928-1941
             return Err(invalid(
                 "eSynopsis",
-                format!("Argument with this name is defined already: {}", desc.name),
+                format!(
+                    "Argument with this name is defined already: {}",
+                    desc.name()
+                ),
             ));
         }
-        values.insert(desc.name, value);
+        values.insert(desc.name(), value);
         if let Some(number) = number {
-            numbers.insert(desc.name, number);
+            numbers.insert(desc.name(), number);
         }
-        given.push(desc.name);
+        given.push(desc.name());
         at += if used { 2 } else { 1 };
     }
     post_check(tool, arguments, &mut values, &mut numbers, &given)?;
@@ -415,7 +450,7 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
 /// One option word `arg1` with the name `name` (and the next word `arg2`, the value of a key
 /// written apart).
 fn create_arg(
-    arguments: &'static Arguments,
+    arguments: Arguments,
     arg1: &str,
     name: &str,
     arg2: Option<&String>,
@@ -540,7 +575,7 @@ fn process_value(desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> 
         Some(constraint) if !constraint.verify(value) => Err(invalid(
             "eConstraint",
             arg_message(
-                desc.name,
+                desc.name(),
                 &format!("Illegal value, expected {}", constraint.usage()),
                 value,
             ),
@@ -558,7 +593,7 @@ fn not_converted(desc: &Desc, value: &str, predecessor: String) -> ArgsError {
         code: "eConvert",
         messages: vec![
             predecessor,
-            arg_message(desc.name, "Argument cannot be converted", value),
+            arg_message(desc.name(), "Argument cannot be converted", value),
         ],
     })
 }
@@ -577,7 +612,7 @@ fn integer_value(desc: &Desc, value: &str) -> Result<i32, ArgsError> {
     i32::try_from(number).map_err(|_| {
         invalid(
             "eConvert",
-            arg_message(desc.name, "Integer value is out of range", value),
+            arg_message(desc.name(), "Integer value is out of range", value),
         )
     })
 }
@@ -607,14 +642,14 @@ fn boolean_value(desc: &Desc, value: &str) -> Result<bool, ArgsError> {
 /// were not given and that no given argument excludes.
 fn post_check(
     tool: &Tool,
-    arguments: &'static Arguments,
+    arguments: Arguments,
     values: &mut BTreeMap<&'static str, Option<String>>,
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
     let mut require: BTreeMap<&str, &str> = BTreeMap::new();
     let mut exclude: BTreeSet<&str> = BTreeSet::new();
-    for &(first, dep, second) in arguments.dependencies {
+    for (first, dep, second) in arguments.dependencies() {
         if !given.contains(&first) {
             continue;
         }
@@ -637,27 +672,27 @@ fn post_check(
     // throws; of the arguments that throw, the one first in the usage is the one NCBI names.
     let mut first: Option<(usize, ArgsError)> = None;
     for desc in descs(arguments) {
-        if given.contains(&desc.name) {
+        if given.contains(&desc.name()) {
             continue;
         }
-        let error = if let Some(requester) = require.get(desc.name) {
+        let error = if let Some(requester) = require.get(desc.name()) {
             invalid(
                 "eConstraint",
                 arg_message(
-                    desc.name,
+                    desc.name(),
                     "Must be specified, as it is required by argument",
                     requester,
                 ),
             )
-        } else if exclude.contains(desc.name) {
+        } else if exclude.contains(desc.name()) {
             continue;
-        } else if let Some(default) = desc.default {
+        } else if let Some(default) = desc.default() {
             match process_value(desc, default) {
                 Ok(number) => {
                     if let Some(number) = number {
-                        numbers.insert(desc.name, number);
+                        numbers.insert(desc.name(), number);
                     }
-                    values.insert(desc.name, Some(default.to_string()));
+                    values.insert(desc.name(), Some(default.to_string()));
                     continue;
                 }
                 Err(error) => error,
@@ -667,7 +702,7 @@ fn post_check(
         } else {
             continue;
         };
-        let position = usage_position(tool.help, desc.name);
+        let position = usage_position(tool.help, desc.name());
         if first
             .as_ref()
             .is_none_or(|(earlier, _)| position < *earlier)
@@ -691,7 +726,7 @@ fn mandatory_missing(desc: &Desc) -> ArgsError {
     }
     invalid(
         "eNoArg",
-        arg_message(desc.name, "Mandatory value is missing", &attr),
+        arg_message(desc.name(), "Mandatory value is missing", &attr),
     )
 }
 

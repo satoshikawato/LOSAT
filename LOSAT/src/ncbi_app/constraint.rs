@@ -6,12 +6,15 @@
 //! and its `GetUsage`, the text of the reader's `Illegal value, expected ...` (`args::process_value`)
 //! and of the XML's `<constraint>` (the tables of `args` are made from that XML).
 
-/// A constraint on a key's value (`CArgAllow`).
+use super::{Span, Text};
+
+/// A constraint on a key's value (`CArgAllow`). The values of a set are rows of the tables of
+/// `args` (`STRING_VALUES`, `INTEGER_VALUES`), so that a constraint holds no pointer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Constraint {
     /// `CArgAllow_Strings`: one of the values, compared with case, listed in the order of its
     /// `std::set`.
-    Strings(&'static [&'static str]),
+    Strings(Span),
     /// `CArgAllowValuesGreaterThanOrEqual(min)`.
     AtLeast(f64),
     /// `CArgAllowValuesLessThanOrEqual(max)`.
@@ -23,9 +26,9 @@ pub(crate) enum Constraint {
     /// `CArgAllow_Integers(min, max)`.
     Integers { min: i64, max: i64 },
     /// `CArgAllowStringSet`: one of the values, in the order of its `set<string>`.
-    StringSet(&'static [&'static str]),
+    StringSet(Span),
     /// `CArgAllowIntegerSet`: one of the values, in the order of its `set<int>`.
-    IntegerSet(&'static [i32]),
+    IntegerSet(Span),
     /// `CArgAllowGeneticCodeInteger`: a genetic code of NCBI's tables.
     GeneticCode,
     /// `CArgAllowMaximumFileNameLength(max)`: a file name shorter than `max` bytes.
@@ -49,7 +52,9 @@ impl Constraint {
         match self {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4605-4609
             // A lookup of the value in the set, with case.
-            Constraint::Strings(values) | Constraint::StringSet(values) => values.contains(&value),
+            Constraint::Strings(values) | Constraint::StringSet(values) => {
+                strings(values).any(|allowed| allowed == value)
+            }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:111-113
             // BLAST's bounds read the value with `NStr::StringToDouble` (default flags), then
             // compare it; a value it does not read throws.
@@ -82,7 +87,7 @@ impl Constraint {
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222, 239
             // Read with `NStr::StringToInt`, then looked up in the set.
             Constraint::IntegerSet(values) => crate::ncbi_str::string_to_int(bytes, 0)
-                .is_ok_and(|number| values.contains(&number)),
+                .is_ok_and(|number| integers(values).contains(&number)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1002-1007
             // Read with `NStr::StringToInt`, then looked up among the genetic codes.
             Constraint::GeneticCode => crate::ncbi_str::string_to_int(bytes, 0)
@@ -101,8 +106,7 @@ impl Constraint {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4612-4636
             // Each value in a backquote and a quote, joined by `, ` (the sets are case-sensitive,
             // so no `{case insensitive}`).
-            Constraint::Strings(values) => values
-                .iter()
+            Constraint::Strings(values) => strings(values)
                 .map(|value| format!("`{value}'"))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -157,14 +161,27 @@ impl Constraint {
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:224-231
             // `Permissible values: ` and each value in quotes, each followed by a space.
-            Constraint::StringSet(values) => permissible_values(values.iter()),
-            Constraint::IntegerSet(values) => permissible_values(values.iter()),
+            Constraint::StringSet(values) => permissible_values(strings(values)),
+            Constraint::IntegerSet(values) => permissible_values(integers(values).iter()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1010-1012
             Constraint::GeneticCode => "values between: 1-6, 9-16, 21-31, 33".to_string(),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:91-93
             Constraint::MaxFileNameLength(max) => format!("file name length < {max}"),
         }
     }
+}
+
+/// The values of a set of strings (rows of `STRING_VALUES`).
+fn strings(values: Span) -> impl Iterator<Item = &'static str> {
+    values
+        .of(&super::STRING_VALUES)
+        .iter()
+        .map(|&value| Text::get(value))
+}
+
+/// The values of a set of integers (rows of `INTEGER_VALUES`).
+fn integers(values: Span) -> &'static [i32] {
+    values.of(&super::INTEGER_VALUES)
 }
 
 /// `Permissible values: 'a' 'b' ` of BLAST's set classes.

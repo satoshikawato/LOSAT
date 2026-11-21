@@ -62,10 +62,10 @@ fn strings(texts: &[&str]) -> Vec<String> {
 }
 
 /// Every program's table.
-fn programs() -> impl Iterator<Item = (&'static str, &'static Arguments)> {
-    PROGRAM_ARGUMENTS
+fn programs() -> impl Iterator<Item = (&'static str, Arguments)> {
+    PROGRAMS
         .iter()
-        .map(|(program, arguments)| (*program, arguments))
+        .map(|&(program, arguments)| (program.get(), arguments))
 }
 
 /// The text of the XML of `program`, unchanged (`ncbi_xmlhelp::print` refusing nothing).
@@ -136,9 +136,9 @@ fn every_argument_of_the_xml_is_in_its_table() {
             .iter()
             .filter(|(_, name, _)| !standard.contains(name))
             .collect();
-        assert_eq!(own.len(), arguments.descs.len(), "{program}");
+        assert_eq!(own.len(), arguments.descs().len(), "{program}");
         for &&(tag, name, element) in &own {
-            let desc = arguments.descs.iter().find(|desc| desc.name == name);
+            let desc = arguments.descs().iter().find(|desc| desc.name() == name);
             let desc = desc.unwrap_or_else(|| panic!("{program} -{name}"));
             if tag == "flag" {
                 assert_eq!(desc.kind, Kind::Flag, "{program} -{name}");
@@ -160,7 +160,7 @@ fn every_argument_of_the_xml_is_in_its_table() {
                 .split_once("<default>")
                 .map(|(_, rest)| xml_decode(rest.split_once("</default>").unwrap().0));
             assert_eq!(
-                desc.default.map(str::to_string),
+                desc.default().map(str::to_string),
                 default,
                 "{program} -{name}"
             );
@@ -219,7 +219,7 @@ const CLASSES: [&str; 11] = [
 #[test]
 fn every_class_is_used() {
     let used: BTreeSet<&str> = programs()
-        .flat_map(|(_, arguments)| arguments.descs.iter())
+        .flat_map(|(_, arguments)| arguments.descs().iter())
         .filter_map(|desc| desc.constraint.map(class))
         .collect();
     assert_eq!(used, CLASSES.into_iter().collect());
@@ -228,12 +228,12 @@ fn every_class_is_used() {
 #[test]
 fn every_default_passes_its_own_checks() {
     for (program, arguments) in programs() {
-        for desc in arguments.descs {
-            if let Some(default) = desc.default {
+        for desc in arguments.descs() {
+            if let Some(default) = desc.default() {
                 assert!(
                     process_value(desc, default).is_ok(),
                     "{program} -{} {default:?}",
-                    desc.name
+                    desc.name()
                 );
             }
         }
@@ -327,13 +327,13 @@ fn the_verdicts_reach_every_constraint() {
     let probed: BTreeSet<&str> = cases.iter().map(|case| case.program).collect();
     assert_eq!(probed.len(), 14);
     for (program, arguments) in programs().filter(|(program, _)| probed.contains(program)) {
-        for desc in arguments.descs {
+        for desc in arguments.descs() {
             let Some(constraint) = desc.constraint else {
                 continue;
             };
             let refusal = format!(
                 "Argument \"{}\". Illegal value, expected {}",
-                desc.name,
+                desc.name(),
                 constraint.usage()
             );
             let outside = cases.iter().any(|case| {
@@ -341,11 +341,11 @@ fn the_verdicts_reach_every_constraint() {
                     && case.code == "eConstraint"
                     && case.messages.last().unwrap().starts_with(&refusal)
             });
-            assert!(outside, "{program} -{}", desc.name);
+            assert!(outside, "{program} -{}", desc.name());
             assert!(
                 inside.contains(&constraint.usage()),
                 "{program} -{}",
-                desc.name
+                desc.name()
             );
         }
     }
@@ -359,12 +359,12 @@ fn the_verdicts_reach_every_constraint() {
 fn the_synopsis_orders_the_errors_of_the_post_check() {
     for program in ON_THE_READER {
         let help = tool(program).help;
-        for desc in arguments(program).unwrap().descs {
+        for desc in arguments(program).unwrap().descs() {
             assert_ne!(
-                usage_position(help, desc.name),
+                usage_position(help, desc.name()),
                 usize::MAX,
                 "{program} -{}",
-                desc.name
+                desc.name()
             );
         }
     }
@@ -372,15 +372,15 @@ fn the_synopsis_orders_the_errors_of_the_post_check() {
     for (program, arguments) in programs() {
         let xml = xml(program);
         for (tag, name, element) in xml_arguments(&xml) {
-            if !element.contains("<hidden/>") || arguments.descs.iter().all(|d| d.name != name) {
+            if !element.contains("<hidden/>") || arguments.descs().iter().all(|d| d.name() != name)
+            {
                 continue;
             }
             hidden += 1;
             assert_eq!(tag, "flag", "{program} -{name}");
             let required = arguments
-                .dependencies
-                .iter()
-                .any(|&(_, dep, second)| dep == Dep::Requires && second == name);
+                .dependencies()
+                .any(|(_, dep, second)| dep == Dep::Requires && second == name);
             assert!(!required, "{program} -{name}");
         }
     }
@@ -567,4 +567,29 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
             strings(&["Too many positional arguments (1), the offending value: true"])
         )
     );
+}
+
+/// The generated tables hold no pointer: one text (`TEXT`) and rows of integers, so that loading
+/// LOSAT relocates nothing of them (a `&str` or a slice in a static is an address that the dynamic
+/// loader relocates in every run of every program; line RG item K4i-1 fix 1). Every line of the
+/// generated file but its comments and `TEXT` is without a reference and without a string.
+#[test]
+fn the_tables_hold_no_pointer() {
+    let generated = include_str!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
+    let mut texts = 0;
+    for line in generated.lines() {
+        if line.starts_with("//") {
+            continue;
+        }
+        if line.starts_with("const TEXT: &str = \"") {
+            texts += 1;
+            continue;
+        }
+        assert!(!line.contains('&') && !line.contains('"'), "{line}");
+        assert!(
+            !line.starts_with("const ") || line.starts_with("const TEXT"),
+            "{line}"
+        );
+    }
+    assert_eq!(texts, 1);
 }

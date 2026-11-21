@@ -57,12 +57,17 @@ const C = codons(2, 100);
 const QUERY = A + 'CAG'.repeat(12) + B + C;
 const SUBJECT = C + B.slice(0, 120) + 'GGC' + B.slice(120, 180) + 'TGG' + B.slice(183) + A;
 const encoder = new TextEncoder();
-const fasta = (dna: string, kind: SequenceKind) => encoder.encode(`>warm-up\n${kind === 'protein' ? translate(dna) : dna}\n`);
+const fasta = (id: string, dna: string, kind: SequenceKind) =>
+  encoder.encode(`>${id}\n${kind === 'protein' ? translate(dna) : dna}\n`);
 
-/** The built-in query and subject of `program`, nucleotide or protein as the program reads them. */
+/**
+ * The built-in query and subject of `program`, nucleotide or protein as the program reads them. Their
+ * IDs differ: under -parse_deflines one ID would make the query also a subject (line WQA's sweep, D7,
+ * 2026-11-19), a search that LOSAT refuses where it has masks.
+ */
 export function warmUpInputs(program: ProgramId): { readonly query: Uint8Array; readonly subject: Uint8Array } {
   const inputs = PROGRAM_INPUTS[program];
-  return { query: fasta(QUERY, inputs.query), subject: fasta(SUBJECT, inputs.subject) };
+  return { query: fasta('warm-up-query', QUERY, inputs.query), subject: fasta('warm-up-subject', SUBJECT, inputs.subject) };
 }
 
 /**
@@ -82,9 +87,18 @@ export function warmUp(abi: ReactorAbi, argv: readonly string[]): boolean {
   try {
     const program = argv[0] as ProgramId;
     const inputs = warmUpInputs(program);
-    if (abi.validate(runArgv) !== undefined) return false;
-    handles.push(abi.register(program, ROLE_QUERY, inputs.query).handle);
-    handles.push(abi.register(program, ROLE_SUBJECT, inputs.subject).handle);
+    const validation = abi.validate(runArgv);
+    if (!validation.ok) return false;
+    const started = abi.start(runArgv);
+    if (!started.ok) return false;
+    if (started.start.registerInputs) {
+      // The inputs of a run that reads them together (-parse_deflines), as the search does (runtime.ts).
+      const registered = abi.registerInputs(runArgv, inputs.query, inputs.subject);
+      handles.push(registered.query.handle, registered.subject.handle);
+    } else {
+      handles.push(abi.register(program, ROLE_QUERY, validation.dataLoaders, inputs.query).handle);
+      handles.push(abi.register(program, ROLE_SUBJECT, validation.dataLoaders, inputs.subject).handle);
+    }
     abi.run(runArgv, handles[0]!, handles[1]!, () => undefined);
     return true;
   } catch {

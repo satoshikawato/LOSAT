@@ -15,40 +15,20 @@ use crate::blastinput::app::CompositionMode;
 /// `mode` with the matrix `matrix_name` (the frequency ratios all zero when the statistics are on;
 /// modes 2 and 3 reset to 1), which the query's warning line carries. None for a PSSM that
 /// `CPsiBlastImpl`'s constructor stops before (`CPsiBlastValidate::Pssm`, the PSSM engine's
-/// scores).
+/// scores), and for one whose query set-up fails (`PsiSearch::setup_error`): that set-up is the
+/// first step of the search's preparation, before `PsiBlastSetupScoreBlock`
+/// (blast_aux_priv.cpp:149-151, 197).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:179-207
-/// ```c++
-///     _ASSERT(options->GetCompositionBasedStats() < eNumCompoAdjustModes);
-///     // the message below is meaningless for deltablast
-///     if (options->GetProgram() != eDeltaBlast &&
-///         (options->GetCompositionBasedStats() != eNoCompositionBasedStats) &&
-///         freq_ratios_all_zeros) {
-///         ostringstream os;
-///         os << "Frequency ratios for PSSM are all zeros, frequency ratios for ";
-///         os << options->GetMatrixName() << " will be used during traceback ";
-///         os << "in composition based statistics";
-///         ...
-///     }
-///
-///     if (options->GetCompositionBasedStats() > eCompositionBasedStats) {
-///         // ugly, but necessary
-///         const_cast<CBlastOptions*>(&*options)
-///             ->SetCompositionBasedStats(eCompositionBasedStats);
-///         ostringstream os;
-///         os << "Composition-based score adjustment conditioned on "
-///            << "sequence properties and unconditional composition-based score "
-///            << "adjustment is not supported with PSSMs, resetting to default "
-///            << "value of standard composition-based statistics";
-///         ...
-///     }
-/// ```
 pub(crate) fn setup_messages(
     search: &PsiSearch,
     mode: CompositionMode,
     matrix_name: &str,
 ) -> Vec<String> {
-    if search.validation_error.is_some() || search.scores_error.is_some() {
+    if search.validation_error.is_some()
+        || search.scores_error.is_some()
+        || search.setup_error.is_some()
+    {
         return Vec::new();
     }
     pssm_setup_messages(&search.freq_ratios, mode, matrix_name)
@@ -105,7 +85,7 @@ pub(crate) fn check_in_pssm_options(
     psi: &Arc<PsiSearch>,
     outfmts: &[i32],
 ) -> Result<()> {
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 (quoted at
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 (cited at
     // `PsiSearch::write_annot_posts`: the prolog, then the query's Bioseq joins the scope)
     // An exception of NCBI's object manager when the query joins the scope (`PsiSearch::
     // annot_abort`) ends the run after the prolog of its format, before any report: NCBI BLAST+
@@ -128,7 +108,8 @@ pub(crate) fn check_in_pssm_options(
     }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
     if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
-        bail!("output format {number} with -in_pssm is not supported by LOSAT's PSIBLAST yet");
+        let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
+        bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
     }
     Ok(())
 }

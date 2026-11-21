@@ -224,8 +224,7 @@ jobs:
       - name: Build exact native release artifact
         run: cd LOSAT && cargo build --release --bin losat --locked
 
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # The shipped binary holds FMA instructions and references to fma only where LOSAT's one
       # mul_add emulates that line (docs/agents/diagnostics.md, "Floating-point contract"). The
       # checker reads x86-64 and aarch64 objdump output, so it runs on the two Linux artifacts.
@@ -235,7 +234,7 @@ jobs:
 
       - name: Assemble, extract, and smoke native artifact
         run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
           # The helper invokes a committed contract search per program without changing or classifying its output.
           "$PYTHON" LOSAT/tests/prepare_release_candidate_v020.py native \
             --repo-root . \
@@ -284,7 +283,7 @@ jobs:
 
       - name: Assemble, extract, and smoke serial-Wasm artifact
         run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
           # The WASI runner supplies the existing CLI inputs and does not implement BLAST behavior.
           python3 LOSAT/tests/prepare_release_candidate_v020.py wasm \
             --repo-root . \
@@ -338,8 +337,7 @@ jobs:
       # guard fails this step, and writes nothing, on an encoding that it declines.
       - name: Guard the threaded-Wasm release artifact
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
           # The guard is host compatibility only; it implements no BLAST behavior.
           mkdir -p .tmp/release-readiness/threaded-guarded
           node LOSAT/tests/wasi_shared_memory.js guard \
@@ -348,8 +346,7 @@ jobs:
 
       - name: Assemble, extract, and smoke threaded-Wasm artifact
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
           # The threaded WASI runner hosts the command; it implements no BLAST behavior.
           python3 LOSAT/tests/prepare_release_candidate_v020.py wasm \
             --repo-root . \
@@ -455,6 +452,55 @@ jobs:
             --archive ".tmp/release-readiness/download/${{ matrix.archive }}" \
             --target "${{ matrix.target_triple }}"
 
+  # CodeQL of the candidate itself (codeql.yml: the four languages, filed under this run's ref and
+  # commit); its job `open alerts` fails when an alert is open at R. Its upload of the results is the
+  # only write before job `handoff` (security-events).
+  codeql-candidate:
+    uses: ./.github/workflows/codeql.yml
+    with:
+      own_commit: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+  security:
+    name: Dependency advisories at the candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact candidate
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check pip-audit==2.10.1
+
+      # The same script as nightly.yml's job `audit`: no known advisory in any lock file at R.
+      - name: Dependency advisories (cargo, npm, pip)
+        run: scripts/dependency_advisories.sh
+
   handoff:
     name: Aggregate exact-SHA RC handoff
     needs:
@@ -464,16 +510,21 @@ jobs:
       - threaded-wasm-artifact
       - extracted-smoke
       - threading-regression
+      - codeql-candidate
+      - security
     if: >-
       ${{ always() &&
           needs.quality.result == 'success' &&
+          needs.codeql-candidate.result == 'success' &&
+          needs.security.result == 'success' &&
           needs.threading-regression.result == 'success' &&
           needs.native-artifacts.result == 'success' &&
           needs.serial-wasm-artifact.result == 'success' &&
           needs.threaded-wasm-artifact.result == 'success' &&
           needs.extracted-smoke.result == 'success' }}
     runs-on: ubuntu-24.04
-    # id-token and attestations: the two attestations below (every other job stays read-only).
+    # id-token and attestations: the two attestations below (every other job stays read-only, but for
+    # codeql-candidate's upload of code scanning results).
     permissions:
       contents: read
       id-token: write

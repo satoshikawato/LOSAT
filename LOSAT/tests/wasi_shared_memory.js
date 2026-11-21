@@ -1,9 +1,7 @@
 "use strict";
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// int num_threads = args[kArgNumThreads].AsInteger();
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // if (num_threads > kMaxValue) { m_NumThreads = kMaxValue; }
-// else { m_NumThreads = num_threads; }
 // Host compatibility only: preserve the requested parallel search and every
 // original memory operation. No search code or on-disk artifact is changed.
 //
@@ -231,8 +229,7 @@ function guardedBody(copy) {
   ]);
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host compatibility only. An atomic instruction's operands after the address, its result and
 // the bytes it accesses (WebAssembly threads proposal, binary encoding: 0x10 loads, 0x17 stores,
 // 0x1e-0x41 read-modify-writes, 0x48 compare-exchanges, seven widths each).
@@ -399,8 +396,7 @@ function sectionsOf(bytes) {
   return { header, sections };
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host compatibility only. The record of a module that guardSharedMemory wrote:
 // { version, fill, copy, grow, atomic, atomic_helpers }, or null. A module whose encoding cannot be read has none
 // (guardSharedMemory then rejects it as invalid).
@@ -579,8 +575,7 @@ function guardSharedMemory(bytes) {
   return { bytes: guarded, ...counts, record: written };
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host compatibility only. Throws unless `bytes` is a module that guardSharedMemory wrote:
 // its record, the helpers last with the guard's types and bodies (fill, copy, then the atomic
 // ones), no memory.fill, memory.copy or atomic memory instruction anywhere else, and as many
@@ -636,8 +631,7 @@ function verifyGuarded(bytes) {
   return record;
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host compatibility only. Whether the guard's waits in `bytes` can end with their worker (the
 // header): the module imports wasi_snapshot_preview1.sched_yield, () -> i32.
 function slicesWaits(bytes) {
@@ -646,8 +640,7 @@ function slicesWaits(bytes) {
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); return status;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Build step: `guard <input.wasm> <output.wasm>` writes the guarded module (through a
 // temporary file and a rename) and prints its record as JSON; `verify <file.wasm>` checks a
 // guarded module. Either exits 1 with the reason, and `guard` writes nothing, when the

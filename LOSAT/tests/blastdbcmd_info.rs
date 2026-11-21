@@ -76,12 +76,13 @@ fn blastdbcmd(words: &[&str], out_dir: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed.
+/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed, in
+/// LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
-    native_paths(text, &tests)
+    losat::wording::losat_output_bytes(&native_paths(text, &tests)).into_owned()
 }
 
 /// The frozen text with `{R}` and `{T}` placed, its paths written as on the platform of the run
@@ -281,7 +282,7 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at
 // `ncbi_version::print`). NCBI BLAST+ 2.17.0 (probe B20, line RG `E/e3/ncbi/blastdbcmd.vf_args`):
 // `-version-full` prints the full version and exits 0 before the arguments are read; LOSAT's has
 // NCBI's form with LOSAT's values (line RG item E3).
@@ -300,7 +301,7 @@ fn a_full_version_is_printed_before_the_arguments() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at `ncbi_xmlhelp`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (cited at `ncbi_xmlhelp`).
 // NCBI BLAST+ 2.17.0 (probe C06, and line RG `E/e2/ncbi/blastdbcmd.xml_args`): `-xmlhelp` after
 // the arguments prints the XML of blastdbcmd's arguments and exits 0. The toolkit words that the
 // probe's LOSAT refused all run now (`-dryrun`, probe B22, since line RG item E1b:
@@ -315,7 +316,7 @@ fn xmlhelp_prints_ncbis_xml() {
     assert!(stdout == include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml"));
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (cited at
 // `ncbi_environment::conf_file_path`). NCBI BLAST+ 2.17.0 (probe B21, and line RG
 // `E/SURVEY_E1.md` `blastdbcmd.conf_missing`): a `-conffile` that is not a file is NCBI's
 // critical post, then its abort with exit status 255, before the arguments are read.

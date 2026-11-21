@@ -1,0 +1,844 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "PAM30",
+        "expect": 100000,
+        "filter": "L;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q1",
+            "query_len": 183,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1"
+                  }
+                ],
+                "len": 189,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 14.7629,
+                    "score": 26,
+                    "evalue": 1.19107,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 12,
+                    "query_to": 14,
+                    "hit_from": 62,
+                    "hit_to": 64,
+                    "align_len": 3,
+                    "gaps": 0,
+                    "qseq": "DYR",
+                    "hseq": "DYR",
+                    "midline": "DYR"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 14.2661,
+                    "score": 25,
+                    "evalue": 1.68076,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 55,
+                    "query_to": 57,
+                    "hit_from": 153,
+                    "hit_to": 155,
+                    "align_len": 3,
+                    "gaps": 0,
+                    "qseq": "CFS",
+                    "hseq": "CFS",
+                    "midline": "CFS"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 13.7692,
+                    "score": 24,
+                    "evalue": 2.37176,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 164,
+                    "query_to": 169,
+                    "hit_from": 101,
+                    "hit_to": 106,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "YDSIHD",
+                    "hseq": "YDRQHD",
+                    "midline": "YD  HD"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 13.2724,
+                    "score": 23,
+                    "evalue": 3.34685,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 93,
+                    "query_to": 96,
+                    "hit_from": 117,
+                    "hit_to": 120,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "YSHQ",
+                    "hseq": "YDHQ",
+                    "midline": "Y HQ"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 12.7755,
+                    "score": 22,
+                    "evalue": 4.72283,
+                    "identity": 3,
+                    "positive": 4,
+                    "query_from": 166,
+                    "query_to": 171,
+                    "hit_from": 12,
+                    "hit_to": 17,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "SIHDFI",
+                    "hseq": "SFNDYI",
+                    "midline": "S  D+I"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 11.285,
+                    "score": 19,
+                    "evalue": 13.2709,
+                    "identity": 4,
+                    "positive": 6,
+                    "query_from": 87,
+                    "query_to": 96,
+                    "hit_from": 116,
+                    "hit_to": 125,
+                    "align_len": 10,
+                    "gaps": 0,
+                    "qseq": "YSQQQNYSHQ",
+                    "hseq": "YYDHQNTSNE",
+                    "midline": "Y  +QN S +"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 10.2913,
+                    "score": 17,
+                    "evalue": 26.426,
+                    "identity": 2,
+                    "positive": 2,
+                    "query_from": 73,
+                    "query_to": 74,
+                    "hit_from": 45,
+                    "hit_to": 46,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "FP",
+                    "hseq": "FP",
+                    "midline": "FP"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 10.2913,
+                    "score": 17,
+                    "evalue": 26.426,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 156,
+                    "query_to": 158,
+                    "hit_from": 95,
+                    "hit_to": 97,
+                    "align_len": 3,
+                    "gaps": 0,
+                    "qseq": "GYQ",
+                    "hseq": "GYE",
+                    "midline": "GY+"
+                  },
+                  {
+                    "num": 9,
+                    "bit_score": 9.79447,
+                    "score": 16,
+                    "evalue": 37.2904,
+                    "identity": 1,
+                    "positive": 5,
+                    "query_from": 170,
+                    "query_to": 175,
+                    "hit_from": 24,
+                    "hit_to": 29,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "FIHYYF",
+                    "hseq": "YMHFFY",
+                    "midline": "+ H+++"
+                  },
+                  {
+                    "num": 10,
+                    "bit_score": 9.79447,
+                    "score": 16,
+                    "evalue": 37.2904,
+                    "identity": 0,
+                    "positive": 0,
+                    "query_from": 170,
+                    "query_to": 169,
+                    "hit_from": 24,
+                    "hit_to": 23,
+                    "align_len": 0,
+                    "gaps": 0,
+                    "qseq": "",
+                    "hseq": "",
+                    "midline": ""
+                  },
+                  {
+                    "num": 11,
+                    "bit_score": 9.29762,
+                    "score": 15,
+                    "evalue": 52.6214,
+                    "identity": 2,
+                    "positive": 4,
+                    "query_from": 87,
+                    "query_to": 92,
+                    "hit_from": 101,
+                    "hit_to": 106,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "YSQQQN",
+                    "hseq": "YDRQHD",
+                    "midline": "Y  Q++"
+                  },
+                  {
+                    "num": 12,
+                    "bit_score": 8.80077,
+                    "score": 14,
+                    "evalue": 74.2555,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 100,
+                    "query_to": 104,
+                    "hit_from": 145,
+                    "hit_to": 149,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "DGMNW",
+                    "hseq": "EGVRW",
+                    "midline": "+G  W"
+                  },
+                  {
+                    "num": 13,
+                    "bit_score": 8.30393,
+                    "score": 13,
+                    "evalue": 104.784,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 69,
+                    "query_to": 73,
+                    "hit_from": 27,
+                    "hit_to": 31,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "YFWNF",
+                    "hseq": "FFYEF",
+                    "midline": "+F  F"
+                  },
+                  {
+                    "num": 14,
+                    "bit_score": 8.30393,
+                    "score": 13,
+                    "evalue": 104.784,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 31,
+                    "query_to": 31,
+                    "hit_from": 72,
+                    "hit_to": 72,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "W",
+                    "hseq": "W",
+                    "midline": "W"
+                  },
+                  {
+                    "num": 15,
+                    "bit_score": 7.80708,
+                    "score": 12,
+                    "evalue": 147.863,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 86,
+                    "query_to": 91,
+                    "hit_from": 37,
+                    "hit_to": 42,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "AYSQQQ",
+                    "hseq": "AFADRQ",
+                    "midline": "A+   Q"
+                  },
+                  {
+                    "num": 16,
+                    "bit_score": 7.80708,
+                    "score": 12,
+                    "evalue": 147.863,
+                    "identity": 1,
+                    "positive": 2,
+                    "query_from": 174,
+                    "query_to": 175,
+                    "hit_from": 116,
+                    "hit_to": 117,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "YF",
+                    "hseq": "YY",
+                    "midline": "Y+"
+                  },
+                  {
+                    "num": 17,
+                    "bit_score": 7.31023,
+                    "score": 11,
+                    "evalue": 208.654,
+                    "identity": 2,
+                    "positive": 2,
+                    "query_from": 89,
+                    "query_to": 92,
+                    "hit_from": 47,
+                    "hit_to": 50,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "QQQN",
+                    "hseq": "QNRN",
+                    "midline": "Q  N"
+                  },
+                  {
+                    "num": 18,
+                    "bit_score": 6.81338,
+                    "score": 10,
+                    "evalue": 294.436,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 157,
+                    "query_to": 157,
+                    "hit_from": 33,
+                    "hit_to": 33,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "Y",
+                    "hseq": "Y",
+                    "midline": "Y"
+                  },
+                  {
+                    "num": 19,
+                    "bit_score": 6.31654,
+                    "score": 9,
+                    "evalue": 415.487,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 118,
+                    "query_to": 118,
+                    "hit_from": 11,
+                    "hit_to": 11,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "F",
+                    "hseq": "F",
+                    "midline": "F"
+                  },
+                  {
+                    "num": 20,
+                    "bit_score": 6.31654,
+                    "score": 9,
+                    "evalue": 415.487,
+                    "identity": 1,
+                    "positive": 2,
+                    "query_from": 177,
+                    "query_to": 178,
+                    "hit_from": 35,
+                    "hit_to": 36,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "KD",
+                    "hseq": "KN",
+                    "midline": "K+"
+                  },
+                  {
+                    "num": 21,
+                    "bit_score": 6.31654,
+                    "score": 9,
+                    "evalue": 415.487,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 146,
+                    "query_to": 146,
+                    "hit_from": 67,
+                    "hit_to": 67,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "F",
+                    "hseq": "F",
+                    "midline": "F"
+                  },
+                  {
+                    "num": 22,
+                    "bit_score": 2.83861,
+                    "score": 2,
+                    "evalue": 4629.33,
+                    "identity": 0,
+                    "positive": 1,
+                    "query_from": 93,
+                    "query_to": 93,
+                    "hit_from": 38,
+                    "hit_to": 38,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "Y",
+                    "hseq": "F",
+                    "midline": "+"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 33115,
+              "kappa": 0.278371441643579,
+              "lambda": 0.344387962080815,
+              "entropy": 2.0118442032259
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "PAM30",
+        "expect": 100000,
+        "filter": "L;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q2",
+            "query_len": 83,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1"
+                  }
+                ],
+                "len": 189,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 13.7182,
+                    "score": 24,
+                    "evalue": 1.08445,
+                    "identity": 3,
+                    "positive": 4,
+                    "query_from": 23,
+                    "query_to": 27,
+                    "hit_from": 60,
+                    "hit_to": 64,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "CCNYR",
+                    "hseq": "CADYR",
+                    "midline": "C +YR"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 13.7182,
+                    "score": 24,
+                    "evalue": 1.08445,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 27,
+                    "query_to": 31,
+                    "hit_from": 89,
+                    "hit_to": 93,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "RGRWN",
+                    "hseq": "RDQWN",
+                    "midline": "R  WN"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 12.2365,
+                    "score": 21,
+                    "evalue": 3.02872,
+                    "identity": 3,
+                    "positive": 4,
+                    "query_from": 38,
+                    "query_to": 43,
+                    "hit_from": 19,
+                    "hit_to": 24,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "VLYHFY",
+                    "hseq": "VFFPFY",
+                    "midline": "V + FY"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 12.2365,
+                    "score": 21,
+                    "evalue": 3.02872,
+                    "identity": 2,
+                    "positive": 2,
+                    "query_from": 11,
+                    "query_to": 12,
+                    "hit_from": 144,
+                    "hit_to": 145,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "WE",
+                    "hseq": "WE",
+                    "midline": "WE"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 9.27297,
+                    "score": 15,
+                    "evalue": 23.6242,
+                    "identity": 3,
+                    "positive": 5,
+                    "query_from": 13,
+                    "query_to": 21,
+                    "hit_from": 104,
+                    "hit_to": 112,
+                    "align_len": 9,
+                    "gaps": 0,
+                    "qseq": "QQNIRVPMW",
+                    "hseq": "QHDDKMPNW",
+                    "midline": "Q++   P W"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 8.28514,
+                    "score": 13,
+                    "evalue": 46.8516,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 58,
+                    "query_to": 61,
+                    "hit_from": 130,
+                    "hit_to": 133,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "LLYH",
+                    "hseq": "LQFH",
+                    "midline": "L +H"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 4.82773,
+                    "score": 6,
+                    "evalue": 514.644,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 81,
+                    "query_to": 81,
+                    "hit_from": 65,
+                    "hit_to": 65,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "A",
+                    "hseq": "A",
+                    "midline": "A"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 14615,
+              "kappa": 0.27466753213529,
+              "lambda": 0.342355763788799,
+              "entropy": 2.00738228324074
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "PAM30",
+        "expect": 100000,
+        "filter": "L;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "q3",
+            "query_len": 111,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1"
+                  }
+                ],
+                "len": 189,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 17.201,
+                    "score": 31,
+                    "evalue": 0.131383,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 89,
+                    "query_to": 93,
+                    "hit_from": 60,
+                    "hit_to": 64,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "CAGYR",
+                    "hseq": "CADYR",
+                    "midline": "CA YR"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 13.2425,
+                    "score": 23,
+                    "evalue": 2.04257,
+                    "identity": 3,
+                    "positive": 5,
+                    "query_from": 61,
+                    "query_to": 66,
+                    "hit_from": 38,
+                    "hit_to": 43,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "FMNRHP",
+                    "hseq": "FADRQP",
+                    "midline": "F +R+P"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 13.2425,
+                    "score": 23,
+                    "evalue": 2.04257,
+                    "identity": 3,
+                    "positive": 5,
+                    "query_from": 41,
+                    "query_to": 46,
+                    "hit_from": 164,
+                    "hit_to": 169,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "TIHLEW",
+                    "hseq": "TIQSDW",
+                    "midline": "TI+ +W"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 12.7476,
+                    "score": 22,
+                    "evalue": 2.87827,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 60,
+                    "query_to": 63,
+                    "hit_from": 153,
+                    "hit_to": 156,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "CFMN",
+                    "hseq": "CFSN",
+                    "midline": "CF N"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 12.2528,
+                    "score": 21,
+                    "evalue": 4.0559,
+                    "identity": 3,
+                    "positive": 3,
+                    "query_from": 4,
+                    "query_to": 7,
+                    "hit_from": 83,
+                    "hit_to": 86,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "VCHM",
+                    "hseq": "VIHM",
+                    "midline": "V HM"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 10.2736,
+                    "score": 17,
+                    "evalue": 15.9921,
+                    "identity": 2,
+                    "positive": 2,
+                    "query_from": 33,
+                    "query_to": 34,
+                    "hit_from": 84,
+                    "hit_to": 85,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "IH",
+                    "hseq": "IH",
+                    "midline": "IH"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 9.77874,
+                    "score": 16,
+                    "evalue": 22.5352,
+                    "identity": 2,
+                    "positive": 4,
+                    "query_from": 48,
+                    "query_to": 52,
+                    "hit_from": 153,
+                    "hit_to": 157,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "CYMDT",
+                    "hseq": "CFSNT",
+                    "midline": "C+ +T"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 9.28392,
+                    "score": 15,
+                    "evalue": 31.7553,
+                    "identity": 2,
+                    "positive": 2,
+                    "query_from": 94,
+                    "query_to": 97,
+                    "hit_from": 109,
+                    "hit_to": 112,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "MCKW",
+                    "hseq": "MPNW",
+                    "midline": "M  W"
+                  },
+                  {
+                    "num": 9,
+                    "bit_score": 8.29429,
+                    "score": 13,
+                    "evalue": 63.0559,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 74,
+                    "query_to": 74,
+                    "hit_from": 149,
+                    "hit_to": 149,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "W",
+                    "hseq": "W",
+                    "midline": "W"
+                  },
+                  {
+                    "num": 10,
+                    "bit_score": 7.79947,
+                    "score": 12,
+                    "evalue": 88.8547,
+                    "identity": 2,
+                    "positive": 3,
+                    "query_from": 66,
+                    "query_to": 70,
+                    "hit_from": 46,
+                    "hit_to": 50,
+                    "align_len": 5,
+                    "gaps": 0,
+                    "qseq": "PRDPN",
+                    "hseq": "PQNRN",
+                    "midline": "P + N"
+                  },
+                  {
+                    "num": 11,
+                    "bit_score": 6.31502,
+                    "score": 9,
+                    "evalue": 248.625,
+                    "identity": 1,
+                    "positive": 2,
+                    "query_from": 18,
+                    "query_to": 19,
+                    "hit_from": 121,
+                    "hit_to": 122,
+                    "align_len": 2,
+                    "gaps": 0,
+                    "qseq": "DT",
+                    "hseq": "NT",
+                    "midline": "+T"
+                  },
+                  {
+                    "num": 12,
+                    "bit_score": 6.31502,
+                    "score": 9,
+                    "evalue": 248.625,
+                    "identity": 1,
+                    "positive": 1,
+                    "query_from": 87,
+                    "query_to": 87,
+                    "hit_from": 133,
+                    "hit_to": 133,
+                    "align_len": 1,
+                    "gaps": 0,
+                    "qseq": "H",
+                    "hseq": "H",
+                    "midline": "H"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 19795,
+              "kappa": 0.275158641275811,
+              "lambda": 0.342981199167592,
+              "entropy": 2.00053638211349
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -10,10 +10,6 @@
 //! tblastn's code everywhere except where `Blast_QueryIsPssm` selects the PSSM.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:82-83
-//! ```c
-//!     /** PSI Tblastn */
-//!     eBlastTypePsiTblastn = (PSSM_QUERY_MASK | NUCLEOTIDE_SUBJECT_MASK | TRANSLATED_SUBJECT_MASK),
-//! ```
 
 use std::path::Path;
 
@@ -29,13 +25,7 @@ use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 /// `eBlastTypePsiTblastn`, upper-cased by the formatter).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:690
-/// ```c++
-///     case eBlastTypePsiTblastn:  retval.assign("psitblastn"); break;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
-/// ```c++
-///     m_Program = Blast_ProgramNameFromType(opts.GetProgramType());
-/// ```
 pub(super) const PROGRAM: &str = "PSITBLASTN";
 
 /// Reads `-in_pssm path` for tblastn: psiblast's reader (NCBI's `CPsiBlastArgs`, the same handler
@@ -44,12 +34,7 @@ pub(super) const PROGRAM: &str = "PSITBLASTN";
 /// `database` are whether the run writes a search strategy and searches `-db`
 /// (`PssmReader::strategy`); the messages of NCBI's reader go to `diagnostics`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:128-130
-/// ```c++
-///     m_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eNucleotideDb));
-///     arg.Reset(m_PsiBlastArgs);
-///     m_Args.push_back(arg);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:125-130
 pub(super) fn read(
     path: &Path,
     matrix_name: &str,
@@ -77,10 +62,6 @@ pub(super) fn read(
 /// the code 32 that LOSAT's TBLASTN adds for its own translations (`PD-TLOSAN-LOCAL-GENCODE-32`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1011-1015
-/// ```c++
-///     static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,
-///                         21,22,23,24,25,26,27,28,29,30,31,33};
-/// ```
 pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     if code == 32 {
         bail!(
@@ -91,11 +72,6 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
-// ```c++
-//     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
-//         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
-//         _ASSERT(m_Pssm.Empty());
-// ```
 /// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
 /// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
 /// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, `-in_pssm` of a missing file
@@ -107,7 +83,7 @@ pub(super) fn file_error_in_run(error: &anyhow::Error) -> bool {
         .is_some_and(|native| {
             native
                 .message
-                .starts_with("Command line argument error: Argument \"in_pssm\".")
+                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
         })
 }
 
@@ -120,7 +96,7 @@ pub(super) fn check_limits(
     psi: &PsiSearch,
     outfmt: i32,
 ) -> Result<()> {
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (quoted at
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (cited at
     // `tblastn_app::search_pssm_query`: the query's Bioseq joins the scope before the formatter
     // is made)
     // An exception of NCBI's object manager when the query joins the scope (`PsiSearch::
@@ -133,13 +109,7 @@ pub(super) fn check_limits(
     if !index_stops {
         crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, outfmt, "TBLASTN")?;
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-162
-    // ```c++
-    // 	if ((mt_mode == CMTArgs::eSplitByQueries) && (num_threads > 1)){
-    // 		m_UsageReport.AddParam(CBlastUsageReport::eMTMode, CMTArgs::eSplitByQueries);
-    // 		return x_RunMTBySplitQuery();
-    // 	}
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-164
     // NCBI's split by queries reads the query file, which a PSSM search has not opened: NCBI
     // BLAST+ 2.17.0 aborts (probe `ts1.mt1.n2.6`). With `-subject` it runs on one thread.
     if args.mt_mode == Some(1) && resolved.num_threads > 1 && args.db.is_some() {
@@ -149,11 +119,6 @@ pub(super) fn check_limits(
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)
-    // ```c++
-    //     if (m_FormatType >= CFormattingArgs::eTabular &&
-    //         m_FormatType <= CFormattingArgs::eCommaSeparatedValues) {
-    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, m_CustomDelim);
-    // ```
     // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too). A run that
     // NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's "Remote
     // PSI-BL2SEQ" with `-subject`, NCBI's check of the PSSM, the PSSM engine's scores) writes the
@@ -186,17 +151,7 @@ pub(super) fn check_limits(
 /// letters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:631-637
-/// ```c
-///     if (lookup_segments) {
-///         if (program_number == eBlastTypeBlastx || program_number == eBlastTypeTblastx) {
-///         ...
-///         } else {
-///             BLAST_ComplementMaskLocations(program_number, query_info,
-///                                           filter_maskloc, lookup_segments);
-///         }
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99 (cited at
 /// `pssm_search::lookup`: a score block with a PSSM indexes the PSSM's rows)
 pub(super) fn lookup_table(
     rows: &QueryPssm,
@@ -226,17 +181,5 @@ pub(super) fn lookup_table(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI blast_args.cpp:1011-1015: the code 32 is not NCBI's.
-    #[test]
-    fn the_genetic_code_32_is_refused_with_a_pssm() {
-        assert!(check_db_gencode(1).is_ok());
-        assert!(check_db_gencode(33).is_ok());
-        assert!(check_db_gencode(32)
-            .unwrap_err()
-            .to_string()
-            .contains("-db_gencode 32 with -in_pssm"));
-    }
-}
+#[path = "in_pssm_tests.rs"]
+mod tests;

@@ -4,19 +4,20 @@
 //! E-values when multiple HSPs are linked together. These functions are essential
 //! for proper HSP chaining and scoring.
 //!
-//! Reference: NCBI BLAST source code (blast_stat.c)
+//! Reference: NCBI BLAST source code (c++/src/algo/blast/core/blast_stat.c)
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:152-163
+use crate::utils::glibc_fma_libm::GlibcLibm;
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_math.h:152-163
 const LOGDERIV_ORDER_MAX: usize = 4;
 const POLYGAMMA_ORDER_MAX: usize = LOGDERIV_ORDER_MAX;
 const NCBIMATH_PI: f64 = std::f64::consts::PI; // the same f64 as NCBI's literal
 const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 const NCBIMATH_LNPI: f64 = 1.1447298858494001741434273513531;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:60-62
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:60-62
 const DBL_EPSILON: f64 = 2.2204460492503131e-16;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:140-151
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:140-151
 const DEFAULT_GAMMA_COEF: [f64; 11] = [
     4.694580336184385e+04,
     -1.560605207784446e+05,
@@ -31,7 +32,7 @@ const DEFAULT_GAMMA_COEF: [f64; 11] = [
     1.251639670050933e-10,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:296-309
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:296-309
 const PRECOMPUTED_FACTORIAL: [f64; 35] = [
     1.0,
     1.0,
@@ -70,12 +71,12 @@ const PRECOMPUTED_FACTORIAL: [f64; 35] = [
     295232799039604140847618609643520000000.0,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:33-55
 #[rustfmt::skip]
 pub(crate) fn blast_expm1(x: f64) -> f64 {
     let absx = x.abs();
     if absx > 0.33 {
-        return x.exp() - 1.0;
+        return x.glibc_exp() - 1.0;
     }
     if absx < 1.0e-16 {
         return x;
@@ -95,10 +96,10 @@ pub(crate) fn blast_expm1(x: f64) -> f64 {
                                                     + x / 6227020800.0))))))))))))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:64-83
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:64-83
 fn blast_log1p(x: f64) -> f64 {
     if x.abs() >= 0.2 {
-        return (x + 1.0).ln();
+        return (x + 1.0).glibc_ln();
     }
     let mut sum = 0.0;
     let mut y = x;
@@ -120,7 +121,7 @@ fn blast_log1p(x: f64) -> f64 {
     sum
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:444-470
 pub(crate) fn blast_powi(mut x: f64, mut n: i32) -> f64 {
     if n == 0 {
         return 1.0;
@@ -146,7 +147,7 @@ pub(crate) fn blast_powi(mut x: f64, mut n: i32) -> f64 {
     y
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:94-137
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:94-137
 fn s_log_derivative(order: i32, u: &[f64]) -> f64 {
     if order < 0 || order as usize > LOGDERIV_ORDER_MAX {
         return f64::INFINITY;
@@ -163,7 +164,7 @@ fn s_log_derivative(order: i32, u: &[f64]) -> f64 {
     match order {
         0 => {
             if u[0] > 0.0 {
-                u[0].ln()
+                u[0].glibc_ln()
             } else {
                 f64::INFINITY
             }
@@ -181,7 +182,7 @@ fn s_log_derivative(order: i32, u: &[f64]) -> f64 {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:161-221
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:161-221
 fn s_general_ln_gamma(x: f64, order: i32) -> f64 {
     let xx = x - 1.0;
     let xgamma_dim = DEFAULT_GAMMA_COEF.len() as f64;
@@ -223,10 +224,10 @@ fn s_general_ln_gamma(x: f64, order: i32) -> f64 {
     let mut tmp = tx + 0.5;
     match order {
         0 => {
-            value += (NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0 + (xx + 0.5) * tmp.ln() - tmp;
+            value += (NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0 + (xx + 0.5) * tmp.glibc_ln() - tmp;
         }
         1 => {
-            value += tmp.ln() - xgamma_dim / tmp;
+            value += tmp.glibc_ln() - xgamma_dim / tmp;
         }
         2 => {
             value += (tmp + xgamma_dim) / (tmp * tmp);
@@ -251,7 +252,11 @@ fn s_general_ln_gamma(x: f64, order: i32) -> f64 {
     value
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:235-284
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:235-284
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sines of x < 0 never run: s_ln_gamma, the only caller, passes order 0 and x >= 1"
+)]
 fn s_poly_gamma(x: f64, order: i32) -> f64 {
     if order < 0 || order as usize > POLYGAMMA_ORDER_MAX {
         return f64::INFINITY;
@@ -271,7 +276,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             if (x < -0.1 && ((x.ceil() == x) || sx < 2.0 * DBL_EPSILON)) || sx == 0.0 {
                 return f64::INFINITY;
             }
-            value += NCBIMATH_LNPI - sx.ln();
+            value += NCBIMATH_LNPI - sx.glibc_ln();
         } else {
             let mut y = [0.0; POLYGAMMA_ORDER_MAX + 1];
             let mut tmp = 1.0;
@@ -291,7 +296,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             if x == 0.0 {
                 return f64::INFINITY;
             }
-            value -= x.ln();
+            value -= x.glibc_ln();
         } else {
             let tmp = blast_factorial(order - 1) * blast_powi(x, -order);
             value += if order % 2 == 0 { tmp } else { -tmp };
@@ -300,12 +305,12 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:292-295
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:292-295
 fn s_ln_gamma(x: f64) -> f64 {
     s_poly_gamma(x, 0)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:312-321
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:312-321
 fn blast_factorial(n: i32) -> f64 {
     if n < 0 {
         return 0.0;
@@ -313,18 +318,18 @@ fn blast_factorial(n: i32) -> f64 {
     if (n as usize) < PRECOMPUTED_FACTORIAL.len() {
         return PRECOMPUTED_FACTORIAL[n as usize];
     }
-    (s_ln_gamma(n as f64 + 1.0)).exp()
+    (s_ln_gamma(n as f64 + 1.0)).glibc_exp()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:323-329
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:323-329
 fn blast_ln_gamma_int(n: i32) -> f64 {
     if n > 1 && (n as usize) < PRECOMPUTED_FACTORIAL.len() {
-        return PRECOMPUTED_FACTORIAL[(n - 1) as usize].ln();
+        return PRECOMPUTED_FACTORIAL[(n - 1) as usize].glibc_ln();
     }
     s_ln_gamma(n as f64)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:473-480
 fn blast_ln_factorial(x: f64) -> f64 {
     if x <= 0.0 {
         0.0
@@ -343,7 +348,7 @@ pub fn gap_decay_divisor(decay_rate: f64, num_segments: usize) -> f64 {
     if num_segments == 0 {
         return 1.0;
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4081
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4081
     (1.0 - decay_rate) * blast_powi(decay_rate, (num_segments - 1) as i32)
 }
 
@@ -354,7 +359,7 @@ pub fn ln_gamma_int(n: i32) -> f64 {
     if n <= 0 {
         return f64::INFINITY;
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:323-329
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:323-329
     blast_ln_gamma_int(n)
 }
 
@@ -389,7 +394,7 @@ pub fn e_to_p(e: f64) -> f64 {
 
 /// Exact ln(n!) for integers (n >= 0).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:473-480
 fn ln_factorial_int(n: i32) -> f64 {
     blast_ln_factorial(n as f64)
 }
@@ -423,17 +428,17 @@ const TAB4: &[f64] = &[
 fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     // Faithful port of NCBI BLAST's s_BlastSumPCalc + BLAST_RombergIntegrate.
     // Reference:
-    // - ncbi-blast/c++/src/algo/blast/core/blast_stat.c:s_BlastSumPCalc
-    // - ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:BLAST_RombergIntegrate
+    // - c++/src/algo/blast/core/blast_stat.c:s_BlastSumPCalc
+    // - c++/src/algo/blast/core/ncbi_math.c:BLAST_RombergIntegrate
 
     const SUMP_EPSILON: f64 = 0.002;
 
     if r == 1 {
         if s > 8.0 {
-            return (-s).exp();
+            return (-s).glibc_exp();
         }
         // -BLAST_Expm1(-exp(-s))
-        return -blast_expm1(-(-s).exp());
+        return -blast_expm1(-(-s).glibc_exp());
     }
     if r < 1 {
         return 0.0;
@@ -474,7 +479,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 
     // mean is close to the mode and is readily calculated
-    let logr = rf.ln();
+    let logr = rf.glibc_ln();
     let mean = rf * (1.0 - logr) - 0.5;
     if s <= mean - stddev4 {
         return 1.0;
@@ -493,17 +498,17 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 
     // Callback for outer integral
     let outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
-        let y = (x - sdvir).exp();
+        let y = (x - sdvir).glibc_exp();
         if !y.is_finite() {
             return 0.0;
         }
         if num_hsps_minus_2 == 0 {
-            return (adj2 - y).exp();
+            return (adj2 - y).glibc_exp();
         }
         if x == 0.0 {
             return 0.0;
         }
-        ((num_hsps_minus_2 as f64) * x.ln() + adj2 - y).exp()
+        ((num_hsps_minus_2 as f64) * x.glibc_ln() + adj2 - y).glibc_exp()
     };
 
     // Callback for inner integral (calls outer via Romberg)
@@ -564,7 +569,7 @@ fn blast_sum_p_calc_reused(r: i32, s: f64) -> f64 {
 fn blast_sum_p(r: i32, s: f64) -> f64 {
     // Faithful port of NCBI BLAST's s_BlastSumP.
     if r == 1 {
-        return -blast_expm1(-(-s).exp());
+        return -blast_expm1(-(-s).glibc_exp());
     }
 
     if r <= 4 {
@@ -576,7 +581,7 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
 
         if s >= rf * rf + (r1 as f64) {
             let a = ln_gamma_int(r + 1);
-            return rf * ((r1 as f64) * s.ln() - s - a - a).exp();
+            return rf * ((r1 as f64) * s.glibc_ln() - s - a - a).glibc_exp();
         }
 
         if s > -2.0 * rf {
@@ -608,7 +613,7 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
 
 /// Romberg numerical integrator (NCBI BLAST compatible).
 ///
-/// Reference: `ncbi_math.c:BLAST_RombergIntegrate`.
+/// Reference: `c++/src/algo/blast/core/ncbi_math.c:BLAST_RombergIntegrate`.
 fn romberg_integrate<F>(f: &mut F, p: f64, q: f64, eps: f64, epsit: i32, itmin: i32) -> f64
 where
     F: FnMut(f64) -> f64,
@@ -704,14 +709,14 @@ pub fn small_gap_sum_e(
     let mut sum_e: f64;
 
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let pair_search_space = (subject_length as f64) * (query_length as f64);
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
-        adjusted_xsum -=
-            pair_search_space.ln() + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
+        adjusted_xsum -= pair_search_space.glibc_ln()
+            + 2.0 * ((num - 1) as f64) * (starting_points as f64).glibc_ln();
         adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
@@ -758,15 +763,16 @@ pub fn uneven_gap_sum_e(
     let mut sum_e: f64;
 
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let pair_search_space = (subject_length as f64) * (query_length as f64);
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
-        adjusted_xsum -= pair_search_space.ln()
+        adjusted_xsum -= pair_search_space.glibc_ln()
             + ((num - 1) as f64)
-                * ((query_start_points as f64).ln() + (subject_start_points as f64).ln());
+                * ((query_start_points as f64).glibc_ln()
+                    + (subject_start_points as f64).glibc_ln());
         adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
@@ -791,11 +797,7 @@ pub fn uneven_gap_sum_e(
 /// adding the factorial (the HSP order of TBLASTX depends on the last bit, and BLASTX's sum
 /// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561
-/// ```c
-///       xsum -= num*log(lcl_subject_length*lcl_query_length)
-///         - BLAST_LnFactorial((double) num);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4560-4561
 pub fn ncbi_large_gap_sum_e(
     num_hsps: i16,
     xsum: f64,
@@ -806,11 +808,11 @@ pub fn ncbi_large_gap_sum_e(
 ) -> f64 {
     let mut sum_e: f64;
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let num = num_hsps as i32;
         let prod = (subject_length as f64) * (query_length as f64);
-        let adjusted_xsum = xsum - ((num as f64) * prod.ln() - ln_factorial_int(num));
+        let adjusted_xsum = xsum - ((num as f64) * prod.glibc_ln() - ln_factorial_int(num));
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
     }
@@ -841,94 +843,8 @@ pub mod defaults {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_gap_decay_divisor() {
-        // For decay_rate = 0.5, nsegs = 1: (1-0.5) * 0.5^0 = 0.5
-        assert!((gap_decay_divisor(0.5, 1) - 0.5).abs() < 1e-10);
-
-        // For decay_rate = 0.5, nsegs = 2: (1-0.5) * 0.5^1 = 0.25
-        assert!((gap_decay_divisor(0.5, 2) - 0.25).abs() < 1e-10);
-
-        // For decay_rate = 0.1, nsegs = 1: (1-0.1) * 0.1^0 = 0.9
-        assert!((gap_decay_divisor(0.1, 1) - 0.9).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_ln_factorial() {
-        // ln(1!) = 0
-        assert!((blast_ln_factorial(1.0) - 0.0).abs() < 1e-10);
-
-        // ln(2!) = ln(2) ≈ 0.693
-        assert!((blast_ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
-
-        // ln(5!) = ln(120) ≈ 4.787
-        assert!((blast_ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_p_to_e_and_e_to_p() {
-        // Round trip test
-        let p = 0.01;
-        let e = p_to_e(p);
-        let p_back = e_to_p(e);
-        assert!((p - p_back).abs() < 1e-10);
-
-        // Edge cases
-        assert_eq!(e_to_p(0.0), 0.0);
-        assert!((e_to_p(f64::INFINITY) - 1.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_small_gap_sum_e_single_hsp() {
-        // For a single HSP, sum_e = searchsp * exp(-xsum)
-        let xsum = 10.0;
-        let searchsp = 1000000_i64;
-        let result = small_gap_sum_e(50, 1, xsum, 100, 1000, searchsp, 1.0);
-
-        let expected = (searchsp as f64) * (-xsum).exp();
-        assert!((result - expected).abs() / expected < 0.01);
-    }
-
-    #[test]
-    fn test_normalize_score() {
-        let lambda: f64 = 0.267;
-        let k: f64 = 0.041;
-        let log_k = k.ln();
-        let score = 100;
-
-        let xsum = normalize_score(score, lambda, log_k);
-        let expected = lambda * 100.0 - log_k;
-        assert!((xsum - expected).abs() < 1e-10);
-    }
-
-    #[test]
-    fn sum_p_calc_reused_gives_the_computed_value() {
-        // Repeats after one and after two other calls, a key that left the two kept, and a
-        // value of `s` that differs from a kept one in its last bit.
-        let s: f64 = -366.25;
-        let args = [
-            (157, s),
-            (157, s),
-            (12, -20.0),
-            (157, s),
-            (30, -50.5),
-            (12, -20.0),
-            (157, s),
-            (157, f64::from_bits(s.to_bits() + 1)),
-            (157, s),
-        ];
-        for (r, s) in args {
-            assert_eq!(
-                blast_sum_p_calc_reused(r, s).to_bits(),
-                blast_sum_p_calc(r, s).to_bits(),
-                "r {r} s {s}"
-            );
-        }
-    }
-}
+#[path = "sum_statistics_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "evalue_precision_tests.rs"]

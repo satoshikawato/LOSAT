@@ -2,20 +2,6 @@
 //! after the reports (DESIGN_OF5 1.1, 1.2).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2332-2356
-//! ```c++
-//! void CBlastFormat::x_WriteXML2(CCmdLineBlastXML2ReportData & report_data)
-//! {
-//! 	if(m_FormatType == CFormattingArgs::eXml2_S) {
-//! 			BlastXML2_FormatReport(&report_data, &m_Outfile);
-//! 	}
-//! 	else if (m_FormatType == CFormattingArgs::eJson_S) {
-//! 			m_XMLFileCount++;
-//! 			if(m_XMLFileCount > 1) {
-//! 				m_Outfile << ",\n";
-//! 			}
-//! 			BlastJSON_FormatReport(&report_data, &m_Outfile);
-//! 	}
-//! ```
 //! There is one document per query and every document is complete (the report header, the
 //! parameters, one `Search`). Outfmt 16 writes them one after the other after the XML2 root's
 //! start tag, outfmt 15 as the elements of one JSON array, outfmts 14 and 13 each to a file of
@@ -28,27 +14,8 @@
 //! programs do not make that report (`Xml2Document::unwritten`) and refuse none of its texts
 //! (`blast_xml::written_queries`).
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2364, :2383-2389
-//! ```c++
-//! 	if((m_IsIterative) || (m_IsBl2Seq)) {
-//! 		if(m_AccumulatedResults.empty()) {
-//! 			_ASSERT(m_AccumulatedQueries->size() == 0);
-//! 			m_AccumulatedResults.push_back(res);
-//! ...
-//! 				CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
-//! 				if(m_IsBl2Seq) {
-//! 				    CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
-//! 				    		   	   	   	   	   	   	    m_Scope, m_SeqInfoSrc);
-//! 				    x_WriteXML2(report_data);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2385, :2383-2389
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2219
-//! ```c++
-//!     	if(!m_AccumulatedResults.empty()) {
-//!     		CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
-//!     		if(m_IsBl2Seq) {
-//!     			...
-//! 		    	x_WriteXML2(report_data);
-//! ```
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -104,7 +71,7 @@ impl Xml2Kind {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417, 750-760
-    // (quoted at `report::db_subject::HitLoads`: the `Hit` whose lookup throws, and the report
+    // (cited at `report::db_subject::HitLoads`: the `Hit` whose lookup throws, and the report
     // function that catches it)
     /// What the document does after a `Hit` whose subject's lookup throws
     /// (`report::db_subject::AfterThrow`): the stream forms (15 and 16) leave the query's report
@@ -123,7 +90,7 @@ impl Xml2Kind {
 pub fn side_file_open_error() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 1,
-        message: "Command line argument error: Cannot open output file\n".to_string(),
+        message: "Command line argument error: Cannot open output file\n".into(),
     }
     .into()
 }
@@ -140,7 +107,7 @@ pub fn side_file_open_error() -> anyhow::Error {
 pub fn side_file_write_error() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 6,
-        message: "BLAST failed to write output\n".to_string(),
+        message: "BLAST failed to write output\n".into(),
     }
     .into()
 }
@@ -228,16 +195,6 @@ pub const TAIL15: &[u8] = b"]\n}\n";
 /// one `<xi:include href="<file>"/>` line follows for each side file, then `</BlastXML2>`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2425-2437
-/// ```c++
-/// 	m_Outfile << "<?xml version=\"1.0\"?>\n<BlastXML2\n"
-/// 			"xmlns=\"http://www.ncbi.nlm.nih.gov\"\n"
-/// 			"xmlns:xi=\"http://www.w3.org/2003/XInclude\"\n"
-/// 			"xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
-/// 			"xs:schemaLocation=\"http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd\">\n";
-/// 	...
-/// 		m_Outfile << "\t<xi:include href=\"" + file_name + "\"/>\n";
-/// 	m_Outfile << "</BlastXML2>\n";
-/// ```
 pub const MASTER14_HEAD: &[u8] = b"<?xml version=\"1.0\"?>\n<BlastXML2\nxmlns=\"http://www.ncbi.nlm.nih.gov\"\nxmlns:xi=\"http://www.w3.org/2003/XInclude\"\nxmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\nxs:schemaLocation=\"http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd\">\n";
 
 /// What `PrintProlog` writes for a document of `kind` (nothing for the side-file forms).
@@ -380,14 +337,6 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-882
-    // ```c++
-    // BlastJSON_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream )
-    // {
-    // 	blastxml2::CBlastOutput2 bxmlout;
-    // 	try {
-    // 		s_FillBlastOutput(bxmlout, data);
-    // 		s_WriteJSONObjectNoHeader(bxmlout, out_stream);
-    // ```
     /// Hands one query's report (`x_PrintXML2Report`): appends to `out` what the framing writes
     /// before the report that this call writes (the document's start if it is not written yet,
     /// outfmt 15's separator `,\n` before every report but the first), then `make` formats the
@@ -454,34 +403,7 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2334-2354
-    // ```c++
-    // 	if(m_FormatType == CFormattingArgs::eXml2_S) {
-    // 			BlastXML2_FormatReport(&report_data, &m_Outfile);
-    // 	}
-    // 	else if (m_FormatType == CFormattingArgs::eJson_S) {
-    // 			m_XMLFileCount++;
-    // 			if(m_XMLFileCount > 1) {
-    // 				m_Outfile << ",\n";
-    // 			}
-    // 			BlastJSON_FormatReport(&report_data, &m_Outfile);
-    // 	}
-    // 	else {
-    // 		m_XMLFileCount++;
-    // 		...
-    // 			BlastXML2_FormatReport(&report_data, file_name);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
-    // ```c++
-    // BlastXML2_FormatReport(const IBlastXML2ReportData* data, string file_name)
-    // {
-    // 	blastxml2::CBlastOutput2 bxmlout;
-    // 	ofstream out_stream;
-    // 	out_stream.open(file_name.c_str(), IOS_BASE::out);
-    // 	if(!out_stream.is_open())
-    // 		 NCBI_THROW(CArgException, eInvalidArg, "Cannot open output file");
-    //
-    // 	s_FillBlastOutput(bxmlout, data);
-    // ```
     /// A report whose making raised `exception` where NCBI writes it: counted as written (the
     /// separator before it stays, so a JSON document can hold `,\n,\n`); the stream forms catch
     /// the exception (`CaughtException`, the program posts its message and goes on), the file
@@ -550,11 +472,7 @@ impl<F: SideFiles> Xml2Document<F> {
                 at: base + at * post.at,
                 text: post.text,
             }));
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
-        // ```c++
-        // 		s_FillBlastOutput(bxmlout, data);
-        // 		s_WriteXML2Object(bxmlout, &out_stream);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-777
         // The subjects' loads (`s_FillBlastOutput`) and the posts come before the exception.
         if let Some(thrown) = ends_run {
             self.files.write_file(self.written, report)?;
@@ -565,11 +483,6 @@ impl<F: SideFiles> Xml2Document<F> {
             Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:770-774
-                // ```c++
-                // 		out_stream.open(file_name.c_str(), IOS_BASE::out);
-                // 		if(!out_stream.is_open())
-                // 			 NCBI_THROW(CArgException, eInvalidArg, "Cannot open output file");
-                // ```
                 // The `CArgException` is caught by the application (blast_app_util.hpp:177-180):
                 // "Command line argument error: " and the message, exit status 1. The side files
                 // written before stay, and the master file stays empty (no epilog).
@@ -599,11 +512,7 @@ impl<F: SideFiles> Xml2Document<F> {
                 },
                 None => self.write(&pending, made, out)?,
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
-            // ```c++
-            // 		s_FillBlastOutput(bxmlout, data);
-            // 		s_WriteXML2Object(bxmlout, &out_stream);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-777
             // No `catch`: the held report's exception leaves `PrintEpilog` before the document's
             // end (the master file stays empty).
             if self.posts.ends_run.is_some() {
@@ -624,15 +533,6 @@ impl<F: SideFiles> Xml2Document<F> {
             }
             Xml2Kind::Files13 => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2447-2457
-                // ```c++
-                // 	m_Outfile << "{\n\t\"BlastJSON\": [\n";
-                // 	...
-                // 		m_Outfile << "\t\t{\"File\": \"" + file_name + "\" }";
-                // 		if(i != m_XMLFileCount)
-                // 			m_Outfile << ",";
-                // 		m_Outfile << "\n";
-                // 	m_Outfile << "\t]\n}";
-                // ```
                 // The master ends without an end of line.
                 out.extend_from_slice(b"{\n\t\"BlastJSON\": [\n");
                 for n in 1..=self.written {

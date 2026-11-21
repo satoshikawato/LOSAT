@@ -125,19 +125,6 @@ use crate::seqid::parse::{parse_ids, seq_id_from_text, which_inverse_seq_id, Seq
 use crate::seqid::rank::{best_rank_score, find_best};
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:45-55
-// ```c++
-// /// Format version of the ISAM files
-// #define ISAM_VERSION 1
-//
-// /// Default page size for numeric indices
-// #define DEFAULT_NISAM_SIZE 256
-//
-// /// Default page size for string indices
-// #define DEFAULT_SISAM_SIZE 64
-//
-// /// Special page size value which indicates a memory-only string index
-// #define MEMORY_ONLY_PAGE_SIZE 1
-// ```
 /// `ISAM_VERSION`.
 const ISAM_VERSION: i32 = 1;
 /// `CSeqDBIsam::eString`.
@@ -147,10 +134,6 @@ const MEMORY_ONLY_PAGE_SIZE: i32 = 1;
 /// `m_KeySampleOffset` (`x_InitSearch`): the nine header fields.
 const KEY_SAMPLE_OFFSET: u64 = 9 * 4;
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:580-581
-// ```c++
-// /// The terminating character for string ISAM keys when data is present.
-// const char ISAM_DATA_CHAR = (char) 2;
-// ```
 /// `ISAM_DATA_CHAR`: the byte that ends a key when data follows.
 const ISAM_DATA_CHAR: u8 = 2;
 /// The bytes of the data file the negative scan reads at once (whole pages; LOSAT: NCBI maps
@@ -158,27 +141,6 @@ const ISAM_DATA_CHAR: u8 = 2;
 const SCAN_CHUNK: u64 = 4 << 20;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:560-578
-// ```c++
-// /// Return NUL for nulls or EOL characters
-// ///
-// /// This function returns a NUL byte for any of NUL, CR, or NL.  This
-// /// is done because these characters are used to terminate the
-// /// variable length records in a string-based ISAM file.
-// ///
-// /// @param c
-// ///   A character
-// /// @return
-// ///   NUL or the same character
-// static inline char
-// s_SeqDBIsam_NullifyEOLs(char c)
-// {
-//     if (SEQDB_ISEOL(c)) {
-//         return 0;
-//     } else {
-//         return c;
-//     }
-// }
-// ```
 /// `s_SeqDBIsam_NullifyEOLs`.
 fn nullify_eols(c: u8) -> u8 {
     if c == b'\n' || c == b'\r' {
@@ -189,65 +151,12 @@ fn nullify_eols(c: u8) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:583-587
-// ```c++
-// /// Returns true if the character is a terminator for an ISAM key.
-// static inline bool ENDS_ISAM_KEY(char P)
-// {
-//     return (P == ISAM_DATA_CHAR) || (s_SeqDBIsam_NullifyEOLs(P) == 0);
-// }
-// ```
 /// `ENDS_ISAM_KEY`.
 fn ends_isam_key(c: u8) -> bool {
     c == ISAM_DATA_CHAR || nullify_eols(c) == 0
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:589-632
-// ```c++
-// Int4 CSeqDBIsam::x_DiffChar(const string & term_in,
-//                             const char   * begin,
-//                             const char   * end,
-//                             bool           ignore_case)
-// {
-//     int result(-1);
-//     int i(0);
-//
-//     const char * file_data = begin;
-//     int bytes = int(end - begin);
-//
-//     for(i = 0; (i < bytes) && i < (int) term_in.size(); i++) {
-//         char ch1 = term_in[i];
-//         char ch2 = file_data[i];
-//
-//         if (ch1 != ch2) {
-//             ch1 = s_SeqDBIsam_NullifyEOLs(ch1);
-//             ch2 = s_SeqDBIsam_NullifyEOLs(ch2);
-//
-//             if (ignore_case) {
-//                 ch1 = toupper((unsigned char) ch1);
-//                 ch2 = toupper((unsigned char) ch2);
-//             }
-//
-//             if (ch1 != ch2) {
-//                 break;
-//             }
-//         }
-//     }
-//
-//     const char * p = file_data + i;
-//
-//     while((p < end) && ((*p) == ' ')) {
-//         p++;
-//     }
-//
-//     if (((p == end) || ENDS_ISAM_KEY(*p)) && (i == (int) term_in.size())) {
-//         result = -1;
-//     } else {
-//         result = i;
-//     }
-//
-//     return result;
-// }
-// ```
 /// `CSeqDBIsam::x_DiffChar`: `begin` is `[begin, end)`; the index of the first difference, or -1
 /// for a complete match.
 fn diff_char(term_in: &[u8], begin: &[u8], ignore_case: bool) -> i64 {
@@ -281,36 +190,6 @@ fn diff_char(term_in: &[u8], begin: &[u8], ignore_case: bool) -> i64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:793-820
-// ```c++
-// void CSeqDBIsam::x_ExtractData(const char     * key_start,
-//                                const char     * map_end,
-//                                vector<string> & keys_out,
-//                                vector<string> & data_out)
-// {
-//     const char * data_ptr(0);
-//     const char * p(key_start);
-//
-//     while(p < map_end) {
-//         switch(s_SeqDBIsam_NullifyEOLs(*p)) {
-//         case 0:
-//             if (data_ptr) {
-//                 keys_out.push_back(string(key_start, data_ptr));
-//                 data_out.push_back(string(data_ptr+1, p));
-//             } else {
-//                 keys_out.push_back(string(key_start, p));
-//                 data_out.push_back("");
-//             }
-//             return;
-//
-//         case ISAM_DATA_CHAR:
-//             data_ptr = p;
-//
-//         default:
-//             p++;
-//         }
-//     }
-// }
-// ```
 /// `CSeqDBIsam::x_ExtractData`: the key and the data of the line at the start of `line` (which
 /// ends where the page does); nothing when the page ends inside the line.
 fn extract_data(line: &[u8]) -> Option<IsamLine> {
@@ -337,61 +216,6 @@ fn extract_data(line: &[u8]) -> Option<IsamLine> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:634-686
-// ```c++
-// void CSeqDBIsam::x_ExtractPageData(const string   & term_in,
-//                                    TIndx            page_index,
-//                                    const char     * beginp,
-//                                    const char     * endp,
-//                                    vector<TIndx>  & indices_out,
-//                                    vector<string> & keys_out,
-//                                    vector<string> & data_out)
-// {
-//     // Collect all 'good' data from the page.
-//
-//     bool ignore_case = true;
-//
-//     Uint4 TermNum(0);
-//
-//     const char * indexp(beginp);
-//     bool found_match(false);
-//
-//     while (indexp < endp) {
-//         Int4 Diff = x_DiffChar(term_in,
-//                                indexp,
-//                                endp,
-//                                ignore_case);
-//
-//         if (Diff == -1) { // Complete match
-//             found_match = true;
-//
-//             x_ExtractData(indexp,
-//                           endp,
-//                           keys_out,
-//                           data_out);
-//
-//             indices_out.push_back(page_index + TermNum);
-//         } else {
-//             // If we found a match, but the current term doesn't
-//             // match, then we are past the set of matching entries.
-//
-//             if (found_match) {
-//                 break;
-//             }
-//         }
-//
-//         // Skip remainder of term, and any nulls after it.
-//
-//         while((indexp < endp) && s_SeqDBIsam_NullifyEOLs(*indexp)) {
-//             indexp++;
-//         }
-//         while((indexp < endp) && (! s_SeqDBIsam_NullifyEOLs(*indexp))) {
-//             indexp++;
-//         }
-//
-//         TermNum++;
-//     }
-// }
-// ```
 /// `CSeqDBIsam::x_ExtractPageData`: every line of `page` that matches `term_in`, up to the
 /// first line that does not once one matched.
 fn extract_page_data(term_in: &[u8], page: &[u8], lines: &mut Vec<IsamLine>) {
@@ -445,30 +269,7 @@ struct Header {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1201-1209
-// ```c++
-// bool CSeqDBIsam::IndexExists(const string & dbname,
-//                              char           prot_nucl,
-//                              char           file_ext_char)
-// {
-//     string iname, dname;
-//     x_MakeFilenames(dbname, prot_nucl, file_ext_char, iname, dname);
-//
-//     return CFile(iname).Exists() && CFile(dname).Exists();
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:4038-4042 and 3941-3944
-// ```c++
-// inline
-// bool CFile::Exists(void) const
-// {
-//     return IsFile();
-// }
-// ...
-// bool CDirEntry::IsFile(EFollowLinks follow) const
-// {
-//     return GetType(follow) == eFile;
-// }
-// ```
 /// `CSeqDBIsam::IndexExists` of the index file `index` and the data file `data` of an ISAM (the
 /// string, PIG and trace-id ISAMs of a version 4 volume, `x_OpenStrFile`, `x_OpenPigFile`,
 /// `x_OpenTiFile`): both are regular files, or symbolic links to one (`CFile::Exists` is
@@ -479,30 +280,20 @@ pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1150-1160
-// (quoted in full at `StringIsam::open`)
-// ```c++
-//     try {
-//         m_IndexLease.Init(m_IndexFname);
-//         m_DataLease.Init(m_DataFname);
-//     } catch (CException & e){
-//         m_IndexLease.Clear();
-//         m_DataLease.Clear();
-//         string msg("Error: Could not open input file (");
-//         msg += m_IndexFname + "/" + m_DataFname + ")";
-//         NCBI_THROW(CSeqDBException, eFileErr, msg);
-//
-//     }
-// ```
+// (cited at `StringIsam::open`)
 /// The open of the two files of an ISAM by the `CSeqDBIsam` constructor: NCBI's `Error: Could
 /// not open input file (<index>/<data>)` where one of them does not open
 /// ([`DbFile::open`]: no regular file, or one that `open` refuses).
 pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
     let message = || {
-        SeqDbError::NotFound(format!(
-            "Error: Could not open input file ({}/{})",
-            index.display(),
-            data.display()
-        ))
+        SeqDbError::NotFound(
+            format!(
+                "Error: Could not open input file ({}/{})",
+                index.display(),
+                data.display()
+            )
+            .into(),
+        )
     };
     let index_file = DbFile::open(index).map_err(|_| message())?;
     let data_file = DbFile::open(data).map_err(|_| message())?;
@@ -510,18 +301,6 @@ pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), 
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:190-198
-// ```c++
-// CSeqDBVol::x_OpenStrFile(void) const{
-//     CFastMutexGuard mtx_gurad(m_MtxStr);
-//     if (m_IsamStr.NotEmpty()) {
-//     	m_IsamStr->AddReference();
-//     }
-//     else if(CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 's') &&
-//             m_Idx->GetNumOIDs() != 0) {
-//         m_IsamStr = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 's', eStringId);
-//     }
-// }
-// ```
 /// The files of the ISAM of a volume with sequences as `x_OpenStrFile` and `x_OpenPigFile` make
 /// it (`index`, `data`): `None` where the volume has none ([`index_exists`]), the constructor's
 /// exception where one of them does not open ([`open_files`]), else both open. The one owner of
@@ -557,52 +336,12 @@ pub struct StringIsam {
 
 impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1173-1210
-    // ```c++
-    // void CSeqDBIsam::x_MakeFilenames(const string & dbname,
-    //                                  char           prot_nucl,
-    //                                  char           file_ext_char,
-    //                                  string       & index_name,
-    //                                  string       & data_name)
-    // {
-    //     if (dbname.empty() ||
-    //         (! isalpha((unsigned char) prot_nucl)) ||
-    //         (! isalpha((unsigned char) file_ext_char))) {
-    //
-    //         NCBI_THROW(CSeqDBException,
-    //                    eArgErr,
-    //                    "Error: argument not valid");
-    //     }
-    //
-    //     index_name.reserve(dbname.size() + 4);
-    //     data_name.reserve(dbname.size() + 4);
-    //
-    //     index_name = dbname;
-    //     index_name += '.';
-    //     index_name += prot_nucl;
-    //     index_name += file_ext_char;
-    //
-    //     data_name = index_name;
-    //     index_name += 'i';
-    //     data_name  += 'd';
-    // }
-    //
-    // bool CSeqDBIsam::IndexExists(const string & dbname,
-    //                              char           prot_nucl,
-    //                              char           file_ext_char)
-    // {
-    //     string iname, dname;
-    //     x_MakeFilenames(dbname, prot_nucl, file_ext_char, iname, dname);
-    //
-    //     return CFile(iname).Exists() && CFile(dname).Exists();
-    // }
-    //
-    // ```
     /// `CSeqDBIsam::x_MakeFilenames` (`file_ext_char` is `s`): `<dbname>.ps?` or `.ns?`, the index
     /// file ending in `i` and the data file in `d`.
     pub fn file_names(dbname: &str, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
         if dbname.is_empty() {
             return Err(SeqDbError::NotFound(
-                "Error: argument not valid".to_string(),
+                "Error: argument not valid".to_string().into(),
             ));
         }
         let mut index = format!("{dbname}.{}s", if protein { 'p' } else { 'n' });
@@ -636,78 +375,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1102-1171
-    // ```c++
-    // CSeqDBIsam::CSeqDBIsam(CSeqDBAtlas  & atlas,
-    //                        const string & dbname,
-    //                        char           prot_nucl,
-    //                        char           file_ext_char,
-    //                        ESeqDBIdType   ident_type)
-    //     : m_Atlas          (atlas),
-    //       m_IdentType      (ident_type),
-    //       m_IndexLease     (atlas),
-    //       m_DataLease      (atlas),
-    //       m_Type           (eNumeric),
-    //       m_NumTerms       (0),
-    //       m_NumSamples     (0),
-    //       m_PageSize       (0),
-    //       m_MaxLineSize    (0),
-    //       m_IdxOption      (0),
-    //       m_Initialized    (false),
-    //       m_KeySampleOffset(0),
-    //       m_TestNonUnique  (true),
-    //       m_FileStart      (0),
-    //       m_FirstOffset    (0),
-    //       m_LastOffset     (0),
-    //       m_LongId         (false),
-    //       m_TermSize       (8)
-    // {
-    //     // These are the types that readdb.c seems to use.
-    //
-    //     switch(ident_type) {
-    //     case eGiId:
-    //     case ePigId:
-    //     case eTiId:
-    //         m_Type = eNumeric;
-    //         break;
-    //
-    //     case eStringId:
-    //     case eHashId:
-    //         m_Type = eString;
-    //         break;
-    //
-    //     default:
-    //         NCBI_THROW(CSeqDBException,
-    //                    eArgErr,
-    //                    "Error: ident type argument not valid");
-    //     }
-    //
-    //     x_MakeFilenames(dbname,
-    //                     prot_nucl,
-    //                     file_ext_char,
-    //                     m_IndexFname,
-    //                     m_DataFname);
-    //     try {
-    //         m_IndexLease.Init(m_IndexFname);
-    //         m_DataLease.Init(m_DataFname);
-    //     } catch (CException & e){
-    //         m_IndexLease.Clear();
-    //         m_DataLease.Clear();
-    //         string msg("Error: Could not open input file (");
-    //         msg += m_IndexFname + "/" + m_DataFname + ")";
-    //         NCBI_THROW(CSeqDBException, eFileErr, msg);
-    //
-    //     }
-    //     if(m_Type == eNumeric) {
-    //         m_PageSize = DEFAULT_NISAM_SIZE;
-    //     } else {
-    //         m_PageSize = DEFAULT_SISAM_SIZE;
-    //     }
-    //     if (eNoError !=x_InitSearch()) {
-    //         m_Initialized = false;
-    //     }
-    //     x_FindIndexBounds();
-    // }
-    // ```
     /// The constructor: opens the two files. A file that cannot be opened is NCBI's "Error: Could
     /// not open input file (`<index>/<data>`)".
     pub fn open(index_path: &Path, data_path: &Path) -> Result<Self, SeqDbError> {
@@ -742,72 +409,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:58-121
-    // ```c++
-    // CSeqDBIsam::EErrorCode
-    // CSeqDBIsam::x_InitSearch(void)
-    // {
-    //     if(m_Initialized == true)
-    //         return eNoError;
-    //
-    //     TIndx info_needed = 10 * sizeof(Int4);
-    //
-    //     bool found_index_file =
-    //         m_Atlas.GetFileSizeL(m_IndexFname, m_IndexFileLength);
-    //
-    //     if ((! found_index_file) || (m_IndexFileLength < info_needed)) {
-    //         return eWrongFile;
-    //     }
-    //
-    //
-    //     Int4 * FileInfo = (Int4*)m_IndexLease.GetFileDataPtr(m_IndexFname,0);
-    //
-    //     // Check for consistence of files and parameters
-    //
-    //     Int4 Version = SeqDB_GetStdOrd(& FileInfo[0]);
-    //
-    //     if (Version != ISAM_VERSION)
-    //         return eBadVersion;
-    //
-    //     Int4 IsamType = SeqDB_GetStdOrd(& FileInfo[1]);
-    //
-    //     if (IsamType == eNumericLongId && m_Type == eNumeric) {
-    //         m_LongId = true;
-    //         m_TermSize = 12;
-    //         IsamType = eNumeric;
-    //     }
-    //
-    //     if (IsamType != m_Type)
-    //         return eBadType;
-    //
-    //     m_NumTerms    = SeqDB_GetStdOrd(& FileInfo[3]);
-    //     m_NumSamples  = SeqDB_GetStdOrd(& FileInfo[4]);
-    //     m_PageSize    = SeqDB_GetStdOrd(& FileInfo[5]);
-    //     m_MaxLineSize = SeqDB_GetStdOrd(& FileInfo[6]);
-    //
-    //     if(m_PageSize != MEMORY_ONLY_PAGE_SIZE) {
-    //         // Special case of memory-only index
-    //         m_DataFileLength = SeqDB_GetStdOrd(& FileInfo[2]);
-    //
-    //         TIndx disk_file_length(0);
-    //         bool found_data_file =
-    //             m_Atlas.GetFileSizeL(m_DataFname, disk_file_length);
-    //
-    //         if ((! found_data_file) || (m_DataFileLength != disk_file_length)) {
-    //             return eWrongFile;
-    //         }
-    //     }
-    //
-    //     // This space reserved for future use
-    //
-    //     m_IdxOption = SeqDB_GetStdOrd(& FileInfo[7]);
-    //
-    //     m_KeySampleOffset = (9 * sizeof(Int4));
-    //
-    //     m_Initialized = true;
-    //
-    //     return eNoError;
-    // }
-    // ```
     /// `x_InitSearch`: `None` for NCBI's `eWrongFile`, `eBadVersion` and `eBadType`, which leave
     /// the index uninitialised.
     fn init_search(&self) -> Result<Option<Header>, SeqDbError> {
@@ -905,28 +506,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1646-1665
-    // ```c++
-    // void CSeqDBIsam::GetIdBounds(string         & low_id,
-    //                              string         & high_id,
-    //                              int            & count)
-    //
-    //
-    // {
-    //     if(m_Initialized == false) {
-    //         count = 0;
-    //         return;
-    //     }
-    //
-    //     if (! (m_FirstKey.IsSet() && m_LastKey.IsSet())) {
-    //         count = 0;
-    //         return;
-    //     }
-    //
-    //     low_id = m_FirstKey.GetString();
-    //     high_id = m_LastKey.GetString();
-    //     count = m_NumTerms;
-    // }
-    // ```
     /// `GetIdBounds(string&, string&, int&)`: the lower-cased first and last key and the number
     /// of lines; count 0 and empty keys for an uninitialised index.
     #[cfg(test)]
@@ -975,33 +554,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:899-923
-    // ```c++
-    // void CSeqDBIsam::x_LoadPage(TIndx             SampleNum1,
-    //                             TIndx             SampleNum2,
-    //                             const char     ** beginp,
-    //                             const char     ** endp)
-    //
-    // {
-    //     // Load the appropriate page of terms into memory.
-    //
-    //     _ASSERT(SampleNum2 > SampleNum1);
-    //
-    //     TIndx begin_offset = m_KeySampleOffset + SampleNum1       * sizeof(Uint4);
-    //     //TIndx end_offset   = m_KeySampleOffset + (SampleNum2 + 1) * sizeof(Uint4);
-    //
-    //     Uint4 * key_offsets((Uint4*)m_IndexLease.GetFileDataPtr(begin_offset));
-    //
-    //
-    //     Uint4 key_off1 = SeqDB_GetStdOrd(& key_offsets[0]);
-    //     Uint4 key_off2 = SeqDB_GetStdOrd(& key_offsets[SampleNum2 - SampleNum1]);
-    //
-    //     *beginp = (const char *) m_DataLease.GetFileDataPtr(m_DataFname,key_off1);
-    //     *endp   = (const char *) m_DataLease.GetFileDataPtr(key_off2);
-    // }
-    //
-    //
-    // // ------------------------StringSearch--------------------------
-    // ```
     /// `x_LoadPage(SampleNum1, SampleNum2)`: the data file's bytes from the first record of page
     /// `s1` to the first of page `s2`.
     fn load_page(&self, s1: i64, s2: i64) -> Result<Vec<u8>, SeqDbError> {
@@ -1021,131 +573,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1461-1583
-    // ```c++
-    // void CSeqDBIsam::x_FindIndexBounds()
-    // {
-    //     Int4 Start (0);
-    //     Int4 Stop  (m_NumSamples - 1);
-    //
-    //     //m_Atlas.Lock(locked);
-    //
-    //
-    //     if (m_Type == eNumeric) {
-    //         //
-    //         // Get first key from data file
-    //
-    //         int num_elements(0);
-    //         int start(0);
-    //         const void * data_page(0);
-    //
-    //         x_MapDataPage(Start,
-    //                       start,
-    //                       num_elements,
-    //                       & data_page);
-    //
-    //
-    //         _ASSERT(num_elements);
-    //
-    //         int elem_index = 0;
-    //
-    //         Int8 data_gi(0);
-    //         int data_oid(-1);
-    //
-    //         x_GetDataElement(data_page,
-    //                          elem_index,
-    //                          data_gi,
-    //                          data_oid);
-    //
-    //         m_FirstKey.SetNumeric(data_gi);
-    //
-    //
-    //         //
-    //         // Get last key from data file
-    //
-    //         x_MapDataPage(Stop,
-    //                       start,
-    //                       num_elements,
-    //                       & data_page);
-    //
-    //
-    //         _ASSERT(num_elements);
-    //
-    //         elem_index = num_elements - 1;
-    //
-    //         x_GetDataElement(data_page,
-    //                          elem_index,
-    //                          data_gi,
-    //                          data_oid);
-    //
-    //         m_LastKey.SetNumeric(data_gi);
-    //     } else {
-    //         //
-    //         // Load the appropriate page of terms into memory.
-    //
-    //         const char * beginp(0);
-    //         const char * endp(0);
-    //
-    //         //
-    //         // Load the first page
-    //
-    //         x_LoadPage(Start, Start + 1, & beginp, & endp);
-    //
-    //         // Get first term
-    //
-    //         vector<string> keys_out;
-    //         vector<string> data_out; // not used
-    //
-    //         x_ExtractData(beginp,
-    //                       endp,
-    //                       keys_out,
-    //                       data_out);
-    //
-    //         x_Lower(keys_out.front());
-    //         m_FirstKey.SetString(keys_out.front());
-    //
-    //
-    //         //
-    //         // Load the last page
-    //
-    //         x_LoadPage(Stop, Stop + 1, & beginp, & endp);
-    //
-    //         // Advance to last item
-    //
-    //         const char * lastp(0);
-    //         const char * indexp(beginp);
-    //
-    //         while (indexp < endp) {
-    //             // Remember our new "last term" value.
-    //
-    //             lastp = indexp;
-    //
-    //             // Skip remainder of term, and any nulls after it.
-    //
-    //             while((indexp < endp) && s_SeqDBIsam_NullifyEOLs(*indexp)) {
-    //                 indexp++;
-    //             }
-    //             while((indexp < endp) && (! s_SeqDBIsam_NullifyEOLs(*indexp))) {
-    //                 indexp++;
-    //             }
-    //         }
-    //
-    //         // Get the last key
-    //
-    //         _ASSERT(lastp);
-    //
-    //         keys_out.clear();
-    //         data_out.clear();
-    //
-    //         x_ExtractData(lastp,
-    //                       endp,
-    //                       keys_out,
-    //                       data_out);
-    //
-    //         x_Lower(keys_out.front());
-    //         m_LastKey.SetString(keys_out.front());
-    //     }
-    // }
-    // ```
     /// `x_FindIndexBounds` (the string branch): the lower-cased first key of the first page and
     /// last key of the last page.
     fn find_index_bounds(&mut self) -> Result<(), SeqDbError> {
@@ -1183,38 +610,7 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1604-1623
-    // ```c++
-    // bool CSeqDBIsam::x_OutOfBounds(string key)
-    // {
-    //     if (! (m_FirstKey.IsSet() && m_LastKey.IsSet())) {
-    //         return false;
-    //     }
-    //
-    //     _ASSERT(m_Type == eString);
-    //
-    //     x_Lower(key);
-    //
-    //     if (m_FirstKey.OutsideFirstBound(key)) {
-    //         return true;
-    //     }
-    //
-    //     if (m_LastKey.OutsideLastBound(key)) {
-    //         return true;
-    //     }
-    //
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1142-1148
-    // ```c++
-    //     /// Converts a string to lower case.
-    //     static void x_Lower(string & s)
-    //     {
-    //         for(size_t i = 0; i < s.size(); i++) {
-    //             s[i] = tolower(s[i]);
-    //         }
-    //     }
-    // ```
     /// `x_OutOfBounds(string)`: the lower-cased `key` is before the first key or after the last
     /// one.
     fn out_of_bounds(&self, key: &[u8]) -> bool {
@@ -1226,51 +622,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:516-558
-    // ```c++
-    // int CSeqDBIsam::x_DiffCharLease(const string   & term_in,
-    //                                 CSeqDBFileMemMap & lease,
-    //                                 const string   & file_name,
-    //                                 TIndx            file_length,
-    //                                 Uint4            at_least,
-    //                                 TIndx            KeyOffset,
-    //                                 bool             ignore_case)
-    //
-    // {
-    //     int result(-1);
-    //
-    //     //m_Atlas.Lock(locked);
-    //
-    //     // Add one to term_end to insure we don't consider "AA" and "AAB"
-    //     // as equal.
-    //
-    //     TIndx offset_begin = KeyOffset;
-    //     TIndx term_end     = KeyOffset + term_in.size() + 1;
-    //     TIndx map_end      = term_end + at_least;
-    //
-    //     if (map_end > file_length) {
-    //         map_end = file_length;
-    //
-    //         if (term_end > map_end) {
-    //             term_end = map_end;
-    //             result = int(file_length - offset_begin);
-    //         }
-    //     }
-    //
-    //     const char * file_data = (const char *)lease.GetFileDataPtr(file_name,offset_begin);
-    //
-    //     Int4 dc_result =
-    //         x_DiffChar(term_in,
-    //                    file_data,
-    //                    file_data + term_in.size() + 1,
-    //                    ignore_case);
-    //
-    //     if (dc_result != -1) {
-    //         return dc_result;
-    //     }
-    //
-    //     return result;
-    // }
-    // ```
     /// `x_DiffCharLease` over the index file: the first difference of `term_in` and the bytes at
     /// `key_offset` (`x_DiffChar` over `term + 1` bytes, NUL past the end of the file), and
     /// those bytes (`KeyData`).
@@ -1308,43 +659,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:863-897
-    // ```c++
-    // int CSeqDBIsam::x_DiffSample(const string   & term_in,
-    //                              Uint4            SampleNum,
-    //                              TIndx          & KeyOffset)
-    //
-    // {
-    //     // Meaning:
-    //     // a. Compute SampleNum*4
-    //     // b. Address this number into SamplePos (indexlease)
-    //     // c. Swap this number to compute Key offset.
-    //     // d. Add to beginning of file to get key data pointer.
-    //
-    //     bool ignore_case(true);
-    //
-    //     TIndx SampleOffset(m_KeySampleOffset);
-    //
-    //     if(m_PageSize != MEMORY_ONLY_PAGE_SIZE) {
-    //         SampleOffset += (m_NumSamples + 1) * sizeof(Uint4);
-    //     }
-    //
-    //     TIndx offset_begin = SampleOffset + (SampleNum * sizeof(Uint4));
-    //     //TIndx offset_end   = offset_begin + sizeof(Uint4);
-    //
-    //     KeyOffset = SeqDB_GetStdOrd((Int4*)m_IndexLease.GetFileDataPtr(offset_begin));
-    //
-    //     Uint4 max_lines_2 = m_MaxLineSize * 2;
-    //
-    //     return x_DiffCharLease(term_in,
-    //                            m_IndexLease,
-    //                            m_IndexFname,
-    //                            m_IndexFileLength,
-    //                            max_lines_2,
-    //                            KeyOffset,
-    //                            ignore_case);
-    //
-    // }
-    // ```
     /// `x_DiffSample`: the first difference of `term_in` and the key of sample `sample_num`,
     /// and the bytes of that key.
     fn diff_sample(&self, term_in: &[u8], sample_num: i64) -> Result<(i64, Vec<u8>), SeqDbError> {
@@ -1359,112 +673,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:688-791
-    // ```c++
-    // void CSeqDBIsam::x_ExtractAllData(const string   & term_in,
-    //                                   TIndx            sample_index,
-    //                                   vector<TIndx>  & indices_out,
-    //                                   vector<string> & keys_out,
-    //                                   vector<string> & data_out)
-    //
-    // {
-    //     // The object at sample_index is known to match; we will iterate
-    //     // over the surrounding values to see if they match as well.  No
-    //     // assumptions about how many keys can match are made here.
-    //
-    //     bool ignore_case = true;
-    //
-    //     int pre_amt  = 1;
-    //     int post_amt = 1;
-    //
-    //     bool done_b(false), done_e(false);
-    //
-    //     const char * beginp(0);
-    //     const char * endp(0);
-    //
-    //     TIndx beg_off(0);
-    //     TIndx end_off(0);
-    //
-    //     while(! (done_b && done_e)) {
-    //         if (sample_index < pre_amt) {
-    //             beg_off = 0;
-    //             done_b = true;
-    //         } else {
-    //             beg_off = sample_index - pre_amt;
-    //         }
-    //
-    //         if ((m_NumSamples - sample_index) < post_amt) {
-    //             end_off = m_NumSamples;
-    //             done_e = true;
-    //         } else {
-    //             end_off = sample_index + post_amt;
-    //         }
-    //
-    //         x_LoadPage(beg_off, end_off, & beginp, & endp);
-    //
-    //         if (! done_b) {
-    //             Int4 diff_begin = x_DiffChar(term_in,
-    //                                          beginp,
-    //                                          endp,
-    //                                          ignore_case);
-    //
-    //             if (diff_begin != -1) {
-    //                 done_b = true;
-    //             } else {
-    //                 pre_amt ++;
-    //             }
-    //         }
-    //
-    //         if (! done_e) {
-    //             const char * last_term(0);
-    //             const char * p(endp-1);
-    //
-    //             // Skip over any non-terminating junk at the end
-    //
-    //             enum { eEndNulls, eLastTerm } search_stage = eEndNulls;
-    //
-    //             while(p > beginp) {
-    //                 bool terminal = (0 == s_SeqDBIsam_NullifyEOLs(*p));
-    //
-    //                 if (search_stage == eEndNulls) {
-    //                     if (! terminal) {
-    //                         search_stage = eLastTerm;
-    //                     }
-    //                 } else {
-    //                     if (terminal) {
-    //                         last_term = p + 1;
-    //                         break;
-    //                     }
-    //                 }
-    //
-    //                 p--;
-    //             }
-    //
-    //             if (! last_term) {
-    //                 last_term = beginp;
-    //             }
-    //
-    //             Int4 diff_end = x_DiffChar(term_in,
-    //                                        last_term,
-    //                                        endp,
-    //                                        ignore_case);
-    //
-    //             if (diff_end != -1) {
-    //                 done_e = true;
-    //             } else {
-    //                 post_amt ++;
-    //             }
-    //         }
-    //     }
-    //
-    //     x_ExtractPageData(term_in,
-    //                       m_PageSize * beg_off,
-    //                       beginp,
-    //                       endp,
-    //                       indices_out,
-    //                       keys_out,
-    //                       data_out);
-    // }
-    // ```
     /// `x_ExtractAllData`: the page of `sample_index`, known to hold a match, with the pages
     /// around it for as long as their first (before) and last (after) line match too.
     fn extract_all_data(
@@ -1530,176 +738,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:933-1100
-    // ```c++
-    // CSeqDBIsam::EErrorCode
-    // CSeqDBIsam::x_StringSearch(const string   & term_in,
-    //                            vector<string> & terms_out,
-    //                            vector<string> & values_out,
-    //                            vector<TIndx>  & indices_out)
-    //
-    // {
-    //     // These are always false; They may relate to the prior find_one /
-    //     // expand_to_many method of getting multiple OIDs.
-    //
-    //     bool short_match(false);
-    //     bool follow_match(false);
-    //
-    //     size_t preexisting_data_count = values_out.size();
-    //
-    //     if (m_Initialized == false) {
-    //         return eInitFailed;
-    //     }
-    //
-    //     if (x_OutOfBounds(term_in)) {
-    //         return eNotFound;
-    //     }
-    //
-    //     // We will set this option to avoid more complications
-    //     bool ignore_case = true;
-    //
-    //     // search the sample file first
-    //
-    //     TIndx Start(0);
-    //     TIndx Stop(m_NumSamples - 1);
-    //
-    //     int Length = (int) term_in.size();
-    //
-    //     TIndx SampleOffset(m_KeySampleOffset);
-    //
-    //     if(m_PageSize != MEMORY_ONLY_PAGE_SIZE) {
-    //         SampleOffset += (m_NumSamples + 1) * sizeof(Uint4);
-    //     }
-    //
-    //     int found_short(-1);
-    //
-    //     string short_term;
-    //     int SampleNum(-1);
-    //
-    //     while(Stop >= Start) {
-    //         SampleNum = ((Uint4)(Stop + Start)) >> 1;
-    //
-    //         TIndx KeyOffset(0);
-    //
-    //         int diff = x_DiffSample(term_in, SampleNum, KeyOffset);
-    //
-    //         // If this is an exact match, return the master term number.
-    //
-    //         const char * KeyData = (const char *)m_IndexLease.GetFileDataPtr(KeyOffset);
-    //         TIndx BytesToEnd = m_IndexFileLength - KeyOffset;
-    //
-    //         Uint4 max_lines_2 = m_MaxLineSize * 2;
-    //
-    //         if (BytesToEnd > (TIndx) max_lines_2) {
-    //             BytesToEnd = max_lines_2;
-    //         }
-    //
-    //         if (diff == -1) {
-    //             x_ExtractAllData(term_in,
-    //                              SampleNum,
-    //                              indices_out,
-    //                              terms_out,
-    //                              values_out);
-    //
-    //
-    //             return eNoError;
-    //         }
-    //
-    //         // If the key is a superset of the sample term, backup until
-    //         // just before the term.
-    //
-    //         if (short_match && (diff >= Length)) {
-    //             if (SampleNum > 0)
-    //                 SampleNum--;
-    //
-    //             while(SampleNum > 0) {
-    //                 TIndx key_offset =
-    //                     x_GetIndexKeyOffset(SampleOffset,
-    //                                         SampleNum);
-    //
-    //
-    //                 string prefix;
-    //                 x_GetIndexString(key_offset, Length, prefix, false);
-    //
-    //                 if (ignore_case) {
-    //                     if (NStr::CompareNocase(prefix, term_in) != 0) {
-    //                         break;
-    //                     }
-    //                 } else {
-    //                     if (prefix != term_in) {
-    //                         break;
-    //                     }
-    //                 }
-    //
-    //                 SampleNum--;
-    //             }
-    //
-    //             found_short = SampleNum + 1;
-    //
-    //             TIndx key_offset =
-    //                 x_GetIndexKeyOffset(SampleOffset,
-    //                                     SampleNum + 1);
-    //
-    //
-    //             string prefix;
-    //             x_GetIndexString(key_offset, max_lines_2, short_term, true);
-    //
-    //             break;
-    //         } else {
-    //             // If preceding is desired, note the key.
-    //
-    //             if (follow_match) {
-    //                 found_short = SampleNum;
-    //
-    //                 x_GetIndexString(KeyOffset, max_lines_2, short_term, true);
-    //             }
-    //         }
-    //
-    //         // Otherwise, search for the next sample.
-    //
-    //         if (ignore_case
-    //             ? tolower((unsigned char) term_in[diff]) < tolower((unsigned char) KeyData[diff])
-    //             : term_in[diff] < KeyData[diff]) {
-    //             Stop = --SampleNum;
-    //         } else {
-    //             Start = SampleNum + 1;
-    //         }
-    //     }
-    //
-    //
-    //     // If the term is out of range altogether, report not finding it.
-    //
-    //     if ( (SampleNum < 0) || (SampleNum >= m_NumSamples)) {
-    //         return eNotFound;
-    //     }
-    //
-    //     // Load the appropriate page of terms into memory.
-    //
-    //     const char * beginp(0);
-    //     const char * endp(0);
-    //
-    //     x_LoadPage(SampleNum, SampleNum + 1, & beginp, & endp);
-    //
-    //     // Search the page for the term.
-    //
-    //     x_ExtractPageData(term_in,
-    //                       m_PageSize * SampleNum,
-    //                       beginp,
-    //                       endp,
-    //                       indices_out,
-    //                       terms_out,
-    //                       values_out);
-    //
-    //     // For now the short and follow logic is not implemented.
-    //
-    //     EErrorCode rv(eNoError);
-    //
-    //     if (preexisting_data_count == values_out.size()) {
-    //         rv = eNotFound;
-    //     }
-    //
-    //     return rv;
-    // }
-    // ```
     /// `x_StringSearch`: appends the lines that match `term_in` to `lines`.
     fn string_search_into(
         &self,
@@ -1764,149 +802,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1236-1376
-    // ```c++
-    // void CSeqDBIsam::StringToOids(const string   & acc,
-    //                               vector<TOid>   & oids,
-    //                               bool             adjusted,
-    //                               bool           & version_check)
-    //
-    // {
-    //     bool strip_version = version_check;
-    //     version_check = false;
-    //
-    //     _ASSERT(m_IdentType == eStringId);
-    //
-    //     if(m_Initialized == false) {
-    //             return;
-    //     }
-    //
-    //     bool found = false;
-    //
-    //     string accession(string("gb|") + acc + "|");
-    //     string locus_str(string("gb||") + acc);
-    //
-    //     EErrorCode err = eNoError;
-    //
-    //     vector<string> keys_out;
-    //     vector<string> data_out;
-    //     vector<TIndx>  indices_out;
-    //
-    //     if (! adjusted) {
-    //         if ((err = x_StringSearch(accession,
-    //                                   keys_out,
-    //                                   data_out,
-    //                                   indices_out)) < 0) {
-    //             return;
-    //         }
-    //
-    //         if (err == eNoError) {
-    //             found = true;
-    //         }
-    //
-    //         if ((! found) &&
-    //             (err = x_StringSearch(locus_str,
-    //                                   keys_out,
-    //                                   data_out,
-    //                                   indices_out)) < 0) {
-    //
-    //             return;
-    //         }
-    //
-    //         if (err != eNotFound) {
-    //             found = true;
-    //         }
-    //     }
-    //
-    //     if ((! found) &&
-    //         (err = x_StringSearch(acc,
-    //                               keys_out,
-    //                               data_out,
-    //                               indices_out)) < 0) {
-    //
-    //
-    //         return;
-    //     }
-    //
-    //     if (err != eNotFound) {
-    //         found = true;
-    //     }
-    //
-    //     if ((! found) && strip_version) {
-    //         size_t pos = acc.find(".");
-    //
-    //         bool is_version = false;
-    //
-    //         if (pos != string::npos) {
-    //             int ver_len = static_cast<int>(acc.size() - pos) - 1;
-    //
-    //             is_version = (ver_len <= 3 && ver_len >= 1);
-    //
-    //             for(size_t vp = pos+1; vp < acc.size(); vp++) {
-    //                 if (! isdigit(acc[vp])) {
-    //                     is_version = false;
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //
-    //         if (is_version) {
-    //             string nover(acc, 0, pos);
-    //
-    //             err = x_StringSearch(nover,
-    //                                  keys_out,
-    //                                  data_out,
-    //                                  indices_out);
-    //
-    //
-    //             if (data_out.size()) {
-    //                 version_check = true;
-    //             }
-    //
-    //             if (err < 0) {
-    //                 return;
-    //             }
-    //         }
-    //     }
-    //
-    //     if (err != eNotFound) {
-    //         found = true;
-    //     }
-    //
-    //     if (! found) {
-    //         // Use CSeq_id to parse the id string and build a replacement,
-    //         // FASTA type string.  This allows some IDs, such as PDBs with
-    //         // chains, such as '1qcfA' to be parsed.
-    //
-    //         string id;
-    //
-    //         try {
-    //             CSeq_id seqid(acc, CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal);
-    //             id = seqid.AsFastaString();
-    //         }
-    //         catch(CSeqIdException &) {
-    //         }
-    //
-    //         if (id.size() &&
-    //             ((err = x_StringSearch(id,
-    //                                    keys_out,
-    //                                    data_out,
-    //                                    indices_out)) < 0)) {
-    //
-    //             return;
-    //         }
-    //     }
-    //
-    //     if (err != eNotFound) {
-    //         found = true;
-    //     }
-    //
-    //     if (found) {
-    //         ITERATE(vector<string>, iter, data_out) {
-    //             oids.push_back(atoi((*iter).c_str()));
-    //         }
-    //     }
-    // }
-    // ```
     /// `StringToOids`: the OIDs (local to the volume) of the lines found for `acc`. `adjusted`:
     /// `acc` was simplified (the `simpler` of `SeqDB_SimplifyAccession`), so `gb|acc|` and
     /// `gb||acc` are not tried; `strip_version`: the in/out `version_check` of NCBI, true when the
@@ -2011,42 +906,7 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2638-2658
-    // ```c++
-    // void CSeqDBVol::x_StringToOids(const string          & acc,
-    //                                ESeqDBIdType            id_type,
-    //                                Int8                    ident,
-    //                                const string          & str_id,
-    //                                bool                    simpler,
-    //                                vector<int>           & oids) const
-    // {
-    //     bool vcheck (false);
-    //     bool fits_in_four = (ident == -1) || ! (ident >> 32);
-    //     bool needs_four = true;
-    //
-    //     switch(id_type) {
-    //     case eStringId:
-    //         x_OpenStrFile();
-    //         if (! m_IsamStr.Empty()) {
-    //             // Not simplified
-    //             vcheck = true;
-    //             m_IsamStr->StringToOids(str_id, oids, simpler, vcheck);
-    //             x_UnleaseStrFile();
-    //         }
-    //         break;
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2724-2733
-    // ```c++
-    //     if ((! fits_in_four) && needs_four) {
-    //         NCBI_THROW(CSeqDBException,
-    //                    eArgErr,
-    //                    "ID overflows range of specified type.");
-    //     }
-    //
-    //     if (vcheck) {
-    //         x_CheckVersions(acc, oids);
-    //     }
-    // }
-    // ```
     /// The string case of `CSeqDBVol::x_StringToOids`: `StringToOids` of the simplified id with
     /// `version_check` asked for, then `x_CheckVersions` of the user's `acc` when the lookup
     /// stripped a version. `seq_ids` is `GetSeqIDs(oid)` of the volume.
@@ -2065,42 +925,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1371-1404
-    // ```c++
-    // template <> inline void
-    // CSeqDBIsam::x_LoadIndex<string>(CSeqDBFileMemMap & lease,
-    //                                 vector<string> & keys,
-    //                                 vector<TIndx>  & offs)
-    // {
-    //     TIndx offset_begin = m_KeySampleOffset;
-    //     TIndx sample_begin = offset_begin + sizeof(Uint4) * (m_NumSamples + 1);
-    //
-    //     // load offset array
-    //     const Uint4 * offset = (const Uint4 *) lease.GetFileDataPtr(offset_begin);
-    //     for (int index=0; index <= m_NumSamples; ++index, ++offset) {
-    //         // Get the data_offsets
-    //         offs.push_back(SeqDB_GetStdOrd((Uint4*) offset));
-    //     }
-    //
-    //     // load sample array
-    //     offset = (const Uint4 *) lease.GetFileDataPtr(sample_begin);
-    //     for (int index=0; index < m_NumSamples; ++index, ++offset) {
-    //         // Get the index_offsets
-    //         offset_begin = SeqDB_GetStdOrd((Uint4*) offset);
-    //
-    //         // Lookup the samples
-    //         const char * keydatap =  (const char *) lease.GetFileDataPtr(offset_begin) - 1;
-    //
-    //
-    //         const char * key_begin = ++ keydatap;
-    //         while (*keydatap != 0x02) ++keydatap;
-    //         keys.push_back(string(key_begin, keydatap));
-    //
-    //         /* key_begin = ++keydatap;
-    //         while (*keydatap != 0x00) ++keydatap;
-    //         vals.push_back(NStr::StringToUInt(string(key_begin, keydatap))); */
-    //     }
-    // }
-    // ```
     /// `x_LoadIndex<string>`: the offsets of the pages in the data file (`samples + 1` of them)
     /// and, when `with_keys`, the sample keys (the text before the `\x02`).
     fn load_index(&self, with_keys: bool) -> Result<(Vec<u64>, Vec<Vec<u8>>), SeqDbError> {
@@ -2140,28 +964,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1406-1425
-    // ```c++
-    // template <> inline void
-    // CSeqDBIsam::x_LoadData<string>(CSeqDBFileMemMap & lease,
-    //                                vector<string> & keys,
-    //                                vector<int>    & vals,
-    //                                int              num_keys,
-    //                                TIndx            begin)
-    // {
-    //     const char * keydatap = (const char *) lease.GetFileDataPtr(begin) - 1;
-    //
-    //     for (int index=0; index < num_keys; ++index) {
-    //
-    //         const char * key_begin = ++keydatap;
-    //         while (*keydatap != 0x02) ++keydatap;
-    //         keys.push_back(string(key_begin, keydatap));
-    //
-    //         key_begin = ++keydatap;
-    //         while (*keydatap != 0x0a) ++keydatap;
-    //         vals.push_back(NStr::StringToUInt(string(key_begin, keydatap)));
-    //     }
-    // }
-    // ```
     /// `x_LoadData<string>`: `num_keys` records of `page`: the keys and the OIDs.
     fn load_data<'a>(
         &self,
@@ -2216,133 +1018,8 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2540-2550
-    // ```c++
-    //     if (ids.GetNumSis() && (GetLMDBFileName() == kEmptyStr)) {
-    //         x_OpenStrFile();
-    //         if (m_IsamStr.NotEmpty()) {
-    //             m_IsamStr->IdsToOids(m_VolStart, m_VolEnd, ids);
-    //             x_UnleaseStrFile();
-    //         } else {
-    //             NCBI_THROW(CSeqDBException,
-    //                        eArgErr,
-    //                        "SI list specified but no ISAM file found for SI in " + m_VolName);
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1388-1419
-    // ```c++
-    // void CSeqDBIsam::IdsToOids(int              vol_start,
-    //                            int              vol_end,
-    //                            CSeqDBGiList   & ids)
-    //
-    //
-    // {
-    //     // The vol_start parameter is needed because translations in the
-    //     // GI list should refer to global OIDs, not per-volume OIDs.
-    //
-    //     switch (m_IdentType) {
-    //     case eGiId:
-    //         x_TranslateGiList<TGi>(vol_start, ids);
-    //         break;
-    //
-    //     case eTiId:
-    //         x_TranslateGiList<TTi>(vol_start, ids);
-    //         break;
-    //
-    //     case eStringId:
-    //         x_TranslateGiList<string>(vol_start, ids);
-    //         break;
-    //
-    //     case ePigId:
-    //         x_TranslateGiList<TPig>(vol_start, ids);
-    //         break;
-    //
-    //     default:
-    //         NCBI_THROW(CSeqDBException,
-    //                        eArgErr,
-    //                        "Error: Wrong type of idlist specified.");
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:548-623
-    // ```c++
-    //     template <class T>
-    //     void x_TranslateGiList(int              vol_start,
-    //                            CSeqDBGiList   & gis)
-    //
-    //     {
-    //         int gilist_size = gis.GetSize<T>();
-    //         if (! gilist_size) return;
-    //
-    //         gis.InsureOrder(CSeqDBGiList::eGi);
-    //
-    //         if(m_Initialized == false) {
-    //                 NCBI_THROW(CSeqDBException,
-    //                        eArgErr,
-    //                        "Error: Unable to use ISAM index in batch mode.");
-    //         }
-    //
-    //         vector<T> sample_keys;
-    //         vector<TIndx> page_offs;
-    //         vector<T> keys;
-    //         vector<int> vals;
-    //
-    //         sample_keys.reserve(m_NumSamples);
-    //         page_offs.reserve(m_NumSamples + 1);
-    //         keys.reserve(m_PageSize);
-    //         vals.reserve(m_PageSize);
-    //
-    //         x_LoadIndex(m_IndexLease, sample_keys, page_offs);
-    //
-    //         int gilist_index = 0;
-    //         int sample_index = 0;
-    //
-    //         while((gilist_index < gilist_size) && (sample_index < m_NumSamples)) {
-    //
-    //             s_AdvanceGiList<T>(gis, gilist_index, gilist_size,
-    //                                sample_keys[sample_index]);
-    //
-    //             if (gilist_index >= gilist_size) break;
-    //
-    //             s_AdvanceKeyList<T>(sample_keys, sample_index, m_NumSamples,
-    //                                 gis.GetKey<T>(gilist_index));
-    //
-    //             // Now we should be ready to search a data block.
-    //             keys.clear();
-    //             vals.clear();
-    //
-    //             int num_keys = m_PageSize;
-    //             if (sample_index + 1 == m_NumSamples) {
-    //                 num_keys = m_NumTerms - sample_index * m_PageSize;
-    //             }
-    //             x_LoadData(m_DataLease, keys, vals, num_keys, page_offs[sample_index]);
-    //
-    //             int index = 0;
-    //
-    //             while ((gilist_index < gilist_size) && (index < num_keys)) {
-    //
-    //                 s_AdvanceKeyList<T>(keys, index, num_keys,
-    //                                     gis.GetKey<T>(gilist_index));
-    //
-    //                 s_SetTranslation<T>(gis, gilist_index, gilist_size,
-    //                                     keys[index], vals[index] + vol_start);
-    //
-    //                 ++index;
-    //                 if (index >= num_keys) break;
-    //
-    //                 s_AdvanceGiList<T>(gis, gilist_index, gilist_size, keys[index]);
-    //
-    //                 s_SetTranslation<T>(gis, gilist_index, gilist_size,
-    //                                     keys[index], vals[index] + vol_start);
-    //
-    //             }
-    //
-    //             // We could be finished here because we exhausted the GI list
-    //             // We must be done with that one by now..
-    //             ++sample_index;
-    //         }
-    //     }
-    // ```
     /// `IdsToOids(vol_start, vol_end, CSeqDBGiList&)` for the string list
     /// (`x_TranslateGiList<string>`): sets `oid` of every entry of `ids` whose `si` (lower-cased,
     /// simplified: [`simplify_accession_for_isam`]) is a key of the volume, to the OID of the
@@ -2420,149 +1097,8 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2582-2591
-    // ```c++
-    //     if (ids.GetNumSis()) {
-    //         x_OpenStrFile();
-    //         if (m_IsamStr.NotEmpty()) {
-    //             m_IsamStr->IdsToOids(m_VolStart, m_VolEnd, ids);
-    //             x_UnleaseStrFile();
-    //         } else {
-    //             NCBI_THROW(CSeqDBException,
-    //                        eArgErr,
-    //                        "SI list specified but no ISAM file found for SI in " + m_VolName);
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1421-1459
-    // ```c++
-    // void CSeqDBIsam::IdsToOids(int                  vol_start,
-    //                            int                  vol_end,
-    //                            CSeqDBNegativeList & ids)
-    //
-    //
-    // {
-    //     // The vol_start parameter is needed because translations in the
-    //     // GI list should refer to global OIDs, not per-volume OIDs.
-    //
-    //     _ASSERT(m_IdentType == eGiId || m_IdentType == eTiId || m_IdentType == eStringId);
-    //
-    //     //m_Atlas.Lock(locked);
-    //
-    //     ids.InsureOrder();
-    //
-    //     if ((m_IdentType == eGiId) && ids.GetNumGis()) {
-    //         x_SearchNegativeMulti(vol_start,
-    //                               vol_end,
-    //                               ids,
-    //                               false);
-    //
-    //     }
-    //
-    //     if ((m_IdentType == eTiId) && ids.GetNumTis()) {
-    //         x_SearchNegativeMulti(vol_start,
-    //                               vol_end,
-    //                               ids,
-    //                               true);
-    //
-    //     }
-    //
-    //     if(m_IdentType == eStringId && ids.GetNumSis()) {
-    //         x_SearchNegativeMultiSeq(vol_start,
-    //                               vol_end,
-    //                               ids);
-    //                               //true,
-    //
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:333-418
-    // ```c++
-    // CSeqDBIsam::x_SearchNegativeMultiSeq(int              vol_start,
-    //                                      int              vol_end,
-    //                                      CSeqDBNegativeList & ids)
-    //
-    // {
-    //         int gilist_size = ids.ListSize();
-    //         if (! gilist_size) return;
-    //
-    //         if(m_Initialized == false) {
-    //             // Most ordinary errors (missing GIs for example) are
-    //             // ignored for "multi" mode searches.  But if a GI list is
-    //             // specified, and cannot be interpreted, it is an error.
-    //
-    //             NCBI_THROW(CSeqDBException,
-    //                        eArgErr,
-    //                        "Error: Unable to use ISAM index in batch mode.");
-    //         }
-    //
-    //
-    //         vector<string> sample_keys;
-    //         vector<TIndx> page_offs;
-    //         vector<string> keys;
-    //         vector<int> vals;
-    //
-    //         sample_keys.reserve(m_NumSamples);
-    //         page_offs.reserve(m_NumSamples + 1);
-    //         keys.reserve(m_PageSize);
-    //         vals.reserve(m_PageSize);
-    //
-    //
-    //         x_LoadIndex(m_IndexLease, sample_keys, page_offs);
-    //
-    //         int gilist_index = 0;
-    //         int sample_index = 0;
-    //
-    //         while(sample_index < m_NumSamples) {
-    //
-    //             // Now we should be ready to search a data block.
-    //             keys.clear();
-    //             vals.clear();
-    //
-    //             int num_keys = m_PageSize;
-    //             if (sample_index + 1 == m_NumSamples) {
-    //                 num_keys = m_NumTerms - sample_index * m_PageSize;
-    //             }
-    //
-    //             x_LoadData(m_DataLease, keys, vals, num_keys, page_offs[sample_index]);
-    //
-    //             for(int i = 0; i < num_keys; i++) {
-    //                 // 2. Look for it in the negative id list.
-    //
-    //                 bool found = false;
-    //                 if (gilist_index < gilist_size) {
-    //                     found = x_FindInNegativeList(ids,
-    //                                              gilist_index,
-    //                                              keys[i]);
-    //
-    //                 }
-    //                 if (vals[i] < vol_end) {
-    //                     if (found) {
-    //                         // OID is found, but may not be included yet.
-    //                         ids.AddVisibleOid(vals[i] + vol_start);
-    //                         //If next accession is the same as current, but with version
-    //                         if(s_IsSameAccession(keys, num_keys, i)) {
-    //                             i++; //skip next check - sequence already excluded
-    //                         }
-    //                     } else {
-    //                         // OID is included for iteration.
-    //                         //Only include next accession if it is not the same as current (but with version)
-    //                         //because it may be in exclude list. The check will be done in the next step
-    //                         if(!s_IsSameAccession(keys, num_keys, i)) {
-    //                             ids.AddIncludedOid(vals[i] + vol_start);
-    //                         }
-    //                     }
-    //                 }
-    //
-    //             }
-    //             // Move to next data page.  Note that for a negative ID list
-    //             // processing, we don't actually fetch any samples, because
-    //             // every ID->OID line needs to be examined anyway.
-    //
-    //             sample_index ++;
-    //
-    //         }
-    // }
-    //
-    // ```
     /// `x_SearchNegativeMultiSeq` (through `IdsToOids(vol_start, vol_end, CSeqDBNegativeList&)`):
     /// reads every line of the volume and marks its OID (plus `vol_start`) in `out`: visible if
     /// its key is in `ids`, included if not. `ids` are the lower-cased simplified ids; they are
@@ -2675,7 +1211,11 @@ impl ScanChunk {
 
 /// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
 fn batch_mode_error() -> SeqDbError {
-    SeqDbError::NotFound("Error: Unable to use ISAM index in batch mode.".to_string())
+    SeqDbError::NotFound(
+        "Error: Unable to use ISAM index in batch mode."
+            .to_string()
+            .into(),
+    )
 }
 
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by
@@ -2697,81 +1237,8 @@ impl SiOid {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:574-586
-// ```c++
-// /// Compare SSeqIdOid structs by SeqId.
-// class CSeqDB_SortSiLessThan {
-// public:
-//     /// Test whether lhs is less than (occurs before) rhs.
-//     /// @param lhs Left hand side of less-than operator. [in]
-//     /// @param rhs Right hand side of less-than operator. [in]
-//     /// @return True if lhs sorts before rhs by Seq-id.
-//     int operator()(const CSeqDBGiList::SSiOid & lhs,
-//                    const CSeqDBGiList::SSiOid & rhs)
-//     {
-//         return lhs.si < rhs.si;
-//     }
-// };
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:589-606
-// ```c++
-// template<class TCompare, class TVector>
-// void s_InsureOrder(TVector & v)
-// {
-//     bool already = true;
-//
-//     TCompare compare_less;
-//
-//     for(int i = 1; i < (int) v.size(); i++) {
-//         if (compare_less(v[i], v[i-1])) {
-//             already = false;
-//             break;
-//         }
-//     }
-//
-//     if (! already) {
-//         sort(v.begin(), v.end(), compare_less);
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:616-651
-// ```c++
-// void CSeqDBGiList::InsureOrder(ESortOrder order)
-// {
-//     // Code depends on OID order after translation, because various
-//     // methods of SeqDB use this class for filtering purposes.
-//     static CFastMutex mtx;
-//     CFastMutexGuard mtx_gurad(mtx);
-//     if ((order < m_CurrentOrder) || (order == eNone)) {
-//         NCBI_THROW(CSeqDBException,
-//                    eFileErr,
-//                    "Out of sequence sort order requested.");
-//     }
-//
-//     // Input is usually sorted by GI, so we first test for sortedness.
-//     // If it will fail it will probably do so almost immediately.
-//
-//     if (order != m_CurrentOrder) {
-//         switch(order) {
-//         case eNone:
-//             break;
-//
-//         case eGi:
-//             s_InsureOrder<CSeqDB_SortGiLessThan>(m_GisOids);
-//             s_InsureOrder<CSeqDB_SortTiLessThan>(m_TisOids);
-//             s_InsureOrder<CSeqDB_SortSiLessThan>(m_SisOids);
-//             s_InsureOrder<CSeqDB_SortPigLessThan>(m_PigsOids);
-//             break;
-//
-//         default:
-//             NCBI_THROW(CSeqDBException,
-//                        eFileErr,
-//                        "Unrecognized sort order requested.");
-//         }
-//
-//         m_CurrentOrder = order;
-//     }
-// }
-// ```
 /// `CSeqDBGiList::InsureOrder(eGi)` for the string list: sorts by `si` (`std::string` order:
 /// unsigned bytes, then length) unless it is sorted already.
 pub fn insure_order(ids: &mut [SiOid]) {
@@ -2782,34 +1249,6 @@ pub fn insure_order(ids: &mut [SiOid]) {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:50-75
-// ```c++
-// // Use Parabolic Binary Search to find the first gilist that
-// // is greater-than-or-equal-to the key
-// template <class T> static inline void
-// s_AdvanceGiList(CSeqDBGiList & gis,
-//                 int          & gi_index,
-//                 int            gis_size,
-//                 const T      & key)
-// {
-//     while( (gi_index < gis_size)
-//        &&  (gis.GetKey<T>(gi_index) < key)) {
-//
-//         ++gi_index;
-//         int jump = 2;
-//
-//         while( (gi_index + jump < gis_size)
-//            &&  (gis.GetKey<T>(gi_index + jump) < key)) {
-//
-//             gi_index += jump;
-//             jump *= 2;
-//         }
-//     }
-//
-//     // skipping translated elements
-//     while( (gi_index < gis_size)
-//        &&  (gis.IsValueSet<T>(gi_index) )) ++gi_index;
-// }
-// ```
 /// `s_AdvanceGiList` for strings: moves `gi_index` to the first entry that is `>= key` (by
 /// jumps of doubling length), then past the entries already translated.
 fn advance_gi_list(gis: &[SiOid], gi_index: &mut usize, key: &[u8]) {
@@ -2829,31 +1268,6 @@ fn advance_gi_list(gis: &[SiOid], gi_index: &mut usize, key: &[u8]) {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:77-99
-// ```c++
-// // Use Parabolic Binary Search to find the largest sample that
-// // is less-than-or-equal-to the first untranslated target GI.
-// template <class T> static inline void
-// s_AdvanceKeyList(const vector<T> & keys,
-//                  int             & index,
-//                  int               num_keys,
-//                  const T         & target)
-// {
-//     while( (index < num_keys)
-//        &&  (keys[index] <= target)) {
-//
-//         ++index;
-//         int jump = 2;
-//
-//         while( (index + jump < num_keys)
-//            &&  (keys[index + jump] <= target)) {
-//
-//             index += jump;
-//             jump *= 2;
-//         }
-//     }
-//     --index;
-// }
-// ```
 /// `s_AdvanceKeyList`: moves `index` to the last key that is `<= target`; -1 when none is.
 fn advance_key_list<K: AsRef<[u8]>>(keys: &[K], index: &mut i64, num_keys: usize, target: &[u8]) {
     let num_keys = num_keys as i64;
@@ -2869,23 +1283,6 @@ fn advance_key_list<K: AsRef<[u8]>>(keys: &[K], index: &mut i64, num_keys: usize
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:101-115
-// ```c++
-// // apply the translation (if we have it) for those GIs.
-// template <class T> static inline void
-// s_SetTranslation(CSeqDBGiList & gis,
-//                  int          & gi_index,
-//                  int            gis_size,
-//                  const T      & key,
-//                  int            value)
-// {
-//     while( (gi_index < gis_size)
-//        &&  (gis.GetKey<T>(gi_index) == key)) {
-//
-//         gis.SetValue<T>(gi_index, value);
-//         ++gi_index;
-//     }
-// }
-// ```
 /// `s_SetTranslation` for strings: the OID of every entry from `gi_index` on that equals `key`.
 fn set_translation(
     gis: &mut [SiOid],
@@ -2901,38 +1298,6 @@ fn set_translation(
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1460-1489
-// ```c++
-// inline bool
-// CSeqDBIsam::x_FindInNegativeList(CSeqDBNegativeList & ids,
-//                                  int                & index,
-//                                  string                 key)
-// {
-//     bool found = false;
-//
-//     // Skip any that are less than key.
-//     int ids_size = ids.ListSize();
-//
-//     while((index < ids_size) && (x_GetId(ids, index) < key)) {
-//         index++;
-//
-//         int jump = 2;
-//
-//         while((index + jump) < ids_size &&
-//               x_GetId(ids, index + jump) < key) {
-//             index += jump;
-//             jump += jump;
-//         }
-//     }
-//
-//     // Check whether the GI or TI was found.
-//
-//     if ((index < ids_size) && (x_GetId(ids,index) == key)) {
-//         found = true;
-//     }
-//
-//     return found;
-// }
-// ```
 /// `x_FindInNegativeList` for strings: moves `index` past the ids `< key`; whether the id it
 /// stops at is `key`.
 fn find_in_negative_list(ids: &[Vec<u8>], index: &mut usize, key: &[u8]) -> bool {
@@ -2951,24 +1316,6 @@ fn find_in_negative_list(ids: &[Vec<u8>], index: &mut usize, key: &[u8]) -> bool
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:304-319
-// ```c++
-// //In case if acc2 does not have version and acc1 has version
-// //check if it is the same accession
-// static bool s_IsSameAccession(string acc1, string acc2)
-// {
-//     bool sameAccession = false;
-//     if(NStr::Find(acc2,".") == NPOS) { // no version in acc2
-//         if(NStr::Find(acc1,".") != NPOS && NStr::Find(acc1, acc2) != NPOS) {
-//             string accession, version;
-//             NStr::SplitInTwo(acc1,".", accession, version);
-//             if(acc2 == accession) {
-//                 sameAccession = true;
-//             }
-//         }
-//     }
-//     return sameAccession;
-// }
-// ```
 /// `s_IsSameAccession(acc1, acc2)`: `acc2` has no `.`, `acc1` has one and holds `acc2`, and
 /// `acc2` is what `acc1` has before its first `.`.
 fn is_same_accession(acc1: &[u8], acc2: &[u8]) -> bool {
@@ -2986,18 +1333,6 @@ fn is_same_accession(acc1: &[u8], acc2: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:321-330
-// ```c++
-// //In case if keys[currIndex] does not have version and keys[currIndex + 1] has version
-// //check if it is the same accession
-// static bool s_IsSameAccession(vector <string> keys, int num_keys, int currIndex)
-// {
-//     bool sameAccession = false;
-//     if(currIndex < num_keys - 1) {
-//         sameAccession = s_IsSameAccession(keys[currIndex + 1], keys[currIndex]);
-//     }
-//     return sameAccession;
-// }
-// ```
 /// `s_IsSameAccession(keys, num_keys, currIndex)`: whether line `curr_index + 1` of the page is
 /// line `curr_index` with a version.
 fn is_same_accession_next(keys: &[&[u8]], num_keys: usize, curr_index: usize) -> bool {
@@ -3041,47 +1376,6 @@ impl BitVector {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:976-1014
-// ```c++
-//     /// Include an OID in the iteration.
-//     ///
-//     /// The OID will be included by SeqDB in the set returned to users
-//     /// by OID iteration.
-//     ///
-//     /// @param oid The OID in question. [in]
-//     void AddIncludedOid(int oid)
-//     {
-//         m_Included.SetBit(oid);
-//     }
-//
-//     /// Indicate a visible OID.
-//     ///
-//     /// The OID will be marked as having been found in a GI or TI
-//     /// ISAM index (but possibly not included for iteration).
-//     ///
-//     /// @param oid The OID in question. [in]
-//     void AddVisibleOid(int oid)
-//     {
-//         m_Visible.SetBit(oid);
-//     }
-//
-//     /// Get the inclusion status of an OID.
-//     ///
-//     /// This returns true for OIDs that were in the included set and
-//     /// for OIDs that were not found in the ISAM file at all.
-//     ///
-//     /// @param oid The OID in question. [in]
-//     /// @return True if the OID is included by SeqDB.
-//     bool GetOidStatus(int oid)
-//     {
-//         return m_Included.GetBit(oid) || (! m_Visible.GetBit(oid));
-//     }
-//
-//     /// Get the size of the OID array.
-//     int GetNumOids()
-//     {
-//         return max(m_Visible.Size(), m_Included.Size());
-//     }
-// ```
 /// The OID sets of `CSeqDBNegativeList` that [`StringIsam::negative_scan`] fills (see the module
 /// documentation for what they mean).
 #[derive(Clone, Debug, Default)]
@@ -3130,63 +1424,6 @@ impl NegativeOids {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2735-2789
-// ```c++
-// void CSeqDBVol::x_CheckVersions(const string         & acc,
-//                                 vector<int>          & oids) const
-// {
-//     // If we resolved a string id by stripping the version off of the
-//     // string, we need to check (for each OID) if the real ID had a
-//     // matching version.
-//
-//     // This condition happens in two cases: where the database has a
-//     // different version of the same ID, and in the case of sparse
-//     // databases (which do not store the version).  In the latter
-//     // case, we may get a list of OIDs where some of the OIDs pass
-//     // this test, and others fail.
-//
-//     size_t pos = acc.find(".");
-//     _ASSERT(pos != acc.npos);
-//
-//     string ver_str(acc, pos+1, acc.size()-(pos+1));
-//     int vernum = NStr::StringToInt(ver_str,
-//                                    NStr::fConvErr_NoThrow |
-//                                    NStr::fAllowTrailingSymbols);
-//
-//     string nover(acc, 0, pos);
-//
-//     size_t pos2(0);
-//     while((pos2 = nover.find("|")) != nover.npos) {
-//         nover.erase(0, pos2+1);
-//     }
-//
-//     NON_CONST_ITERATE(vector<int>, iter, oids) {
-//         list< CRef<CSeq_id> > ids =
-//             GetSeqIDs(*iter);
-//
-//         bool found = false;
-//
-//         ITERATE(list< CRef<CSeq_id> >, seqid, ids) {
-//             const CTextseq_id * id = (*seqid)->GetTextseq_Id();
-//
-//             if (id &&
-//                 id->CanGetAccession() &&
-//                 id->GetAccession() == nover &&
-//                 id->CanGetVersion() &&
-//                 id->GetVersion() == vernum) {
-//
-//                 found = true;
-//                 break;
-//             }
-//         }
-//
-//         if (! found) {
-//             *iter = -1;
-//         }
-//     }
-//
-//     oids.erase(remove(oids.begin(), oids.end(), -1), oids.end());
-// }
-// ```
 /// `CSeqDBVol::x_CheckVersions`: removes the OIDs whose Seq-ids (`seq_ids` is `GetSeqIDs(oid)`
 /// of the volume) hold no Textseq-id with the accession and version of the user's `acc`.
 pub fn check_versions(
@@ -3222,16 +1459,6 @@ pub fn check_versions(
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:1951-1958
-// ```c++
-// enum ESeqDBIdType {
-//     eGiId,     /// Genomic ID is a relatively stable numeric identifier for sequences.
-//     eTiId,     /// Trace ID is a numeric identifier for Trace sequences.
-//     ePigId,    /// Each PIG identifier refers to exactly one protein sequence.
-//     eStringId, /// Some sequence sources uses string identifiers.
-//     eHashId,   /// Lookup from sequence hash values to OIDs.
-//     eOID       /// The ordinal id indicates the order of the data in the volume's index file.
-// };
-// ```
 /// `ESeqDBIdType`, without `eHashId` (a Seq-id is never simplified to a hash).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeqDbIdType {
@@ -3263,14 +1490,14 @@ pub enum SimplifyError {
     SeqId(SeqIdError),
     /// Another exception, with its message: a string tag read as a number, an integer read from
     /// a string tag.
-    Exception(String),
+    Exception(Vec<u8>),
 }
 
 impl std::fmt::Display for SimplifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SimplifyError::SeqId(error) => f.write_str(&error.what()),
-            SimplifyError::Exception(message) => f.write_str(message),
+            SimplifyError::SeqId(error) => f.write_str(&String::from_utf8_lossy(&error.what())),
+            SimplifyError::Exception(message) => f.write_str(&String::from_utf8_lossy(message)),
         }
     }
 }
@@ -3283,8 +1510,7 @@ fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
-                .to_string(),
+            b"CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str".to_vec(),
         )),
     }
 }
@@ -3296,172 +1522,6 @@ fn fasta_string(id: &ParsedSeqId) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2264-2427
-// ```c++
-// ESeqDBIdType SeqDB_SimplifySeqid(CSeq_id       & bestid,
-//                                  const string  * acc,
-//                                  Int8          & num_id,
-//                                  string        & str_id,
-//                                  bool          & simpler)
-// {
-//     ESeqDBIdType result = eStringId;
-//
-//     const CTextseq_id * tsip = 0;
-//
-//     bool matched = true;
-//
-//     switch(bestid.Which()) {
-//     case CSeq_id::e_Gi:
-//         simpler = true;
-//         num_id = GI_TO(Int8, bestid.GetGi());
-//         result = eGiId;
-//         break;
-//
-//     case CSeq_id::e_Gibbsq:    /* gibbseq */
-//         simpler = true;
-//         result = eStringId;
-//         str_id = NStr::UIntToString(bestid.GetGibbsq());
-//         break;
-//
-//     case CSeq_id::e_General:
-//         {
-//             const CDbtag & dbt = bestid.GetGeneral();
-//
-//             if (dbt.CanGetDb()) {
-//                 if (dbt.GetDb() == "BL_ORD_ID") {
-//                     simpler = true;
-//                     num_id = dbt.GetTag().GetId();
-//                     result = eOID;
-//                     break;
-//                 }
-//
-//                 if (dbt.GetDb() == "PIG") {
-//                     simpler = true;
-//                     num_id = dbt.GetTag().GetId();
-//                     result = ePigId;
-//                     break;
-//                 }
-//
-//                 if (dbt.GetDb() == "ti") {
-//                     simpler = true;
-//                     num_id = (dbt.GetTag().IsStr()
-//                               ? NStr::StringToInt8(dbt.GetTag().GetStr())
-//                               : dbt.GetTag().GetId());
-//
-//                     result = eTiId;
-//                     break;
-//                 }
-//
-//
-//                 if (NStr::CompareNocase(dbt.GetDb(), "GNOMON") == 0) {
-//                     str_id = bestid.AsFastaString();
-//                     str_id = NStr::ToLower(str_id);
-//                     result = eStringId;
-//                     break;
-//                 }
-//             }
-//
-//             if (dbt.CanGetTag() && dbt.GetTag().IsStr()) {
-//                 result = eStringId;
-//                 str_id = dbt.GetTag().GetStr();
-//                 str_id = NStr::ToLower(str_id);
-//             } else {
-//                 // Use the default logic.
-//                 matched = false;
-//             }
-//         }
-//         break;
-//
-//     case CSeq_id::e_Local:     /* local */
-//         simpler = true;
-//         result = eStringId;
-//         {
-//             const CObject_id & objid = bestid.GetLocal();
-//
-//             if (objid.IsStr()) {
-//                 // sparse version will leave "lcl|" off.
-//                 str_id = objid.GetStr();
-//                 str_id = NStr::ToLower(str_id);
-//             } else {
-//                 // Local numeric ids are stored as strings.
-//                 str_id = "lcl|" + NStr::IntToString(objid.GetId());
-//             }
-//         }
-//         break;
-//
-//         // tsip types
-//
-//     case CSeq_id::e_Embl:      /* embl */
-//     case CSeq_id::e_Ddbj:      /* ddbj */
-//     case CSeq_id::e_Genbank:   /* genbank */
-//     case CSeq_id::e_Tpg:       /* Third Party Annot/Seq Genbank */
-//     case CSeq_id::e_Tpe:       /* Third Party Annot/Seq EMBL */
-//     case CSeq_id::e_Tpd:       /* Third Party Annot/Seq DDBJ */
-//     case CSeq_id::e_Other:     /* other */
-//     case CSeq_id::e_Swissprot: /* swissprot (now with versions) */
-//     case CSeq_id::e_Gpipe:     /* internal NCBI genome pipeline */
-//         tsip = bestid.GetTextseq_Id();
-//         break;
-//
-//     case CSeq_id::e_Pir:       /* pir   */
-//     case CSeq_id::e_Prf:       /* prf   */
-//         tsip = bestid.GetTextseq_Id();
-//         break;
-//
-//     default:
-//         matched = false;
-//     }
-//
-//     // Default: if we have a string, use it; if we only have seqid,
-//     // create a string.  This should not happen if the seqid matches
-//     // one of the cases above, which currently correspond to all the
-//     // supported seqid types.
-//
-//     CSeq_id::ELabelFlags label_flags = (CSeq_id::ELabelFlags)
-//         (CSeq_id::fLabel_GeneralDbIsContent | CSeq_id::fLabel_Version);
-//
-//     if (! matched) {
-//         // (should not happen normally)
-//
-//         simpler = false;
-//         result  = eStringId;
-//
-//         if (acc) {
-//             str_id = *acc;
-//             str_id = NStr::ToLower(str_id);
-//         } else {
-//             bestid.GetLabel(& str_id, CSeq_id::eFasta, label_flags);
-//             str_id = NStr::ToLower(str_id);
-//         }
-//     }
-//
-//     if (tsip) {
-//         bool found = false;
-//
-//         if (tsip->CanGetAccession()) {
-//             str_id = tsip->GetAccession();
-//             str_id = NStr::ToLower(str_id);
-//             found = true;
-//
-//             if (tsip->CanGetVersion()) {
-//                 str_id += ".";
-//                 str_id += NStr::UIntToString(tsip->GetVersion());
-//             }
-//         } else if (tsip->CanGetName()) {
-//             str_id = tsip->GetName();
-//             str_id = NStr::ToLower(str_id);
-//             found = true;
-//         }
-//
-//         if (found) {
-//             simpler = true;
-//             result = eStringId;
-//         }
-//     }
-//
-//     return result;
-// }
-//
-// ```
 /// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL` is
 /// [`seqdb_simplify_seqid`]).
 fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
@@ -3501,7 +1561,7 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text, 0)
-                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_string()))?,
+                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_vec()))?,
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;
@@ -3576,21 +1636,6 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2805-2817
-// ```c++
-// void CSeqDBVol::SeqidToOids(CSeq_id              & seqid,
-//                             vector<int>          & oids,
-//                             CSeqDBLockHold       & locked) const
-// {
-//     Int8   ident   (-1);
-//     string str_id;
-//     bool   simpler (false);
-//
-//     ESeqDBIdType id_type = SeqDB_SimplifySeqid(seqid, 0, ident, str_id, simpler);
-//
-//     x_StringToOids(seqid.AsFastaString(), id_type, ident, str_id, simpler, oids);
-//
-// }
-// ```
 /// `SeqDB_SimplifySeqid(seqid, 0, num_id, str_id, simpler)` of `CSeqDBVol::SeqidToOids`: what a
 /// volume looks up for the Seq-id `seqid`. Without `acc`, NCBI's default case labels the Seq-id
 /// itself (`GetLabel` with `eFasta`), which is its FASTA string, the `acc` given here.
@@ -3612,50 +1657,6 @@ fn find_from(s: &[u8], byte: u8, from: usize) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2441-2482
-// ```c++
-// static size_t
-// s_SeqDB_EndOfFastaID(const string & str, size_t pos)
-// {
-//     // (Derived from s_EndOfFastaID()).
-//
-//     size_t vbar = str.find('|', pos);
-//
-//     if (vbar == string::npos) {
-//         return string::npos; // bad
-//     }
-//
-//     string portion(str, pos, vbar - pos);
-//
-//     CSeq_id::E_Choice choice =
-//         CSeq_id::WhichInverseSeqId(portion.c_str());
-//
-//     if (choice != CSeq_id::e_not_set) {
-//         size_t vbar_prev = vbar;
-//         int count;
-//         for (count=0; ; ++count, vbar_prev = vbar) {
-//             vbar = str.find('|', vbar_prev + 1);
-//
-//             if (vbar == string::npos) {
-//                 break;
-//             }
-//
-//             int start_pt = int(vbar_prev + 1);
-//             string element(str, start_pt, vbar - start_pt);
-//
-//             choice = CSeq_id::WhichInverseSeqId(element.c_str());
-//
-//             if (choice != CSeq_id::e_not_set) {
-//                 vbar = vbar_prev;
-//                 break;
-//             }
-//         }
-//     } else {
-//         return string::npos; // bad
-//     }
-//
-//     return (vbar == string::npos) ? str.size() : vbar;
-// }
-// ```
 /// `s_SeqDB_EndOfFastaID`: the end of the first Seq-id of `s` from `pos`, `None` (NCBI's
 /// `npos`) for a text that does not start with a Seq-id tag and `|`.
 fn end_of_fasta_id(s: &[u8], pos: usize) -> Option<usize> {
@@ -3678,44 +1679,6 @@ fn end_of_fasta_id(s: &[u8], pos: usize) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2496-2531
-// ```c++
-// static bool
-// s_SeqDB_ParseSeqIDs(const string              & line,
-//                     vector< CRef< CSeq_id > > & seqids)
-// {
-//     // (Derived from s_ParseFastaDefline()).
-//
-//     seqids.clear();
-//     size_t pos = 0;
-//
-//     while (pos < line.size()) {
-//         size_t end = s_SeqDB_EndOfFastaID(line, pos);
-//
-//         if (end == string::npos) {
-//             // We didn't get a clean parse -- ignore the data after
-//             // this point, and return what we have.
-//             break;
-//         }
-//
-//         string element(line, pos, end - pos);
-//
-//         CRef<CSeq_id> id;
-//
-//         try {
-//             id = new CSeq_id(element);
-//         }
-//         catch(invalid_argument &) {
-//             // Maybe this should be done: "seqids.clear();"
-//             break;
-//         }
-//
-//         seqids.push_back(id);
-//         pos = end + 1;
-//     }
-//
-//     return ! seqids.empty();
-// }
-// ```
 /// `s_SeqDB_ParseSeqIDs`: the Seq-ids at the start of `line` (`CSeq_id(element)` of every
 /// element up to the first text that is not one). A `CSeqIdException` is not caught by NCBI's
 /// `catch(invalid_argument &)`.
@@ -3738,82 +1701,6 @@ fn parse_seq_ids(line: &[u8]) -> Result<Vec<ParsedSeqId>, SimplifyError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2535-2608
-// ```c++
-// ESeqDBIdType SeqDB_SimplifyAccession(const string & acc,
-//                                      Int8         & num_id,
-//                                      string       & str_id,
-//                                      bool         & simpler)
-// {
-//     ESeqDBIdType result = eStringId;
-//     num_id = (Uint4)-1;
-//
-//     vector< CRef< CSeq_id > > seqid_set;
-//
-//     if (s_SeqDB_ParseSeqIDs(acc, seqid_set)) {
-//         // Something like SeqIdFindBest()
-//         CRef<CSeq_id> bestid =
-//             FindBestChoice(seqid_set, CSeq_id::BestRank);
-//
-//         result = SeqDB_SimplifySeqid(*bestid, & acc, num_id, str_id, simpler);
-//     } else {
-//
-//         // Check for bare pdb accession with underscore (such as 12AS_A). These
-//         // are not in the isam index and need to be translated to the
-//         // standard form (pdb|12AS|A).
-//         list< CRef<CSeq_id> > seqids;
-//         try {
-//             CSeq_id::ParseFastaIds(seqids, acc, false);
-//         }
-//         catch (...) {
-//             seqids.clear();
-//         }
-//
-//         if (!seqids.empty() && seqids.front()->IsPdb() &&
-//             acc.find("_") != string::npos) {
-//
-//             str_id = seqids.front()->AsFastaString();
-//             str_id = NStr::ToLower(str_id);
-//         }
-//         else if (!seqids.empty() && seqids.front()->IsLocal()) {
-//             // Chec for gnl dbs
-//             if( acc.find(":") != string::npos) {
-//                 static const char* GNL_DBs[] = {"CDD", "SRA", "TSA", "GNOMON", NULL};
-//                 string db_tag, gnl_id;
-//                 NStr::SplitInTwo(acc, ":", db_tag, gnl_id);
-//                 const char** p = GNL_DBs;
-//                 for (;  p  &&  *p;  ++p) {
-//                     if(NStr::EqualNocase(*p, db_tag.c_str())) {
-//                         str_id  = "gnl|" + db_tag + "|"  + gnl_id;
-//                         seqids.front().Reset();
-//                         CRef<CSeq_id> new_id(new CSeq_id(str_id));
-//                         seqids.front() = new_id;
-//                         break;
-//                     }
-//                 }
-//                 if(*p == NULL) {
-//                     str_id =  acc;
-//                 }
-//             }
-//             else {
-//                 Int8 n_id = 0;
-//                 if (NStr::StringToNumeric<Int8>(acc,&n_id, NStr::fConvErr_NoThrow)) {
-//                     str_id = "lcl|" + acc;
-//                 }
-//                 else {
-//                     str_id = acc;
-//                 }
-//             }
-//         }
-//         else {
-//             str_id = acc;
-//         }
-//         result = eStringId;
-//         simpler = false;
-//     }
-//
-//     return result;
-// }
-// ```
 /// `SeqDB_SimplifyAccession(acc, num_id, str_id, simpler)`: what the volume looks up for the
 /// user's id `acc`.
 pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
@@ -3871,37 +1758,8 @@ pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, Simpl
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2610-2618
-// ```c++
-// const string SeqDB_SimplifyAccession(const string &acc)
-// {
-//     Int8 num_id;
-//     string str_id;
-//     bool simpler(false);
-//     ESeqDBIdType result = SeqDB_SimplifyAccession(acc, num_id, str_id, simpler);
-//     if (result == eStringId) return str_id;
-//     else return "";
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:608-614
-// ```c++
-// void CSeqDBGiList::PreprocessIdsForISAMSiLookup()
-// {
-//     NON_CONST_ITERATE(vector<CSeqDBGiList::SSiOid>, itr, m_SisOids) {
-//         string str_id = SeqDB_SimplifyAccession(itr->si);
-//         itr->si = NStr::ToLower(str_id);
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1612-1618
-// ```c++
-// void CSeqDBNegativeList::PreprocessIdsForISAMSiLookup()
-// {
-//     NON_CONST_ITERATE(vector<string>, itr, m_Sis) {
-//         string str_id = SeqDB_SimplifyAccession(*itr);
-//         *itr = NStr::ToLower(str_id);
-//     }
-// }
-// ```
 /// `SeqDB_SimplifyAccession(acc)` followed by `NStr::ToLower`
 /// (`PreprocessIdsForISAMSiLookup`): the key of the string index for a user's id; empty for an id
 /// that devolves to a number (a GI, TI, PIG or OID).

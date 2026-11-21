@@ -1,11 +1,11 @@
-# BLASTX local CLI on the current branch
+# BLASTX command line
 
 ```bash
 losat blastx -query query.fna -subject subject.faa -num_threads 1 -outfmt 0
 losat blastx -query query.fna -subject subject.faa -outfmt "7 std qframe btop stitle" -out results.txt
 ```
 
-The local FASTA path uses the final Rust runtime results for pairwise format 0,
+The FASTA path (`-subject`) writes pairwise format 0,
 the query-anchored formats 1 to 4 (with and without identities, and flat), tabular
 format 6, commented tabular format 7, CSV formats 10 and 20 (20 with header lines),
 BLAST XML format 5, Seq-align formats 8 (text ASN.1), 9 (binary ASN.1) and 12
@@ -35,34 +35,14 @@ Omitted defaults retain their NCBI meanings, including description/alignment
 limits. Multiple query and subject records retain input order, with ordinary
 NCBI BLASTX batching and split/rejoin boundaries.
 
-Custom formats 6/7 accept these 30 fields and `std` in the requested order,
-including duplicate fields:
+Custom formats 6, 7, 10 and 20 take a field list and `delim=` (README, "Output formats"); `std`
+expands to the 12 standard columns. Output goes to stdout unless `-out` names a file; `-out -` also
+uses stdout.
 
-```
-qseqid qacc qaccver qlen sseqid sacc saccver slen
-qstart qend sstart send qseq sseq evalue bitscore score length
-pident nident mismatch positive gapopen gaps ppos
-qframe sframe frames btop stitle
-```
-
-`std` expands to the standard 12 columns. Unknown fields, an empty entire
-format specification, or fields attached to format 0 are refused under the
-registered CLI contract. A blank field list following `6 ` or `7 ` uses the
-registered standard-field expansion. Output goes to stdout unless `-out` names
-a file; `-out -` also uses stdout.
-
-Each protein subject may contain at most 5,000,000 residues. Longer subjects
-and unsupported options and tasks fail explicitly. `-query -` (or no `-query`)
-and `-subject -` read standard input as NCBI BLAST+ reads it. Native threads 1/2/4/8 and serial
-and threaded command-WASI and Web/reactor entry points are implemented. Their
-full v0.2.0 acceptance, including browser and pool-failure coverage, remains
-open. Formal performance measurements exist for fixed workloads; they do not
-establish release readiness. The v0.2.0 release remains **HOLD**, and this
-branch has not been published as a BLASTX release. Ordinary native paths such as
-`/dev/stdin` retain the source stream behavior, including pipe EOF, warnings,
-and format-0 header flush before query data.
-
-Release acceptance requires the public CLI's raw reports, warnings, exits,
-file lifecycle, complete M1–M11 coverage across required targets, current
-shared-program regressions, quality checks, and an independent audit of the
-final binding. The current Session G decision is HARD_FAIL / HOLD.
+Each protein subject may contain at most 5,000,000 residues; LOSAT refuses a longer one (NCBI
+BLAST+ searches it in overlapping parts). Unsupported options and tasks fail explicitly (README,
+"What LOSAT refuses"). `-query -` (or no `-query`) and `-subject -` read standard input as NCBI BLAST+
+reads it. Native threads and the serial and threaded command-WASI and Web/reactor entry points are
+implemented. BLASTX is part of v0.2.0; the results on the release candidate are in the
+[release record](release/v0.2.0.md). Ordinary native paths such as `/dev/stdin` retain the source
+stream behavior, including pipe EOF, warnings, and format-0 header flush before query data.

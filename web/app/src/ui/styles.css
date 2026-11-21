@@ -108,7 +108,11 @@
   --accent-line: #9ccbe6;
   --ok: #007a5a;
   --ok-bg: #e3f4ee;
-  --error: #b84f00;
+  /* Okabe–Ito's vermillion (#d55e00) darkened until it is 4.5:1 or more on every ground that shows
+     an error or a reverse orientation: 5.0:1 on --page, 5.2:1 on --error-bg, 5.1:1 on a selected
+     row (--accent-bg). #b84f00 was 4.3, 4.5 and 4.4:1 there (axe in line WQA's random walk,
+     2026-11-19; tests/unit/colour-contrast.test.ts). */
+  --error: #a84800;
   --error-bg: #fdeee3;
   --error-line: #f2b58b;
   --warn-bg: #faf6d2;
@@ -123,6 +127,17 @@
   /* A neutral light grey page behind the white cards, so that the status colours read against it. */
   background: var(--page);
   line-height: 1.45;
+}
+
+/* The page always has its vertical scroll bar, so that its width never depends on whether it scrolls. Where scroll bars
+   take space (Windows, Linux), the Dot Plot's square plot follows the page's width and makes the page taller as it
+   grows: in a window a few pixels taller than the page, the bar went away, the wider plot brought it back, and the plot
+   changed its size, with "ResizeObserver loop completed with undelivered notifications.", every frame (line WQA's
+   sweep 2, S2-2, review M1, 2026-11-20). Overlay scroll bars (phones, macOS) take no space. `scrollbar-gutter: stable`
+   keeps the same place, but Chromium keeps it also where it hides scroll bars, as in the tests, which would then see
+   every window 15 px narrower than it is. */
+html {
+  overflow-y: scroll;
 }
 
 body {
@@ -410,6 +425,15 @@ input[type='radio'] {
   color: #004a73;
 }
 
+/* What of LOSAT could not be loaded or stopped, once for the page (AppView; line WQA's sweep, D1 and D2). */
+.unavailable {
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin: 8px 0;
+}
+
 .error {
   color: var(--error);
 }
@@ -456,6 +480,13 @@ input[type='radio'] {
   overflow-wrap: anywhere;
 }
 
+/* The file of -logfile has the name the user gave it, as long as they made it: its line and its button (line WQA's
+   sweep 2, S2-1, 2026-11-20: a name of 46 characters made the Outputs 414 px wide in a 320 px window). */
+.run-file-name,
+.run-file > button {
+  overflow-wrap: anywhere;
+}
+
 .tabs button[aria-selected='true'],
 .tabs button[aria-selected='true']:hover:not(:disabled) {
   border-color: var(--accent);
@@ -480,8 +511,16 @@ input[type='radio'] {
   gap: 0 24px;
 }
 
-/* An option name is not broken after its leading hyphen (S13 screen review L2). */
+/* An option's name (OptionName.vue): a line takes it whole or leaves it whole to the next line, and only a name
+   longer than its line breaks, at the line's end; its lead (the hyphen and the letter after it) never does (S13
+   screen review L2). With the whole name unbreakable, -min_raw_gapped_score made Run details and the results' Options
+   line wider than a 320 or 360 px window (line WQA's sweep 2, S2-1, 2026-11-20). An inline-block name would have let
+   a line break between the name and the ':' or ')' after it in the notices' sentences. */
 .option-name {
+  overflow-wrap: anywhere;
+}
+
+.option-lead {
   white-space: nowrap;
 }
 
@@ -497,6 +536,10 @@ input[type='radio'] {
   border-bottom: 3px solid var(--accent);
   padding: 0;
   margin: 12px 0 8px;
+  /* A fieldset is at least as wide as its content's longest unbreakable line (min-inline-size:
+     min-content): at 320 px the tabs' names made it 16 px wider than the search panel, and the
+     page 2 px wider than the window (line WQA's random walk, 2026-11-19). */
+  min-inline-size: 0;
 }
 
 .program-tab {
@@ -2049,9 +2092,9 @@ label.inline {
   white-space: nowrap;
 }
 
-/* 5.1:1 on the selected row's background (the error colour #b84f00 is 4.4:1 there; axe, W6). */
+/* The error colour, 5.1:1 on the selected row's background too (axe, W6). */
 .orientation[data-orientation='reverse'] {
-  color: #a84800;
+  color: var(--error);
 }
 
 .orientation[data-orientation='unknown'] {
@@ -2214,6 +2257,37 @@ pre.range-text {
   overflow-wrap: anywhere;
 }
 
+/* Below 480 px each label of the results' lists of labels and values (the header block, Run details) is above its
+   value, which then has the whole width: beside a column of labels such as "Threads requested", the values of a
+   320 px window had 114 to 134 px, and option names such as -min_raw_gapped_score broke inside (line WQA's sweep 2,
+   S2-1 round 2, 2026-11-20). OptionName's break at the line's end stays for a name longer than the whole line. */
+@media (max-width: 479px) {
+  .results-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .results-summary dt {
+    padding: 5px 0 0;
+    border-bottom: none;
+  }
+
+  .results-summary dd {
+    padding-top: 1px;
+  }
+
+  .details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .details-list {
+    row-gap: 0;
+  }
+
+  .details-list dd {
+    margin-bottom: 6px;
+  }
+}
+
 /* Narrow screens: the notes one under the other (design §3.4). */
 @media (max-width: 800px) {
   .notes {
@@ -2228,6 +2302,8 @@ pre.range-text {
   .program-tabs {
     flex-wrap: nowrap;
     gap: 2px;
+    /* The tabs' type size follows the row's width (cqi), and the row's width is the panel's. */
+    container-type: inline-size;
   }
 
   .program-tab {
@@ -2237,6 +2313,18 @@ pre.range-text {
     padding: 10px 2px 9px;
     border-radius: 6px 6px 0 0;
     font-size: 0.9em;
+  }
+
+  /* Below 360 px the names would pass their tabs' borders: the type shrinks with the row so that
+     each name fits its tab. A tab is (100cqi - 8px) / 5 wide (five tabs, four 2 px gaps); a name
+     wider than its tab's content starts 3 px in (1 px border, 2 px padding); the widest,
+     "TBLASTN" in Inter 600, is up to 4.76 em wide (Chromium at 12 px; Firefox and WebKit 4.67).
+     With 1 px to spare and 4.8 em: 3px + 4.8em <= (100cqi - 8px) / 5 - 1px, so the size is at
+     most (100cqi - 28px) / 24 (10.8 px in a 320 px window, 12.5 px at 359 px). */
+  @media (max-width: 359px) {
+    .program-tab {
+      font-size: min(0.9em, calc((100cqi - 28px) / 24));
+    }
   }
 
   /* Larger targets for touch. */

@@ -8,29 +8,6 @@
 //! writes no newline).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:382-386, 418-431
-//! ```c++
-//! inline
-//! void CObjectOStreamAsnBinary::WriteIndefiniteLength(void)
-//! {
-//!     WriteByte(eIndefiniteLengthByte);
-//! }
-//! ...
-//! inline
-//! void CObjectOStreamAsnBinary::WriteLength(size_t length)
-//! {
-//!     if ( length <= 127 )
-//!         WriteShortLength(length);
-//!     else
-//!         WriteLongLength(length);
-//! }
-//!
-//! inline
-//! void CObjectOStreamAsnBinary::WriteEndOfContent(void)
-//! {
-//!     WriteSysTag(eNone);
-//!     WriteShortLength(0);
-//! }
-//! ```
 
 use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
@@ -95,25 +72,6 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// (`replace`).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:841-865
-    /// ```c++
-    ///     WriteLength(length - fixed);
-    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
-    ///         size_t done = 0;
-    ///         for ( size_t i = 0; i < length; ++i ) {
-    ///             char c = str[i];
-    ///             if ( !GoodVisibleChar(c) ) {
-    ///                 ...
-    ///                 if ( i > done ) {
-    ///                     WriteBytes(str.data() + done, i - done);
-    ///                 }
-    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
-    ///                 if (c != 0) {
-    ///                     WriteByte(c);
-    ///                 }
-    ///                 done = i + 1;
-    ///             }
-    ///         }
-    /// ```
     #[inline(always)]
     fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
         self.out.push(TAG_VISIBLE_STRING);
@@ -136,25 +94,6 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// length, big-endian.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-416
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteLongLength(size_t length)
-    /// {
-    ///     // long form
-    ///     size_t count;
-    ///     if ( length <= 0xffU )
-    ///         count = 1;
-    ///     else if ( length <= 0xffffU )
-    ///         count = 2;
-    ///     else if ( length <= 0xffffffU )
-    ///         count = 3;
-    ///     else {
-    ///         count = sizeof(length);
-    ///         ...
-    ///     }
-    ///     WriteByte(TByte(0x80 + count));
-    ///     WriteBytesOf(length, count);
-    /// }
-    /// ```
     fn length(&mut self, length: usize) {
         if length <= 127 {
             self.out.push(length as u8);
@@ -179,30 +118,6 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// shortest of the ranges of one, two and three bytes, else four.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteNumberValue(Int4 data)
-    /// {
-    ///     size_t length;
-    ///     if ( data >= Int4(-0x80) && data <= Int4(0x7f) ) {
-    ///         // one byte
-    ///         length = 1;
-    ///     }
-    ///     else if ( data >= Int4(-0x8000) && data <= Int4(0x7fff) ) {
-    ///         // two bytes
-    ///         length = 2;
-    ///     }
-    ///     else if ( data >= Int4(-0x800000) && data <= Int4(0x7fffff) ) {
-    ///         // three bytes
-    ///         length = 3;
-    ///     }
-    ///     else {
-    ///         // full length signed
-    ///         length = sizeof(data);
-    ///     }
-    ///     WriteShortLength(length);
-    ///     WriteBytesOf(data, length);
-    /// }
-    /// ```
     fn number(&mut self, value: i32) {
         let length = if (-0x80..=0x7f).contains(&value) {
             1
@@ -222,14 +137,6 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// indefinite length.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1346-1375
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::BeginClassMember(const CMemberId& id)
-    /// {
-    ///     ...
-    ///     WriteTag(eContextSpecific, eConstructed, id.GetTag());  // [i], explicit
-    ///     WriteIndefiniteLength();
-    /// }
-    /// ```
     /// (the tags of Seq-annot's modules are below 31, so the identifier is one byte.)
     fn context_open(&mut self, tag: u8) {
         debug_assert!(tag < 31, "a one-byte context tag");
@@ -322,17 +229,6 @@ impl Encoder for AsnBinaryEncoder<'_> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1006-1017
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteEnum(const CEnumeratedTypeValues& values,
-    ///                                         TEnumValueType value)
-    /// {
-    ///     if ( values.IsInteger() ) {
-    ///         WriteSysTag(eInteger);
-    ///     }
-    ///     ...
-    ///     WriteNumberValue(value);
-    /// }
-    /// ```
     fn named_int(&mut self, _name: &str, value: i32) {
         self.out.push(TAG_INTEGER);
         self.number(value);
@@ -360,24 +256,8 @@ impl Encoder for AsnBinaryEncoder<'_> {
     /// digits of `DoubleToStringPosix`. (NCBI marks a NaN or an infinity by another form
     /// byte, which LOSAT does not write: BLAST reports have none.)
     ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-814
-    /// ```c++
-    ///     WriteLength(width + 1);
-    ///     if (width) {
-    ///         WriteByte(type);
-    ///         WriteBytes(buffer, width);
-    ///     } else {
-    ///         WriteByte(type);
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-816
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1704-1708
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::BeginBytes(const ByteBlock& block)
-    /// {
-    ///     WriteSysTag(eOctetString);
-    ///     WriteLength(block.GetLength());
-    /// }
-    /// ```
     fn octets(&mut self, value: &[u8]) {
         self.out.push(TAG_OCTET_STRING);
         self.length(value.len());
@@ -385,15 +265,6 @@ impl Encoder for AsnBinaryEncoder<'_> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:874-879
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteStringStore(const string& str)
-    /// {
-    ///     WriteShortTag(eApplication, ePrimitive, eStringStore);
-    ///     size_t length = str.size();
-    ///     WriteLength(length);
-    ///     WriteBytes(str.data(), length);
-    /// }
-    /// ```
     fn string_store(&mut self, value: &[u8]) {
         self.out.push(TAG_STRING_STORE);
         self.length(value.len());
@@ -401,13 +272,6 @@ impl Encoder for AsnBinaryEncoder<'_> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:433-437
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteNull(void)
-    /// {
-    ///     WriteSysTag(eNull);
-    ///     WriteShortLength(0);
-    /// }
-    /// ```
     fn null(&mut self) {
         self.out.extend_from_slice(&[TAG_NULL, 0]);
     }

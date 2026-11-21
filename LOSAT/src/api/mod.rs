@@ -1,7 +1,7 @@
 //! The library API: a search of FASTA records in memory, with the command line's options and
 //! the command line's output bytes.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
 //! is `docs/losat_library_surface_plan.md`.
 //!
 //! # Use
@@ -10,6 +10,7 @@
 //! use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 //!
 //! # fn main() -> Result<(), losat::api::Error> {
+//! // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 //! let query = read_fasta(Program::Blastp, Role::Query, b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let subject = read_fasta(Program::Blastp, Role::Subject, b">s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "2"])?;
@@ -64,7 +65,8 @@
 //!   that `-outfmt` alone, with the inputs' names where the command line shows its file names.
 //!   [`Report`] tells where each HSP lies in its bytes. The HSP records ([`HspRecord`]) are the
 //!   engine's values: each number that names a `-outfmt` column is the column's value for the
-//!   HSP's row, not rounded. Text to show is read from a report, never formatted here.
+//!   HSP's row, not rounded, and each id the column's bytes ([`Id`]). Text to show is read
+//!   from a report, never formatted here.
 //! - An E-value is a value of the whole search, not of the pair: the same pair has another
 //!   E-value among other subjects. [`QueryStats`] holds what fixed it, and `-dbsize` or
 //!   `-searchsp` fix it across searches.
@@ -126,12 +128,20 @@
 //! - A PSSM query of psiblast and tblastn (the command line's `-in_pssm`) is an input:
 //!   [`Inputs::pssm`] and [`Inputs::pssm_database`] name the file, which the search reads; its one
 //!   query is the PSSM's sequence, query 0 of the results, in one batch of [`run_batches`].
+//! - A query alignment of psiblast (the command line's `-in_msa`) is an input the same way:
+//!   [`Inputs::msa`] and [`Inputs::msa_database`] name the alignment file, which the search reads
+//!   as the command line reads it, errors included; its one query is the alignment's master,
+//!   query 0 of the results, in one batch of [`run_batches`]. `-msa_master_idx` and
+//!   `-ignore_msa_master` are options of the argv ([`validate`] takes them; a search of other
+//!   inputs fails with the parser's message, as the command line does without `-in_msa`).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
-//!   protein) and [`run_convert2blastmask`] the converter of lower case masks: the command
-//!   line's words, with the caller's reader and writers for its standard streams.
+//!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions,
+//!   [`run_convert2blastmask`] the converter of lower case masks and [`run_makembindex`] the
+//!   writer of megablast indices: the command line's words, with the caller's reader and writers
+//!   for its standard streams.
 //!
 //! # Items
 //!
@@ -141,17 +151,18 @@
 //!   [`Inputs`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
-//! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
-//!   [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
+//! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
+//!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_convert2blastmask`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
 mod batches;
 mod describe;
 mod error;
-mod input;
+mod id;
+pub(crate) mod input;
 mod parts;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
 // and the routing of its outputs. It speaks the engine's types, so it stays outside the API.
@@ -167,6 +178,7 @@ pub use crate::record::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
+pub use id::Id;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
 pub use run::{
@@ -175,21 +187,11 @@ pub use run::{
 pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{
-    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_segmasker,
+    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
+    run_segmasker, run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57
-// ```c++
-// /// Keeps track of the version of the BLAST engine in the NCBI C++ toolkit.
-// /// Used to perform run-time version checks
-// ///
-// /// For reference, please refer to http://apr.apache.org/versioning.html
-// class CBlastVersion : public CVersionInfo {
-// public:
-//     CBlastVersion()
-//         : CVersionInfo(kBlastMajorVersion,
-//                        kBlastMinorVersion,
-// ```
 /// The version of the engine: what `losat --version` prints after the name.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

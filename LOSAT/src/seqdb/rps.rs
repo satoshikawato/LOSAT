@@ -10,16 +10,6 @@
 //! which NCBI would read outside its buffers is LOSAT's refusal (`RpsOpenError::Refused`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:549-575
-//! ```c++
-//!     if (flags & fAuxInfoFile) {
-//!         m_AuxFile.Reset(new CRpsAuxFile(path));
-//!         ...
-//!     if (flags & fLookupTableFile) {
-//!         m_LutFile.Reset(new CRpsLookupTblFile(path));
-//!         ...
-//!     if (flags & fPssmFile) {
-//!         m_PssmFile.Reset(new CRpsPssmFile(path));
-//! ```
 
 use std::path::{Path, PathBuf};
 
@@ -28,44 +18,19 @@ use crate::utils::mapped_file::MappedFile;
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:43-44
-/// ```c
-/// #define RPS_MAGIC_NUM 0x1e16    /**< RPS blast version number */
-/// #define RPS_MAGIC_NUM_28 0x1e17    /**< Version number for 28-letter alphabet */
-/// ```
 pub(crate) const RPS_MAGIC_NUM: i32 = 0x1e16;
 /// `RPS_MAGIC_NUM_28`: the files of the 28-letter alphabet (makeprofiledb 2.17 writes these).
 pub(crate) const RPS_MAGIC_NUM_28: i32 = 0x1e17;
 
 /// `RPS_HITS_PER_CELL`.
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:330-344
-/// ```c
-/// #define RPS_HITS_PER_CELL 3 /**< maximum number of hits in an RPS backbone
-///                                  cell; ...
-/// typedef struct RPSBackboneCell {
-///     Int4 num_used;                   /**< number of hits in this cell */
-///     Int4 entries[RPS_HITS_PER_CELL]; /**< if the number of hits in this cell
-///                                           is RPS_HITS_PER_CELL or less, all
-///                                           hits go into this array. Otherwise,
-///                                           the first hit in the list goes into
-///                                           element 0 of the array, and element 1
-///                                           contains the byte offset into the
-///                                           overflow array where the list of the
-///                                           remaining hits begins */
-/// } RPSBackboneCell;
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:330-347
 pub(crate) const RPS_HITS_PER_CELL: i32 = 3;
 
 /// The word size of the prebuilt table (`BLAST_WORDSIZE_PROT`) and its letters' bits
 /// (`ilog2(alphabet_size) + 1`, 5 for 26 and 28 letters): `backbone_size = 1 << 15`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:148-153
-/// ```c
-///     lookup->wordsize = BLAST_WORDSIZE_PROT;
-///     lookup->charsize = ilog2(lookup->alphabet_size) + 1;
-///     lookup->backbone_size = 1 << (lookup->wordsize * lookup->charsize);
-///     lookup->mask = lookup->backbone_size - 1;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:148-154
 pub(crate) const RPS_WORDSIZE: usize = 3;
 pub(crate) const RPS_CHARSIZE: usize = 5;
 pub(crate) const RPS_BACKBONE_SIZE: usize = 1 << (RPS_WORDSIZE * RPS_CHARSIZE);
@@ -74,11 +39,6 @@ pub(crate) const RPS_BACKBONE_SIZE: usize = 1 << (RPS_WORDSIZE * RPS_CHARSIZE);
 /// `2^RPS_BUCKET_BITS`: a position is its bucket's index times 2,048 plus a value below 2,048.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:349-351
-/// ```c
-/// /** The number of regions into which the concatenated RPS blast
-///     database is split via bucket sorting */
-/// #define RPS_BUCKET_SIZE 2048
-/// ```
 pub(crate) const RPS_BUCKET_SIZE: usize = 1 << RPS_BUCKET_BITS;
 pub(crate) const RPS_BUCKET_BITS: u32 = 11;
 
@@ -150,24 +110,6 @@ impl From<RpsOpenError> for RpsVolumeFault {
 /// The contents of the `.aux` file.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:193-225
-/// ```c++
-///     // Read the data
-///     input >> matrix;
-///     input >> gap_open;
-///     input >> gap_extend;
-///     input >> ignore_me_d; // corresponds to BlastRPSAuxInfo::ungapped_k
-///     input >> ignore_me_d; // corresponds to BlastRPSAuxInfo::ungapped_h
-///     input >> ignore_me_i; // corresponds to BlastRPSAuxInfo::max_db_seq_length
-///     input >> ignore_me_i; // corresponds to BlastRPSAuxInfo::db_length
-///     input >> scale_factor;
-///     while (input) {
-///         int seq_size;   // unused value
-///         double k;
-///         input >> seq_size;
-///         input >> k;
-///         karlinK.push_back(k);
-///     }
-/// ```
 /// The loop pushes one more K after the last pair (the extraction that fails at the end of the
 /// file); it is never indexed and not kept here.
 #[derive(Debug, Clone, PartialEq)]
@@ -456,26 +398,7 @@ impl RpsVolumeFiles {
     /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:180-188
-    /// ```c++
-    ///     const string file2open(filename_no_extn + kExtension);
-    ///     CNcbiIfstream auxfile(file2open.c_str());
-    ///     if (auxfile.bad() || auxfile.fail()) {
-    ///         NCBI_THROW(CBlastException, eRpsInit,
-    ///                    "Cannot open RPS-BLAST auxiliary file: " + file2open);
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:296-306
-    /// ```c++
-    ///     m_Data = (BlastRPSLookupFileHeader*) m_MmappedFile->GetPtr();
-    ///     if (m_Data->magic_number != RPS_MAGIC_NUM &&
-    ///         m_Data->magic_number != RPS_MAGIC_NUM_28) {
-    ///         m_Data = NULL;
-    ///         NCBI_THROW(CBlastException, eRpsInit,
-    ///                "RPS BLAST profile file (" + filename_no_extn + kExtension +
-    ///                ") is either corrupt or constructed for an incompatible "
-    ///                "architecture");
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:294-306
     /// (The `.rps` file's check, rps_aux.cpp:338-348, is the same.)
     /// `program` is the name in LOSAT's refusals; an `.aux` without a token is
     /// `RpsVolumeFault::NoMatrix`, NCBI's engine error of each query (review A of PS12a, N2).
@@ -566,13 +489,7 @@ impl RpsVolumeFiles {
             ))
         };
         let aux_text = std::str::from_utf8(&aux_text).ok();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:205-208
-        // ```c++
-        //     // Read the data
-        //     input >> matrix;
-        //     input >> gap_open;
-        //     input >> gap_extend;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:205-209
         // An `.aux` of no token leaves the matrix name empty (the stream fails without throwing):
         // the files open, and the batch's score blocks fail (`RpsVolumeFault::NoMatrix`).
         if aux_text.is_some_and(|text| text.split_ascii_whitespace().next().is_none()) {
@@ -581,15 +498,7 @@ impl RpsVolumeFiles {
         let aux = aux_text
             .and_then(parse_aux)
             .ok_or_else(|| refused(".aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K)"))?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:139-146
-        // ```c
-        //     /* set the alphabet size. Use hardwired numbers, since we cannot rely on
-        //        #define'd constants matching up to the sizes implicit in disk files */
-        //     if (lookup_header->magic_number == RPS_MAGIC_NUM)
-        //         lookup->alphabet_size = 26;
-        //     else
-        //         lookup->alphabet_size = 28;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:139-149
         if loo_magic != rps_magic {
             return Err(
                 refused(".loo and .rps files are of different alphabets (magic numbers)").into(),
@@ -652,14 +561,6 @@ impl RpsVolumeFiles {
             return Err(refused(".aux file has a K value that is not positive").into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:154-160
-        // ```c
-        //     lookup->rps_backbone = (RPSBackboneCell *) ((Uint1 *) lookup_header +
-        //                                                 lookup_header->
-        //                                                 start_of_backbone);
-        //     lookup->overflow =
-        //         (Int4 *) ((Uint1 *) lookup_header + lookup_header->start_of_backbone +
-        //                   (lookup->backbone_size + 1) * sizeof(RPSBackboneCell));
-        // ```
         let header = loo
             .i32s(0, LOO_HEADER_BYTES / 4)
             .ok_or_else(|| empty(".loo"))?;
@@ -701,38 +602,24 @@ impl RpsVolumeFiles {
 
     /// Opens the volume's `.freq` file (the frequency ratios of the composition-based
     /// statistics), after the other files as NCBI does. A missing file, an empty one or a wrong
-    /// magic number is NCBI's error (the file's own text is replaced by the message below);
+    /// magic number is NCBI's error (the file's own text is replaced by the message below, which
+    /// names `rps_dbname`: `database_name`, the `-db` value of a database of one volume, else the
+    /// volume's path; `RpsVolumeSetup::with_database`);
     /// a file shorter than the rows that the `.rps` offsets name (NCBI reads past it) is
     /// LOSAT's refusal.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:568-584
-    /// ```c++
-    ///     if (flags & fFreqRatiosFile) {
-    ///         try {
-    ///             // read frequency ratios data
-    ///             m_FreqRatiosFile.Reset(new CRpsFreqRatiosFile(path));
-    ///         } catch (const CBlastException& e) {
-    ///         	string msg = rps_dbname + " contains no frequency ratios needed for composition-based statistics.\n" \
-    ///         			     "Please disable composition-based statistics when searching against " + rps_dbname + ".";
-    ///             NCBI_RETHROW(e, CBlastException, eRpsInit, msg);
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:594-601
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:485-499
-    /// ```c++
-    ///     m_Data = (BlastRPSFreqRatiosHeader *) m_MmappedFile->GetPtr();
-    ///     if (m_Data->magic_number != RPS_MAGIC_NUM &&
-    ///             m_Data->magic_number != RPS_MAGIC_NUM_28) {
-    ///             m_Data = NULL;
-    ///             NCBI_THROW(CBlastException, eRpsInit,
-    ///                    "RPS BLAST freq ratios file (" + filename_no_extn + kExtension +
-    ///                    ") is either corrupt or constructed for an incompatible "
-    ///                    "architecture");
-    /// ```
     /// The rows start after the header and `num_profiles + 1` offsets, with the profile count
     /// of the `.rps` file (`freq_header->start_offsets + num_profiles + 1`,
     /// blast_traceback.c:956-957), and their stride is the `.rps` alphabet.
-    pub(crate) fn open_freq(&mut self, base: &Path) -> Result<(), RpsOpenError> {
-        let shown = canonical_volume_path(base);
+    pub(crate) fn open_freq(
+        &mut self,
+        base: &Path,
+        program: &str,
+        database_name: Option<&str>,
+    ) -> Result<(), RpsOpenError> {
+        let shown = database_name.map_or_else(|| canonical_volume_path(base), str::to_string);
         let missing = || {
             RpsOpenError::Ncbi(format!(
                 "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
@@ -753,7 +640,7 @@ impl RpsVolumeFiles {
             .and_then(|bytes| bytes.checked_add(self.rows_start()));
         if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
             return Err(RpsOpenError::Refused(
-                "a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST".to_string(),
+                format!("a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"),
             ));
         }
         self.freq = Some(freq);
@@ -806,20 +693,7 @@ impl RpsVolumeFiles {
     /// `.freq` reads rows two integers early, as NCBI does).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:985-1006
-    /// ```c
-    ///    for (ic=0; ic<ncol; ic++) {
-    ///        for (ir=0; ir<psi_matrix->pssm->nrows; ir++) {
-    ///            psi_matrix->freq_ratios[ic][ir] = (double) freq[ic][ir]/ (double) FREQ_RATIO_SCALE;
-    ///        }
-    ///        for (;  ir<BLASTAA_SIZE; ir++) {
-    ///            psi_matrix->freq_ratios[ic][ir] = 0.0;
-    ///        }
-    ///    }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:91
-    /// ```c
-    /// #define FREQ_RATIO_SCALE 1000000000
-    /// ```
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:83
     pub(crate) fn freq_ratios(
         &self,
         start: usize,
@@ -859,17 +733,6 @@ impl RpsVolumeFiles {
     /// `check_hits` is not set).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
-    /// ```c
-    ///     pv = lookup->pv = (PV_ARRAY_TYPE *) calloc(
-    ///                             (lookup->backbone_size >> PV_ARRAY_BTS),
-    ///                             sizeof(PV_ARRAY_TYPE));
-    ///
-    ///     for (i = 0; i < lookup->backbone_size; i++) {
-    ///         if (lookup->rps_backbone[i].num_used > 0) {
-    ///             PV_SET(pv, i, PV_ARRAY_BTS);
-    ///         }
-    ///     }
-    /// ```
     fn check_cells(&mut self, num_rows: usize, check_hits: bool) -> Result<bool, String> {
         let cells = self.cells().expect("checked by the caller");
         let overflow = self.overflow().expect("checked by the caller");
@@ -940,6 +803,32 @@ impl RpsVolumeFiles {
         8 + 4 * (self.num_profiles + 1)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:184-190 (cited at
+    // `rps_search::RpsRows`)
+    /// NCBI's row after the concatenated rows (`rps_pssm[num_pssm_rows]`, a pointer to the bytes
+    /// that follow the last row in the mapped `.rps` file, at the row stride of the alphabet) as
+    /// each letter reads it: the file's own bytes there, then the zeros of its last memory page
+    /// (`file::mapped_length`), `None` for a letter whose four bytes lie past that page (NCBI's
+    /// read of them faults, SIGBUS: the file ends on a page boundary). The ungapped extensions
+    /// read it where the unit's concatenated length `Lc` is above the rows
+    /// (`rps_search::RpsPastRows`).
+    pub(crate) fn row_after_rows(&self) -> [Option<i32>; 28] {
+        let bytes = self.rps.bytes();
+        let mapped = super::file::mapped_length(bytes.len() as u64);
+        let num_rows = self.offsets()[self.num_profiles] as usize;
+        let start = (self.rows_start() + num_rows * self.alphabet * 4) as u64;
+        std::array::from_fn(|letter| {
+            let at = start + 4 * letter as u64;
+            (at + 4 <= mapped).then(|| {
+                let mut word = [0u8; 4];
+                for (k, byte) in word.iter_mut().enumerate() {
+                    *byte = bytes.get((at as usize) + k).copied().unwrap_or(0);
+                }
+                i32::from_ne_bytes(word)
+            })
+        })
+    }
+
     /// The `num_profiles + 1` row offsets of the profiles (`start_offsets`).
     pub(crate) fn offsets(&self) -> &[i32] {
         self.rps
@@ -987,447 +876,5 @@ impl RpsVolumeFiles {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A temporary directory of this test (tests of one binary run in parallel).
-    fn scratch(name: &str) -> PathBuf {
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-rps-{name}-{}",
-            crate::utils::test_dir::process_id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn words(values: &[i32]) -> Vec<u8> {
-        values.iter().flat_map(|v| v.to_le_bytes()).collect()
-    }
-
-    /// A volume of two profiles (lengths 3 and 2), with `columns` columns, whose table holds
-    /// the word ending at row 2 in a cell and three words in one overflow run.
-    pub(crate) fn write_volume(dir: &Path, columns: usize, aux: &str) -> PathBuf {
-        let base = dir.join("v");
-        let magic = if columns == 26 {
-            RPS_MAGIC_NUM
-        } else {
-            RPS_MAGIC_NUM_28
-        };
-        let offsets = [0, 4, 7];
-        let mut rps = vec![magic, 2];
-        rps.extend_from_slice(&offsets);
-        for row in 0..7 {
-            for column in 0..columns {
-                rps.push((row * 100 + column) as i32);
-            }
-        }
-        std::fs::write(base.with_extension("rps"), words(&rps)).unwrap();
-        let mut loo = vec![magic, 1, 0, 0, 0, 0, 0, 0, 40, 0];
-        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-        cells[5] = [1, 2, 0, 0];
-        cells[9] = [4, 2, 4, 0];
-        for cell in &cells {
-            loo.extend_from_slice(cell);
-        }
-        loo.extend_from_slice(&[99, 3, 5, 6]);
-        std::fs::write(base.with_extension("loo"), words(&loo)).unwrap();
-        std::fs::write(base.with_extension("aux"), aux).unwrap();
-        base
-    }
-
-    const AUX: &str =
-        "BLOSUM62\n11\n1\n0.000000e+00\n0.000000e+00\n0\n0\n100.000000\n3\n4.1e-02\n2\n3.9e-02\n";
-
-    #[test]
-    fn the_aux_text_is_read_as_the_streams_do() {
-        let aux = parse_aux(AUX).unwrap();
-        assert_eq!(aux.matrix, "BLOSUM62");
-        assert_eq!((aux.gap_open, aux.gap_extend, aux.scale), (11, 1, 100.0));
-        assert_eq!(aux.karlin_k, vec![0.041, 0.039]);
-        // Any white space separates the tokens.
-        assert_eq!(parse_aux(&AUX.replace('\n', " \t")).unwrap(), aux);
-        // A pair without its K, and a token of the wrong kind.
-        assert!(parse_aux(&format!("{AUX}7\n")).is_none());
-        assert!(parse_aux(&AUX.replace("\n11\n", "\neleven\n")).is_none());
-    }
-
-    #[test]
-    fn a_volume_of_28_columns_is_viewed_in_place() {
-        let dir = scratch("v28");
-        let base = write_volume(&dir, 28, AUX);
-        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        assert_eq!(files.alphabet, 28);
-        assert_eq!(files.offsets(), &[0, 4, 7]);
-        assert_eq!(files.rows().len(), 7);
-        assert_eq!(files.rows()[5][27], 527);
-        assert_eq!(files.cells().unwrap()[9], [4, 2, 4, 0]);
-        assert_eq!(files.overflow().unwrap(), &[99, 3, 5, 6]);
-        assert_eq!(files.pv()[0], (1 << 5) | (1 << 9));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_volume_of_26_columns_reads_the_next_rows_first_columns() {
-        let dir = scratch("v26");
-        let base = write_volume(&dir, 26, AUX);
-        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        assert_eq!(files.alphabet, 26);
-        let rows = files.rows();
-        assert_eq!(rows[2][25], 225);
-        // Letters 26 and 27 read the next row's columns 0 and 1 (stride 26).
-        assert_eq!((rows[2][26], rows[2][27]), (300, 301));
-        assert_eq!((rows[6][26], rows[6][27]), (0, 0));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A `.freq` file of `columns` columns for the two profiles of `write_volume` (rows 0 to
-    /// 6): the ratio of row `r`, column `c` is `r * 1000 + c` over 10^9.
-    fn write_freq(base: &Path, columns: usize) {
-        let magic = if columns == 26 {
-            RPS_MAGIC_NUM
-        } else {
-            RPS_MAGIC_NUM_28
-        };
-        let mut freq = vec![magic, 2, 0, 4, 7];
-        for row in 0..7 {
-            for column in 0..columns {
-                freq.push((row * 1000 + column) as i32);
-            }
-        }
-        std::fs::write(base.with_extension("freq"), words(&freq)).unwrap();
-    }
-
-    #[test]
-    fn the_freq_rows_have_the_rps_alphabets_stride() {
-        let dir = scratch("freq");
-        let mut ratios = Vec::new();
-        let mut bytes = Vec::new();
-        // 28 columns on both sides: rows as written, ÷ 10^9.
-        let base = write_volume(&dir, 28, AUX);
-        write_freq(&base, 28);
-        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
-        files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
-        assert_eq!(ratios.len(), 2);
-        assert_eq!(ratios[0][0], 4000.0 / 1e9);
-        assert_eq!(ratios[1][27], 5027.0 / 1e9);
-        // The next volume is written over these files. (Windows does not write a mapped file.)
-        drop(files);
-        // A 26-column `.rps` with a 28-column `.freq` reads rows two integers early: row r
-        // starts at integer 26 r of the rows (NCBI's drift), and columns 26 and 27 are 0.0.
-        let base = write_volume(&dir, 26, AUX);
-        write_freq(&base, 28);
-        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
-        files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
-        let flat: Vec<i32> = (0..7)
-            .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
-            .collect();
-        assert_eq!(ratios[0][0], f64::from(flat[52]) / 1e9);
-        assert_eq!(ratios[0][25], f64::from(flat[77]) / 1e9);
-        assert_eq!((ratios[0][26], ratios[0][27]), (0.0, 0.0));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
-        let dir = scratch("bounds");
-        let base = write_volume(&dir, 28, AUX);
-        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        // Row r holds r * 100 + c: the maximum of a row is r * 100 + 27. Profile 0 has rows
-        // 0..=3 (the last is its sentinel row), profile 1 rows 4..=6.
-        let bounds = files.profile_score_bounds(&base).unwrap();
-        assert_eq!(bounds, vec![27 + 127 + 227 + 327, 427 + 527 + 627]);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
-        let dir = scratch("freqerr");
-        let base = write_volume(&dir, 28, AUX);
-        let shown = canonical_volume_path(&base);
-        let text = format!(
-            "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
-        );
-        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        assert_eq!(
-            files.open_freq(&base).err(),
-            Some(RpsOpenError::Ncbi(text.clone()))
-        );
-        std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
-        assert_eq!(files.open_freq(&base).err(), Some(RpsOpenError::Ncbi(text)));
-        write_freq(&base, 28);
-        let freq = std::fs::read(base.with_extension("freq")).unwrap();
-        std::fs::write(base.with_extension("freq"), &freq[..freq.len() - 4]).unwrap();
-        assert!(matches!(
-            files.open_freq(&base),
-            Err(RpsOpenError::Refused(_))
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ncbis_errors_come_in_ncbis_file_order() {
-        let dir = scratch("errors");
-        let base = write_volume(&dir, 28, AUX);
-        let shown = canonical_volume_path(&base);
-        let open = || RpsVolumeFiles::open(&base, &[3, 2]).err();
-        std::fs::write(base.with_extension("rps"), words(&[7, 2])).unwrap();
-        assert_eq!(
-            open(),
-            Some(RpsOpenError::Ncbi(format!(
-                "RPS BLAST profile file ({shown}.rps) is either corrupt or constructed for an incompatible architecture"
-            )))
-        );
-        std::fs::remove_file(base.with_extension("loo")).unwrap();
-        assert_eq!(
-            open(),
-            Some(RpsOpenError::Ncbi(format!(
-                "Cannot memory map RPS-BLAST database file: {shown}.loo"
-            )))
-        );
-        std::fs::remove_file(base.with_extension("aux")).unwrap();
-        assert_eq!(
-            open(),
-            Some(RpsOpenError::Ncbi(format!(
-                "Cannot open RPS-BLAST auxiliary file: {shown}.aux"
-            )))
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn inconsistent_files_are_refused() {
-        let dir = scratch("refused");
-        let base = write_volume(&dir, 28, AUX);
-        // The consensus lengths of the sequence part differ.
-        assert!(matches!(
-            RpsVolumeFiles::open(&base, &[3, 3]),
-            Err(RpsOpenError::Refused(_))
-        ));
-        // Too few K values.
-        std::fs::write(base.with_extension("aux"), AUX.replace("2\n3.9e-02\n", "")).unwrap();
-        assert!(matches!(
-            RpsVolumeFiles::open(&base, &[3, 2]),
-            Err(RpsOpenError::Refused(_))
-        ));
-        // A .rps cut inside its rows (NCBI crashes).
-        let base = write_volume(&dir, 28, AUX);
-        let rps = std::fs::read(base.with_extension("rps")).unwrap();
-        std::fs::write(base.with_extension("rps"), &rps[..rps.len() - 4]).unwrap();
-        assert!(matches!(
-            RpsVolumeFiles::open(&base, &[3, 2]),
-            Err(RpsOpenError::Refused(_))
-        ));
-        // Bytes after the last row are not read (NCBI searches the file).
-        let mut longer = rps.clone();
-        longer.extend_from_slice(&[0x7f; 112]);
-        std::fs::write(base.with_extension("rps"), &longer).unwrap();
-        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        assert_eq!(files.rows().len(), 7);
-        // (Windows does not write a mapped file.)
-        drop(files);
-        // An empty .rps (NCBI crashes).
-        let base = write_volume(&dir, 28, AUX);
-        std::fs::write(base.with_extension("rps"), b"").unwrap();
-        assert!(matches!(
-            RpsVolumeFiles::open(&base, &[3, 2]),
-            Err(RpsOpenError::Refused(_))
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // D6 of PS12s: the files of a volume checked once in the run open again without LOSAT's check of
-    // the table's hits (`open_checked`): the presence bits are the same, and a hit outside the
-    // rows, which `open_for` refuses, is not read again.
-    #[test]
-    fn files_checked_in_the_run_open_without_the_check_of_the_hits() {
-        let dir = scratch("checked");
-        let base = write_volume(&dir, 28, AUX);
-        let checked = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        let reopened = RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST", false).unwrap();
-        assert_eq!(reopened.pv(), checked.pv());
-        assert_eq!(reopened.rows(), checked.rows());
-        drop((checked, reopened));
-        // The hit of word 5 at row 99 of 7 (cell 5's first entry, byte 40 + 5 * 16 + 4).
-        let mut loo = std::fs::read(base.with_extension("loo")).unwrap();
-        loo[124..128].copy_from_slice(&99i32.to_le_bytes());
-        std::fs::write(base.with_extension("loo"), &loo).unwrap();
-        assert!(matches!(
-            RpsVolumeFiles::open(&base, &[3, 2]),
-            Err(RpsOpenError::Refused(text)) if text.contains(".loo word 5 names a position")
-        ));
-        let reopened = RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST", false).unwrap();
-        assert_ne!(reopened.pv()[0] & (1 << 5), 0);
-        drop(reopened);
-        // NCBI's own errors of the files stay: a missing .loo.
-        std::fs::remove_file(base.with_extension("loo")).unwrap();
-        assert!(matches!(
-            RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST", false),
-            Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(_)))
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A volume of two profiles of 140,000 and 100 letters (140,102 rows: 69 buckets, so two groups
-    /// of `RPS_GROUP_BUCKETS`) whose table holds the given cells' hits (word, hits in the cell's
-    /// order), the long lists in the overflow array.
-    fn write_wide_volume(dir: &Path, cell_hits: &[(usize, &[i32])]) -> PathBuf {
-        let base = dir.join("wide");
-        let (a, b) = (140_000usize, 100usize);
-        let mut rps = vec![RPS_MAGIC_NUM_28, 2, 0, (a + 1) as i32, (a + b + 2) as i32];
-        rps.extend(std::iter::repeat_n(3i32, (a + b + 2) * 28));
-        std::fs::write(base.with_extension("rps"), words(&rps)).unwrap();
-        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-        let mut overflow = Vec::new();
-        for &(word, hits) in cell_hits {
-            let mut cell = [hits.len() as i32, 0, 0, 0];
-            if hits.len() as i32 <= RPS_HITS_PER_CELL {
-                cell[1..=hits.len()].copy_from_slice(hits);
-            } else {
-                cell[1] = hits[0];
-                cell[2] = (overflow.len() * 4) as i32;
-                overflow.extend_from_slice(&hits[1..]);
-            }
-            cells[word] = cell;
-        }
-        let mut loo = vec![RPS_MAGIC_NUM_28, 1, 0, 0, 0, 0, 0, 0, 40, 0];
-        loo.extend(cells.iter().flatten());
-        loo.extend(overflow);
-        std::fs::write(base.with_extension("loo"), words(&loo)).unwrap();
-        std::fs::write(base.with_extension("aux"), AUX).unwrap();
-        base
-    }
-
-    // PS12m: the walk of `check_cells` (`hits_in_rows_and_groups`) and the regroup's test
-    // (`list_is_grouped`) are one predicate: they agree on random cells, ordered and not, in
-    // a cell's head and run, with entries in and out of the rows.
-    #[test]
-    fn the_check_walk_and_the_regroup_test_agree_on_grouped_cells() {
-        let mut state = 12345u64;
-        let mut next = move || {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (state >> 33) as u32
-        };
-        let (mut grouped, mut ungrouped) = (0, 0);
-        for case in 0..4_000 {
-            let len = 1 + next() as usize % 40;
-            let rows = 140_000u32;
-            let mut list: Vec<i32> = (0..len).map(|_| 2 + (next() % (rows - 2)) as i32).collect();
-            if case % 3 != 0 {
-                // Ascending by group (what makeprofiledb writes), the order inside a group free.
-                list.sort_by_key(|&entry| entry_group(entry, RPS_GROUP_BUCKETS));
-            }
-            if case % 11 == 0 {
-                list[len / 2] = 1; // a hit outside the rows
-            }
-            let split = 1.min(len);
-            let (head, run) = list.split_at(split);
-            let mut walk_ungrouped = false;
-            let in_rows = hits_in_rows_and_groups(head, run, rows - 2, &mut walk_ungrouped);
-            assert_eq!(in_rows, list.iter().all(|&e| (2..rows as i32).contains(&e)));
-            assert_eq!(
-                !walk_ungrouped,
-                list_is_grouped(head, run, RPS_GROUP_BUCKETS),
-                "{list:?}"
-            );
-            if walk_ungrouped {
-                ungrouped += 1;
-            } else {
-                grouped += 1;
-            }
-        }
-        assert!(grouped > 500 && ungrouped > 500, "{grouped} {ungrouped}");
-    }
-
-    // PS12m: the groups of a cell's hits (entry - 2, per 2,048 rows, per 64 buckets) are
-    // non-decreasing in every table that makeprofiledb writes; a table that lists a cell otherwise
-    // is regrouped by a stable sort of the cell (the hits of one group keep their order), the copy
-    // read in place of the file's cells and overflow array; the other cells, and the cells whose
-    // buckets are unordered inside a group, are not touched, and grouped files are not copied.
-    #[test]
-    fn cells_not_in_groups_of_buckets_are_regrouped_stably() {
-        let dir = scratch("regroup");
-        const G1: i32 = 2 + 65 * 2048; // the first entry of bucket 65: group 1
-                                       // Group 1 is entries from 2 + 64 * 2048 = 131,074.
-        let drop_in_cell = [G1 + 5, 10];
-        let drop_after_first = [G1 + 5, 10, 20, G1 + 7]; // the drop is between the cell and the run
-        let drop_in_run = [10, G1, 20, G1 + 9, 30];
-        let grouped = [10, 20, G1];
-        let unordered_in_group = [3000, 10, 2500, 40_000, G1, G1 + 1]; // buckets drop, groups do not
-        let cells: [(usize, &[i32]); 5] = [
-            (5, &drop_in_cell),
-            (9, &drop_in_run),
-            (11, &grouped),
-            (13, &unordered_in_group),
-            (15, &drop_after_first),
-        ];
-        let base = write_wide_volume(&dir, &cells);
-        let lengths = [140_000, 100];
-        let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
-        assert!(files.is_regrouped());
-        let (cells, overflow) = (files.cells().unwrap(), files.overflow().unwrap());
-        assert_eq!(cells[5], [2, 10, G1 + 5, 0]);
-        // The long list: 10 20 30 (group 0), then G1 and G1 + 9 in their order.
-        assert_eq!(&cells[9][..2], &[5, 10]);
-        let (head, run) = cell_hits(&cells[9], overflow).unwrap();
-        assert_eq!((head, run), (&[10][..], &[20, 30, G1, G1 + 9][..]));
-        assert_eq!(cells[11], [3, 10, 20, G1]);
-        // Unordered buckets inside group 0 stay as they are.
-        let (head, run) = cell_hits(&cells[13], overflow).unwrap();
-        assert_eq!(
-            (head, run),
-            (&[3000][..], &[10, 2500, 40_000, G1, G1 + 1][..])
-        );
-        // The drop between the cell's first hit and the run's first.
-        let (head, run) = cell_hits(&cells[15], overflow).unwrap();
-        assert_eq!((head, run), (&[10][..], &[20, G1 + 5, G1 + 7][..]));
-        // The reopening of a file checked in the run: regrouped when told so, as it was.
-        let reopened = RpsVolumeFiles::open_checked(&base, &lengths, "RPSBLAST", true).unwrap();
-        assert_eq!(reopened.cells(), files.cells());
-        assert_eq!(reopened.overflow(), files.overflow());
-        let raw = RpsVolumeFiles::open_checked(&base, &lengths, "RPSBLAST", false).unwrap();
-        assert!(!raw.is_regrouped());
-        assert_eq!(raw.cells().unwrap()[5], [2, G1 + 5, 10, 0]);
-        drop((files, reopened, raw));
-        // A table whose cells are grouped (a bucket drop inside a group is not a drop) is read in place.
-        let cells: [(usize, &[i32]); 2] = [
-            (9, &[10, 20, 3000, 2500, 40_000]),
-            (13, &unordered_in_group),
-        ];
-        let base = write_wide_volume(&dir, &cells);
-        let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
-        assert!(!files.is_regrouped());
-        assert_eq!(files.cells().unwrap()[9][1], 10);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // The sort of one cell: stable, so a group's hits keep the order they had, and idempotent on
-    // a grouped list; the regrouping works at any group size.
-    #[test]
-    fn a_cells_hits_are_sorted_by_group_and_keep_their_order_inside_one() {
-        // Buckets (entry - 2) / 2048: 2, 0, 1, 0, 2, 1, 0.
-        let original = [5000, 12, 2100, 30, 5001, 2050, 20];
-        for (group_buckets, sorted) in [
-            (1, [12, 30, 20, 2100, 2050, 5000, 5001]),
-            (2, [12, 2100, 30, 2050, 20, 5000, 5001]),
-        ] {
-            let mut hits = original;
-            assert!(!list_is_grouped(&hits[..1], &hits[1..], group_buckets));
-            regroup_cell(&mut hits, group_buckets);
-            assert_eq!(hits, sorted, "{group_buckets} buckets a group");
-            assert!(list_is_grouped(&hits[..1], &hits[1..], group_buckets));
-            let again = hits;
-            regroup_cell(&mut hits, group_buckets);
-            assert_eq!(hits, again);
-        }
-        assert_eq!(q_off_bucket(entry_q_off(2)), 0);
-        assert_eq!(q_off_bucket(entry_q_off(2049)), 0);
-        assert_eq!(q_off_bucket(entry_q_off(2050)), 1);
-        assert_eq!(entry_group(2 + 64 * 2048, 64), 1);
-        assert_eq!(entry_group(1 + 64 * 2048, 64), 0);
-    }
-}
+#[path = "rps_tests.rs"]
+mod tests;

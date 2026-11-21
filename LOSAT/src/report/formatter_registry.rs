@@ -21,24 +21,7 @@ use crate::blastinput::ncbi_registry::RegistryRead;
 /// messages of a read that does not throw are `registry_posts`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:171-177
-/// ```c++
-///     //set config file
-///     m_ConfigFile = new CNcbiIfstream(".ncbirc");
-///     m_Reg = new CNcbiRegistry(*m_ConfigFile);
-///     if(m_Reg) {
-///         m_TaxBrowserURL = m_Reg->Get("TAX_BROWSER","BLASTFMTUTIL");
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1615-1625
-/// ```c++
-/// CNcbiRegistry::CNcbiRegistry(CNcbiIstream& is, TFlags flags,
-///                              const string& path)
-/// ...
-///     x_Init();
-///     m_FileRegistry->Read(is, flags & ~(fWithNcbirc | fCaseFlags));
-///     LoadBaseRegistries(flags, 0, path);
-///     IncludeNcbircIfAllowed(flags & ~fCaseFlags);
-/// ```
 /// One `Read` of the stream into a file layer (the byte order mark checked once), as the
 /// system-wide `.ncbirc` is read; flags 0 include no other `.ncbirc`.
 pub(crate) fn read_cwd_ncbirc() -> Result<Option<RegistryRead>, String> {
@@ -81,17 +64,6 @@ pub(crate) fn registry_posts(read: &RegistryRead, program: &str) -> Vec<u8> {
 /// an empty value as set: `protocol`.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-991
-/// ```c++
-///     const TEntries& entries = sit->second.entries;
-///     TEntries::const_iterator eit = entries.find(name);
-///     if (eit == entries.end()) {
-///         return false;
-///     } else if ((flags & fCountCleared) != 0) {
-///         return true;
-///     } else {
-///         return !eit->second.value.empty();
-///     }
-/// ```
 pub(crate) fn value<'a>(
     registry: Option<&'a RegistryRead>,
     section: &str,
@@ -109,37 +81,7 @@ pub(crate) fn value<'a>(
 /// and in the `-html` references (line RG T4 probes `rc_p_empty`, review of T4a0 `pe`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3643-3655
-/// ```c++
-/// string CAlignFormatUtil::GetProtocol()
-/// {
-///     CNcbiIfstream  config_file(".ncbirc");
-///     CNcbiRegistry config_reg(config_file);
-///     string httpProt = "https:";
-///     if(!config_reg.Empty()) {
-///         if(config_reg.HasEntry("BLASTFMTUTIL","PROTOCOL")) {
-///             httpProt = config_reg.Get("BLASTFMTUTIL","PROTOCOL");
-///         }
-///     }
-///     return httpProt;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1236-1245, 1300-1303
-/// ```c++
-/// CConstRef<IRegistry> CCompoundRegistry::FindByContents(const string& section,
-///                                                        const string& entry,
-///                                                        TFlags flags) const
-/// {
-///     TFlags has_entry_flags = (flags | fCountCleared) & ~fJustCore;
-///     REVERSE_ITERATE(TPriorityMap, it, m_PriorityMap) {
-///         if (it->second->HasEntry(section, entry, has_entry_flags)) {
-///             return it->second;
-/// ...
-/// bool CCompoundRegistry::x_HasEntry(const string& section, const string& name,
-///                                    TFlags flags) const
-/// {
-///     return FindByContents(section, name, flags).NotEmpty();
-/// }
-/// ```
 pub(crate) fn protocol(registry: Option<&RegistryRead>) -> &[u8] {
     registry
         .and_then(|read| read.last_value("BLASTFMTUTIL", "PROTOCOL"))
@@ -150,11 +92,6 @@ pub(crate) fn protocol(registry: Option<&RegistryRead>) -> &[u8] {
 /// (`m_TaxBrowserURL`): `[TAX_BROWSER] BLASTFMTUTIL` (`value`), else NCBI's `TAX_BROWSER_URL`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:175-177
-/// ```c++
-///         m_TaxBrowserURL = m_Reg->Get("TAX_BROWSER","BLASTFMTUTIL");
-///     }
-///     m_TaxBrowserURL = (m_TaxBrowserURL.empty()) ? s_TagToConstString("TAX_BROWSER_URL") : m_TaxBrowserURL;
-/// ```
 pub(crate) fn tax_browser_template(registry: Option<&RegistryRead>) -> &[u8] {
     const TAX_BROWSER_URL: &[u8] =
         b"<@protocol@>//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi";
@@ -162,49 +99,5 @@ pub(crate) fn tax_browser_template(registry: Option<&RegistryRead>) -> &[u8] {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-
-    #[test]
-    fn the_protocol_and_the_browser_url_read_ncbirc() {
-        assert_eq!(protocol(None), b"https:");
-        assert_eq!(
-            tax_browser_template(None),
-            b"<@protocol@>//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi"
-        );
-        let read = read_registry(
-            b"[BLASTFMTUTIL]\nPROTOCOL=http:\n[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//x\n",
-            Layer::SystemWide,
-        )
-        .unwrap();
-        assert_eq!(protocol(Some(&read)), b"http:");
-        assert_eq!(tax_browser_template(Some(&read)), b"<@protocol@>//x");
-        let read = read_registry(
-            b"[BLASTFMTUTIL]\nPROTOCOL=\n[TAX_BROWSER]\nBLASTFMTUTIL=\n",
-            Layer::SystemWide,
-        )
-        .unwrap();
-        // An empty PROTOCOL is set (`HasEntry` with `fCountCleared`); an empty browser URL is not
-        // (`Get(...).empty()`).
-        assert_eq!(protocol(Some(&read)), b"");
-        assert_eq!(value(Some(&read), "TAX_BROWSER", "BLASTFMTUTIL"), None);
-    }
-
-    #[test]
-    fn a_registry_read_posts_as_ncbi() {
-        // NCBI BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): the posts of one read; each
-        // query's report reads `./.ncbirc` twice.
-        let read = read_registry(b"[FOO]\na=1\na=2\n", Layer::SystemWide).unwrap();
-        assert_eq!(
-            registry_posts(&read, "blastp"),
-            b"Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3\n"
-                .to_vec()
-        );
-        let read = read_registry(b"\xef", Layer::SystemWide).unwrap();
-        assert_eq!(
-            registry_posts(&read, "blastp"),
-            b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
-        );
-    }
-}
+#[path = "formatter_registry_tests.rs"]
+mod tests;

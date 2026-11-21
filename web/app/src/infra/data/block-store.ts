@@ -2,7 +2,7 @@
 // only read. Two implementations pass the same contract
 // (tests/contract/block-store.contract.ts): OPFS (opfs-block-store.ts), used when the
 // browser supports it, and memory (memory-block-store.ts).
-import type { StorageBackend } from '../../ports/data';
+import { MEMORY_RESULTS_CAPACITY, type StorageBackend } from '../../ports/data';
 
 export interface BlockWriter {
   /**
@@ -40,8 +40,9 @@ export const STORAGE_FULL_MESSAGE =
   'Earlier results are kept.';
 
 export class StorageFullError extends Error {
-  constructor(message = STORAGE_FULL_MESSAGE) {
-    super(message);
+  /** `cause`: the browser's error (QuotaExceededError), kept for developers (session.ts). */
+  constructor(message = STORAGE_FULL_MESSAGE, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'StorageFullError';
   }
 }
@@ -82,21 +83,14 @@ function errorName(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
 }
 
-/**
- * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
- * is then the only copy of the results, so running out of it would end the tab and lose
- * every result; the budget makes it the same recoverable failure as a full OPFS instead.
- * The engine's own memory comes on top (up to 4 GiB less one page, plan TD-7).
- */
-export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
-
+/** When results kept in memory reach MEMORY_RESULTS_CAPACITY_BYTES (ports/data.ts, which the storage note names too). */
 export const MEMORY_FULL_MESSAGE =
   'Not enough temporary storage for the results of this run: this browser keeps results in memory, ' +
-  'at most 512 MB in a tab. Earlier results are kept.';
+  `at most ${MEMORY_RESULTS_CAPACITY} in a tab. Earlier results are kept.`;
 
-/** The StorageFullError of a storage-full error, keeping its message (memory or browser storage). */
+/** The StorageFullError of a storage-full error, keeping its message (memory or browser storage), or the browser's error as its cause. */
 export function asStorageFull(error: unknown): StorageFullError {
-  return error instanceof StorageFullError ? error : new StorageFullError();
+  return error instanceof StorageFullError ? error : new StorageFullError(undefined, error);
 }
 
 /** True for StorageFullError and for the browser's QuotaExceededError. */

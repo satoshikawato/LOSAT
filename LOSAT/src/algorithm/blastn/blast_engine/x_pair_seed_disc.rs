@@ -6,30 +6,7 @@
 //! are those of PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1624-1634,1673-1684
-//! ```c
-//!     else if (lookup_wrap->lut_type == eMBLookupTable) {
-//!         BlastMBLookupTable *lookup =
-//!                                 (BlastMBLookupTable *) lookup_wrap->lut;
-//!         if (lookup->discontiguous) {
-//!             word_length = lookup->template_length;
-//!             lut_word_length = lookup->template_length;
-//! ...
-//!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-//!
-//!         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-//! ...
-//!         hits_extended += extend(offset_pairs, hitsfound, word_params,
-//!                                 lookup_wrap, query, subject, matrix,
-//!                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1651-1655
-//! ```c
-//!     if (subject->mask_type != eNoSubjMasking) {
-//!         if (lookup_wrap->lut_type == eMBLookupTable &&
-//!             ((BlastMBLookupTable *) lookup_wrap->lut)->discontiguous) {
-//!             /* discontiguous scan subs assumes any (non-aligned starting offset */
-//! ```
 //! The discontiguous scan routines (`s_MB_DiscWordScanSubject_*`, stride 1) start at any
 //! subject offset and derive their accumulator from it; NCBI restarts them at
 //! `scan_range[1]` whenever its offset array is full. Phase 1, on any thread: the reference
@@ -208,22 +185,6 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
-/// ```c
-/// /** access the megablast lookup table with two templates */
-/// #define MB_ACCESS_HITS2()                               \
-///    if (total_hits >= max_hits)                          \
-///        break;                                           \
-///    if (s_BlastMBLookupHasHits(mb_lt, index)) {          \
-///        total_hits += s_BlastMBLookupRetrieve(mb_lt,     \
-///                   index, offset_pairs + total_hits,     \
-///                   scan_range[0]);                               \
-///    }                                                    \
-///    if (s_BlastMBLookupHasHits(mb_lt, index2)) {         \
-///        total_hits += s_BlastMBLookupRetrieve2(mb_lt,    \
-///                   index2, offset_pairs + total_hits,    \
-///                   scan_range[0]);                               \
-///    }
-/// ```
 /// Phase 1 for one strip: the discontiguous scan kernel `scan_subject_disc_words_with_ranges`
 /// picks (`choose_disc_scan_subject`), from `job.start` to `job.end` (stride 1); every word's
 /// first-template chain, then its second-template chain, as `on_word` of
@@ -315,13 +276,6 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
     // (where a resumed word's walk starts, and whether its first chain is passed over)
     let (node, second) = if PIECE { cut.chain_start() } else { (0, false) };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    //     while (q_off) {
-    //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //         offset_pairs[i++].qs_offsets.s_off = s_off;
-    //         q_off = lookup->next_pos[q_off];
-    //     }
-    // ```
     let mut pair = |q_off_1: u32| {
         if q_off_1 != 0 {
             if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
@@ -336,15 +290,6 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
         two_stage.for_each_hit_from(index as u64, node, &mut pair);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1428-1444
-    // ```c
-    //     Int4 q_off = lookup->hashtable2[index];
-    //
-    //     while (q_off) {
-    //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //         offset_pairs[i++].qs_offsets.s_off = s_off;
-    //         q_off = lookup->next_pos2[q_off];
-    //     }
-    // ```
     if let Some(index2) = index2 {
         let mut pair2 = |q_off_1: u32| {
             if PIECE && !cut.take(kmer_start, q_off_1, true, out) {
@@ -368,13 +313,6 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
 /// the chain's order; so the same pairs reach `seed_of_pair` in the same order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-/// ```c
-///     while (q_off) {
-///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-///         offset_pairs[i++].qs_offsets.s_off = s_off;
-///         q_off = lookup->next_pos[q_off];
-///     }
-/// ```
 #[inline(never)]
 fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     x: &Inputs<'_>,
@@ -443,55 +381,7 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-841
-/// ```c
-///     Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
-///     Int4 rc;
-///
-///     diag = s_off - q_off;
-///     s_end = s_off + word_length;
-///     s_off_pos = s_off + hash_table->offset;
-///     s_end_pos = s_end + hash_table->offset;
-///
-///     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-///
-///     /* if there is no record in hashtable, we set last_hit to be a very negative number */
-///     if(!rc)  last_hit = 0;
-///
-///     /* hit within the explored area should be rejected*/
-///     if (s_off_pos < last_hit) return 0;
-///
-///     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:882-895,923-941
-/// ```c
-///             if (!off_found) {
-///                 /* This is a new hit */
-///                 hit_ready = 0;
-///             }
-///         }
-///     }  else if (check_masks) {
-/// 	 /* check the masks for the word */
-///         if (!s_TypeOfWord(query, subject, &q_off, &s_off,
-///                           query_mask, query_info, s_range,
-///                           word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-///         /* update the right end*/
-///         s_end += extended;
-///         s_end_pos += extended;
-///     }
-/// ...
-///             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-/// ...
-///                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-///                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-///                           + hash_table->offset;
-///             } else {
-///                 hit_ready = 0;
-///             }
-/// ...
-///     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-///                           hit_ready, s_off_pos, window_size + Delta + 1);
-/// ```
 /// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
 /// strip, in order, statement for statement for the diagonal hash in two-hit mode; the debug, trace
 /// and diagonal-array branches are outside the scope and left out, and the small-query
@@ -505,11 +395,12 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
 /// LOSAT_TIMING counters); without it `out` and `pos` are not read.
 ///
 /// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s early return
-/// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
-/// `if (word_length == lut_word_length) return 1;`, with `*extended = 0` and the offsets
-/// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`). `MEMO`
-/// says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it the retrieve and the
-/// insert do not test for one, so with both off this is the fold before those switches.
+/// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531, which
+/// returns 1 when the word length equals the lookup table's word length, with `*extended`
+/// set to 0 and the offsets unchanged) when the word lengths are equal, and inlines the insert
+/// (`insert_inl`). `MEMO` says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it
+/// the retrieve and the insert do not test for one, so with both off this is the fold before
+/// those switches.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
@@ -554,6 +445,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
     // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
@@ -583,20 +475,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         let s_range = seed.s_range as usize;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
-        // ```c
-        //     diag = s_off - q_off;
-        //     s_end = s_off + word_length;
-        //     s_off_pos = s_off + hash_table->offset;
-        //     s_end_pos = s_end + hash_table->offset;
-        //
-        //     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-        //
-        //     /* if there is no record in hashtable, we set last_hit to be a very negative number */
-        //     if(!rc)  last_hit = 0;
-        //
-        //     /* hit within the explored area should be rejected*/
-        //     if (s_off_pos < last_hit) return 0;
-        // ```
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
@@ -631,17 +509,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         let query_mask = ctx.masks.as_slice();
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
-        // ```c
-        //     if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
-        //         return FALSE;
-        //     }
-        //
-        //     q_off = mb_lt->hashtable[index];
-        //     while (q_off) {
-        //         if (q_off == q_pos) return TRUE;
-        //         q_off = mb_lt->next_pos[q_off];
-        //     }
-        // ```
         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
             if s_pos + lut_word_length > s_len {
                 return true;
@@ -658,18 +525,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         };
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:841-851
-        // ```c
-        //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-        //         /* check the masks for the word; also check to see if this
-        //            first hit qualifies for a double-hit */
-        //         word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
-        //                                  query_mask, query_info, s_range,
-        //                                  word_length, lut_word_length, lut, TRUE, &extended);
-        //         if (!word_type) return 0;
-        //         /* update the right end*/
-        //         s_end += extended;
-        //         s_end_pos += extended;
-        // ```
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
@@ -701,42 +556,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
             s_end_pos += extended;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:853-886
-            // ```c
-            //         if (word_type == 1) {
-            //             /* try off-diagonal */
-            //             Int4 s_a = s_off_pos + word_length - window_size;
-            //             Int4 s_b = s_end_pos - 2 * word_length;
-            //             Int4 delta;
-            //             if (Delta < 0) Delta = 0;
-            //             for (delta = 1; delta <= Delta; ++delta) {
-            //                 Int4 off_s_end = 0;
-            //                 Int4 off_s_l = 0;
-            //                 Int4 off_hit_saved = 0;
-            //                 Int4 off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta,
-            //                               &off_s_end, &off_s_l, &off_hit_saved);
-            //                 if ( off_rc
-            //                   && off_s_l
-            //                   && off_s_end - delta >= s_a
-            //                   && off_s_end - off_s_l <= s_b) {
-            //                      off_found = TRUE;
-            //                      break;
-            //                 }
-            //                 off_rc = s_BlastDiagHashRetrieve(hash_table, diag - delta,
-            //                               &off_s_end, &off_s_l, &off_hit_saved);
-            //                 if ( off_rc
-            //                   && off_s_l
-            //                   && off_s_end >= s_a
-            //                   && off_s_end - off_s_l + delta <= s_b) {
-            //                      off_found = TRUE;
-            //                      break;
-            //                 }
-            //             }
-            //             if (!off_found) {
-            //                 /* This is a new hit */
-            //                 hit_ready = 0;
-            //             }
-            //         }
-            // ```
             // (`scan_range` is 0 in the scope, so `Delta` is 0 and the loop runs no
             // iteration; the statements are kept as the reference has them.)
             if word_type == 1 {
@@ -779,17 +598,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
             }
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:887-895
-            // ```c
-            //     }  else if (check_masks) {
-            // 	 /* check the masks for the word */
-            //         if (!s_TypeOfWord(query, subject, &q_off, &s_off,
-            //                           query_mask, query_info, s_range,
-            //                           word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-            //         /* update the right end*/
-            //         s_end += extended;
-            //         s_end_pos += extended;
-            //     }
-            // ```
             let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
                 (1, 0, q_off, s_off)
             } else {
@@ -815,13 +623,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:897,939-941
-        // ```c
-        //     if (hit_ready) {
-        // ...
-        //     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                           hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
         if !hit_ready {
             part::insert_t::<PT, LEAN, MEMO, TRACK>(
                 diag_hash,
@@ -837,21 +638,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
             continue;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-919
-        // ```c
-        //             if ( word_params->options->program_number == eBlastTypeBlastn &&
-        //                  (word_params->matrix_only_scoring || word_length < 11))
-        //             {
-        //                 s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-        //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-        //             }else {
-        //                 s_NuclUngappedExtend(query, subject, matrix, q_off, s_end,
-        //                                  s_off, -(cutoffs->x_dropoff),
-        //                                  ungapped_data,
-        //                                  word_params->nucl_score_table,
-        //                                  cutoffs->reduced_nucl_cutoff_score);
-        //             }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-920
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {
@@ -859,7 +646,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -899,24 +686,9 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         let ungapped_score = ungapped.score;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:928-929
-        // ```c
-        //                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-        //                           + hash_table->offset;
-        // ```
         let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932,939-941
-        // ```c
-        //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-        // ...
-        //             } else {
-        //                 hit_ready = 0;
-        //             }
-        // ...
-        //     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                           hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
             part::insert_t::<PT, LEAN, MEMO, TRACK>(
@@ -938,12 +710,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:924-927
-        // ```c
-        //                 BlastUngappedData *final_data =
-        //                     (BlastUngappedData *) malloc(sizeof(BlastUngappedData));
-        //                 *final_data = *ungapped_data;
-        //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-        // ```
         super::super::x_push_ungapped(
             ungapped_hits,
             UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),
@@ -953,11 +719,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
-        // ```c
-        //     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-        //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-        //                           hit_ready, s_off_pos, window_size + Delta + 1);
-        // ```
         part::insert_t::<PT, LEAN, MEMO, TRACK>(
             diag_hash,
             out,
@@ -973,13 +734,6 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1327-1331
-/// ```c
-///    if (lookup_options->mb_template_length > 0) {
-///         /* discontiguous megablast */
-///         mb_lt->scan_step = 1;
-///         status = s_FillDiscMBTable(query, location, mb_lt, lookup_options);
-///    }
-/// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): the scan ranges of `scan_subject_disc_words_with_ranges` (the whole subject, or
 /// a masked subject's `seq_ranges` one by one; stride 1) cut into strips scanned by any
@@ -1199,16 +953,6 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-///                                 lookup_wrap, query, subject, matrix,
-///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-///     }
-/// ```
 /// The parent's `run` for a discontiguous table: the seed stage of this chunk (the loop
 /// above with its two-hit extension) when LOSAT_X_PAIRPARDISC is on and the chunk is in
 /// scope; `true` means it has run and the reference scan is skipped. `fold_scratch` holds the
@@ -1292,27 +1036,8 @@ pub(super) fn run(
     true
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:660-664,670-677
-/// ```c
-///     diag = s_off + diag_table->diag_array_length - q_off;
-///     real_diag = diag & diag_table->diag_mask;
-///     last_hit = hit_level_array[real_diag].last_hit;
-///     hit_saved = hit_level_array[real_diag].flag;
-///     s_end = s_off + word_length;
-///     s_off_pos = s_off + diag_table->offset;
-///     s_end_pos = s_end + diag_table->offset;
-///
-///     /* hit within the explored area should be rejected*/
-///     if (s_off_pos < last_hit) return 0;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:660-677
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
-/// ```c
-///     hit_level_array[real_diag].last_hit = s_end_pos;
-///     hit_level_array[real_diag].flag = hit_ready;
-///     if (two_hits) {
-///         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-///     }
-/// ```
 /// EXPERIMENT (LOSAT_X_PAIRPARDISCARR), phase 2 on the owner thread: the seeds of one strip
 /// through the two-hit diagonal-array branch of `extend_offset_pairs` (`pair_extend.rs`,
 /// `s_BlastnDiagTableExtendInitialHit`), statement for statement: `fold_two_hit` with the
@@ -1335,6 +1060,7 @@ fn fold_two_hit_array<const LEAN: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
     // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
@@ -1362,12 +1088,6 @@ fn fold_two_hit_array<const LEAN: bool>(
         let s_range = seed.s_range as usize;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:663-668
-        // ```c
-        //     diag = s_off + diag_table->diag_array_length - q_off;
-        //     real_diag = diag & diag_table->diag_mask;
-        //     last_hit = hit_level_array[real_diag].last_hit;
-        //     hit_saved = hit_level_array[real_diag].flag;
-        // ```
         let diag = (s_ext_start as isize + diag_array_length - q_ext_start as isize) & diag_mask;
         let diag_idx = diag as usize;
         let (last_hit, hit_saved) = if diag_idx < diag_array_size {
@@ -1394,17 +1114,6 @@ fn fold_two_hit_array<const LEAN: bool>(
         let query_mask = ctx.masks.as_slice();
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
-        // ```c
-        //     if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
-        //         return FALSE;
-        //     }
-        //
-        //     q_off = mb_lt->hashtable[index];
-        //     while (q_off) {
-        //         if (q_off == q_pos) return TRUE;
-        //         q_off = mb_lt->next_pos[q_off];
-        //     }
-        // ```
         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
             if s_pos + lut_word_length > s_len {
                 return true;
@@ -1420,19 +1129,7 @@ fn fold_two_hit_array<const LEAN: bool>(
             !two_stage.contains_hit(kmer, q_off_1)
         };
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:676-686
-        // ```c
-        //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-        //         /* check the masks for the word; also check to see if this
-        //            first hit qualifies for a double-word */
-        //         word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
-        //                                  query_mask, query_info, s_range,
-        //                                  word_length, lut_word_length, lut, TRUE, &extended);
-        //         if (!word_type) return 0;
-        //         /* update the right end*/
-        //         s_end += extended;
-        //         s_end_pos += extended;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-686
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
@@ -1463,41 +1160,7 @@ fn fold_two_hit_array<const LEAN: bool>(
             s_end += extended;
             s_end_pos += extended;
 
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:688-720
-            // ```c
-            //         if (word_type == 1) {
-            //             /* try off-diagonals */
-            //             Int4 orig_diag = real_diag + diag_table->diag_array_length;
-            //             Int4 s_a = s_off_pos + word_length - window_size;
-            //             Int4 s_b = s_end_pos - 2 * word_length;
-            //             Int4 delta;
-            //             if (Delta < 0) Delta = 0;
-            //             for (delta = 1; delta <= Delta ; ++delta) {
-            //                 Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
-            //                 Int4 off_s_end = hit_level_array[off_diag].last_hit;
-            //                 Int4 off_s_l   = diag_table->hit_len_array[off_diag];
-            //                 if ( off_s_l
-            //                  && off_s_end - delta >= s_a
-            //                  && off_s_end - off_s_l <= s_b) {
-            //                     off_found = TRUE;
-            //                     break;
-            //                 }
-            //                 off_diag  = (orig_diag - delta) & diag_table->diag_mask;
-            //                 off_s_end = hit_level_array[off_diag].last_hit;
-            //                 off_s_l   = diag_table->hit_len_array[off_diag];
-            //                 if ( off_s_l
-            //                  && off_s_end >= s_a
-            //                  && off_s_end - off_s_l + delta <= s_b) {
-            //                     off_found = TRUE;
-            //                     break;
-            //                 }
-            //             }
-            //             if (!off_found) {
-            //                 /* This is a new hit */
-            //                 hit_ready = 0;
-            //             }
-            //         }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-720
             // (`scan_range` is 0 in the scope, so `Delta` is 0 and the loop runs no
             // iteration; the statements are kept as the reference has them.)
             if word_type == 1 {
@@ -1555,18 +1218,7 @@ fn fold_two_hit_array<const LEAN: bool>(
                 }
             }
         } else {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:722-730
-            // ```c
-            //     } else if (check_masks) {
-            //         /* check the masks for the word */
-            //         if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-            //                         query_mask, query_info, s_range,
-            //                         word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-            //         /* update the right end*/
-            //         s_end += extended;
-            //         s_end_pos += extended;
-            //     }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-730
             let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
                 (1, 0, q_off, s_off)
             } else {
@@ -1591,16 +1243,7 @@ fn fold_two_hit_array<const LEAN: bool>(
             s_end_pos += ext;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:732,768-772
-        // ```c
-        //     if (hit_ready) {
-        // ...
-        //     hit_level_array[real_diag].last_hit = s_end_pos;
-        //     hit_level_array[real_diag].flag = hit_ready;
-        //     if (two_hits) {
-        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-        //     }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:728-772
         if !hit_ready {
             if diag_idx < diag_array_size {
                 hit_level_array[diag_idx].last_hit = s_end_pos as i32;
@@ -1612,20 +1255,7 @@ fn fold_two_hit_array<const LEAN: bool>(
             continue;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-756
-        // ```c
-        //             if ( word_params->options->program_number == eBlastTypeBlastn &&
-        //                  (word_params->matrix_only_scoring || word_length < 11))
-        //             {
-        //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-        //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-        //             }else {
-        //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
-        //                                  -(cutoffs->x_dropoff), ungapped_data,
-        //                                  word_params->nucl_score_table,
-        //                                  cutoffs->reduced_nucl_cutoff_score);
-        //             }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-756
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {
@@ -1633,7 +1263,7 @@ fn fold_two_hit_array<const LEAN: bool>(
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -1668,27 +1298,10 @@ fn fold_two_hit_array<const LEAN: bool>(
         let ungapped_se = ungapped.s_start + ungapped.length;
         let ungapped_score = ungapped.score;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:762-763
-        // ```c
-        //                 s_end_pos = ungapped_data->length + ungapped_data->s_start
-        //                           + diag_table->offset;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:757-758
         let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:757-772
-        // ```c
-        //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-        // ...
-        //             } else {
-        //                 hit_ready = 0;
-        //             }
-        // ...
-        //     hit_level_array[real_diag].last_hit = s_end_pos;
-        //     hit_level_array[real_diag].flag = hit_ready;
-        //     if (two_hits) {
-        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-        //     }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752-772
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
             if diag_idx < diag_array_size {
@@ -1706,25 +1319,12 @@ fn fold_two_hit_array<const LEAN: bool>(
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:758-761
-        // ```c
-        //                 BlastUngappedData *final_data =
-        //                     (BlastUngappedData *) malloc(sizeof(BlastUngappedData));
-        //                 *final_data = *ungapped_data;
-        //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-        // ```
         super::super::x_push_ungapped(
             ungapped_hits,
             UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),
         );
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
-        // ```c
-        //     hit_level_array[real_diag].last_hit = s_end_pos;
-        //     hit_level_array[real_diag].flag = hit_ready;
-        //     if (two_hits) {
-        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-        //     }
-        // ```
         if diag_idx < diag_array_size {
             hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
             hit_level_array[diag_idx].flag = 1;
@@ -1736,16 +1336,6 @@ fn fold_two_hit_array<const LEAN: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-/// ```c
-///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-///
-///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-/// ...
-///         hits_extended += extend(offset_pairs, hitsfound, word_params,
-///                                 lookup_wrap, query, subject, matrix,
-///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-///     }
-/// ```
 /// EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the seed stage of one chunk with the diagonal array on
 /// `threads` threads: the strips of `seed_stage` scanned by any thread, folded here in strip
 /// order into the array and `hits` (`fold_two_hit_array`). EXPERIMENT (LOSAT_X_FOLDLEAN): one
@@ -1917,1077 +1507,5 @@ pub(super) fn summary() {
 }
 
 #[cfg(test)]
-mod tests {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    use super::super::super::scan_subject_disc_words_with_ranges;
-    use super::super::super::{
-        build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-        diag_hash_insert_window, QueryContext, QueryContextIndex,
-    };
-    use super::*;
-    use crate::algorithm::blastn::disc_lookup::DiscWordType;
-    use crate::algorithm::blastn::lookup::{
-        build_disc_mb_lookup, build_two_stage_lookup, reverse_complement, TwoStageLookup,
-    };
-    use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_subject_ncbi2na_packed};
-    use crate::utils::dust::MaskedInterval;
-
-    struct Lcg(u64);
-    impl Lcg {
-        fn next(&mut self) -> u64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            self.0 >> 33
-        }
-        fn below(&mut self, n: u64) -> u64 {
-            self.next() % n.max(1)
-        }
-    }
-
-    fn random_dna(rng: &mut Lcg, len: usize) -> Vec<u8> {
-        (0..len).map(|_| b"ACGT"[rng.below(4) as usize]).collect()
-    }
-
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
-
-    /// `seed_stage_of` in the instance of `lean` (LOSAT_X_FOLDLEAN) and of the table's memo
-    /// (LOSAT_X_DIAGLV2), with LOSAT_X_DCSEEDLEAN's stage or not (`lists`), whatever the
-    /// environment says (`seed_stage` reads the switches), after the memo is made again at the
-    /// stage's start as `seed_stage` does.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    fn stage_of(
-        lean: bool,
-        lists: bool,
-        x: &Inputs<'_>,
-        disc: &DiscTemplates,
-        threads: usize,
-        hash: &mut DiagHashTable,
-        hits: &mut Vec<UngappedHit>,
-        fold_part: Option<part::FoldPart<'_>>,
-    ) -> StageStats {
-        if !hash.x_last.is_empty() {
-            hash.x_lv2_reset();
-        }
-        match (lean, !hash.x_last.is_empty()) {
-            (false, false) => seed_stage_of::<false, false>(
-                x, disc, threads, hash, hits, None, false, fold_part, lists,
-            ),
-            (false, true) => seed_stage_of::<false, true>(
-                x, disc, threads, hash, hits, None, false, fold_part, lists,
-            ),
-            (true, false) => seed_stage_of::<true, false>(
-                x, disc, threads, hash, hits, None, false, fold_part, lists,
-            ),
-            (true, true) => seed_stage_of::<true, true>(
-                x, disc, threads, hash, hits, None, false, fold_part, lists,
-            ),
-        }
-    }
-
-    /// `fold_two_hit` without partitions in the instance of `lean` (LOSAT_X_FOLDLEAN) and of
-    /// the table's memo (LOSAT_X_DIAGLV2), as `seed_stage` picks it.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    #[allow(clippy::too_many_arguments)]
-    fn fold_serial(
-        lean: bool,
-        x: &Inputs<'_>,
-        seeds: &[Seed],
-        hash: &mut DiagHashTable,
-        hits: &mut Vec<UngappedHit>,
-        pause: &mut u64,
-        counts: &mut FoldCounts,
-    ) {
-        let out = &mut part::PartOut::default();
-        match (lean, !hash.x_last.is_empty()) {
-            (false, false) => fold_two_hit::<false, false, false>(
-                x,
-                seeds,
-                hash,
-                hits,
-                None,
-                pause,
-                counts,
-                out,
-                &[],
-            ),
-            (false, true) => fold_two_hit::<false, false, true>(
-                x,
-                seeds,
-                hash,
-                hits,
-                None,
-                pause,
-                counts,
-                out,
-                &[],
-            ),
-            (true, false) => fold_two_hit::<false, true, false>(
-                x,
-                seeds,
-                hash,
-                hits,
-                None,
-                pause,
-                counts,
-                out,
-                &[],
-            ),
-            (true, true) => fold_two_hit::<false, true, true>(
-                x,
-                seeds,
-                hash,
-                hits,
-                None,
-                pause,
-                counts,
-                out,
-                &[],
-            ),
-        }
-    }
-
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    fn hash_state(h: &DiagHashTable) -> HashState {
-        (
-            h.backbone.clone(),
-            h.chain[..h.occupancy as usize]
-                .iter()
-                .map(|c| (c.diag, c.level, c.hit_saved, c.hit_len, c.next))
-                .collect(),
-            h.occupancy,
-            h.capacity,
-            h.offset,
-        )
-    }
-
-    /// A query of two contexts (plus and minus strand, masks on the plus strand) and a
-    /// subject made of mutated copies of query pieces on both strands and random pieces.
-    struct Case {
-        contexts: Vec<QueryContext>,
-        index: QueryContextIndex,
-        ctx_seqs: Vec<Vec<u8>>,
-        offsets: Vec<i32>,
-        masks: Vec<Vec<MaskedInterval>>,
-        concat: Vec<u8>,
-        concat_sentinels: Vec<u8>,
-        packed: Vec<u8>,
-        s_len: usize,
-        seq_ranges: Vec<(i32, i32)>,
-        masked: bool,
-        score_matrix: [i32; 256],
-        nucl_score_table: [i32; 256],
-    }
-
-    fn make_case(rng: &mut Lcg, subject_len: usize) -> Case {
-        let q_len = 4100 + rng.below(3000) as usize;
-        make_case_with(rng, subject_len, q_len)
-    }
-
-    /// `make_case` with a query of `q_len` bases (more than 1013: the masks).
-    fn make_case_with(rng: &mut Lcg, subject_len: usize, q_len: usize) -> Case {
-        let mut query = random_dna(rng, q_len);
-        // a repeat inside the query (long lookup chains)
-        let motif = random_dna(rng, 40);
-        for k in 0..20 {
-            let at = (k * 97) % (q_len - 40);
-            query[at..at + 40].copy_from_slice(&motif);
-        }
-        let minus = reverse_complement(&query);
-        let mut subject = Vec::new();
-        while subject.len() < subject_len {
-            if rng.below(3) == 0 {
-                let len = 50 + rng.below(400) as usize;
-                subject.extend(random_dna(rng, len));
-            } else {
-                let src = if rng.below(2) == 0 { &query } else { &minus };
-                let len = 30 + rng.below(1500) as usize;
-                let at = rng.below((q_len - len.min(q_len - 1)) as u64) as usize;
-                let end = (at + len).min(q_len);
-                for &b in &src[at..end] {
-                    // dc-megablast finds diverged copies: 10 % substitutions
-                    let r = rng.below(100);
-                    if r < 10 {
-                        subject.push(b"ACGT"[rng.below(4) as usize]);
-                    } else if r < 11 {
-                        // an indel
-                    } else {
-                        subject.push(b);
-                    }
-                }
-            }
-        }
-        let s_len = subject.len();
-        let packed = encode_subject_ncbi2na_packed(&subject);
-        let ctx_seqs = vec![
-            encode_iupac_to_blastna(&query),
-            encode_iupac_to_blastna(&minus),
-        ];
-        let offsets = vec![0i32, q_len as i32 + 1];
-        let masks = vec![
-            vec![
-                MaskedInterval {
-                    start: 100,
-                    end: 180,
-                },
-                MaskedInterval {
-                    start: 1000,
-                    end: 1013,
-                },
-            ],
-            Vec::new(),
-        ];
-        let concat_len = 2 * q_len + 1;
-        let concat_sentinels =
-            build_query_blastna_buffer(&[query.as_slice()][..], &offsets, concat_len);
-        let concat = concat_sentinels[1..concat_len + 1].to_vec();
-        let contexts: Vec<QueryContext> = (0..2)
-            .map(|c| QueryContext {
-                query_idx: 0,
-                frame: if c == 0 { 1 } else { -1 },
-                query_offset: offsets[c],
-                len: ctx_seqs[c].len(),
-                masks: masks[c].clone(),
-            })
-            .collect();
-        let index = QueryContextIndex::new(&contexts, false);
-        Case {
-            contexts,
-            index,
-            ctx_seqs,
-            offsets,
-            masks,
-            concat,
-            concat_sentinels,
-            packed,
-            s_len,
-            seq_ranges: vec![(0, s_len as i32)],
-            masked: false,
-            score_matrix: build_blastna_matrix(2, -3),
-            nucl_score_table: build_nucl_score_table(2, -3),
-        }
-    }
-
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    /// `c` as a masked subject: its scan ranges (NCBI's `seq_ranges`, right end exclusive) cover
-    /// most of it with gaps of 1 to 120 bases between them; some are shorter than any template
-    /// (the scan skips them) and the last may end at the subject's end.
-    fn mask_case(rng: &mut Lcg, mut c: Case) -> Case {
-        let mut ranges = Vec::new();
-        let mut at = rng.below(30) as usize;
-        while at < c.s_len {
-            let len = if rng.below(10) == 0 {
-                1 + rng.below(20) as usize
-            } else {
-                30 + rng.below(2000) as usize
-            };
-            let end = (at + len).min(c.s_len);
-            ranges.push((at as i32, end as i32));
-            at = end + 1 + rng.below(120) as usize;
-        }
-        assert!(ranges.len() > 10);
-        c.seq_ranges = ranges;
-        c.masked = true;
-        c
-    }
-
-    fn ctx_refs(c: &Case) -> Vec<&[u8]> {
-        c.ctx_seqs.iter().map(Vec::as_slice).collect()
-    }
-
-    fn inputs<'a>(
-        c: &'a Case,
-        lookup: &'a TwoStageLookup,
-        diag_offset: isize,
-        window_size: usize,
-    ) -> Inputs<'a> {
-        Inputs {
-            two_stage: lookup,
-            search_seq_packed: &c.packed,
-            s_len: c.s_len,
-            subject_seq_ranges: &c.seq_ranges,
-            subject_masked: c.masked,
-            scan_step: 1,
-            query_context_index: &c.index,
-            query_contexts: &c.contexts,
-            encoded_query_concat_blastna: &c.concat,
-            encoded_query_concat_blastna_with_sentinels: &c.concat_sentinels,
-            cutoff_scores: &[30, 30],
-            x_dropoff_scores: &[20, 20],
-            reduced_cutoff_scores: &[24, 24],
-            score_matrix: &c.score_matrix,
-            nucl_score_table: &c.nucl_score_table,
-            diag_offset,
-            diag_hash_window: diag_hash_insert_window(window_size, 0, lookup.word_length()),
-            use_array_indexing: false,
-            window_size,
-            scan_range: 0,
-            small_na_word: false,
-            diagnostics: false,
-            one_subject_owner: true,
-            timing: None,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1651-1655
-    // ```c
-    //     if (subject->mask_type != eNoSubjMasking) {
-    //         if (lookup_wrap->lut_type == eMBLookupTable &&
-    //             ((BlastMBLookupTable *) lookup_wrap->lut)->discontiguous) {
-    //             /* discontiguous scan subs assumes any (non-aligned starting offset */
-    // ```
-    // The whole two-hit stage on random sequences for every discontiguous template (word
-    // size 11 and 12, coding, optimal and both, lengths 16, 18 and 21; each one-template
-    // type picks one of the scan kernels, two templates the two-template kernel): the pairs
-    // of the reference wrapper `scan_subject_disc_words_with_ranges` (one scan of the whole
-    // range) folded in one go, against `seed_stage` on 1..8 threads (strips planned for each
-    // thread count, so the kernels restart at many offsets). Every second case is a masked
-    // subject (`mask_case`): the reference scans its ranges one by one, each with its own
-    // `s_range`. Hit lists and diagonal hashes must be the same, and the serial fold must have
-    // taken every branch: the `last_hit` rejection, the first hit of a window (insert with
-    // `hit_ready` 0), the second hit (ungapped extension) both below and above the cutoff.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    #[test]
-    fn disc_two_hit_stage_on_strips_equals_one_scan() {
-        let mut rng = Lcg(0xD15C_5EED);
-        let mut case_no = 0;
-        for word_size in [11usize, 12] {
-            for word_type in [
-                DiscWordType::Coding,
-                DiscWordType::Optimal,
-                DiscWordType::TwoTemplates,
-            ] {
-                for template_length in [16usize, 18, 21] {
-                    case_no += 1;
-                    let c = make_case(&mut rng, 30_000);
-                    // every second case: a masked subject, scanned in its ranges
-                    let c = if case_no % 2 == 0 {
-                        mask_case(&mut rng, c)
-                    } else {
-                        c
-                    };
-                    let lookup = build_disc_mb_lookup(
-                        &ctx_refs(&c),
-                        &c.offsets,
-                        word_size,
-                        template_length,
-                        word_type,
-                        &c.masks,
-                        c.concat.len(),
-                    );
-                    let disc = lookup.disc().expect("a discontiguous table");
-                    assert_eq!(lookup.word_length(), template_length);
-                    let diag_offset = 37 + rng.below(1000) as isize;
-                    let window_size = 40;
-                    let x = inputs(&c, &lookup, diag_offset, window_size);
-                    assert!(in_scope(&x));
-                    let new_hash = || {
-                        let mut h = DiagHashTable::new(window_size as i32);
-                        h.offset = diag_offset as i32;
-                        h
-                    };
-                    let mut seeds = Vec::new();
-                    scan_subject_disc_words_with_ranges(
-                        &c.packed,
-                        c.s_len,
-                        disc,
-                        &c.seq_ranges,
-                        c.masked,
-                        |s_off, s_range, index, index2| {
-                            lookup.for_each_hit(index, |q_off_1| {
-                                if q_off_1 != 0 {
-                                    seed_of_pair(
-                                        &x,
-                                        q_off_1 as usize - 1,
-                                        s_off,
-                                        s_range,
-                                        &mut seeds,
-                                    );
-                                }
-                            });
-                            if let Some(index2) = index2 {
-                                lookup.for_each_hit2(index2, |q_off_1| {
-                                    seed_of_pair(
-                                        &x,
-                                        q_off_1 as usize - 1,
-                                        s_off,
-                                        s_range,
-                                        &mut seeds,
-                                    );
-                                });
-                            }
-                        },
-                    );
-                    let mut serial_hash = new_hash();
-                    let mut serial_hits = Vec::new();
-                    let mut counts = FoldCounts::default();
-                    let mut pause = 0u64;
-                    fold_serial(
-                        false,
-                        &x,
-                        &seeds,
-                        &mut serial_hash,
-                        &mut serial_hits,
-                        &mut pause,
-                        &mut counts,
-                    );
-                    let saved = serial_hash.chain[1..serial_hash.occupancy as usize]
-                        .iter()
-                        .filter(|cell| cell.hit_saved)
-                        .count();
-                    let first_hits = serial_hash.chain[1..serial_hash.occupancy as usize]
-                        .iter()
-                        .filter(|cell| !cell.hit_saved && cell.hit_len > 0)
-                        .count();
-                    assert!(
-                        serial_hits.len() > 5 && counts.skipped > 0 && saved > 0 && first_hits > 0,
-                        "case {case_no}: the test sequences give too few hits ({} hits, {} skipped, {saved} saved cells, {first_hits} first-hit cells)",
-                        serial_hits.len(),
-                        counts.skipped
-                    );
-                    let key = |h: &UngappedHit| {
-                        (
-                            h.context_idx,
-                            h.seed_q_off,
-                            h.seed_s_off,
-                            h.qs,
-                            h.qe,
-                            h.ss,
-                            h.se,
-                            h.score,
-                        )
-                    };
-                    let serial_keys: Vec<_> = serial_hits.iter().map(key).collect();
-                    for threads in 1..=8usize {
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(threads)
-                            .build()
-                            .unwrap();
-                        let (state, keys, stats_seeds, strips) = pool.install(|| {
-                            let mut hash = new_hash();
-                            let mut hits = Vec::new();
-                            let stats = seed_stage(
-                                &x, disc, threads, &mut hash, &mut hits, None, false, None,
-                            );
-                            (
-                                hash_state(&hash),
-                                hits.iter().map(key).collect::<Vec<_>>(),
-                                stats.counts.seeds,
-                                stats.strips,
-                            )
-                        });
-                        assert!(strips > 1, "case {case_no} threads {threads}");
-                        assert_eq!(
-                            stats_seeds,
-                            seeds.len() as u64,
-                            "case {case_no} threads {threads}"
-                        );
-                        assert_eq!(keys, serial_keys, "case {case_no} threads {threads}");
-                        assert_eq!(
-                            state,
-                            hash_state(&serial_hash),
-                            "case {case_no} threads {threads}"
-                        );
-                    }
-                    // LOSAT_X_DIAGLV (`x_diag_lv.rs`): on a table with level bounds the serial fold
-                    // and the strips on 1, 2, 3 and 7 threads skip walks and give the hits and
-                    // the table of the fold without bounds, and the same bounds.
-                    let new_lv_hash = || {
-                        let mut h = new_hash();
-                        h.x_lv_start();
-                        h
-                    };
-                    let mut lv_hash = new_lv_hash();
-                    let mut lv_hits = Vec::new();
-                    let before = super::super::super::x_diag_lv::test_skips();
-                    fold_serial(
-                        false,
-                        &x,
-                        &seeds,
-                        &mut lv_hash,
-                        &mut lv_hits,
-                        &mut pause,
-                        &mut FoldCounts::default(),
-                    );
-                    let skipped = super::super::super::x_diag_lv::test_skips() - before;
-                    assert!(skipped > 0, "case {case_no}: no walk skipped");
-                    assert_eq!(lv_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
-                    assert_eq!(
-                        hash_state(&lv_hash),
-                        hash_state(&serial_hash),
-                        "case {case_no}"
-                    );
-                    for threads in [1usize, 2, 3, 7] {
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(threads)
-                            .build()
-                            .unwrap();
-                        let (state, keys, max_level, skipped) = pool.install(|| {
-                            let mut hash = new_lv_hash();
-                            let mut hits = Vec::new();
-                            let before = super::super::super::x_diag_lv::test_skips();
-                            seed_stage(&x, disc, threads, &mut hash, &mut hits, None, false, None);
-                            (
-                                hash_state(&hash),
-                                hits.iter().map(key).collect::<Vec<_>>(),
-                                hash.max_level.clone(),
-                                super::super::super::x_diag_lv::test_skips() - before,
-                            )
-                        });
-                        let at = format!("case {case_no} threads {threads}");
-                        assert!(skipped > 0, "{at}: no walk skipped");
-                        assert_eq!(keys, serial_keys, "{at}");
-                        assert_eq!(state, hash_state(&serial_hash), "{at}");
-                        assert_eq!(max_level, lv_hash.max_level, "{at}");
-                    }
-                    // LOSAT_X_DIAGLV2 (`x_diag_lv.rs`) and LOSAT_X_FOLDLEAN: on a table with
-                    // level bounds, with and without the memo, the serial fold's four instances
-                    // (`LEAN` x `MEMO`) give the hits and the table of the fold on a table with
-                    // neither; with the memo it answers retrieves, without it never.
-                    let mut plain_hash = new_hash();
-                    plain_hash.max_level = Vec::new();
-                    plain_hash.x_last = Vec::new();
-                    let mut plain_hits = Vec::new();
-                    fold_serial(
-                        false,
-                        &x,
-                        &seeds,
-                        &mut plain_hash,
-                        &mut plain_hits,
-                        &mut pause,
-                        &mut FoldCounts::default(),
-                    );
-                    assert_eq!(plain_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
-                    assert_eq!(hash_state(&plain_hash), hash_state(&serial_hash));
-                    for (lean, memo) in (0..4).map(|k| (k & 2 != 0, k & 1 != 0)) {
-                        let mut h = new_hash();
-                        h.x_lv_start();
-                        if memo {
-                            h.x_lv2_start();
-                        } else {
-                            h.x_last = Vec::new();
-                        }
-                        let mut hits = Vec::new();
-                        let before = super::super::super::x_diag_lv::test_memos();
-                        fold_serial(
-                            lean,
-                            &x,
-                            &seeds,
-                            &mut h,
-                            &mut hits,
-                            &mut pause,
-                            &mut FoldCounts::default(),
-                        );
-                        let memos = super::super::super::x_diag_lv::test_memos() - before;
-                        let at = format!("case {case_no} lean {lean} memo {memo}");
-                        assert_eq!(memos > 0, memo, "{at}: memo answers {memos}");
-                        assert_eq!(
-                            hits.iter().map(key).collect::<Vec<_>>(),
-                            serial_keys,
-                            "{at}"
-                        );
-                        assert_eq!(hash_state(&h), hash_state(&plain_hash), "{at}");
-                    }
-                    // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the two-hit fold split into
-                    // 2, 3, 7, 8 and 16 partitions on 1..8 threads (and two configurations
-                    // without partitions), on tables without level bounds, with bounds, and with
-                    // bounds and the memo (LOSAT_X_DIAGLV2), in the stage's instances with and
-                    // without LOSAT_X_FOLDLEAN (alternating over the configurations), for two
-                    // stages on one scratch with a chunk that the fold without the memo folds
-                    // between them (as the reference fold does where a subject takes it: the memo
-                    // is not kept there, and the next stage makes it again), each with the hash
-                    // offset moved on: the hits and the table of the serial fold, and with every
-                    // configuration those of the table without bounds. Where the environment's
-                    // LOSAT_X_FOLDLEAN is the configuration's, the stage is `seed_stage` itself, so
-                    // that its reset of the memo after the fold without it is the one tested (a
-                    // debug build panics on a stale memo); elsewhere `stage_of`.
-                    let x2 = Inputs {
-                        diag_offset: diag_offset + c.s_len as isize + window_size as isize,
-                        ..x
-                    };
-                    let x3 = Inputs {
-                        diag_offset: x2.diag_offset + c.s_len as isize + window_size as isize,
-                        ..x
-                    };
-                    // the chunks: (inputs, folded by a stage, else by the fold without the memo)
-                    let chunks = [(&x, true), (&x2, false), (&x3, true)];
-                    let fold_memo_free =
-                        |xc: &Inputs<'_>, hash: &mut DiagHashTable, hits: &mut Vec<UngappedHit>| {
-                            let mut pause = 0u64;
-                            fold_two_hit::<false, false, false>(
-                                xc,
-                                &seeds,
-                                hash,
-                                hits,
-                                None,
-                                &mut pause,
-                                &mut FoldCounts::default(),
-                                &mut part::PartOut::default(),
-                                &[],
-                            );
-                        };
-                    let mut plain_expected: Vec<(Vec<_>, HashState)> = Vec::new();
-                    for (levels, memo) in [(false, false), (true, false), (true, true)] {
-                        // whatever the environment says
-                        let new_table = || {
-                            let mut h = new_hash();
-                            h.max_level = Vec::new();
-                            h.x_last = Vec::new();
-                            if levels {
-                                h.x_lv_start();
-                            }
-                            if memo {
-                                h.x_lv2_start();
-                            }
-                            h
-                        };
-                        let mut expected_hash = new_table();
-                        let mut expected = Vec::new();
-                        for (k, &(xc, stage)) in chunks.iter().enumerate() {
-                            expected_hash.offset = xc.diag_offset as i32;
-                            let mut hits = Vec::new();
-                            if stage {
-                                // as `seed_stage`: the memo made again at the stage's start
-                                if memo {
-                                    expected_hash.x_lv2_reset();
-                                }
-                                fold_serial(
-                                    false,
-                                    xc,
-                                    &seeds,
-                                    &mut expected_hash,
-                                    &mut hits,
-                                    &mut pause,
-                                    &mut FoldCounts::default(),
-                                );
-                            } else {
-                                fold_memo_free(xc, &mut expected_hash, &mut hits);
-                            }
-                            let keys = hits.iter().map(key).collect::<Vec<_>>();
-                            if levels {
-                                let (plain_keys, plain_state) = &plain_expected[k];
-                                let at =
-                                    format!("case {case_no} levels {levels} memo {memo} chunk {k}");
-                                assert_eq!(&keys, plain_keys, "{at}");
-                                assert_eq!(&hash_state(&expected_hash), plain_state, "{at}");
-                            } else {
-                                plain_expected.push((keys.clone(), hash_state(&expected_hash)));
-                            }
-                            expected.push((
-                                hits.iter().map(key).collect::<Vec<_>>(),
-                                hash_state(&expected_hash),
-                                expected_hash.max_level.clone(),
-                                expected_hash.x_last.clone(),
-                            ));
-                        }
-                        for (k, (threads, parts)) in [
-                            (1usize, 2usize),
-                            (2, 2),
-                            (3, 3),
-                            (3, 7),
-                            (4, 4),
-                            (5, 16),
-                            (8, 8),
-                            (8, 16),
-                            (4, 0),
-                            (6, 0),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        {
-                            let lean = k % 2 == 1;
-                            // LOSAT_X_DCSEEDLEAN's stage or not, in both instances of `lean`
-                            let lists = (k / 2) % 2 == 0;
-                            let pool = rayon::ThreadPoolBuilder::new()
-                                .num_threads(threads)
-                                .build()
-                                .unwrap();
-                            pool.install(|| {
-                                let mut hash = new_table();
-                                let mut scratch = PartScratch::default();
-                                for (chunk, &(xc, stage)) in chunks.iter().enumerate() {
-                                    // EXPERIMENT (LOSAT_X_SEEDPIECE): the lists' stage in pieces
-                                    // of 1 seed, a few, hundreds, or the strips' lists, the
-                                    // stages of a configuration alternating (the real kernels
-                                    // stop inside words' runs and restart at many offsets)
-                                    let pieces = [1usize, 3 + case_no % 11, 0, 250 + 37 * k]
-                                        [(k + chunk + 2 * usize::from(levels) + usize::from(memo))
-                                            % 4];
-                                    scratch.x_pieces = Some(pieces);
-                                    let at = format!(
-                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} lists {lists} pieces {pieces} chunk {chunk}"
-                                    );
-                                    hash.offset = xc.diag_offset as i32;
-                                    let mut hits = Vec::new();
-                                    if stage {
-                                        let fold_part = (parts > 0).then_some(part::FoldPart {
-                                            scratch: &mut scratch,
-                                            parts,
-                                        });
-                                        let stats =
-                                            if lean == lean_on() && lists == seed_lean_on() {
-                                                seed_stage(
-                                                    xc, disc, threads, &mut hash, &mut hits, None,
-                                                    false, fold_part,
-                                                )
-                                            } else {
-                                                stage_of(
-                                                    lean, lists, xc, disc, threads, &mut hash,
-                                                    &mut hits, fold_part,
-                                                )
-                                            };
-                                        assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
-                                    } else {
-                                        fold_memo_free(xc, &mut hash, &mut hits);
-                                    }
-                                    let (keys, state, max_level, x_last) = &expected[chunk];
-                                    assert_eq!(
-                                        &hits.iter().map(key).collect::<Vec<_>>(),
-                                        keys,
-                                        "{at}"
-                                    );
-                                    assert_eq!(&hash_state(&hash), state, "{at}");
-                                    assert_eq!(&hash.max_level, max_level, "{at}");
-                                    assert_eq!(&hash.x_last, x_last, "{at}");
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the two-hit stage with the diagonal array (a query
-    // of 1500 to 3899 bases, so a block of at most 7799 letters; the array has NCBI's length,
-    // the power of two just above the block plus the window) for every discontiguous template:
-    // the pairs of the reference wrapper folded in one go by `fold_two_hit_array`, against
-    // `seed_stage_array` on 1..8 threads. Hit lists and both arrays must be the same, and the
-    // serial fold must have taken every branch: the `last_hit` rejection, the first hit of a
-    // window (`hit_len_array` set), the second hit both below and above the cutoff (a saved
-    // hit leaves `flag` 1).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    #[test]
-    fn disc_two_hit_array_stage_on_strips_equals_one_scan() {
-        let mut rng = Lcg(0xA22A_5EED);
-        let mut case_no = 0;
-        for word_size in [11usize, 12] {
-            for word_type in [
-                DiscWordType::Coding,
-                DiscWordType::Optimal,
-                DiscWordType::TwoTemplates,
-            ] {
-                for template_length in [16usize, 18, 21] {
-                    case_no += 1;
-                    let q_len = 1500 + rng.below(2400) as usize;
-                    let c = make_case_with(&mut rng, 30_000, q_len);
-                    // every second case: a masked subject, scanned in its ranges
-                    let c = if case_no % 2 == 0 {
-                        mask_case(&mut rng, c)
-                    } else {
-                        c
-                    };
-                    let lookup = build_disc_mb_lookup(
-                        &ctx_refs(&c),
-                        &c.offsets,
-                        word_size,
-                        template_length,
-                        word_type,
-                        &c.masks,
-                        c.concat.len(),
-                    );
-                    let disc = lookup.disc().expect("a discontiguous table");
-                    let diag_offset = 37 + rng.below(1000) as isize;
-                    let window_size = 40;
-                    let x = Inputs {
-                        use_array_indexing: true,
-                        ..inputs(&c, &lookup, diag_offset, window_size)
-                    };
-                    assert!(in_scope_array(&x) && !in_scope(&x));
-                    let mut length = 1usize;
-                    while length < c.concat.len() + window_size {
-                        length <<= 1;
-                    }
-                    let mut seeds = Vec::new();
-                    scan_subject_disc_words_with_ranges(
-                        &c.packed,
-                        c.s_len,
-                        disc,
-                        &c.seq_ranges,
-                        c.masked,
-                        |s_off, s_range, index, index2| {
-                            lookup.for_each_hit(index, |q_off_1| {
-                                if q_off_1 != 0 {
-                                    seed_of_pair(
-                                        &x,
-                                        q_off_1 as usize - 1,
-                                        s_off,
-                                        s_range,
-                                        &mut seeds,
-                                    );
-                                }
-                            });
-                            if let Some(index2) = index2 {
-                                lookup.for_each_hit2(index2, |q_off_1| {
-                                    seed_of_pair(
-                                        &x,
-                                        q_off_1 as usize - 1,
-                                        s_off,
-                                        s_range,
-                                        &mut seeds,
-                                    );
-                                });
-                            }
-                        },
-                    );
-                    let mut serial_levels = vec![DiagStruct::default(); length];
-                    let mut serial_lens = vec![0u8; length];
-                    let mut serial_hits = Vec::new();
-                    let mut counts = FoldCounts::default();
-                    let mut pause = 0u64;
-                    fold_two_hit_array::<false>(
-                        &x,
-                        &seeds,
-                        &mut DiagArray {
-                            levels: &mut serial_levels,
-                            lens: &mut serial_lens,
-                            length: length as isize,
-                            mask: length as isize - 1,
-                            size: length,
-                        },
-                        &mut serial_hits,
-                        None,
-                        &mut pause,
-                        &mut counts,
-                    );
-                    let saved = serial_levels.iter().filter(|d| d.flag != 0).count();
-                    let first_hits = serial_lens.iter().filter(|&&l| l > 0).count();
-                    assert!(
-                        serial_hits.len() > 5 && counts.skipped > 0 && saved > 0 && first_hits > 0,
-                        "case {case_no}: the test sequences give too few hits ({} hits, {} skipped, {saved} saved diagonals, {first_hits} first-hit diagonals)",
-                        serial_hits.len(),
-                        counts.skipped
-                    );
-                    let key = |h: &UngappedHit| {
-                        (
-                            h.context_idx,
-                            h.seed_q_off,
-                            h.seed_s_off,
-                            h.qs,
-                            h.qe,
-                            h.ss,
-                            h.se,
-                            h.score,
-                        )
-                    };
-                    let state = |levels: &[DiagStruct], lens: &[u8]| {
-                        (
-                            levels
-                                .iter()
-                                .map(|d| (d.last_hit, d.flag))
-                                .collect::<Vec<_>>(),
-                            lens.to_vec(),
-                        )
-                    };
-                    let serial_keys: Vec<_> = serial_hits.iter().map(key).collect();
-                    let serial_state = state(&serial_levels, &serial_lens);
-                    for threads in 1..=8usize {
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(threads)
-                            .build()
-                            .unwrap();
-                        let (got_state, keys, stats_seeds, strips) = pool.install(|| {
-                            let mut levels = vec![DiagStruct::default(); length];
-                            let mut lens = vec![0u8; length];
-                            let mut hits = Vec::new();
-                            let stats = seed_stage_array(
-                                &x,
-                                disc,
-                                threads,
-                                &mut DiagArray {
-                                    levels: &mut levels,
-                                    lens: &mut lens,
-                                    length: length as isize,
-                                    mask: length as isize - 1,
-                                    size: length,
-                                },
-                                &mut hits,
-                                None,
-                                false,
-                            );
-                            (
-                                state(&levels, &lens),
-                                hits.iter().map(key).collect::<Vec<_>>(),
-                                stats.counts.seeds,
-                                stats.strips,
-                            )
-                        });
-                        assert!(strips > 1, "case {case_no} threads {threads}");
-                        assert_eq!(
-                            stats_seeds,
-                            seeds.len() as u64,
-                            "case {case_no} threads {threads}"
-                        );
-                        assert_eq!(keys, serial_keys, "case {case_no} threads {threads}");
-                        assert!(
-                            got_state == serial_state,
-                            "case {case_no} threads {threads}: the diagonal arrays differ"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // The scope: a discontiguous table in two-hit mode with the diagonal hash only. A
-    // contiguous table in two-hit mode (megablast or blastn with `-window_size`, which the
-    // CLI rejects) is in neither this scope nor the parent's: the parent's `run` refuses it
-    // (window_size != 0) and the reference runs.
-    #[test]
-    fn scope_is_the_two_hit_discontiguous_stage() {
-        let mut rng = Lcg(0x5C09E);
-        let c = make_case(&mut rng, 5_000);
-        let disc = build_disc_mb_lookup(
-            &ctx_refs(&c),
-            &c.offsets,
-            11,
-            18,
-            DiscWordType::Coding,
-            &c.masks,
-            c.concat.len(),
-        );
-        let x = inputs(&c, &disc, 40, 40);
-        assert!(in_scope(&x));
-        assert!(!in_scope(&Inputs {
-            window_size: 0,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        assert!(!in_scope(&Inputs {
-            use_array_indexing: true,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        assert!(!in_scope(&Inputs {
-            scan_range: 1,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        // a masked subject is scanned in its ranges by the stage (the stage tests compare both)
-        assert!(in_scope(&Inputs {
-            subject_masked: true,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        assert!(!in_scope(&Inputs {
-            diagnostics: true,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        assert!(!in_scope(&Inputs {
-            one_subject_owner: false,
-            ..inputs(&c, &disc, 40, 40)
-        }));
-        let contiguous = build_two_stage_lookup(
-            &ctx_refs(&c),
-            &c.offsets,
-            28,
-            12,
-            &c.masks,
-            None,
-            0,
-            c.concat.len(),
-            false,
-        );
-        assert!(!in_scope(&inputs(&c, &contiguous, 40, 40)));
-        // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the same scope with the diagonal array.
-        fn array(x: Inputs<'_>) -> Inputs<'_> {
-            Inputs {
-                use_array_indexing: true,
-                ..x
-            }
-        }
-        assert!(in_scope_array(&array(inputs(&c, &disc, 40, 40))));
-        assert!(!in_scope_array(&inputs(&c, &disc, 40, 40)));
-        assert!(!in_scope_array(&array(Inputs {
-            window_size: 0,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(!in_scope_array(&array(Inputs {
-            scan_range: 1,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(in_scope_array(&array(Inputs {
-            subject_masked: true,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(!in_scope_array(&array(Inputs {
-            small_na_word: true,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(!in_scope_array(&array(Inputs {
-            diagnostics: true,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(!in_scope_array(&array(Inputs {
-            one_subject_owner: false,
-            ..inputs(&c, &disc, 40, 40)
-        })));
-        assert!(!in_scope_array(&array(inputs(&c, &contiguous, 40, 40))));
-        // The parent's `run` in a pool of two threads (where its one-hit stage would run):
-        // a contiguous table with a window is refused and nothing is touched.
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(2)
-                .build()
-                .unwrap();
-            pool.install(|| {
-                let mut hash = DiagHashTable::new(40);
-                let mut hits = Vec::new();
-                let x = inputs(&c, &contiguous, 40, 40);
-                let mut fold_scratch = PartScratch::default();
-                let (mut levels, mut lens) = (Vec::new(), Vec::new());
-                assert!(!super::super::run(
-                    &x,
-                    &mut hash,
-                    DiagArray {
-                        levels: &mut levels,
-                        lens: &mut lens,
-                        length: 0,
-                        mask: 0,
-                        size: 0,
-                    },
-                    &mut hits,
-                    &mut fold_scratch
-                ));
-                assert!(hits.is_empty());
-                assert_eq!(hash.occupancy, 1);
-            });
-        }
-    }
-}
+#[path = "x_pair_seed_disc_tests.rs"]
+mod tests;

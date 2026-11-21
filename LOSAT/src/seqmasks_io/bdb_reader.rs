@@ -20,7 +20,7 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
 use crate::seqdb::alias::SearchPath;
-use crate::seqdb::{SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{NucleotideAmbiguity, SeqDb, SeqDbError, SeqType};
 use crate::seqid::ParsedSeqId;
 
 /// One sequence of the database (`CBioseq`).
@@ -38,6 +38,12 @@ pub(crate) struct BdbRecord {
     /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
     /// `false`, which writes the same title).
     pub has_source: bool,
+    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`) of a sequence with letters,
+    /// when the reader was asked for it (`MaskBdbReader::ask_get_title`: windowmasker's `-ids` matched as text,
+    /// makembindex's `-idmap`). An empty title is made from the Bioseq's first source, which it
+    /// has for a definition line with a positive taxid whatever the taxonomy database holds
+    /// (seqdbvol.cpp:1126-1176).
+    pub get_title: Option<Vec<u8>>,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
     /// The `ERR_POST` texts of the taxonomy database that NCBI's `GetBioseq` writes while it
@@ -62,30 +68,7 @@ pub(crate) enum BdbError {
 /// those outside the alias files' OID ranges (`SeqDb::open_every_oid_in`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
-/// ```c++
-///     CMaskBDBReader( const string & dbname, bool is_nucl = true)
-///         : CMaskReader( cin ),
-///           seqdb_( new CSeqDB( dbname, (is_nucl
-///                                        ? CSeqDB::eNucleotide
-///                                        : CSeqDB::eProtein)) ),
-///           oid_( 0 )
-///     {}
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:41-55
-/// ```c++
-/// CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
-/// {
-///     CRef< CSeq_entry > entry( null );
-///
-///     if( oid_ < seqdb_->GetNumOIDs() ) {
-///         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
-///         entry.Reset( new CSeq_entry );
-///         if( seq.NotEmpty() ) entry->SetSeq( *seq );
-///     }
-///
-///     return entry;
-/// }
-/// ```
 pub(crate) struct MaskBdbReader {
     db: SeqDb,
     molecule: SeqType,
@@ -100,6 +83,10 @@ pub(crate) struct MaskBdbReader {
     taxdb: crate::algorithm::common::database::TaxdbRun,
     /// What `source_taxname` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
     source_names: crate::seqdb::taxdb::TaxCache,
+    /// The search path the database was opened on (`volume_paths`).
+    path: SearchPath,
+    /// Whether the records carry `sequence::GetTitle` (`BdbRecord::get_title`).
+    get_title: bool,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -136,11 +123,70 @@ impl MaskBdbReader {
             program,
             taxdb: crate::algorithm::common::database::TaxdbRun::sequential(),
             source_names: Default::default(),
+            path,
+            get_title: false,
         })
+    }
+
+    /// From now on the records carry `sequence::GetTitle` of their Bioseq
+    /// (`BdbRecord::get_title`).
+    pub(crate) fn ask_get_title(&mut self) {
+        self.get_title = true;
+    }
+
+    /// The OID that `next_record` reads next (makembindex's `CSequenceIStreamBlastDB::oid_`).
+    pub(crate) fn next_oid(&self) -> u32 {
+        self.oid
+    }
+
+    /// `CSequenceIStreamBlastDB::putback()`: the last OID is read again (none before OID 0).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:138-139
+    pub(crate) fn putback(&mut self) {
+        self.oid = self.oid.saturating_sub(1);
+    }
+
+    /// The database (its mask algorithms and mask data: makembindex's `-db_mask`).
+    pub(crate) fn db(&self) -> &SeqDb {
+        &self.db
+    }
+
+    /// `FindVolumePaths(paths, true)` of the database opened as `name`: the paths of its
+    /// volumes (without extension), each once, in NCBI's order.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
+    pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
+        SeqDb::volume_and_alias_paths(name, self.molecule, &self.path)
+            .map(|(volumes, _)| volumes)
+            .map_err(|error| database_error(error, self.program))
+    }
+
+    /// The exception or refusal of `error`, as `next_record` reports it.
+    pub(crate) fn database_error(&self, error: SeqDbError) -> BdbError {
+        database_error(error, self.program)
     }
 
     /// `GetNextSequence`: the sequence of the next OID, `None` after the last.
     pub(crate) fn next_record(&mut self) -> Result<Option<BdbRecord>, BdbError> {
+        Ok(self.next_record_of(true)?.map(|(record, _)| record))
+    }
+
+    /// [`MaskBdbReader::next_record`] of a nucleotide database without the letters (`residues`
+    /// is empty): the length and the ambiguity runs of the sequence come with the record, so
+    /// that the caller reads the letters by ranges ([`SeqDb::nucleotide_iupac_range_with`],
+    /// makembindex: the whole sequence is never held as letters).
+    pub(crate) fn next_record_by_ranges(
+        &mut self,
+    ) -> Result<Option<(BdbRecord, NucleotideAmbiguity)>, BdbError> {
+        Ok(self
+            .next_record_of(false)?
+            .map(|(record, ambiguity)| (record, ambiguity.expect("a nucleotide database"))))
+    }
+
+    /// `next_record` with the letters (`letters`), or with the length and the ambiguity runs of
+    /// a nucleotide instead.
+    fn next_record_of(
+        &mut self,
+        letters: bool,
+    ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
         if self.oid >= self.db.num_seqs() {
             return Ok(None);
         }
@@ -148,6 +194,8 @@ impl MaskBdbReader {
         self.oid += 1;
         let program = self.program;
         let error = |error| database_error(error, program);
+        // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
+        self.db.build_oid_list().map_err(error)?;
         let set = self.db.defline_set(oid).map_err(error)?;
         if set
             .deflines
@@ -165,20 +213,29 @@ impl MaskBdbReader {
             .map(|defline| defline.ids.clone())
             .unwrap_or_default();
         let title = set.bioseq_title();
-        let residues = match self.molecule {
-            SeqType::Nucleotide => self.db.nucleotide_iupac(oid).map_err(error)?,
-            SeqType::Protein => self
-                .db
-                .read_sequence(oid)
-                .map_err(error)?
-                .protein(0)
-                .to_vec(),
+        let (residues, ambiguity) = match self.molecule {
+            SeqType::Nucleotide if letters => (self.db.nucleotide_iupac(oid).map_err(error)?, None),
+            SeqType::Nucleotide => (
+                Vec::new(),
+                Some(self.db.nucleotide_ambiguity(oid).map_err(error)?),
+            ),
+            SeqType::Protein => (
+                self.db
+                    .read_sequence(oid)
+                    .map_err(error)?
+                    .protein(0)
+                    .to_vec(),
+                None,
+            ),
         };
+        let has_letters = ambiguity
+            .as_ref()
+            .map_or(!residues.is_empty(), |ambiguity| ambiguity.length() > 0);
         // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups
         // (seqdbvol.cpp:1380-1386), and the writer prints none. A sequence without a positive
         // taxid has no lookup (`TaxdbRun::bioseq_texts`).
         let mut texts = Vec::new();
-        if !residues.is_empty() {
+        if has_letters {
             texts = self
                 .taxdb
                 .bioseq_texts(&self.db, oid, &set, None)
@@ -193,44 +250,44 @@ impl MaskBdbReader {
         // The title is asked first: a printed title that NCBI neither makes from the source nor
         // rewrites the end of (the reader's usual one) asks nothing of the source.
         let source_shown = self.title_printed
-            && !residues.is_empty()
+            && has_letters
             && (bioseq_title_from_source(&title, || bioseq_facts(&ids))
                 || (self.molecule == SeqType::Protein
                     && crate::report::defline::protein_title_suffix_adjustable(&title)));
-        let has_source = source_shown && set.first_source_taxid(None).is_some();
+        let any_source = set.first_source_taxid(None).is_some();
+        let has_source = source_shown && any_source;
         let taxname = if has_source {
             self.source_taxname(oid, &set)?
         } else {
             None
         };
-        Ok(Some(BdbRecord {
-            ids,
-            title,
-            taxname,
-            has_source,
-            residues,
-            texts,
-        }))
+        // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups: none
+        // is made, and the callers skip the record (windowmasker) or refuse it (makembindex).
+        let get_title = if self.get_title && has_letters {
+            Some(crate::sequence::title::get_title(
+                &ids,
+                &title,
+                any_source,
+                || self.source_taxname(oid, &set),
+            )?)
+        } else {
+            None
+        };
+        Ok(Some((
+            BdbRecord {
+                ids,
+                title,
+                taxname,
+                has_source,
+                get_title,
+                residues,
+                texts,
+            },
+            ambiguity,
+        )))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1126-1155
-    // ```c++
-    //     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
-    //         TTaxId taxid = ZERO_TAX_ID;
-    //
-    //         if ((*iter)->CanGetTaxid()) {
-    //             taxid = (*iter)->GetTaxid();
-    //         }
-    //         if (taxid <= ZERO_TAX_ID) {
-    //             continue;
-    //         }
-    //         ...
-    //             try {
-    //                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
-    //             } catch (CSeqDBException &) {
-    //                 found_taxid_in_taxonomy_blastdb = false;
-    //             }
-    // ```
     // The first source names the organism (`DeflineSet::first_source_taxid`,
     // `seqdb::taxdb::SourceNames::taxname`). The load of the sequence (`TaxdbRun::bioseq_texts`,
     // in `next_record` before this) made the lookups and has their texts; the name is asked again
@@ -269,14 +326,6 @@ fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
-// ```c++
-// const Uint1 CStdaaToIupacaa::scm_Table[32] = {
-//     255, 'A', 'B', 'C', 'D', 'E', 'F', 'G',
-//     'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q',
-//     'R', 'S', 'T', 'V', 'W', 'X', 'Y', 'Z',
-//     'U', 255, 'O', 'J', 255, 255, 255, 255
-// };
-// ```
 /// The `eCoding_Iupac` letters of a protein's NCBIstdaa codes (`CSeqVector`'s IUPACaa): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them (segmasker 2.17.0 writes
 /// them so with `-infmt blastdb -outfmt fasta`, fixture `db_ambig_fasta`).
@@ -293,14 +342,14 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     if let Some(exception) = error.ncbi_exception() {
         return BdbError::Ncbi(exception.clone());
     }
-    match error.ncbi_message() {
+    match error.ncbi_request_message() {
         Some(text) => {
             let site = crate::seqdb::throw_site(&text)
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }
-        None => BdbError::Refused(
-            crate::algorithm::common::database::refusal(&error.to_string(), program).to_string(),
-        ),
+        None => BdbError::Refused(crate::algorithm::common::database::losat_reader_error(
+            &error, program,
+        )),
     }
 }

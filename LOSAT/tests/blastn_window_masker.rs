@@ -352,8 +352,14 @@ fn check(threads: &str) {
         command.args(&case.args).args(["-num_threads", threads]);
         command.envs(case.env.iter().map(|(key, value)| (key, value)));
         let output = command.output().expect("run losat");
-        let read =
-            |ext: &str| std::fs::read(fixtures().join(format!("{}.{ext}", case.name))).unwrap();
+        let read = |ext: &str| {
+            let bytes = std::fs::read(fixtures().join(format!("{}.{ext}", case.name))).unwrap();
+            if ext == "err" || ext == "out" {
+                temp_support::expected_losat_bytes(bytes)
+            } else {
+                bytes
+            }
+        };
         let rc: i32 = String::from_utf8(read("rc"))
             .unwrap()
             .trim()
@@ -395,7 +401,25 @@ fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
 #[test]
 fn counts_that_ncbi_reads_undefined_are_refused_before_any_output() {
     make_counts();
-    for (taxid, text) in [("48", "units of 17 letters"), ("60", "does not set bc")] {
+    // The counts of taxids 104-144 are line 507 of tests/winmask/text_counts.tsv with a sign or an
+    // overflow that `>>` fails on before it reaches k or bc (taxid_oascii_uint_*; NCBI's result is
+    // the checks of whatever the variable held).
+    let uninitialized = [
+        ("104", "does not set k"),
+        ("106", "does not set k"),
+        ("107", "does not set k"),
+        ("109", "does not set k"),
+        ("110", "does not set k"),
+        ("113", "does not set k"),
+        ("114", "does not set k"),
+        ("130", "does not set bc"),
+        ("143", "does not set bc"),
+        ("144", "does not set bc"),
+    ];
+    for (taxid, text) in [("48", "units of 17 letters"), ("60", "does not set bc")]
+        .into_iter()
+        .chain(uninitialized)
+    {
         let (mut command, _log) = blastn();
         let output = command
             .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")

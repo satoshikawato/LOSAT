@@ -1,0 +1,11 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:1000
+@SQ	SN:Query_2	LN:600
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -query tests/fixtures/blastn_regression/inputs/sam_ug_q.fa -subject tests/fixtures/blastn_regression/inputs/sam_ug_s.fa -ungapped -max_hsps 2 -outfmt 17 	PN:blastn
+Subject_5	16	Query_1	50	255	150H303M38H	*	0	0	*	*	AS:i:202	EV:f:2.04189e-111	NM:i:0	PI:f:66.67	BS:f:389.07
+Subject_1	0	Query_1	9	255	50H292M150H	*	0	0	*	*	AS:i:200	EV:f:2.93499e-110	NM:i:0	PI:f:68.49	BS:f:385.225
+Subject_4	0	Query_1	101	255	40H202M38H	*	0	0	*	*	AS:i:202	EV:f:2.04189e-111	NM:i:0	PI:f:100.00	BS:f:389.07
+Subject_3	0	Query_1	101	255	40H352M39H	*	0	0	*	*	AS:i:301	EV:f:1.02363e-168	NM:i:0	PI:f:85.51	BS:f:579.416
+Subject_2	0	Query_1	200	255	29H121M30H	*	0	0	*	*	AS:i:121	EV:f:1.55511e-64	NM:i:0	PI:f:100.00	BS:f:233.333
+Subject_7	0	Query_2	20	255	20H271M24H	*	0	0	*	*	AS:i:200	EV:f:1.74674e-110	NM:i:0	PI:f:73.80	BS:f:385.225
+Subject_6	0	Query_2	101	255	60H301M59H	*	0	0	*	*	AS:i:151	EV:f:4.00662e-82	NM:i:0	PI:f:50.17	BS:f:291.013

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Check LOSAT's floating-point contract (docs/agents/diagnostics.md, "Floating-point contract").
 
-NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-```c
-            result *= expl(-z * z) / z;
-```
-LOSAT's one fused multiply-add (`f64::mul_add` in `stats/spouge.rs`) is the exact rounding error
-of a product inside the double-double emulation of that long-double line's `expl`. Every other
-floating-point operation is a separate IEEE operation in the order of the NCBI source, so the
-compiler must not contract `a * b + c` into a fused multiply-add, and nothing may add one.
+Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (ErfC's long-double product)
+LOSAT's fused multiply-adds (`f64::mul_add`) are in two places: `stats/spouge.rs`, the exact
+rounding error of a product inside the double-double emulation of that long-double line's `expl`,
+and `utils/glibc_fma_libm.rs`, the fused operations of glibc's x86-64 FMA `exp`, `log` and `pow`,
+which NCBI BLAST+ called for the reference output. Every other floating-point operation is a
+separate IEEE operation in the order of the NCBI source, so the compiler must not contract
+`a * b + c` into a fused multiply-add, and nothing may add one.
 
 Two checks:
 
@@ -37,17 +36,22 @@ from typing import Iterable
 REPO = Path(__file__).resolve().parents[2]
 
 # No NCBI counterpart: the ledger of the explicit fused multiply-adds, keyed by file and the
-# function that contains the call. `x_product_error` is the production site; the test checks
-# Dekker's product against it.
+# function that contains the call. `x_product_error` and `Fused::fma` (every fused operation of the
+# glibc port) are the production sites; the tests check Dekker's product and the emulated FMA
+# against them.
 MUL_ADD_SITES = {
     ("LOSAT/src/stats/spouge.rs", "x_product_error"): 1,
-    ("LOSAT/src/stats/spouge.rs", "x_dekker_product_error_matches_fused_multiply_add"): 1,
+    ("LOSAT/src/stats/spouge_tests.rs", "x_dekker_product_error_matches_fused_multiply_add"): 1,
+    ("LOSAT/src/utils/glibc_fma_libm.rs", "fma"): 1,
+    ("LOSAT/src/utils/glibc_fma_libm_tests.rs", "the_emulated_fma_rounds_once"): 2,
 }
 
-# No NCBI counterpart: the release-binary functions that `x_product_error` is inlined into
-# (the ErfC code of `stats/spouge.rs`). With an FMA target (x86-64-v3, aarch64) `mul_add` is an
-# FMA instruction there; on baseline x86-64 it is a call of `fma`.
-MUL_ADD_FUNCTION_PREFIXES = ("losat::stats::spouge::",)
+# No NCBI counterpart: the release-binary functions that hold the `mul_add` sites: the ErfC code of
+# `stats/spouge.rs`, which `x_product_error` is inlined into, and the glibc port, whose entry points
+# are not inlined where they hold FMA instructions. With an FMA target (x86-64-v3, aarch64, the
+# port's x86-64 copies compiled with `fma`) `mul_add` is an FMA instruction there; on baseline
+# x86-64 it is a call of `fma` (in the port, only in the cold `exp_specialcase`).
+MUL_ADD_FUNCTION_PREFIXES = ("losat::stats::spouge::", "losat::utils::glibc_fma_libm::")
 # No NCBI counterpart: functions that may hold an FMA instruction: the `mul_add` sites and
 # the `fma` of Rust's compiler-builtins that baseline x86-64 links, which takes the FMA or FMA4
 # instruction when the CPU has one and a software fused multiply-add otherwise (all three round

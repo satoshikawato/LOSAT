@@ -140,7 +140,7 @@ the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), 
 
 | Directory | Command line | Library and Web | Notes |
 | :--- | :--- | :--- | :--- |
-| `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short; `blast_engine/run.rs` holds the search |
+| `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short, rmblastn; `blast_engine/run.rs` holds the search |
 | `blastp` | `blast_engine::run` | `run_local`, `run_local_database` | also the driver of psiblast and rpsblast (`args::BlastpApp`) |
 | `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | its own FASTA reader in `input.rs` |
 | `tblastn` | `TblastnArgs::run` | `run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | |
@@ -526,7 +526,7 @@ The diagnostic variables are not switches: `LOSAT_X_STATS` (work counters; those
 the trace and debug variables (those of `xdiag` are read only in a build with the feature
 `diagnostics`). They write to standard error or to files. `main_entry` writes the reach files, the
 counters and the common timing line only when the run succeeds; the programs' own timing lines
-and the traces are written as the run goes. [docs/user/environment.md](../user/environment.md)
+and the traces are written as the run goes. [The manual's Environment variables page](../manual/src/environment.md)
 lists NCBI's variables and names the development ones as a group.
 
 ## Errors and exit codes
@@ -580,7 +580,7 @@ The engine reads its environment in three layers:
    them.
 3. LOSAT's own variables: the switches and the diagnostics above.
 
-[docs/user/environment.md](../user/environment.md) is the operator's list.
+[The manual's Environment variables page](../manual/src/environment.md) is the operator's list.
 [docs/agents/diagnostics.md](../agents/diagnostics.md) describes each development variable.
 
 ## Historical records

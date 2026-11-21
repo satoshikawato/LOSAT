@@ -108,14 +108,18 @@ pub fn recording() -> bool {
     directory().is_some()
 }
 
-/// No NCBI counterpart: records that the switch at `index` took its own path (`own_path`) or
+/// No NCBI counterpart: records that the switch at `INDEX` took its own path (`own_path`) or
 /// the reference path. Called through `x_reach!`. Never inlined: a decision point keeps only the
-/// call, so the code around it compiles as it did without the mark.
+/// call, so the code around it compiles as it did without the mark. The index is a constant of
+/// the function, not an argument, so that its bounds check is made when it compiles: as an
+/// argument its check went only where the optimizer proved the range of every call's index,
+/// which a change elsewhere in the program could undo (blastp's default path +6 instructions a
+/// call, +149,028 for 24,727 calls; line RG D1a-4, implA's callgrind).
 #[doc(hidden)]
 #[inline(never)]
-pub fn mark(index: usize, own_path: bool) {
+pub fn mark<const INDEX: usize>(own_path: bool) {
     if directory().is_some() {
-        SIDES[index].fetch_or(if own_path { NEW } else { REF }, Ordering::Relaxed);
+        SIDES[INDEX].fetch_or(if own_path { NEW } else { REF }, Ordering::Relaxed);
     }
 }
 
@@ -126,7 +130,7 @@ pub fn mark(index: usize, own_path: bool) {
 macro_rules! x_reach {
     ($name:literal, $own_path:expr) => {{
         const INDEX: usize = $crate::utils::xreach::index($name);
-        $crate::utils::xreach::mark(INDEX, $own_path)
+        $crate::utils::xreach::mark::<INDEX>($own_path)
     }};
 }
 pub(crate) use x_reach;
@@ -173,13 +177,5 @@ pub fn write_report() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn index_finds_every_name_of_the_set_then_the_graduated_ones() {
-        for (i, name) in STRICT_SET.iter().chain(GRADUATED).enumerate() {
-            assert_eq!(index(name), i);
-        }
-    }
-}
+#[path = "xreach_tests.rs"]
+mod tests;

@@ -7,14 +7,7 @@
 //! the length and `"\n"`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729
-//! ```c++
-//!         out << label << "= ";
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:743-744
-//! ```c++
-//!             out << "\nLength=";
-//!             out << cbs.GetInst().GetLength() <<"\n";
-//! ```
 //!
 //! The cases (NCBI BLAST+ 2.17.0, review 3's probe B, `tests/fixtures/tax_report_streams`): blastp
 //! of `ids/txr_p` with the taxonomy database `offset_last_past_end`, whose lookup of B's taxid

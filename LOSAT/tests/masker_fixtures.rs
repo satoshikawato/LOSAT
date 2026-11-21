@@ -1,12 +1,15 @@
-//! `losat dustmasker`, `losat segmasker` and `losat convert2blastmask` against NCBI BLAST+
-//! 2.17.0 dustmasker 1.0.0, segmasker 1.0.0 and convert2blastmask: each row of
+//! `losat dustmasker`, `losat segmasker`, `losat windowmasker` and `losat convert2blastmask`
+//! against NCBI BLAST+ 2.17.0 dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 and
+//! convert2blastmask: each row of
 //! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file`
 //! is the standard input) gives NCBI's standard output, standard error and exit status, frozen
 //! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
-//! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
+//! 2026-11-12 and 11-13, on ws and the local official release; windowmasker's of line NP item
+//! M5a, 2026-11-20 on ws, `tests/windowmasker/make_fixtures.py`). A name the table repeats is
 //! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
 //! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
-//! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
+//! `run_windowmasker`, `run_convert2blastmask`, by `examples/library_command_line`), with the
+//! same bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,18 +25,38 @@ fn fixtures(program: &str) -> PathBuf {
         .join(program)
 }
 
-/// One row of the table: its name, the words after the program's name, and the file of
-/// `< file`.
+/// One row of the table: its name, the words after the program's name, the file of `< file`,
+/// and the variables of its first `NAME=value` words.
 struct Case {
     name: String,
     words: Vec<String>,
     stdin: Option<String>,
+    variables: Vec<(String, String)>,
+}
+
+/// The variables of the first words of `words` of the form `NAME=value` (`NAME` in upper case,
+/// such as `BLASTDB`, where the taxonomy database is), taken out of `words`: the shell's
+/// assignments before the command.
+pub(crate) fn take_variables(words: &mut Vec<String>) -> Vec<(String, String)> {
+    let mut variables = Vec::new();
+    while let Some((name, value)) = words.first().and_then(|word| word.split_once('=')) {
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+        {
+            break;
+        }
+        variables.push((name.to_string(), value.to_string()));
+        words.remove(0);
+    }
+    variables
 }
 
 /// The words of `line` as the probe's shell split them: blanks between words, double quotes
 /// around a word with blanks or none, and `<` before the file of the standard input (no other
 /// shell syntax is in the table).
-fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
+pub(crate) fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
     // The open quote: inside `"..."` a `'` is a letter, inside `'...'` a `"`.
@@ -72,12 +95,14 @@ fn cases(program: &str) -> Vec<Case> {
             continue;
         }
         let (name, arguments) = line.split_once('\t').unwrap();
-        let (words, stdin) = shell_words(arguments);
+        let (mut words, stdin) = shell_words(arguments);
+        let variables = take_variables(&mut words);
         cases.retain(|case| case.name != name);
         cases.push(Case {
             name: name.to_string(),
             words,
             stdin,
+            variables,
         });
     }
     cases
@@ -115,6 +140,7 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
     };
     command
         .env("NCBI_CONFIG_PATH", &dir)
+        .envs(case.variables.iter().map(|(name, value)| (name, value)))
         .current_dir(&dir)
         .arg(program)
         .args(&case.words)
@@ -130,7 +156,8 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
 ///   `CArgException::eNoFile`), so `-in` naming one is "File is not accessible" as a file that
 ///   does not exist: the row `MISSING_INPUT` of the program with the name of `case`
 ///   (segmasker and convert2blastmask open `-in` first; dustmasker opens `-out` first, and the
-///   interval writer of its directory row writes nothing before a record; the test
+///   interval writer of its directory row writes nothing before a record; windowmasker opens
+///   `-in` itself, `CWinMaskConfig`'s `ifstream`, whose failure names the file after ` - `; the test
 ///   `the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one` checks that the standard
 ///   output is the same); on Linux the directory opens and its first read fails;
 /// - the paths of the database messages and the search path (`ncbi_paths_on_windows`).
@@ -142,6 +169,10 @@ fn expected(program: &str, case: &Case) -> Streams {
                 String::from_utf8(bytes)
                     .unwrap()
                     .replace(&format!("`{missing_name}'"), &format!("`{directory}'"))
+                    .replace(
+                        &format!(" - {missing_name}\n"),
+                        &format!(" - {directory}\n"),
+                    )
                     .into_bytes()
             };
             let (out, err, status) = expected_row(program, missing);
@@ -152,9 +183,10 @@ fn expected(program: &str, case: &Case) -> Streams {
 }
 
 /// The row of each program's table whose `-in` names a file that does not exist.
-const MISSING_INPUT: [(&str, &str); 3] = [
+const MISSING_INPUT: [(&str, &str); 4] = [
     ("dustmasker", "noin_file"),
     ("segmasker", "noin_file"),
+    ("windowmasker", "m_in_missing"),
     ("convert2blastmask", "in_missing"),
 ];
 
@@ -191,7 +223,8 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     })
 }
 
-/// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen.
+/// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
+/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected_row(program: &str, name: &str) -> Streams {
     let file = |extension: &str| {
         fixtures(program)
@@ -218,7 +251,7 @@ fn expected_row(program: &str, name: &str) -> Streams {
     };
     (
         fs::read(file("out")).unwrap(),
-        err,
+        losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )
 }
@@ -301,13 +334,20 @@ fn segmasker_gives_ncbis_bytes() {
 }
 
 #[test]
+fn windowmasker_gives_ncbis_bytes() {
+    let differ = rows_that_differ("windowmasker");
+    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
+#[test]
 fn convert2blastmask_gives_ncbis_bytes() {
     let differ = rows_that_differ("convert2blastmask");
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
-// `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run NCBI's application start as
-// the command line does (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,
+// `run_dustmasker`, `run_segmasker`, `run_windowmasker` and `run_convert2blastmask` run NCBI's
+// application start as the command line does (`ncbi_app::run_with`, line RG item E1w-2): the
+// rows of `-logfile`,
 // `-conffile` and `-dryrun` give the command line's bytes through the library too. `-xmlhelp`,
 // whose XML only the command line writes, is refused (line RG DECISIONS E2x-1). The example ends
 // every failure with exit status 1. The rows of `program`'s table whose run through the library
@@ -325,7 +365,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
         let expected = if help.is_some_and(|given| given == "-xmlhelp") {
             refused += 1;
             let text = format!(
-                "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
+                "Error: the option -xmlhelp runs on the command line of \
                  LOSAT's {refusal_name} only: the library API and the Web engine do not write \
                  NCBI's XML description of the arguments\n"
             );
@@ -372,6 +412,15 @@ fn segmasker_through_the_library_gives_the_command_line_s_bytes() {
 }
 
 #[test]
+fn windowmasker_through_the_library_gives_the_command_line_s_bytes() {
+    let differ = rows_that_differ_through_the_library("windowmasker", "WINDOWMASKER");
+    assert!(
+        differ.is_empty(),
+        "rows that differ through the library: {differ:?}"
+    );
+}
+
+#[test]
 fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
     let differ = rows_that_differ_through_the_library("convert2blastmask", "CONVERT2BLASTMASK");
     assert!(
@@ -393,6 +442,8 @@ fn merged_rows_that_differ(binary: &Path, program: &str) -> (usize, Vec<String>)
         let Ok(want) = fs::read(ncbi.join(format!("{}.merged", case.name))) else {
             continue;
         };
+        // NCBI's stream in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+        let want = losat::wording::losat_output_bytes(&want).into_owned();
         ran += 1;
         let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
             "masker-merged-{program}-{}-{}",
@@ -454,13 +505,37 @@ fn dustmasker_posts_where_ncbi_does_in_one_file() {
     }
 }
 
+/// windowmasker writes the FASTA reader's warnings between records (post level Warning) while
+/// earlier records' output may still be in NCBI's stdout buffer: in one file (`2>&1`) each
+/// warning falls where NCBI's does (`ncbi/<name>.merged`, make_fixtures.py's `MERGED`).
+#[test]
+fn windowmasker_posts_where_ncbi_does_in_one_file() {
+    for binary in [
+        PathBuf::from(env!("CARGO_BIN_EXE_losat")),
+        example_binary("library_command_line"),
+    ] {
+        let (ran, differ) = merged_rows_that_differ(&binary, "windowmasker");
+        assert!(ran >= 6, "{ran} rows with a merged stream");
+        assert!(
+            differ.is_empty(),
+            "{}: rows whose merged stream differs from NCBI's: {differ:?}",
+            binary.display()
+        );
+    }
+}
+
 // The rows that Windows answers as a missing file (`expected`) are the ones whose `-in` NCBI
 // read as a directory on Linux, and their standard output on Linux is that of the missing file
 // (a writer that wrote something before the failed read, or as the program ended, would write it
 // on Windows too, where the row would need its own standard output).
 #[test]
 fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
-    for program in ["dustmasker", "segmasker", "convert2blastmask"] {
+    for program in [
+        "dustmasker",
+        "segmasker",
+        "windowmasker",
+        "convert2blastmask",
+    ] {
         let (missing, _) = missing_input(program);
         let (missing_out, _, _) = expected_row(program, missing);
         for case in cases(program) {

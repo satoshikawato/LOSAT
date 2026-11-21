@@ -14,14 +14,6 @@
 //! batches, so that a few queries make several batches and blocks.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//!                 results = lcl_blast.Run();
-//! ```
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -29,6 +21,7 @@ use std::process::Command;
 
 mod reach_support;
 mod temp_support;
+use temp_support::InLosatWords;
 use temp_support::{worker_log_if_unset, TempFile, TempPath};
 
 fn fixture(name: &str) -> PathBuf {
@@ -750,9 +743,12 @@ fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
     for line in lines.filter(|line| line.starts_with("db.of18.bp.batch.")) {
         let cells: Vec<&str> = line.split('\t').collect();
         let row = cells[id];
-        let expected_err =
-            std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
-        let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+        let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+            .unwrap_or_default()
+            .in_losat_words();
+        let expected_out = temp_support::expected_losat_bytes(
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        );
         // `NAME=VALUE` tokens are variables of the run, the others arguments.
         let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
             .split_whitespace()

@@ -204,6 +204,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
                 Commands::Blastx(args) => run_local_blastx(
                     args,
                     &records(query, ReaderConfig::query("BLASTX", false, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("BLASTX", true, true)),
                     &mut outputs,
                 ),

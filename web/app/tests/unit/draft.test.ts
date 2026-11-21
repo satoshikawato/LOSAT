@@ -261,8 +261,9 @@ describe('SearchDraft inputs', () => {
   it('checks the inputs again for another program, and reads them again when it reads the role with another kind', async () => {
     const { draft, checks } = setup();
     draft.setPaste('query', '>a\nMKLV\n');
-    // A gap line, which LOSAT Web cannot index: the subject cannot be read.
-    draft.setPaste('subject', '>s\nAC\n>?5\nAC\n');
+    // A record over 2147483647 letters, which LOSAT refuses: the subject cannot be read (gap lines and data
+    // lines that are not plausible are read since line WQA's D13 and D10).
+    draft.setPaste('subject', '>s\nAC\n>?2147483647\nAC\n');
     await draft.idle();
     const revision = sourceOf(draft, 'query').base!.revisionId;
     expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(3);
@@ -658,7 +659,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     await draft.idle();
     for (const text of ['>q\nAC\n', '>q\nACG\n', '>q\nACGT\n']) draft.setPaste('query', text);
     await draft.idle();
-    draft.addFiles('subject', [file('bad.fa', '>s\nACGT\n>?5\nAC\n')]);
+    draft.addFiles('subject', [file('bad.fa', '>s\nACGT\n>?2147483647\nAC\n')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed' });
     expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });

@@ -2534,7 +2534,7 @@ mod tests {
         bad.extend_from_slice(b">bad\nMKVL%%%%\n");
         let line = bad.iter().filter(|&&b| b == b'\n').count();
         let cli = format!("BLAST query error: CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
-        let (handle, response) = crate::store::register("blastp", 0, &bad).unwrap();
+        let (handle, response) = crate::store::register("blastp", 0, true, &bad).unwrap();
         crate::store::release(handle).unwrap();
         assert!(
             response.contains(r#"{"index":10,"id":"q11","length":1100}],"reader_error":""#),

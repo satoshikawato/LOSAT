@@ -6,8 +6,8 @@
 // end a line, without the quirks of NCBI's line reader (which joins the rest of a line to the
 // next after a CR in a file of LF line ends, or the reverse, and has buffer ends); it reads a
 // `>?` gap line's size from its first digits (after `unk`), without NCBI's modifiers; and it
-// never takes a first line for a Seq-id that NCBI's data loaders would fetch, nor refuses a
-// record over 2147483647 letters.
+// never takes a first line for a Seq-id that NCBI's data loaders would fetch. It refuses a record
+// over 2147483647 letters as the engine's reader does, in its words.
 import type { FastaParserKind, FastaReader, IndexedRecord, InputRole, ProgramId, RecordKey } from 'losat/domain';
 import type { InputCheck, InputChecker, RecordScanner, ScanResponse } from 'losat/ports';
 import { recordKey } from '../../domain/dataset';
@@ -22,26 +22,27 @@ const UNDERSCORE = 0x5f;
 const SEMICOLON = 0x3b;
 /** `CheckDataLine`'s window. */
 const CHECK_WINDOW = 70;
+/** The longest record that LOSAT reads, gaps included (`MAX_RECORD_LETTERS` of the engine's reader). */
+const MAX_RECORD_LETTERS = 2_147_483_647;
 /** The letters that kind 1 stores, in either case. */
 const NUCLEOTIDES = new Set([...'ABCDGHKMNRSTUVWY'].map((letter) => letter.charCodeAt(0)));
 
 export class FakeScanner implements RecordScanner {
   async scan(reader: FastaReader, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
-    const parser = fastaParser(programById(reader.program), reader.role);
     const parts: Uint8Array[] = [];
     for await (const chunk of chunks) parts.push(chunk.slice());
-    return fakeScan(concatBytes(parts), parser);
+    return fakeScan(concatBytes(parts), reader.program, reader.role);
   }
 }
 
 /** The records that the fake reads for a program's input, as the FakeEngine's `register` reports them. */
 export function fakeRecordKeys(bytes: Uint8Array, program: ProgramId, role: InputRole): RecordKey[] {
-  return fakeScan(bytes, fastaParser(programById(program), role)).records.map(recordKey);
+  return fakeScan(bytes, program, role).records.map(recordKey);
 }
 
 /** The reader's error that ends the records of an input, as the engine's message of a run says it, if one does. */
 export function fakeReaderError(bytes: Uint8Array, program: ProgramId, role: InputRole): string | undefined {
-  const stop = fakeScan(bytes, fastaParser(programById(program), role)).reader_error;
+  const stop = fakeScan(bytes, program, role).reader_error;
   return stop === undefined ? undefined : `BLAST query error: ${stop.message}`;
 }
 
@@ -133,7 +134,12 @@ function plausible(line: readonly number[]): boolean {
   return !(bad >= Math.floor(good / 3) && (length > 3 || good === 0 || bad > good));
 }
 
-export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): ScanResponse {
+/**
+ * The records of `bytes` as the engine's reader of `program`'s input of `role` reads them, and the reader's error that ends
+ * them; rejects with the reader's refusal of a record over 2147483647 letters, in its words (line WQA's D13 (d)).
+ */
+export function fakeScan(bytes: Uint8Array, program: ProgramId, role: InputRole): ScanResponse {
+  const parser = fastaParser(programById(program), role);
   const records: IndexedRecord[] = [];
   let current: Builder | undefined;
   let needDefline = true;
@@ -176,6 +182,9 @@ export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): ScanRespon
           return { records, reader_error: { offset, defline: bytes[offset] === GT, message: error.message } };
         }
       }
+    }
+    if (current !== undefined && current.length > MAX_RECORD_LETTERS) {
+      throw new Error(`a ${role} record longer than ${MAX_RECORD_LETTERS} letters is not supported by LOSAT's ${program.toUpperCase()}`);
     }
     start = next;
   }
@@ -238,7 +247,7 @@ export class FakeInputChecker implements InputChecker {
   async check({ program, role }: FastaReader, bytes: Uint8Array): Promise<InputCheck> {
     let scanned: ScanResponse;
     try {
-      scanned = fakeScan(bytes, fastaParser(programById(program), role));
+      scanned = fakeScan(bytes, program, role);
     } catch (error) {
       return { ok: false, message: `failed to read ${role} FASTA: ${error instanceof Error ? error.message : String(error)}` };
     }

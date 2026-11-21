@@ -1443,7 +1443,7 @@ export class SearchDraft {
       const before = this.sourcesBefore(role, source);
       if (check.state === 'ok' && check.readerError !== undefined && before.length > 0) {
         const ids = [...(await Promise.all(before.map((s) => this.revisionFor(s)))), revisionId];
-        const joined = await this.deps.data.checkInput(program, role, ids).catch(() => undefined);
+        const joined = await this.deps.data.checkInput(reader, ids).catch(() => undefined);
         if (joined?.ok === true && joined.readerError !== undefined) check = { ...check, readerError: joined.readerError };
       }
     } catch (error) {

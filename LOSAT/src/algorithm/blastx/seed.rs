@@ -182,6 +182,10 @@ pub struct Diagonals {
     entries: Vec<DiagStruct>,
     offset: i32,
     window: i32,
+    /// `-db_soft_mask` and `-db_hard_mask`: the worker's reader of the stored masks
+    /// (`search_db_masked.rs`), made at its first masked sequence; a search without them keeps
+    /// `None` (one word in the table).
+    pub(crate) x_db_masks: Option<Box<crate::algorithm::common::db_mask_search::SubjectMasks>>,
 }
 impl Diagonals {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
@@ -190,6 +194,7 @@ impl Diagonals {
             entries: vec![DiagStruct::default(); Self::array_length(query_length, window)?],
             offset: window,
             window,
+            x_db_masks: None,
         })
     }
     /// `diag_array_length` above: the power of two just at least `qlen + window_size`.
@@ -219,6 +224,7 @@ impl Diagonals {
         self.entries.resize(n, DiagStruct::default());
         self.offset = window;
         self.window = window;
+        self.x_db_masks = None;
         Ok(())
     }
     // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, blastx/x_bx_mem.rs). The same

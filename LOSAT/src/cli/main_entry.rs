@@ -164,7 +164,7 @@ fn run_main_entry() -> Result<()> {
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
     if let Some(start) = &start {
-        start.write_log_setup(&mut target);
+        start.write_log_setup(&mut target, &mut std::io::stderr());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,

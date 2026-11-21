@@ -386,7 +386,8 @@ pub fn restrict_record_masks(
 }
 
 /// `restrict_masks` of a query whose letter before its `-query_loc` interval (record letter
-/// `offset - 1`) is lower case, with `-lcase_masking`. NCBI restricts the lower-case runs of the
+/// `offset - 1`) is in its masks: lower case, with `-lcase_masking`, or joined by the masks of
+/// `-filtering_db` (`repeat_filter::MasksOutside::before`). NCBI restricts the lower-case runs of the
 /// whole record (`restrict_record_masks`); of the letters outside the interval only that one can
 /// reach a part, the first letter of the query's first part, whether its run ends there or goes
 /// on into the interval. The masks in the searched letters' coordinates are moved into the
@@ -407,6 +408,38 @@ pub fn restrict_masks_with_letter_before(
             .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset)),
     );
     restrict_record_masks(&record, part, offset)
+}
+
+/// With `-filtering_db`, where the masks that NCBI's chunk keeps before a part's letters end:
+/// the first restriction of `restrict_masks` keeps masks of the record that end before the
+/// part's Seq-interval when the part's query has a `-query_loc` interval, and the chunk combines
+/// them with the part's repeat hits (`repeat_filter::RepeatFilter::add_masks`) before its search
+/// takes the part's letters. `masks` are the query's masks in the searched letters'
+/// coordinates, `before` the masked letters before its interval (`repeat_filter::MasksOutside`,
+/// bit `k`: record letter `offset - 1 - k`). The letters from the last of them (with the
+/// restriction's extra residue) to the part's first letter; `None` without one.
+pub fn masked_before_part(
+    masks: &[MaskedInterval],
+    before: u8,
+    part: &ChunkQuery,
+    offset: usize,
+) -> Option<usize> {
+    let last = part.to - 1;
+    let interval_from = part.from + offset;
+    let letters_before = (0..u8::BITS as usize)
+        .filter(|&k| before & (1 << k) != 0)
+        .filter_map(|k| offset.checked_sub(k + 1))
+        .map(|letter| (letter, letter + 1));
+    masks
+        .iter()
+        .map(|mask| (mask.start + offset, mask.end + offset))
+        .chain(letters_before)
+        .filter_map(|(start, end)| {
+            let (left, right_open) = (start.max(part.from), end.min(last));
+            (left < right_open && right_open < interval_from).then_some(right_open)
+        })
+        .max()
+        .map(|end| interval_from - end)
 }
 
 #[cfg(test)]

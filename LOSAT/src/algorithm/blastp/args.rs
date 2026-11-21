@@ -181,6 +181,9 @@ pub struct BlastpArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
@@ -471,6 +474,12 @@ pub struct ResolvedBlastpArgs {
     pub show_gis: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
+    /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
+    /// series NP, M4b).
+    pub db_mask: Option<crate::blastinput::db_mask::DbMaskOption>,
+    /// The database masking as the formatter resolved it (`DbMaskOption::resolve`, in
+    /// `search`); `None` before, and for a search without it.
+    pub db_mask_resolved: Option<crate::blastinput::db_mask::ResolvedMask>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
     pub dbsize: i64,
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
@@ -979,6 +988,8 @@ impl BlastpArgs {
                 .as_deref()
                 .map(crate::seqdb::db_argument_name)
                 .map(str::to_string),
+            db_mask: self.db_mask.option(),
+            db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
             // The options start with a database length of 0
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).

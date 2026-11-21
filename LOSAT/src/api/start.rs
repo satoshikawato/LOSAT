@@ -46,7 +46,7 @@ pub(super) fn open<S: AsRef<OsStr> + Clone>(
 }
 
 /// `open` with the start `start` (made from the arguments `words`), whose file of `-logfile` goes
-/// to `files` (`RunFiles::log_target`: LOSAT Web's names that it refuses are refusals here).
+/// to `files` (`RunFiles::log_target`).
 fn open_with<S: AsRef<OsStr> + Clone>(
     start: ApplicationStart,
     words: &[S],
@@ -59,10 +59,8 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let mut target = files
-        .log_target(log_file(words))
-        .map_err(|reason| Error::Search(reason.into()))?;
-    start.write_log_setup(&mut target);
+    let mut target = files.log_target(log_file(words));
+    start.write_log_setup(&mut target, diagnostics);
     Ok(Opened { start, target })
 }
 
@@ -424,7 +422,7 @@ pub struct CallerStart {
 /// up to its configuration load (`open`, `Opened::load`): the usage report's messages and the
 /// configuration's that go to `cerr` are written to `diagnostics`, the file of `-logfile` goes to
 /// `files`. `Err` when the start ends before its `-logfile` target is open (LOSAT's refusal of the
-/// usage report, a `-logfile` name that `files` refuses); a start that ends at the load is a
+/// usage report); a start that ends at the load is a
 /// `CallerStart` whose `ended` is the error, and whose file of `-logfile` has its messages.
 pub fn begin_with<S: AsRef<OsStr> + Clone>(
     start: ApplicationStart,

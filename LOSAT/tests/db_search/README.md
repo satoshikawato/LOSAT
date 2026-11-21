@@ -1257,6 +1257,15 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
+the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
+has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
+`tests/fasta/rps/tks_w.faa` and `tests/fasta/x4/sw_subjects.faa`, and the lists `neg.txt` (an id no database holds) and
+`neg_exact.txt` (also sexact's accession, which the OID mask removes). The negative list keeps the ti-only subjects
+without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after the early termination test of their
+match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
+the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -1728,6 +1737,18 @@ the rejection rows give it a valid query, where NCBI crashes (SIGFPE) and LOSAT 
 before its crash (`ncbi-near`), `nseq0ns` over `aliaskeys/n_nseq0ns` (`NSEQ 0` over `arch_tbn_snucl_nonsq`, which has no
 sequence file) before the error of the missing file, which NCBI meets only after the division (TBLASTN with the Gumbel
 block, which does not divide: that error). Frozen with NCBI BLAST+ 2.17.0 on the workstation (`env_blast`).
+
+Rows `db.cnt.avg2p32.mb.*`, `db.cnt.avg2p32.mo00.split.6`, `db.cnt.avg2p32.mo52.split.6` and `db.ak.bn.rej.nseq0.mbsplit` (D1a-6 of line RG): a query batch split into chunks
+(`CHUNK_SIZE=200`) over `dbcounts/avg2p32`, whose average length is too short, with options that LOSAT refuses for the
+greedy extension (`-task megablast` with gap costs 40000 and 40000, or reward 0 and penalty 0): NCBI checks the subjects in
+the setup of the first chunk with a valid context, before the greedy set-up, so it stops with `The average subject length is
+too short` (exit 3), as an unsplit batch does (`.mbwhole.6`). `.b1.7` reports two queries without letters first (`BATCH_SIZE=1`,
+`../fasta/rps/alln_q.fna`); `.nq` puts a query of 300 N (`../fasta/rps/n300_q.fna`: that query, then `taxfilter/q.fna`) before
+it, so the first chunks have no valid context. The rejection row has `NSEQ 0`, where NCBI crashes in that setup (SIGFPE).
+Rows `db.gr.bn.*` (the same item): `db.gr.bn.rej.mo00.b1` refuses matrix-only scoring with the greedy extension in the third
+batch of `alln_q.fna` (`BATCH_SIZE=1`) after the reports of the two batches before, the 142 bytes NCBI writes before it
+divides by zero there (SIGFPE); `db.gr.bn.alln_q.b1.7` is the near run NCBI finishes (`ncbi-near`).
+Frozen with NCBI BLAST+ 2.17.0 on the developer machine and again on the workstation (`env_blast`), the same bytes.
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
 files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are

@@ -117,6 +117,38 @@ fn here(text: &str, dir: &Path) -> String {
     text.replace("@CWD@", &dir.to_string_lossy())
 }
 
+/// `text` without the ends of line that wrap the message strings of an archive (`message "..."`):
+/// the writer wraps a string by its length, which the row's directory in a message changes
+/// (the wraps themselves are `wording::losat_output_bytes`'s tests').
+fn messages_unwrapped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("message") {
+        let after = at + "message".len();
+        let Some(quote) = rest[after..]
+            .find(|c: char| c != ' ' && c != '\n')
+            .map(|n| after + n)
+            .filter(|&quote| rest[quote..].starts_with('"'))
+        else {
+            out.push_str(&rest[..after]);
+            rest = &rest[after..];
+            continue;
+        };
+        out.push_str(&rest[..=quote]);
+        rest = &rest[quote + 1..];
+        // To the closing quote (a doubled quote is a quote of the string).
+        let bytes = rest.as_bytes();
+        let mut end = 0;
+        while end < bytes.len() && !(bytes[end] == b'"' && bytes.get(end + 1) != Some(&b'"')) {
+            end += if bytes[end] == b'"' { 2 } else { 1 };
+        }
+        out.push_str(&rest[..end].replace('\n', ""));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The rows whose run differs from NCBI's (or from LOSAT's refusal).
 fn rows_that_differ() -> Vec<String> {
     let mut differ = Vec::new();
@@ -163,15 +195,15 @@ fn rows_that_differ() -> Vec<String> {
                     .trim()
                     .parse()
                     .unwrap();
-                // An archive's messages are LOSAT's words, wrapped by their length with the
-                // row's directory in them.
+                // An archive's messages are in LOSAT's words.
                 let want_out = String::from_utf8(
                     losat::wording::losat_output_bytes(text(file("out")).as_bytes()).into_owned(),
                 )
                 .unwrap();
                 let want_err = text(err);
                 let same = output.status.code() == Some(rc)
-                    && String::from_utf8_lossy(&output.stdout) == want_out
+                    && messages_unwrapped(&String::from_utf8_lossy(&output.stdout))
+                        == messages_unwrapped(&want_out)
                     && stderr == want_err;
                 if !same {
                     eprintln!(

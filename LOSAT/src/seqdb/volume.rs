@@ -1198,7 +1198,6 @@ impl NucleotideAmbiguity {
     }
 
     /// The length of the sequence in bases.
-    #[cfg(test)]
     pub fn length(&self) -> usize {
         self.length
     }

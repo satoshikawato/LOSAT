@@ -1,0 +1,3 @@
+Error: Argument "output". The argument has no value
+Error: Application's execution failed
+Error:  (CArgException::eNoValue) Argument "output". The argument has no value

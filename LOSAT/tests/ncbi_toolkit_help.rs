@@ -155,7 +155,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
     for (program, value_option) in PROGRAMS
         .iter()
         .copied()
-        .chain([("convert2blastmask", "-out")])
+        .chain([("convert2blastmask", "-out"), ("makembindex", "-input")])
     {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
@@ -163,7 +163,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         let ncbi = ncbi_xml(program);
         if matches!(
             program,
-            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask" | "makembindex"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

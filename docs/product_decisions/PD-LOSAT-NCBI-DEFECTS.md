@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.60
+- Version: 1.61
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -245,7 +245,13 @@
   fetch excludes sets the batch's status back to 0 unless NCBI's early termination skips it, so a
   failed Smith-Waterman redo before it neither fails the batch nor crashes NCBI, reproduced, rule 2;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.58);
-  1.60 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
+  1.60 2026-11-21 (`losat makembindex`, line RG item D5a: the explicit rejections, rule 3, of a
+  `-legacy false` index whose `Save` NCBI never finishes (a stride above `-ws_hint` − `-nmer` + 1)
+  and of a stride of 32768 or more, whose offsets NCBI computes by shifting an `int` past its
+  width; the explicit rejection, rule 2, of an index volume of more than 4 GiB of packed
+  sequences, whose sizes NCBI writes wrapped at 32 bits; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07);
+  1.61 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
   OID list file, of bits past the memory page after it and of a file of its header alone, rule 3, and
   the two RPSBLAST and RPSTBLASTN rejections of D1a-4 extended to the profiles `OIDLIST` leaves out
   and to the totals of its scan; the explicit rejection of an alias file's `FIRST_OID`-`LAST_OID`
@@ -2052,6 +2058,20 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1; fixture row
   `db.rps.rej.l2p31`) where NCBI's engine meets it, as the diagonal table's refusal above.
 
+- `losat makembindex -legacy false` with a `-stride` above `-ws_hint` − `-nmer` + 1 (version 1.60,
+  2026-11-21, line RG item D5a, Owner-delegated): the list's `mult_` is 0 and the loop over its
+  divisor classes in `COffsetList::Save` (`dbindex_factory.cpp:1222-1252`) starts below 1 and
+  never ends (probes `-stride 20` with the defaults and `-stride 30 -nmer 8`, random input and an
+  all-N record: timeout, a partial `.00.idx` of 262,188 bytes). LOSAT refuses (exit 1) at the
+  first sequence of an index volume; an input without sequences still gives NCBI's
+  `removed (empty)` and exit 0.
+- `losat makembindex -legacy false` with a `-stride` of 32768 or more (same version and line):
+  `GetMinOffset` (`dbindex.cpp:446-447`) shifts an `int` by 32 bits or more, which C++ leaves
+  undefined; the official x86 build finishes with what its shift instruction gives (exit 0, the
+  same file on a rerun). Computed in a wider type, the offsets no longer fit the index's 32-bit
+  words, so no valid index can be defined. LOSAT refuses (exit 1) at the first sequence of an
+  index volume.
+
 - An alias file's `OIDLIST` file (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS D1b1-1 of line RG) that
   is empty: NCBI maps nothing and reads the 4-byte header through a null pointer (SIGSEGV, probe G5 of
   D1b); or whose bits NCBI copies for a volume past the memory page after the file's end (a volume
@@ -2151,8 +2171,8 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last two entries are not of these. The last (version 1.54, line RG item X5) says
-so itself. The one before it (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
+would port. The last three entries are not of these. The last (version 1.60, line RG item D5a)
+and the one before it (version 1.54, line RG item X5) say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
 Version 1.45's rejection of well-formed BitMagic data was removed in version 1.58: line RG item
@@ -2206,6 +2226,14 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   search that could meet it is left to the search of all queries, which writes those reports,
   not to the search in blocks of queries). With a `-searchsp` above 0 the next context's search space is that value
   and LOSAT writes NCBI's bytes (rule 2 above).
+
+- `losat makembindex` with an index volume of more than 4 GiB of packed sequences (version 1.60,
+  2026-11-21, line RG item D5a, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; not of the database class above): NCBI keeps the sequences' start positions, the
+  volume's total and the size words in its 32-bit `TWord` and exits 0 with an index whose recorded
+  sizes wrap and no longer match its data. That needs a `-volsize` of about 18,000 or more and more
+  than 16 Gbp of sequences in one index volume; LOSAT refuses (exit 1) at the sequence that passes
+  4 GiB.
 
 ## Ported (rule 4)
 

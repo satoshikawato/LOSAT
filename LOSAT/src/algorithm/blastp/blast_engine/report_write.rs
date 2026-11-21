@@ -127,6 +127,9 @@ pub(super) struct ReportView<'a> {
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
+    /// The call ends with an exception before any query's report: the pairwise report writes its
+    /// prolog alone (`empty_alignments::write_exception_prolog`).
+    pub(super) prolog_only: bool,
 }
 
 /// Outfmt 8, 9 and 12: the Seq-annot of each query with alignments
@@ -653,6 +656,7 @@ pub(super) fn write_pairwise(
         psi_found_before,
         rps_gapped_k,
         blastp_parallel_pool,
+        prolog_only,
         ..
     } = *report_view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68,71,90-92
@@ -748,6 +752,7 @@ pub(super) fn write_pairwise(
     // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
     let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let mut windows = match pairwise_hits {
+        _ if prolog_only => Vec::new(),
         Some(_) => vec![0..pairwise_queries.len()],
         None => query_rows::row_windows(
             hit_lists,
@@ -851,7 +856,7 @@ pub(super) fn write_pairwise(
             probe.as_mut(),
             warnings.as_mut(),
             reports.x_prolog,
-            reports.epilog,
+            reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences
                 .as_ref()

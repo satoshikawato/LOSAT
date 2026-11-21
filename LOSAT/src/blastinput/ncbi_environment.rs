@@ -1703,11 +1703,16 @@ fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsStrin
 /// (the 2025-05-13 package and bioconda's 0.5.1) with a `.ncbirc` of a malformed line posts
 /// nothing for `-version` and its `Critical` once for `-h` and for a run (env parity probe of
 /// 2026-11-12 on ws), the configuration load's only. dustmasker's has none either: its
-/// application is a `CNcbiApplication` with no member of BLAST's.
+/// application is a `CNcbiApplication` with no member of BLAST's, as are segmasker's and
+/// makembindex's (`CMkIndexApplication`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.hpp:41-56
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.hpp:47-55
 fn has_usage_report(program: &str) -> bool {
-    !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
+    !matches!(
+        program,
+        "rpsbproc" | "dustmasker" | "segmasker" | "makembindex"
+    )
 }
 
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`

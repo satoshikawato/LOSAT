@@ -2,11 +2,6 @@
 """Focused tests for the NCBI unit-test case ledger.
 
 NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:2014-2016
-```c++
-#if SEQLOC_MIX_QUERY_OK
-// Test the masking with a Seq-loc of type mix
-BOOST_AUTO_TEST_CASE(DustSeqlocMix) {
-```
 
 The tests freeze how NCBI's Boost.Test cases are listed (live, fixture and
 compiled-out cases) and how the ledger checker ties citations, ledger rows

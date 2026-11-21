@@ -6,20 +6,6 @@
 //! by not asking for the next batch, which is also where it reports progress.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-288
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!         ...
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//!                 results = lcl_blast.Run();
-//!             ...
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::io;
@@ -85,20 +71,6 @@ impl Batch {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-272
-// ```c++
-//         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
-//         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
-//         if (batch_size) {
-//             input.SetBatchSize(batch_size);
-//         ...
-//         } else {
-//             Int8 total_len = formatter.GetDbTotalLength();
-//             if (total_len > 0) {
-//                 /* the optimal hits per batch scales with total db size */
-//                 mixer.SetTargetHits(total_len / 3000);
-//             }
-//             input.SetBatchSize(mixer.GetBatchSize());
-// ```
 /// The size of NCBI's query batches: BLASTN's follows the extensions of the batch before.
 enum BatchSizes {
     Fixed(u32),
@@ -137,9 +109,6 @@ fn batch_sizes(
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
-        // ```c++
-        //             input.Reset(new CBlastInput(&*fasta, 1));
-        // ```
         Commands::Psiblast(_) => BatchSizes::Fixed(1),
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
@@ -239,7 +208,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     let mut start_messages = Vec::new();
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
-    // searched without a `CBlastInput`, quoted at `blastp::blast_engine::search_pssm_query`)
+    // searched without a `CBlastInput`, cited at `blastp::blast_engine::search_pssm_query`)
     // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
     let lengths: Vec<usize> = match inputs.pssm {
         Some(_) => vec![0],

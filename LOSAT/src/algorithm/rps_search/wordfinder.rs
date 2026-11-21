@@ -29,12 +29,6 @@ use crate::seqdb::rps::RPS_WORDSIZE;
 /// zeroed one comes from the allocator's zeroed pages (`vec![0u32; n]`, `calloc`), as NCBI's.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
-/// ```c
-/// typedef struct DiagStruct {
-///    signed int last_hit   : 31; /**< Offset of the last hit */
-///    unsigned int flag      : 1 ; /**< Reset the next extension? */
-/// } DiagStruct;
-/// ```
 trait RpsDiag {
     fn last_hit(&self) -> i32;
     fn flag(&self) -> bool;
@@ -82,27 +76,8 @@ impl RpsDiagTable {
     /// diagonals that the queries hit become resident, whatever the window.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-    /// ```c
-    ///         diag_table->hit_level_array = (DiagStruct *)
-    ///             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    /// ```
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-62
-    /// ```c
-    ///                 diag_array_length = 1;
-    ///                 /* What power of 2 is just longer than the query? */
-    ///                 while (diag_array_length < (qlen+window_size))
-    ///                 {
-    ///                         diag_array_length = diag_array_length << 1;
-    ///                 }
-    ///                 /* These are used in the word finders to shift and mask
-    ///                 rather than dividing and taking the remainder. */
-    ///                 diag_table->diag_array_length = diag_array_length;
-    ///                 diag_table->diag_mask = diag_array_length-1;
-    ///                 diag_table->multiple_hits = multiple_hits;
-    ///                 diag_table->offset = window_size;
-    ///                 diag_table->window = window_size;
-    /// ```
     /// The table has `length` entries (`diag_table_length`).
     pub(crate) fn reset_for(&mut self, length: i32, window: i32) {
         self.array = vec![0u32; length as usize];
@@ -125,24 +100,8 @@ impl RpsDiagTable {
 
     /// `Blast_ExtendWordExit`: the offset after a query of `subject_length` letters.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:171-178
-    /// ```c
-    ///     if (ewp->diag_table) {
-    ///         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    ///             ewp->diag_table->offset = ewp->diag_table->window;
-    ///             s_BlastDiagClear(ewp->diag_table);
-    ///         } else {
-    ///             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    ///         }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:72-89 (`s_BlastDiagClear`)
-    /// ```c
-    ///         for (i=0; i < n; i++) {
-    ///             diag_struct_array[i].flag = 0;
-    ///             diag_struct_array[i].last_hit = -diag->window;
-    ///             if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-178
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:102-104 (`s_BlastDiagClear`)
     fn exit(&mut self, subject_length: i32) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
@@ -156,7 +115,7 @@ impl RpsDiagTable {
 }
 
 /// NCBI's length of the diagonal table of a concatenated length `concat_length` (`Lc`, also 0
-/// or negative) and the word window `window` (`s_BlastDiagTableNew`, quoted at
+/// or negative) and the word window `window` (`s_BlastDiagTableNew`, cited at
 /// `RpsDiagTable::reset_for`): the power of 2 from 1 up that is at least their sum (1 entry where
 /// the sum is 1 or less; the sum is at most 2^30, `RpsUnit::check_engine_length`).
 pub(crate) fn diag_array_length(concat_length: i32, window: i32) -> i32 {
@@ -254,23 +213,6 @@ impl RpsWordScratch {
 /// (not sorted; the caller sorts them, `Blast_InitHitListSortByScore`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:265-283
-/// ```c
-///     if (ewp->diag_table->multiple_hits) {
-///         status = s_BlastRPSWordFinder_TwoHit(subject, query,
-///                                              lut_wrap, ewp,
-///                                              matrix,
-///                                              cutoffs->cutoff_score,
-///                                              cutoffs->x_dropoff,
-///                                              init_hitlist, ungapped_stats);
-///     } else {
-///         status = s_BlastRPSWordFinder_OneHit(subject, query,
-///                                              lut_wrap, ewp,
-///                                              matrix,
-///                                              cutoffs->cutoff_score,
-///                                              cutoffs->x_dropoff,
-///                                              init_hitlist, ungapped_stats);
-///     }
-/// ```
 ///
 /// The extensions read the rows as `RpsRowsWhole` where `Lc` is the rows' count (every search
 /// but one over an alias file whose `LENGTH` and `NSEQ` give another `Lc`), else as `RpsRows`
@@ -322,102 +264,6 @@ fn scan<R: PssmRows>(
 /// `s_BlastRPSWordFinder_TwoHit`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:331-426
-/// ```c
-///     while (first_offset <= last_offset) {
-///         /* scan the subject sequence for hits */
-///         hits = BlastRPSScanSubject(lookup_wrap, subject, &first_offset);
-///
-///         totalhits += hits;
-///         /* for each region of the concatenated database */
-///         for (i = 0; i < lookup->num_buckets; ++i) {
-///             ...
-///             for (j = 0; j < hits; ++j) {
-///                 Uint4 query_offset = offset_pairs[j].qs_offsets.q_off;
-///                 Uint4 subject_offset = offset_pairs[j].qs_offsets.s_off;
-///
-///                 /* calculate the diagonal associated with this query-subject
-///                    pair */
-///
-///                 diag_coord = (query_offset - subject_offset) & diag_mask;
-///
-///                 /* If the reset bit is set, an extension just happened. */
-///                 if (diag_array[diag_coord].flag) {
-///                     /* If we've already extended past this hit, skip it. */
-///                     if ((Int4) (subject_offset + diag_offset) <
-///                         diag_array[diag_coord].last_hit) {
-///                         continue;
-///                     }
-///                     /* Otherwise, start a new hit. */
-///                     else {
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                         diag_array[diag_coord].flag = 0;
-///                     }
-///                 }
-///                 /* If the reset bit is cleared, try to start an extension. */
-///                 else {
-///                     /* find the distance to the last hit on this diagonal */
-///                     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-///                     diff = subject_offset - last_hit;
-///
-///                     if (diff >= window) {
-///                         /* We are beyond the window for this diagonal; start
-///                            a new hit */
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                         continue;
-///                     }
-///
-///                     /* If the difference is less than the wordsize (i.e.
-///                        last hit and this hit overlap), give up */
-///
-///                     if (diff < wordsize) {
-///                         continue;
-///                     }
-///
-///                     /* Extend this pair of hits. The extension to the left
-///                        must reach the end of the first word in order for
-///                        extension to the right to proceed. */
-///
-///                     score = s_BlastAaExtendTwoHit(matrix, subject, query,
-///                                                   last_hit + wordsize,
-///                                                   subject_offset, query_offset,
-///                                                   dropoff, &hsp_q, &hsp_s,
-///                                                   &hsp_len, TRUE,
-///                                                   wordsize, &right_extend,
-///                                                   &s_last_off);
-///
-///                     ++hits_extended;
-///
-///                     /* if the hsp meets the score threshold, report it */
-///                     if (score >= cutoff)
-///                         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-///                                          query_offset, subject_offset,
-///                                          hsp_len, score);
-///
-///                     /* If an extension to the right happened, reset the last
-///                        hit so that future hits to this diagonal must start
-///                        over. */
-///
-///                     if (right_extend) {
-///                         diag_array[diag_coord].flag = 1;
-///                         diag_array[diag_coord].last_hit =
-///                             s_last_off - (wordsize - 1) + diag_offset;
-///                     }
-///                     /* Otherwise, make the present hit into the previous hit
-///                        for this diagonal */
-///                     else {
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                     }
-///                 }               /* end else */
-///
-///             }                   /* end for - done with this batch of hits */
-///         }                       /* end for - done with this bucket, call
-///                                    scansubject again */
-///     }                           /* end while - done with the entire sequence.
-///                                  */
-/// ```
 fn two_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,
@@ -522,44 +368,6 @@ fn two_hit<R: PssmRows>(
 /// two-hit finder's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:657-703
-/// ```c
-///     while (first_offset <= last_offset) {
-///         /* scan the subject sequence for hits */
-///         hits = BlastRPSScanSubject(lookup_wrap, subject, &first_offset);
-///
-///         totalhits += hits;
-///         for (i = 0; i < lookup->num_buckets; i++) {
-///             ...
-///             for (j = 0; j < hits; ++j) {
-///                 Uint4 query_offset = offset_pairs[j].qs_offsets.q_off;
-///                 Uint4 subject_offset = offset_pairs[j].qs_offsets.s_off;
-///                 diag_coord = (subject_offset - query_offset) & diag_mask;
-///                 diff = subject_offset -
-///                     (diag_array[diag_coord].last_hit - diag_offset);
-///
-///                 /* do an extension, but only if we have not already extended
-///                    this far */
-///                 if (diff >= 0) {
-///                     ++hits_extended;
-///                     score = s_BlastAaExtendOneHit(matrix, subject, query,
-///                                                   subject_offset, query_offset,
-///                                                   dropoff, &hsp_q, &hsp_s,
-///                                                   &hsp_len, wordsize, TRUE,
-///                                                   &s_last_off);
-///
-///                     /* if the hsp meets the score threshold, report it */
-///                     if (score >= cutoff) {
-///                         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-///                                          query_offset, subject_offset,
-///                                          hsp_len, score);
-///                     }
-///                     diag_array[diag_coord].last_hit =
-///                         s_last_off - (wordsize - 1) + diag_offset;
-///                 }
-///             }                   /* end for (one bucket) */
-///         }                       /* end for (all buckets) */
-///     }                           /* end while */
-/// ```
 fn one_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,

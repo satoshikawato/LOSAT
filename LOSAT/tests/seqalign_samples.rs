@@ -20,17 +20,6 @@
 //! fixtures belong to `db_search_manifest/`.)
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
-//!         if (results.HasAlignments()) {
-//!     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
-//!             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
-//!             if(m_FormatType == CFormattingArgs::eAsnText)
-//!             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-//!             else
-//!             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-//!         }
-//! ```
 
 use std::path::PathBuf;
 use std::process::Command;

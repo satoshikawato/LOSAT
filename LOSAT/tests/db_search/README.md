@@ -1816,20 +1816,7 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   of the subject whose letters it meets and puts those columns in lower case in every row of the subject
   (the rows' own letters there are other positions of the subject):
 
-  NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4300-4327
-  ```c++
-          for (int i=0; i<m_AV->GetNumRows(); i++){
-          	const CSeq_interval& interval = (*iter)->GetInterval();
-              TSeqRange loc_range(interval.GetFrom(), interval.GetTo());
-              if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-                 m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-                  ...
-                  alnloc->aln_range.Set(actualAlnStart, actualAlnStop);
-                  has_valid_loc = true;
-                  break;
-              }
-          }
-  ```
+  NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4300-4329
 - `qseg.fa`, `sseg.fa`: `qa` with a run of 20 Q at 76-95, which `-seg yes` masks; `sseg` is the same with every
   11th letter changed, and `s_ins`.
 - `sp_dupid.fa` (two subjects `lcl|dup1`): the `-parse_deflines` refusal `db.of1.bp.dupid.reject`. A query with a

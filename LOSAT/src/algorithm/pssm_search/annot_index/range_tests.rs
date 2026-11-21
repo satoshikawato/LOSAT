@@ -38,7 +38,7 @@ fn ranges_open_at_to_plus_one() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:126-206, 338-376 (quoted at
+// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:126-206, 338-376 (cited at
 // `HandleRange::add` and `HandleRange::overlapping`)
 #[test]
 fn a_handle_range_becomes_circular() {
@@ -105,7 +105,7 @@ fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
     HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, handles)
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (quoted at
+// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (cited at
 // `HandleRangeMap::add_location` and `HandleRangeMap::add`)
 #[test]
 fn a_map_marks_the_ranges_between_seq_ids() {
@@ -470,7 +470,7 @@ fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (quoted at
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (cited at
 // `HandleRangeMap::ncbi_order`): `m_Packed - 1` as an unsigned number, then the info's address.
 #[test]
 fn a_map_iterates_its_seq_ids_by_packed_number() {
@@ -508,7 +508,7 @@ fn a_map_iterates_its_seq_ids_by_packed_number() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964 (quoted at `Handle`):
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964 (cited at `Handle`):
 // the `om/` cases `s_i72`, `s_i73` and review 2's `id13`, `g1`-`g5` (NCBI BLAST+ 2.17.0).
 #[test]
 fn giim_handles_follow_ncbis_inverted_tree() {

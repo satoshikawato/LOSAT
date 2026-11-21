@@ -22,12 +22,12 @@ const PROGRAM: &str = "SEGMASKER";
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:69-74
-/// segmasker as NCBI's application runs it (`ncbi_app`): its own version, the arguments of its
-/// XML (`ncbi_xmlhelp/segmasker.xml`) and no prefix on its diagnostics.
+/// segmasker as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's states its
+/// own (`ncbi_version::print`), the arguments of its XML (`ncbi_xmlhelp/segmasker.xml`) and no
+/// prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "segmasker",
     refusal_name: PROGRAM,
-    version: "1.0.0",
     help: HELP,
     post_prefix: None,
     components: &[],

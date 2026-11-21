@@ -28,13 +28,13 @@ const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:79-84
 // NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:50-254
-/// windowmasker as NCBI's application runs it (`ncbi_app`): its own version, the arguments of its
-/// XML (`ncbi_xmlhelp/windowmasker.xml`: those of `CWinMaskConfig::AddWinMaskArgs` for `eAny`,
-/// the input determined, and its `SetDependency` calls) and no prefix on its diagnostics.
+/// windowmasker as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's states its
+/// own (`ncbi_version::print`), the arguments of its XML (`ncbi_xmlhelp/windowmasker.xml`: those
+/// of `CWinMaskConfig::AddWinMaskArgs` for `eAny`, the input determined, and its `SetDependency`
+/// calls) and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "windowmasker",
     refusal_name: PROGRAM,
-    version: "1.0.0",
     help: HELP,
     post_prefix: None,
     components: COMPONENTS,

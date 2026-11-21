@@ -287,7 +287,7 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at
 // `ncbi_version::print`). NCBI BLAST+ 2.17.0 (probe B20, line RG `E/e3/ncbi/blastdbcmd.vf_args`):
 // `-version-full` prints the full version and exits 0 before the arguments are read; LOSAT's has
-// NCBI's form with LOSAT's values (line RG item E3).
+// NCBI's form with LOSAT's values, the first line too (line RG item E3).
 #[test]
 fn a_full_version_is_printed_before_the_arguments() {
     let dir = TestDir::new("vfull");
@@ -295,10 +295,13 @@ fn a_full_version_is_printed_before_the_arguments() {
     let stdout = String::from_utf8(stdout).unwrap();
     assert_eq!((stderr, code), (Vec::new(), 0), "{stdout}");
     assert!(
-        stdout.starts_with("blastdbcmd: 2.17.0+\n Package: LOSAT ")
-            && stdout.ends_with(
-                ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
-            ),
+        stdout.starts_with(concat!(
+            "blastdbcmd: LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            "\n Package: LOSAT "
+        )) && stdout.ends_with(
+            ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
+        ),
         "{stdout}"
     );
 }
@@ -315,7 +318,9 @@ fn xmlhelp_prints_ncbis_xml() {
     let dir = TestDir::new("xmlhelp");
     let (stdout, stderr, code) = blastdbcmd(&["-db", "db/p5", "-info", "-xmlhelp"], &dir.0);
     assert_eq!((stderr, code), (Vec::new(), 0));
-    assert!(stdout == include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml"));
+    // NCBI's XML in LOSAT's words (the version after the description, `losat::wording`).
+    let ncbi: &[u8] = include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml");
+    assert!(stdout == *losat::wording::losat_output_bytes(ncbi));
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (cited at
@@ -343,13 +348,13 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
     }
 }
 
-// line CLI DECISIONS 4: NCBI's first line, then LOSAT's package line; `-version` is read
+// line CLI DECISIONS 4: LOSAT's first line (`blastdbcmd: LOSAT 0.2.0`; NCBI's is `blastdbcmd: 2.17.0+`), then LOSAT's package line; `-version` is read
 // anywhere before `--`, also in the place of a value and before an argument error.
 #[test]
 fn version_is_read_before_the_arguments() {
     let dir = TestDir::new("version");
     let version = format!(
-        "blastdbcmd: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
+        "blastdbcmd: LOSAT {0}\n Package: LOSAT {0}, output compatible with blast 2.17.0\n",
         env!("CARGO_PKG_VERSION")
     );
     for words in [

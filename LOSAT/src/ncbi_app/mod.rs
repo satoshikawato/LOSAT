@@ -29,9 +29,6 @@ pub(crate) struct Tool {
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
-    /// The version that `-version` and the full versions print (`CVersionInfo::Print` of
-    /// `GetFullVersion`: `2.17.0+`, `1.0.0`; `ncbi_version::print`).
-    pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
     /// frozen. Its part before the details (`REQUIRED ARGUMENTS` or `OPTIONAL ARGUMENTS`) is
     /// the usage that `-h` and the argument errors print (`short_usage`); its synopsis lists the
@@ -46,7 +43,8 @@ pub(crate) struct Tool {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
 /// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
 /// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
-/// convert2blastmask's) or the optional ones.
+/// convert2blastmask's) or the optional ones. The description states LOSAT's version
+/// (`help_text`).
 pub(crate) fn short_usage(help: &str) -> String {
     let end = ["REQUIRED ARGUMENTS", "OPTIONAL ARGUMENTS"]
         .iter()
@@ -55,8 +53,14 @@ pub(crate) fn short_usage(help: &str) -> String {
         .unwrap_or(help.len());
     format!(
         "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        &help[..end]
+        help_text(&help[..end])
     )
+}
+
+/// LOSAT's text of NCBI's frozen `-help` text `help`: its description states LOSAT's version
+/// (`BLAST database client, version LOSAT 0.2.0`; `wording::losat_text`).
+pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
+    crate::wording::losat_text(help)
 }
 
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
@@ -285,13 +289,8 @@ fn run_app(
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
             let _ = out.write_all(
-                crate::ncbi_version::print_with_components(
-                    request,
-                    tool.program,
-                    tool.version,
-                    tool.components,
-                )
-                .as_bytes(),
+                crate::ncbi_version::print_with_components(request, tool.program, tool.components)
+                    .as_bytes(),
             );
             return 0;
         }
@@ -329,7 +328,7 @@ fn run_app(
             return 0;
         }
         Err(ArgsError::Help) => {
-            let _ = out.write_all(tool.help.as_bytes());
+            let _ = out.write_all(help_text(tool.help).as_bytes());
             return 0;
         }
         // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes

@@ -23,7 +23,6 @@ fn tool(program: &'static str) -> Tool {
     Tool {
         program,
         refusal_name: "T",
-        version: "0",
         help,
         post_prefix: None,
         components: &[],

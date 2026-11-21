@@ -10,7 +10,6 @@ fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
     static TOOL: Tool = Tool {
         program: "p",
         refusal_name: "P",
-        version: "1.0.0",
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
         post_prefix: None,
         components: &[],
@@ -50,11 +49,7 @@ fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
     ] {
         assert_eq!(
             run(vec!["-out".into(), bytes.clone(), word.into()]),
-            (
-                0,
-                crate::ncbi_version::print(request, "p", "1.0.0"),
-                String::new()
-            )
+            (0, crate::ncbi_version::print(request, "p"), String::new())
         );
     }
     assert_eq!(
@@ -74,7 +69,6 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
     static TOOL: Tool = Tool {
         program: "p",
         refusal_name: "P",
-        version: "1.0.0",
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
         post_prefix: None,
         components: &[],

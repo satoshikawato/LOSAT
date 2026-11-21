@@ -748,6 +748,20 @@ impl TabularSpec {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1050-1055
+    /// Whether `program`'s report of this field list writes what it writes with a readable
+    /// taxonomy database where every load of a database sequence with a positive taxid and every
+    /// taxid lookup throw (a file of that database does not open, `SeqDbError::TaxdbThrows`): a
+    /// table whose rows load no subject's Bioseq ([`TabularSpec::subject_fetch`]; `slen` is read
+    /// without it), and the organism report, whose `catch` leaves out each HSP whose load or lookup
+    /// throws, as it leaves out one whose taxid is not found, as LOSAT does
+    /// (`tax_report::TaxLookups`; such a lookup finds nothing, and every load that throws is of a
+    /// subject with a positive taxid, whose lookup throws too).
+    pub fn unchanged_by_load_throws(&self, program: crate::blastinput::app::Program) -> bool {
+        self.kind == TabularKind::TaxReport || self.subject_fetch(program) == SubjectFetch::Never
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (cited at
     // `report::tax_report::organism_report`: the `catch` of each HSP's load, `continue`)
     /// What the report does with a subject whose lookup throws where its batch's prefetch is off

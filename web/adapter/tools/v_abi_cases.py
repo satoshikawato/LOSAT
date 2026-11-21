@@ -41,7 +41,8 @@ reduces in the wasm-threads-only path, the BLASTN `-window_masker_db` and `-wind
 searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`),
 the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`), the
 `-db` searches of the db_search rows that the wasm-threading check runs and of two filters (`database`),
-whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), and the
+whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), with
+a query read with the data loaders on and off (`-conffile` of `DATA_LOADERS=none`), and the
 inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
 `-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
 `--group fasta_input` writes that group of the full suite alone.
@@ -291,6 +292,16 @@ def database() -> list[dict]:
     # native CLI's run of the argv is the reference (review of D12a, low 3).
     parsed = dict(searches[DATABASE_ROWS.index("db.d1.6")])
     searches.append({**parsed, "argv": [*parsed["argv"], "-parse_deflines"], "cases": ["db.d1.6.parse_deflines"], "frozen": {}})
+    # A run of -db reads its query with the data loaders of its argv, as every run's inputs are read (line WQA's D13
+    # and D16 with D12a, 2026-11-21): with the `-conffile` of `[BLAST] DATA_LOADERS=none` (web/adapter/tests/fixtures/d16)
+    # the query's first line `2HHB` is data, and without it the CLI refuses that line. Run from the repository's root,
+    # which holds the database and the D16 files; the native CLI's run of each argv is the reference.
+    d16 = "web/adapter/tests/fixtures/d16"
+    argv = ["blastp", "-db", f"LOSAT/{rows['db.d1.6']['db']}", "-query", f"{d16}/sid.q.faa"]
+    searches.append({"program": "blastp", "argv": [argv[0], "-conffile", f"{d16}/nol.ini", *argv[1:]], "cwd": str(REPO),
+                     "cases": ["db.d16.blastp.conffile_no_loaders"], "frozen": {}, "database": True})
+    searches.append({"program": "blastp", "argv": argv, "cwd": str(REPO), "cases": ["db.d16.blastp.loaders_on"],
+                     "frozen": {}, "expect": "failure", "database": True})
     return searches
 
 

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.67
+- Version: 1.68
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -293,7 +293,11 @@
   2026-09-29, restated 2026-10-07; line LIB-S item S1; numbered after 1.66; first 1.54, then 1.56, 1.58, 1.62 and 1.66 at
   the merges of dev that brought line RG item X5's 1.54, then line RG item X6's 1.55 and line RG
   item D1a-4's 1.56 and 1.57, then line RG's 1.58 to 1.61, then the 1.62 to 1.65 of lines LIB-O,
-  RG and PS, then line NP's 1.66)
+  RG and PS, then line NP's 1.66);
+  1.68 2026-11-21 (RPSTBLASTN `-use_sw_tback`, line PS item PS12c: the explicit rejection of 1.30
+  of a Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to RPSTBLASTN, rule
+  3, within the class of 1.30; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.67)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1790,6 +1794,26 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `redo_alignment.c:1560-1580`). A failure before such a match therefore neither fails the batch
   nor crashes NCBI, and LOSAT reproduces that (rule 2; version 1.59; 2026-11-21, line RG item
   X4-excl, rows `db.x4excl.*`).
+
+- RPSTBLASTN `-use_sw_tback` with composition-based statistics (version 1.68, 2026-11-21, line PS
+  item PS12c, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the
+  class of 1.30; P2: no checkable result exists, P3: the round loop of 1.30 and 1.53 decides it,
+  `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a profile with two
+  or more preliminary HSPs in a window of a query frame (`s_WindowsFromTranslatedAligns`) when the
+  e-value of a score of 0 passes `-evalue` (the search space of the query's context 0 times the
+  profile's K below it: a large `-evalue`, a small `-searchsp`, or `-strand minus`, whose invalid
+  frame +1 leaves that search space 0, so that every score passes) and the profile's first
+  position, after the window's composition adjustment, scores the window's first letter (after
+  SEG) above 0. NCBI runs the loop of 1.30 (`Blast_RedoOneMatchSmithWaterman`,
+  `redo_alignment.c:1438-1529`) on each window's letters, so it never ends either: NCBI BLAST+
+  2.17.0's rpstblastn did not end within 120 and 300 seconds on the inputs of rows
+  `db.rpstbn.rej.swendless` and `db.rpstbn.rej.swendless.minus`, which it searches without
+  `-use_sw_tback` in 0.1 seconds. LOSAT refuses (exit 1, "a profile whose Smith-Waterman redo
+  (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's RPSTBLASTN")
+  where its refusal of 1.30 comes in RPSBLAST. Where that cell scores 0 or less, NCBI's redo fails
+  and drops the profile, which LOSAT reproduces (rule 2; rows `db.rpstbn.sw.*`, among them the
+  `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
+  `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

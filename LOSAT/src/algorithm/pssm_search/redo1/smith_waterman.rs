@@ -316,7 +316,9 @@ impl RedoMatch<'_> {
             // A window that ends before it begins (`-strand plus|minus`, NCBI's six-frame
             // arithmetic on the three-frame buffer; `frame_range`): the score-only scan's row of
             // `end - begin` columns, a negative count converted to `size_t`, cannot be allocated,
-            // the scan returns -1 and the match's redo fails (as `SwWindowRedo::Failed`).
+            // the scan returns -1 and the match's redo fails (as `SwWindowRedo::Failed`). The
+            // composition test above stops such a window first where its letters lie past the
+            // frame's copy (zero bytes, no true amino acid).
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:74-77
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1444-1454
             if window.end < window.begin {

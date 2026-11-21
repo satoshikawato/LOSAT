@@ -266,6 +266,7 @@ fn the_logfile_is_a_file_of_the_run() {
             "/var/crash/run.log",
             "/home/me/run.log",
             "/etc/default/../../tmp/run.log",
+            "/run/user/1000/run.log",
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -320,7 +321,7 @@ fn the_logfile_is_a_file_of_the_run() {
             ("/dev/run.log", false),
             ("/dev/kmsg", false),
             ("/data/run.log", false),
-            ("/run/user/1000/run.log", false),
+            ("/proc/thread-self/../../../tmp/run.log", false),
             ("/bin/../tmp/run.log", false),
             ("/etc/default/../tmp/run.log", false),
             ("/root/../tmp/run.log", false),
@@ -490,8 +491,8 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 // the argv: in a run of two searches what the other search adds goes to stream 3, as without
 // `-logfile` (`the_error_of_an_output_that_fails_alone_is_where_its_signal_says`; line WQA's sweep,
 // D3 review r2, 2026-11-19: the file had the other search's warning and error). The command line's
-// file of the failed run (ws, the gate's build of this branch, NCBI's text): `BLAST query/options
-// error: expect value ...`.
+// file of the failed run (a Linux host, the gate's build of this branch, NCBI's text):
+// `BLAST query/options error: expect value ...`.
 #[test]
 fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);

@@ -101,52 +101,92 @@ enum LogName {
 /// (`~/work`). A command line's words have no NUL byte, so no name gives another path in it.
 const WORKING_TREE: &[u8] = b"/\0";
 
-/// The directories of LOSAT Web's Linux where every user makes files (mode 1777, `/var/crash`
-/// 3777): `/tmp` and `/var/tmp` of the Filesystem Hierarchy Standard, `/dev/shm`, Ubuntu's
-/// `/run/lock` (also `/var/lock`, `LINKS`) and Ubuntu's `/var/crash` (line WQA's D11 rounds 3 and
-/// 4, 2026-11-20: NCBI BLAST+ 2.17.0 and LOSAT's command line write their log there as a user on
-/// Ubuntu 24.04). `/dev/mqueue` (1777 too) holds message queues only (`opens`).
-const SHARED_DIRECTORIES: [&[u8]; 5] = [
+/// The model's host, whose system LOSAT Web's `-logfile` names are read on (`log_name`), and the
+/// reference of every measured list here: Ubuntu 24.04.3, kernel 5.15 (WSL2), and its first user
+/// (uid 1000, in that user's groups), not root (line WQA's D11 round 7, 2026-11-21: one host and
+/// one user, Owner-delegated).
+///
+/// The directories where the model's user makes files, besides the working directory's tree and a
+/// home (`user_makes`): those that the user writes on the model's host, measured as the user
+/// (`find -type d -writable`, line WQA's D11 round 7): where every user makes files (mode 1777,
+/// `/var/crash` 3777: `/tmp`, `/var/tmp`, `/dev/shm` and `/run/shm`, `/run/lock`, also as
+/// `/var/lock`, `/var/crash`, WSL's `/mnt/wsl` and `/mnt/wslg`), the user's own `/run/user/1000`,
+/// and WSL's drives of Windows (`/mnt/c`, `/mnt/d`, mode 0777). `/dev/mqueue` (1777 too) holds
+/// message queues only (`opens`).
+const USER_DIRECTORIES: [&[u8]; 11] = [
     b"/tmp",
     b"/var/tmp",
     b"/dev/shm",
+    b"/run/shm",
     b"/run/lock",
     b"/var/crash",
+    b"/run/user/1000",
+    b"/mnt/wsl",
+    b"/mnt/wslg",
+    b"/mnt/c",
+    b"/mnt/d",
 ];
 
 /// Whether the user of LOSAT Web's Linux makes entries in `directory`, a path without links: in
 /// the working directory's tree (`WORKING_TREE`), in a user's home (`/home/<user>`, which LOSAT
-/// Web takes as the user's own, not knowing the user's name) and in the directories where every
-/// user makes files (`SHARED_DIRECTORIES`), each with the directories that the user makes in it.
-/// Every other directory is root's, as only root makes entries in `/` (line WQA's D11 round 4,
-/// 2026-11-20, Owner-delegated: one rule of owners in place of lists of root's directories):
-/// `/`, `/data`, `/home`, `/etc`, `/var/log`, `/run/user/<uid>` (a user's under systemd only).
+/// Web takes as the user's own, not knowing the user's name) and in `USER_DIRECTORIES`, each with
+/// the directories that the user makes in it. Every other directory is root's, as only root makes
+/// entries in `/` (line WQA's D11 round 4, 2026-11-20, Owner-delegated: one rule of owners in
+/// place of lists of root's directories): `/`, `/data`, `/home`, `/etc`, `/var/log`.
 fn user_makes(directory: &[u8]) -> bool {
     within(directory, WORKING_TREE)
         || directory
             .strip_prefix(b"/home/")
             .is_some_and(|user| !user.is_empty())
-        || SHARED_DIRECTORIES
+        || USER_DIRECTORIES
             .iter()
-            .any(|shared| within(directory, shared))
+            .any(|place| within(directory, place))
 }
 
-/// The directories at the root of LOSAT Web's Linux, an Ubuntu of merged `/usr` (`directory_at`):
-/// those that the Filesystem Hierarchy Standard 3.0 requires there and its Linux annex (`/proc`,
-/// `/sys`), with `/home` and `/root` (`/bin`, `/lib`, `/lib64` and `/sbin` are links, `LINKS`).
-/// Another name at the root is not there (`/data`, `/snap`, `/lost+found`, which only root makes).
-const ROOT_DIRECTORIES: [&[u8]; 15] = [
-    b"/boot", b"/dev", b"/etc", b"/home", b"/media", b"/mnt", b"/opt", b"/proc", b"/root", b"/run",
-    b"/srv", b"/sys", b"/tmp", b"/usr", b"/var",
+/// The directories at the root of LOSAT Web's Linux (`directory_at`): the model's host's (`ls /`,
+/// line WQA's D11 round 7), an Ubuntu of merged `/usr` (`/bin`, `/lib`, `/lib32`, `/lib64` and
+/// `/sbin` are links, `LINKS`) with its marks `*.usr-is-merged`, Snap's `/snap` and the file
+/// system's `/lost+found`. WSL's `/init` is a file; another name at the root is not there
+/// (`/data`).
+const ROOT_DIRECTORIES: [&[u8]; 20] = [
+    b"/bin.usr-is-merged",
+    b"/boot",
+    b"/dev",
+    b"/etc",
+    b"/home",
+    b"/lib.usr-is-merged",
+    b"/lost+found",
+    b"/media",
+    b"/mnt",
+    b"/opt",
+    b"/proc",
+    b"/root",
+    b"/run",
+    b"/sbin.usr-is-merged",
+    b"/snap",
+    b"/srv",
+    b"/sys",
+    b"/tmp",
+    b"/usr",
+    b"/var",
 ];
 
-/// The links of LOSAT Web's Linux and their targets (`log_name`), besides `/proc/self/cwd` and
-/// `/proc/thread-self/cwd`, the working directory: merged `/usr`'s, the Filesystem Hierarchy
-/// Standard's `/var/lock` and `/var/run`, the standard streams' (`/dev/fd`, `/dev/stdin`,
-/// `/dev/stdout`, `/dev/stderr`) and procfs's (a thread's descriptors are the process's).
-const LINKS: [(&[u8], &[u8]); 13] = [
+/// LOSAT Web's process in procfs: `/proc/self` is a link to it (`LINKS`), as to a process id, here
+/// a NUL byte, which no name gives (`WORKING_TREE`).
+const SELF: &[u8] = b"/proc/\0";
+
+/// LOSAT Web's thread in procfs: `/proc/thread-self` is a link to it (`LINKS`), a task of `SELF`
+/// whose id is a NUL byte.
+const THREAD: &[u8] = b"/proc/\0/task/\0";
+
+/// The links of LOSAT Web's Linux and their targets (`Walk`), besides `cwd` of `SELF` and of
+/// `THREAD`, the working directory: merged `/usr`'s, the Filesystem Hierarchy Standard's
+/// `/var/lock` and `/var/run`, the standard streams' (`/dev/fd`, `/dev/stdin`, `/dev/stdout`,
+/// `/dev/stderr`) and procfs's (`/proc/self`, `/proc/thread-self` and their `root`).
+const LINKS: [(&[u8], &[u8]); 15] = [
     (b"/bin", b"/usr/bin"),
     (b"/lib", b"/usr/lib"),
+    (b"/lib32", b"/usr/lib32"),
     (b"/lib64", b"/usr/lib64"),
     (b"/sbin", b"/usr/sbin"),
     (b"/var/lock", b"/run/lock"),
@@ -155,39 +195,54 @@ const LINKS: [(&[u8], &[u8]); 13] = [
     (b"/dev/stdin", b"/proc/self/fd/0"),
     (b"/dev/stdout", b"/proc/self/fd/1"),
     (b"/dev/stderr", b"/proc/self/fd/2"),
-    (b"/proc/thread-self/fd", b"/proc/self/fd"),
-    (b"/proc/self/root", b"/"),
-    (b"/proc/thread-self/root", b"/"),
+    (b"/proc/self", SELF),
+    (b"/proc/thread-self", THREAD),
+    (b"/proc/\0/root", b"/"),
+    (b"/proc/\0/task/\0/root", b"/"),
 ];
 
-/// The directories of LOSAT Web's Linux in which a user looks up no name (`searchable`), as their
-/// mode gives others no search permission (`x`) and the user owns none of them: those that a user
-/// finds on Ubuntu 24.04.3 (line WQA's D11 round 6, 2026-11-21: `find / -type d ! -perm -0001` as a
-/// user; mode 0700 but `/etc/polkit-1/rules.d` and `/var/lib/polkit-1` 0750, `/proc/tty/driver`
-/// 0500, `/run/systemd/inaccessible/dir` 0000, `/run/systemd/propagate/*` 0600,
-/// `/var/log/unattended-upgrades` 0750, `/var/spool/cron/crontabs` 1730), less Docker's
-/// (`/run/docker`, `/var/lib/docker`), which Ubuntu does not install, and `/lost+found`, which the
-/// model does not have at the root (`ROOT_DIRECTORIES`). Ubuntu 22.04.5 (ws) has these, less
-/// `/etc/credstore*` and `/etc/polkit-1/rules.d`, and those of its desktop packages.
-const CLOSED_DIRECTORIES: [&[u8]; 28] = [
+/// The links that the system follows in one lookup (`Walk`), each link of the path and of the
+/// links' targets: a name through 40 writes its file on the model's host's command line, and one
+/// through 41 does not (`ELOOP`; observed in line WQA's D11 review r6, 2026-11-21:
+/// `/var/lock/../..` 40 and 41 times, `/proc/self/root`, two links, 20 and 21 times).
+const MAX_LINKS: usize = 40;
+
+/// The directories of LOSAT Web's Linux in which its user looks up no name (`searchable`): those
+/// that the model's user cannot search on the model's host, measured as that user at every depth
+/// but in the user's places and other processes (`find / -type d ! -executable`, line WQA's D11
+/// round 7, 2026-11-21). Some are the host's state then: Snap's FUSE connections and the
+/// directories of systemd's units in `/run/systemd/propagate`.
+const CLOSED_DIRECTORIES: [&[u8]; 39] = [
     b"/etc/credstore",
     b"/etc/credstore.encrypted",
     b"/etc/polkit-1/rules.d",
     b"/etc/ssl/private",
+    b"/lost+found",
     b"/proc/tty/driver",
     b"/root",
+    b"/run/docker",
     b"/run/systemd/inaccessible/dir",
-    b"/run/systemd/propagate/polkit.service",
     b"/run/systemd/propagate/systemd-logind.service",
     b"/run/systemd/propagate/systemd-resolved.service",
     b"/run/systemd/propagate/systemd-timesyncd.service",
     b"/run/systemd/propagate/systemd-udevd.service",
+    b"/sys/fs/fuse/connections/86",
+    b"/sys/fs/fuse/connections/87",
+    b"/sys/fs/fuse/connections/88",
+    b"/sys/fs/fuse/connections/89",
+    b"/sys/fs/fuse/connections/90",
+    b"/sys/fs/fuse/connections/91",
+    b"/sys/fs/fuse/connections/92",
+    b"/sys/fs/fuse/connections/93",
+    b"/sys/fs/fuse/connections/94",
+    b"/sys/fs/fuse/connections/95",
     b"/sys/kernel/debug",
     b"/sys/kernel/tracing",
     b"/var/cache/apt/archives/partial",
     b"/var/cache/ldconfig",
     b"/var/cache/private",
     b"/var/lib/apt/lists/partial",
+    b"/var/lib/docker",
     b"/var/lib/polkit-1",
     b"/var/lib/private",
     b"/var/lib/snapd/cache",
@@ -195,19 +250,18 @@ const CLOSED_DIRECTORIES: [&[u8]; 28] = [
     b"/var/lib/ubuntu-advantage/apt-esm/var/lib/apt/lists/partial",
     b"/var/lib/update-notifier/package-data-downloads/partial",
     b"/var/log/private",
-    b"/var/log/unattended-upgrades",
     b"/var/spool/cron/crontabs",
     b"/var/spool/rsyslog",
 ];
 
 /// The entries of another process (`/proc/<pid>` and its threads' `/proc/<pid>/task/<tid>`) in
-/// which a user looks up no name (`searchable`): its descriptors' directories (`fd`, `fdinfo`,
-/// `map_files`, mode 0500 or 0555 that the kernel checks against the process) and the links to its
-/// working and root directories (`cwd`, `root`), which only the process's user follows. LOSAT Web's
-/// own process is `/proc/self`; a process of `/proc/<pid>` is root's, as `/proc/1` (line WQA's D11
-/// round 6, 2026-11-21: measured as a user on ws's Linux 6.8; Linux 5.15 lets a user search
-/// `fdinfo`).
-const CLOSED_PROCESS_ENTRIES: [&[u8]; 5] = [b"cwd", b"fd", b"fdinfo", b"map_files", b"root"];
+/// which the model's user looks up no name (`searchable`): its descriptors (`fd`, `map_files`) and
+/// its links to its executable and its working and root directories (`exe`, `cwd`, `root`), which
+/// only the process's user may follow. LOSAT Web's own process is `SELF`; a process of
+/// `/proc/<pid>` is root's, as `/proc/1` (measured as the user on the model's host: `stat` of
+/// `<entry>/.` is refused there, and allowed in `fdinfo`, `ns`, `attr` and `net`; line WQA's D11
+/// round 7, 2026-11-21).
+const CLOSED_PROCESS_ENTRIES: [&[u8]; 5] = [b"cwd", b"exe", b"fd", b"map_files", b"root"];
 
 /// Whether a user looks up names in `directory`, a path without links (`Walk`): not in
 /// `CLOSED_DIRECTORIES` nor in another process's `CLOSED_PROCESS_ENTRIES`, where the system
@@ -255,20 +309,16 @@ const LOST_DEVICES: [&[u8]; 8] = [
     b"/dev/net/tun",
 ];
 
-/// The files of procfs that a process may open for writing as a user, of the process
-/// (`/proc/self`) and of its thread (`/proc/thread-self`): those of Linux 5.15, which
-/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20), and
-/// the process's `autogroup` (mode 0644), which Ubuntu 24.04's Linux 6.8 has (automatic group
-/// scheduling; measured in `/proc/self` on ws's Linux 6.8, line WQA's D11 rounds 5 and 6,
-/// 2026-11-21) and WSL's 5.15 does not. The file descriptors 0 to 2 (`fd/0`...) are the standard
-/// streams.
-const PROCESS_FILES: [&[u8]; 19] = [
+/// The files of procfs that a process may open for writing as a user, of the process (`SELF`)
+/// and of its thread (`THREAD`): those of the model's host's Linux 5.15 that
+/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20). The
+/// file descriptors 0 to 2 (`fd/0`...) are the standard streams.
+const PROCESS_FILES: [&[u8]; 18] = [
     b"attr/current",
     b"attr/exec",
     b"attr/fscreate",
     b"attr/keycreate",
     b"attr/sockcreate",
-    b"autogroup",
     b"clear_refs",
     b"comm",
     b"coredump_filter",
@@ -321,32 +371,38 @@ fn within(path: &[u8], directory: &[u8]) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest[0] == b'/' || directory.ends_with(b"/"))
 }
 
+/// Whether `path`, a path without links, is a file of procfs that the model knows in `SELF` or
+/// `THREAD`: a standard stream (`fd/0` to `fd/2`) or a file of `PROCESS_FILES` or `THREAD_FILES`.
+fn is_procfs_file(path: &[u8]) -> bool {
+    let stream = |file: &[u8]| matches!(file, b"fd/0" | b"fd/1" | b"fd/2");
+    let file = |directory: &[u8]| path.strip_prefix(directory)?.strip_prefix(b"/");
+    match (file(THREAD), file(SELF)) {
+        (Some(file), _) => stream(file) || THREAD_FILES.contains(&file),
+        (None, Some(file)) => stream(file) || PROCESS_FILES.contains(&file),
+        (None, None) => false,
+    }
+}
+
 /// Whether `path`, a path without links, is one of the files that the model knows (`opens`): a
-/// device of `LOST_DEVICES`, a standard stream (`/proc/self/fd/0` to `2`) or a file of procfs's
-/// `PROCESS_FILES` and `THREAD_FILES`. Such a file is no directory (`/dev/null/x`,
-/// `/dev/stdout/../stderr`, `/dev/fd/2/..`).
+/// device of `LOST_DEVICES` or a file of procfs (`is_procfs_file`). Such a file is no directory
+/// (`/dev/null/x`, `/dev/stdout/../stderr`, `/dev/fd/2/..`).
 fn is_known_file(path: &[u8]) -> bool {
-    LOST_DEVICES.contains(&path)
-        || path.strip_prefix(b"/proc/self/").is_some_and(|file| {
-            matches!(file, b"fd/0" | b"fd/1" | b"fd/2") || PROCESS_FILES.contains(&file)
-        })
-        || path
-            .strip_prefix(b"/proc/thread-self/")
-            .is_some_and(|file| THREAD_FILES.contains(&file))
+    LOST_DEVICES.contains(&path) || is_procfs_file(path)
 }
 
 /// Whether `directory` holds a file that the model knows (`is_known_file`): `/dev`, `/dev/net`,
-/// `/proc/self` and its `fd` and `attr`, `/proc/thread-self` and its `attr`.
+/// `SELF` and its `fd` and `attr`, its `task`, `THREAD` and its `fd` and `attr`.
 fn holds_known_file(directory: &[u8]) -> bool {
     let holds = |path: &[u8]| path.len() > directory.len() && within(path, directory);
+    let in_procfs = |process: &[u8], files: &[&[u8]]| {
+        [b"fd/0".as_slice()]
+            .iter()
+            .chain(files)
+            .any(|file| holds(&[process, b"/".as_slice(), *file].concat()))
+    };
     LOST_DEVICES.iter().any(|device| holds(device))
-        || [b"fd/0".as_slice()]
-            .iter()
-            .chain(&PROCESS_FILES)
-            .any(|file| holds(&[b"/proc/self/".as_slice(), file].concat()))
-        || THREAD_FILES
-            .iter()
-            .any(|file| holds(&[b"/proc/thread-self/".as_slice(), file].concat()))
+        || in_procfs(SELF, PROCESS_FILES.as_slice())
+        || in_procfs(THREAD, THREAD_FILES.as_slice())
 }
 
 /// What LOSAT Web's Linux has at `directory`, a path without links (`log_name`).
@@ -356,14 +412,14 @@ enum Directory {
     /// which the model takes as made where a name gives it (`logs`, `/tmp/a`; the working
     /// directory and its ancestors), a directory at the root (`ROOT_DIRECTORIES`), a mount of
     /// `NO_FREE_SPACE` (`/dev/pts`) and a directory of a file that the model knows (`/dev/net`,
-    /// `/proc/self/fd`).
+    /// `SELF`'s `fd`).
     Known,
     /// Any other path in root's directories, which may be a directory there or not
     /// (`/etc/default`, `/usr/tmp`): the user cannot change them, and the model does not list
     /// them.
     Unknown,
-    /// No directory: a file that the model knows (`/dev/null`, `/proc/self/fd/1`) or a name at the
-    /// root that is not there (`/data`, `/snap`).
+    /// No directory: a file that the model knows (`/dev/null`, `SELF`'s `fd/1`) or a name at the
+    /// root that is not there (`/data`).
     None,
 }
 
@@ -394,11 +450,8 @@ fn directory_at(directory: &[u8]) -> Directory {
 /// root's is not made, and another device or a file of the system's (`/dev/kmsg`, `/dev/console`,
 /// `/dev/tty` in a run without a terminal, `/etc/passwd`) is not open to a user.
 fn opens(path: &[u8]) -> bool {
-    if let Some(file) = path.strip_prefix(b"/proc/self/") {
-        return matches!(file, b"fd/0" | b"fd/1" | b"fd/2") || PROCESS_FILES.contains(&file);
-    }
-    if let Some(file) = path.strip_prefix(b"/proc/thread-self/") {
-        return THREAD_FILES.contains(&file);
+    if within(path, SELF) {
+        return is_procfs_file(path);
     }
     if let Some(queue) = path.strip_prefix(b"/dev/mqueue/") {
         return !queue.contains(&b'/');
@@ -415,18 +468,22 @@ fn opens(path: &[u8]) -> bool {
 
 /// A path of LOSAT Web's Linux walked component by component as the system walks it (No NCBI
 /// counterpart: the system's resolution, `log_name`): `.` and empty components stay, `..` goes to
-/// the parent of the path walked so far (`/` stays), and a link (`LINKS`; `/proc/self/cwd` and
-/// `/proc/thread-self/cwd`, the working directory `cwd`) is replaced by its target, which is
-/// walked from `/`. A component looked up in a directory that the user cannot search
-/// (`searchable`: `/root/..`, `/root/.`) refuses the path, as the system does. Each step costs the component's length, so a name is read in time linear in
-/// its length (line WQA's D11 round 5, 2026-11-21: resolving each prefix again was cubic, a minute
-/// for a name of 4 KB in LOSAT Web's serial engine).
+/// the parent of the path walked so far (`/` stays), and a link (`LINKS`; `cwd` of `SELF` and
+/// `THREAD`, the working directory `cwd`) is replaced by its target, which is walked from `/`. The
+/// system refuses the path where a component is looked up in a directory that the user cannot
+/// search (`searchable`: `/root/..`, `/root/.`), and at the link past `MAX_LINKS` (also a
+/// standard stream of procfs, `fd/0` to `fd/2`, which is a link there). A name is walked once,
+/// each component once and each link's target once more; a step's work is at most the length of
+/// the path walked so far, under `PATH_MAX` (line WQA's D11 round 5, 2026-11-21: resolving each
+/// prefix again was cubic, a minute for a name of 4 KB in LOSAT Web's serial engine).
 struct Walk<'a> {
     /// The path walked so far, without links; empty for `/`.
     resolved: Vec<u8>,
-    /// The working directory, `/proc/self/cwd`'s target.
+    /// The working directory, the target of `cwd` in `SELF`.
     cwd: &'a [u8],
-    /// Whether the walk looked a component up in a directory that the user cannot search.
+    /// The links that the walk followed.
+    links: usize,
+    /// Whether the system refused the path.
     refused: bool,
 }
 
@@ -437,6 +494,7 @@ impl<'a> Walk<'a> {
         let mut walk = Walk {
             resolved: Vec::new(),
             cwd,
+            links: 0,
             refused: false,
         };
         if path.first() != Some(&b'/') {
@@ -480,13 +538,28 @@ impl<'a> Walk<'a> {
             _ => {
                 self.resolved.push(b'/');
                 self.resolved.extend_from_slice(part);
-                let target = match self.resolved.as_slice() {
-                    b"/proc/self/cwd" | b"/proc/thread-self/cwd" => Some(self.cwd),
-                    path => LINKS
+                let path = self.resolved.as_slice();
+                let link = |of: &[u8], name: &[u8]| path.strip_prefix(of) == Some(name);
+                let target = if link(SELF, b"/cwd".as_slice()) || link(THREAD, b"/cwd".as_slice()) {
+                    Some(self.cwd)
+                } else {
+                    LINKS
                         .iter()
                         .find(|(link, _)| *link == path)
-                        .map(|(_, target)| *target),
+                        .map(|(_, target)| *target)
                 };
+                let stream = [SELF, THREAD].iter().any(|of| {
+                    [b"/fd/0".as_slice(), b"/fd/1", b"/fd/2"]
+                        .iter()
+                        .any(|fd| link(of, fd))
+                });
+                if target.is_some() || stream {
+                    self.links += 1;
+                    if self.links > MAX_LINKS {
+                        self.refused = true;
+                        return;
+                    }
+                }
                 if let Some(target) = target {
                     self.resolved.clear();
                     self.walk(target);
@@ -512,14 +585,16 @@ thread_local! {
 }
 
 /// What the `-logfile` name `name` gives on the command line on Linux (No NCBI counterpart: LOSAT
-/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 5). The name is
+/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 7), on the
+/// model's host as its first user (`USER_DIRECTORIES`). The name is
 /// read as NCBI reads it on Unix (`ncbi_environment::log_file_name`, the command line's reading
 /// too) in a working directory of the user's own (`WORKING_TREE`) on a file system with free
 /// space: `logs/run.log`, ` run.log` (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log`
 /// are files. A directory of '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it
-/// empty. The system then follows the links of Linux (`LINKS`; `/proc/self/cwd` is the working
-/// directory) in the directory that NCBI checks, in the path that it opens and in the directory
-/// whose free space it reads (`Walk`, once over the name), and refuses a component of more than
+/// empty. The system then follows the links of Linux (`LINKS`, at most `MAX_LINKS`;
+/// `/proc/self/cwd` is the working directory) in the directory that NCBI checks, in the path that
+/// it opens and in the directory whose free space it reads (`Walk`, once over the name), and
+/// refuses a component of more than
 /// 255 bytes and a path of 4096 or more (`fits`: `aaa...`, a directory `x/../x/../...` of 4096
 /// bytes). The directory that NCBI checks (the name's as written) is walked as the system walks
 /// it (`directory_at`): each directory that it passes may be one of root's that the model does
@@ -531,8 +606,8 @@ thread_local! {
 /// `/usr/tmp`) or `/var/lock/..` (`/run`, then `/run/tmp`). The opened path is a directory, which
 /// NCBI cannot open (`cerr`), where it is the working directory or one of its ancestors, or a
 /// directory that the walk passed or one of its ancestors (`.`, `logs/.`, `a/b/..`, `/tmp/`,
-/// `/proc/self/cwd`); a directory of root's opens to no user (`opens`: `/tmp`, `/proc/self/fd`); NCBI
-/// cannot open a path that the system does not open to a user either (`opens`: `/dev/fd/3`,
+/// `/proc/self/cwd`); a directory of root's opens to no user (`opens`: `/tmp`, `/proc/self/fd`);
+/// NCBI cannot open a path that the system does not open to a user either (`opens`: `/dev/fd/3`,
 /// `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`, a name in a directory of root's:
 /// `/run.log`, `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`, `/dev/kmsg`). A file opened in
 /// a file system that reports no free space (`NO_FREE_SPACE`) gets no message, as NCBI checks
@@ -597,11 +672,13 @@ fn log_name(name: &[u8]) -> LogName {
     if NO_FREE_SPACE.iter().any(|system| within(&space, system)) {
         return LogName::Nowhere;
     }
-    match path.as_slice() {
-        b"/proc/self/fd/2" => LogName::StandardError,
-        b"/proc/self/fd/0" => LogName::Nowhere,
-        path if LOST_DEVICES.contains(&path) => LogName::Nowhere,
-        _ => LogName::File,
+    let stream = |descriptor: &[u8]| path.strip_prefix(SELF) == Some(descriptor);
+    if stream(b"/fd/2".as_slice()) {
+        LogName::StandardError
+    } else if stream(b"/fd/0".as_slice()) || LOST_DEVICES.contains(&path.as_slice()) {
+        LogName::Nowhere
+    } else {
+        LogName::File
     }
 }
 
@@ -644,6 +721,13 @@ mod tests {
         let long_component = "a".repeat(256);
         let long_file = format!("logs/{}", "b".repeat(256));
         let long_climbed = format!("{}/../run.log", "a".repeat(256));
+        // Round 7: the system follows 40 links in a lookup and refuses the 41st (`ELOOP`).
+        let links_40 = format!("{}/tmp/run.log", "/var/lock/../..".repeat(40));
+        let links_41 = format!("{}/tmp/run.log", "/var/lock/../..".repeat(41));
+        let root_links_40 = format!("{}/tmp/run.log", "/proc/self/root".repeat(20));
+        let root_links_42 = format!("{}/tmp/run.log", "/proc/self/root".repeat(21));
+        let stdin_links_39 = format!("{}/dev/stdin", "/proc/self/root".repeat(18));
+        let stdin_links_41 = format!("{}/dev/stdin", "/proc/self/root".repeat(19));
         let directory_4094 = format!("{}run.log", "x/../".repeat(819));
         let directory_4099 = format!("{}run.log", "x/../".repeat(820));
         let directory_4095 = format!("x{}/run.log", "/.".repeat(2047));
@@ -710,9 +794,6 @@ mod tests {
             "/lost+found/run.log",
             "/snap/run.log",
             "/opt/run.log",
-            "/run/user/1000/run.log",
-            "/var/run/user/1000/run.log",
-            "/run/shm/run.log",
             "/dev/mqueue/a/run.log",
             "/bin/../tmp/run.log",
             "/var/lock/../tmp/run.log",
@@ -735,16 +816,27 @@ mod tests {
             "/root/x/../../tmp/run.log",
             "/data/x/../../tmp/run.log",
             // Round 6: a name looks nothing up in a directory that the user cannot search (as a
-            // user's command line, `EACCES`; measured on Ubuntu 24.04.3 and ws's Linux 6.8).
+            // user's command line, `EACCES`; measured on the model's host as its first user).
             "/root/../tmp/run.log",
             "/root/./run.log",
             "/var/cache/ldconfig/../../../tmp/run.log",
             "/etc/ssl/private/../../../tmp/run.log",
             "/var/spool/cron/crontabs/../../../../tmp/run.log",
             "/proc/1/fd/../../../tmp/run.log",
-            "/proc/1/fdinfo/../../../tmp/run.log",
-            "/proc/1/root/../tmp/run.log",
+            "/proc/1/root/../../../tmp/run.log",
             "/proc/1/task/1/cwd/../../../../../tmp/run.log",
+            // Round 7: the thread's directory is a link to a task of the process (`..` is in its
+            // `task`), the 41st link is refused, another process's `map_files` and `exe` are
+            // closed, and the model's host's Linux 5.15 has no `autogroup` (review r6, all run).
+            "/proc/thread-self/../../../tmp/run.log",
+            "/proc/thread-self/../../tmp/run.log",
+            "/proc/thread-self/fd/../../../tmp/run.log",
+            links_41.as_str(),
+            root_links_42.as_str(),
+            stdin_links_41.as_str(),
+            "/proc/1/map_files/../../../tmp/run.log",
+            "/proc/1/exe/../../../tmp/run.log",
+            "/proc/self/autogroup",
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
         }
@@ -787,8 +879,7 @@ mod tests {
             "/dev/fuse",
             "/dev/net/tun",
             "//dev/ptmx",
-            // Round 5: Ubuntu 24.04's kernels have `autogroup` (automatic group scheduling).
-            "/proc/self/autogroup",
+            stdin_links_39.as_str(),
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Discard), "{name}");
         }
@@ -839,11 +930,25 @@ mod tests {
             "/dev/disk/../../tmp/run.log",
             "/var/log/../../tmp/run.log",
             "/var/lock/../../tmp/run.log",
-            // Round 6: the directories around them, and a process's own descriptors, open to a user.
+            // Round 6: the directories around them, and a process's own descriptors, open to the
+            // user.
             "/var/cache/../../tmp/run.log",
             "/etc/ssl/../../tmp/run.log",
             "/proc/1/../../tmp/run.log",
             "/proc/self/fd/../../../tmp/run.log",
+            // Round 7: the model's host and its first user (review r6): the thread's `..` climbs
+            // out of procfs, 40 links, `fdinfo` of Linux 5.15, a directory of the user's group
+            // `adm`, a directory at the host's root, and places where the user writes.
+            "/proc/thread-self/../../../../tmp/run.log",
+            links_40.as_str(),
+            root_links_40.as_str(),
+            "/proc/1/fdinfo/../../../tmp/run.log",
+            "/var/log/unattended-upgrades/../../../tmp/run.log",
+            "/snap/../tmp/run.log",
+            "/run/user/1000/run.log",
+            "/var/run/user/1000/run.log",
+            "/run/shm/run.log",
+            "/mnt/wsl/run.log",
         ];
         for name in names {
             let log = target(Some(name));
@@ -870,9 +975,6 @@ mod tests {
         );
     }
 
-    /// The file that is the standard error writes where `cerr` does, and gets the messages
-    /// collected before it was opened, which `cerr` has already; a file in memory keeps them, and
-    /// `cerr` gets none (line WQA's sweep, D11, 2026-11-20).
     /// A name of 4 KB is read in time linear in its length (review 3 M1, line WQA's D11 round 5,
     /// 2026-11-21: resolving each of its directories again from `/` took about a minute in LOSAT
     /// Web's serial engine): the walk takes each component a few times, not once per directory
@@ -895,6 +997,30 @@ mod tests {
         }
     }
 
+    /// The engine carries no list of the system's files (line WQA's D11, Q-D11 = B, 2026-11-21): a
+    /// name that climbs with `..` out of a file or out of a missing name in root's trees names a
+    /// file in LOSAT Web, where the command line on Linux refuses the path (`ENOTDIR`, `ENOENT`)
+    /// and writes the messages to its standard error (`/proc/self/status` too, a file of procfs
+    /// that a process does not write). docs/web/abi_v2.md and the manual state this difference,
+    /// so a change to it changes this test and those texts together. A file that the model knows
+    /// refuses the path as the command line does (`/dev/null`, `/proc/self/comm`).
+    #[test]
+    fn a_name_through_a_file_of_roots_names_a_file_as_documented() {
+        for (name, read) in [
+            ("/etc/passwd/../../tmp/x", LogName::File),
+            ("/etc/zzz/../../tmp/x", LogName::File),
+            ("/usr/bin/ls/../../../tmp/x", LogName::File),
+            ("/proc/self/status/../../../tmp/x", LogName::File),
+            ("/dev/null/../../tmp/x", LogName::Unopened),
+            ("/proc/self/comm/../../../tmp/x", LogName::Unopened),
+        ] {
+            assert_eq!(log_name(name.as_bytes()), read, "{name}");
+        }
+    }
+
+    /// The file that is the standard error writes where `cerr` does, and gets the messages
+    /// collected before it was opened, which `cerr` has already; a file in memory keeps them, and
+    /// `cerr` gets none (line WQA's sweep, D11, 2026-11-20).
     #[test]
     fn the_standard_error_file_writes_to_the_standard_error() {
         use crate::blastinput::ncbi_environment::TextPlace;

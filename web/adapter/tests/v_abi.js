@@ -848,7 +848,9 @@ const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>
   // Round 5: a name climbs out of directories of root's that the model does not list, as the CLI passes them.
   "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log",
   // Round 6: a name looks nothing up in a directory that a user cannot search (mode 0700, root's), as the CLI's EACCES.
-  "/root/../tmp/<id>.log", "/var/cache/ldconfig/../../../tmp/<id>.log"];
+  "/root/../tmp/<id>.log", "/var/cache/ldconfig/../../../tmp/<id>.log",
+  // Round 7: the system follows 40 links in a lookup (`/var/lock` is one) and refuses the 41st, as the CLI's ELOOP.
+  `${"/var/lock/../..".repeat(40)}/tmp/<id>.log`, `${"/var/lock/../..".repeat(41)}/tmp/<id>.log`];
 
 // The rows of `/`-names (LOG_NAMES) compare the Web with the CLI of the host, which must be a Linux like LOSAT Web's
 // (Ubuntu 24.04, as CI's runner): a user that is not root, `/var/lock` and `/var/run` links to `/run/lock` and `/run`,

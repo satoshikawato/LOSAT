@@ -9150,9 +9150,18 @@ mod tblastx_tests {
         };
         // 0 loads, 1 throws.
         let parsed = vec![subject(b"NM_100000", false), subject(b"NM_100001", true)];
+        // The report's reads as its writer makes them (`PairwiseReads`): both description lines,
+        // both alignments.
+        let reads = crate::report::db_subject::ReportKeys::Pairwise(
+            crate::report::db_subject::PairwiseReads {
+                hits: vec![vec![0], vec![1]],
+                described: vec![0, 1],
+                aligned: 2,
+            },
+        );
         let loads = HitLoads::of(
             Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
-            [(true, vec![Some(0), Some(1)])],
+            [(true, reads)],
             |key| parsed[key].as_deref(),
             |_, _| 0,
         );

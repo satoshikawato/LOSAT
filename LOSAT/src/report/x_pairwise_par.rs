@@ -394,7 +394,9 @@ impl<'h> QueryGroup<'h> {
 /// The writer's reads of the rows of one query (`rows`, all of the query `q_idx`, in the order of
 /// the rows; `joins` and `reading` as the writer's sections give them, `tblastx` TBLASTX's sort):
 /// its group (`QueryGroup::sorted`), the subjects shown in each hit (its own first, then the
-/// copies, each once, in the order of their first HSP), the hits of its description lines
+/// copies, each once, in the order of their first row: the writer reads a hit's copies with the
+/// hit and has no order of them, so that order is the model's rule, `PairwiseReads::hits`), the
+/// hits of its description lines
 /// (`QueryGroup::described_subjects`) and of its alignments (`QueryGroup::aligned`). The tests of
 /// each program's `pairwise_read_order` compare their model with it (review 2 of line DBID
 /// pfoff-3, L5).
@@ -412,19 +414,22 @@ pub(crate) fn writer_reads(
         return Default::default();
     };
     let position = |shown: &u32| group.subject_order.iter().position(|s| s == shown).unwrap();
+    let shown_in: HashMap<u32, u32> = group
+        .hsps()
+        .map(|(shown, hit)| (hit.hit.s_idx, shown))
+        .collect();
+    let mut members: HashMap<u32, Vec<usize>> = HashMap::new();
+    for row in rows {
+        let hit = members.entry(shown_in[&row.hit.s_idx]).or_default();
+        if !hit.contains(&(row.hit.s_idx as usize)) {
+            hit.push(row.hit.s_idx as usize);
+        }
+    }
     super::db_subject::PairwiseReads {
         hits: group
             .subject_order
             .iter()
-            .map(|shown| {
-                let mut members: Vec<usize> = Vec::new();
-                for hit in &group.subject_hits[shown] {
-                    if !members.contains(&(hit.hit.s_idx as usize)) {
-                        members.push(hit.hit.s_idx as usize);
-                    }
-                }
-                members
-            })
+            .map(|shown| members.remove(shown).unwrap_or_default())
             .collect(),
         described: group
             .described_subjects(reading.shown.descriptions, found_before)

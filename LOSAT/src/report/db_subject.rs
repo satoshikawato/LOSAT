@@ -4933,12 +4933,13 @@ mod tests {
         );
         // The description lines that a report shows are its writer's (`PairwiseReads::described`,
         // in the order of the lines): psiblast's later round shows those of its first HSPs, here
-        // 4 alone (the part of the subjects found before) then 2, so 0 and 5, which neither the
-        // lines nor the alignments (`-num_alignments 0`) show, are never read.
+        // 4 alone (the part of the subjects found before) then 2, so 0, 5, 1 and 3, which neither
+        // the lines nor the alignments (`-num_alignments 0`) show, are never read (1 and 3, whose
+        // lookups throw, throw nothing).
         let two_part = (
             true,
             ReportKeys::Pairwise(PairwiseReads {
-                hits: vec![vec![0], vec![2], vec![4], vec![5]],
+                hits: vec![vec![0], vec![2], vec![4], vec![5], vec![1], vec![3]],
                 described: vec![2, 1],
                 aligned: 0,
             }),
@@ -4970,11 +4971,12 @@ mod tests {
             ),
             [L, T, U, U, U, U]
         );
-        // A hit that shows copies of its record: a thrown first subject loads none of them.
+        // A hit that shows copies of its record: a thrown first subject loads none of them (1 and
+        // 2, in hits that are not shown, are not read).
         let copies = (
             true,
             ReportKeys::Pairwise(PairwiseReads {
-                hits: vec![vec![4, 5], vec![3, 0]],
+                hits: vec![vec![4, 5], vec![3, 0], vec![1], vec![2]],
                 described: vec![0, 1],
                 aligned: 0,
             }),

@@ -1371,7 +1371,8 @@ mod tests {
             hsp(2, 20, 1e-3, 1, 8),
             hsp(2, 40, 1e-7, 6, 5),
         ];
-        let letters = b"ATGGCTAAACTGGAAGGTCCATTTAGCCGA";
+        // Long enough for the residues of every HSP (offsets up to 16 residues).
+        let letters = b"ATGGCTAAACTGGAAGGTCCATTTAGCCGAATGGCTAAACTGGAAGGTCCATTTAGCCGAATGGCT";
         let queries = [FastaRecord::new("q", b"q", letters)];
         let subjects: Vec<FastaRecord> = (0..3)
             .map(|_| FastaRecord::new("s", b"s", letters))

@@ -249,6 +249,9 @@ pub struct OptionInputs {
     pub threshold: Option<i32>,
     /// `-culling_limit` (also 0), when given.
     pub culling_limit: Option<i32>,
+    /// `-best_hit_overhang` and `-best_hit_score_edge`, each when given.
+    pub best_hit_overhang: Option<f64>,
+    pub best_hit_score_edge: Option<f64>,
     pub subject_besthit: bool,
     pub window_size: Option<i32>,
     pub ungapped: bool,
@@ -311,6 +314,8 @@ impl OptionInputs {
             window_masker_taxid: None,
             threshold: None,
             culling_limit: None,
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
             subject_besthit: false,
             window_size: None,
             ungapped: false,
@@ -770,6 +775,15 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Hsp => {
                 if let Some(limit) = inputs.culling_limit {
                     list.set("Culling", Integer(limit));
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3338-3349
+                // Each when given, after `Culling` (they exclude each other) and before
+                // `UseSubjectBestHit` (NCBI BLAST+ 2.17.0, line NP O6a's probe).
+                if let Some(overhang) = inputs.best_hit_overhang {
+                    list.set("BestHitOverhang", Real(overhang));
+                }
+                if let Some(score_edge) = inputs.best_hit_score_edge {
+                    list.set("BestHitScoreEdge", Real(score_edge));
                 }
                 if inputs.subject_besthit {
                     list.set("UseSubjectBestHit", Boolean(true));

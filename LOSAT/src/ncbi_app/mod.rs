@@ -42,6 +42,8 @@ pub(crate) struct Tool {
     pub(crate) dependencies: fn() -> Vec<(&'static str, Dep, &'static str)>,
     /// The prefix of the program's diagnostics (`SetDiagPostPrefix`), if it sets one.
     pub(crate) post_prefix: Option<&'static str>,
+    /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
+    pub(crate) components: &'static [crate::ncbi_version::Component],
 }
 
 /// `Tool::dependencies` of a program that sets none.
@@ -112,6 +114,16 @@ impl Diag<'_> {
     /// (`Tool::post_prefix`), the message.
     pub(crate) fn err_post(&mut self, message: &str) {
         self.err_post_bytes(message.as_bytes());
+    }
+
+    /// `ERR_POST(Warning << message)` inside `Run`: as `err_post`, of severity `Warning`.
+    pub(crate) fn warning_post(&mut self, message: &str) {
+        self.write_text(&crate::ncbi_exception::post_line(
+            crate::ncbi_exception::Severity::Warning,
+            None,
+            self.tool.post_prefix,
+            message.as_bytes(),
+        ));
     }
 
     /// `err_post` of a message that is not UTF-8.
@@ -281,7 +293,13 @@ fn run_app(
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
             let _ = out.write_all(
-                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
+                crate::ncbi_version::print_with_components(
+                    request,
+                    tool.program,
+                    tool.version,
+                    tool.components,
+                )
+                .as_bytes(),
             );
             return 0;
         }

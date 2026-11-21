@@ -1,0 +1,45 @@
+Error: CWinMaskConfig::FillIdList(): can't understand id: : NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2468: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Empty bare accession supplied
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: : NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2468: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Empty bare accession supplied
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: : NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2468: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Empty bare accession supplied
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: gb||: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Textseq_id.cpp", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release )
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: gb|A|B|C|D: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2542: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - FASTA-style ID gb|A|B|C|D has too many parts.
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: gi|abc: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2941: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Negative, excessively large, or non-numeric gi ID abc
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: café: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID café
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: AB000001.1.2: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID AB000001.1.2
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: ref|NC_000099.x|: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Textseq_id.cpp", line 108: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Version embedded in accession NC_000099.x is not a positive integer
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: pdb|: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID pdb|
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: pat|US: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2738: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Not enough fields for ID of type pat
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: gnl|: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID gnl|
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: gnl|db: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2738: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Not enough fields for ID of type gnl
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: tr|: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID tr|
+: ignoring
+Error: CWinMaskConfig::FillIdList(): can't understand id: lcl|: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID lcl|
+: ignoring

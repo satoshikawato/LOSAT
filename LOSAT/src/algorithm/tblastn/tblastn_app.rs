@@ -1420,7 +1420,7 @@ fn write_first_batch_prologs(
     // The program line of outfmt 0 (`TBLASTN`; `PSITBLASTN` with `-in_pssm`).
     program: &str,
 ) -> Result<()> {
-    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
+    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)

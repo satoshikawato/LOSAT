@@ -1787,7 +1787,7 @@ fn pairwise_metadata(
     let (database_name, num_sequences, total) = match shown {
         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are held in memory.
         ShownSubjects::Fasta { path, .. } => (
-            crate::report::pairwise::subject_set_name(path),
+            crate::report::pairwise::subject_set_definition(path),
             subjects.len() as i64,
             subjects.iter().map(|s| s.sequence.len() as i64).sum(),
         ),

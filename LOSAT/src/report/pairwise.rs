@@ -2100,16 +2100,22 @@ fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
 /// NCBI keeps the `std::string` of the command line (a name that is not UTF-8, BLASTX's
 /// `-subject`: probe R2 of line LIB-B).
 pub(crate) fn subject_set_name(subject: &std::path::Path) -> Vec<u8> {
-    // An imported strategy's subjects have no name (`scan_mode_definition`).
-    if subject.as_os_str().is_empty() {
-        return scan_mode_definition("").into_bytes();
-    }
     [
         b"User specified sequence set (Input: ".as_slice(),
         &crate::utils::os_bytes::path_bytes(subject),
         b")",
     ]
     .concat()
+}
+
+/// The definition of a subject set in the pairwise report: [`subject_set_name`], or, for the
+/// subjects of an imported strategy (an empty path: they name no input), [`scan_mode_definition`]'s
+/// definition without an input.
+pub(crate) fn subject_set_definition(subject: &std::path::Path) -> Vec<u8> {
+    if subject.as_os_str().is_empty() {
+        return scan_mode_definition("").into_bytes();
+    }
+    subject_set_name(subject)
 }
 
 fn ensure_trailing_period(text: &[u8]) -> std::borrow::Cow<'_, [u8]> {

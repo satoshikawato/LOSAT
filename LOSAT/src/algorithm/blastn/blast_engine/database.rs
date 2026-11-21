@@ -1853,6 +1853,15 @@ pub(super) fn after_throw(
     )
 }
 
+/// Whether every format of `output_formats` writes the same where every load of a subject with a
+/// positive taxid throws (`BlastnOutputFormat::unchanged_by_load_throws`, for the batch's
+/// prefetch, `shared::PrefetchQueries::where_reports_unchanged_by_load_throws`).
+pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFormat]) -> bool {
+    output_formats
+        .iter()
+        .all(BlastnOutputFormat::unchanged_by_load_throws)
+}
+
 /// What the XML2 and JSON reports of `hit_lists` (final hit lists by query, in the order of the
 /// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by

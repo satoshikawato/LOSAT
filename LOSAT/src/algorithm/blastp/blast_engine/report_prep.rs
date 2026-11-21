@@ -215,6 +215,16 @@ pub(super) fn prefetch_reported_subjects(
         query_records,
         ..
     } = *prep;
+    // Whether the reports write the same where every load of a subject with a positive taxid throws
+    // (`db_subject::unchanged_by_load_throws`, of psiblast's formats as of blastp's, as
+    // `query_warning_lines` reads them); psiblast's PSSM reads no letters of such a subject
+    // (`ListedTitles::pssm_reads`).
+    let reports_unchanged_by_load_throws =
+        crate::report::db_subject::unchanged_by_load_throws_outfmts(
+            outputs.formats.iter().map(|format| format.outfmt),
+            crate::blastinput::app::Program::Blastp,
+            args.app.request_kind(),
+        );
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
@@ -478,7 +488,8 @@ pub(super) fn prefetch_reported_subjects(
                 loaded(span.start),
                 database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(unrecorded_calls),
+                    .after_unrecorded_calls(unrecorded_calls)
+                    .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws),
             )?;
         }
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
@@ -611,7 +622,8 @@ pub(super) fn prefetch_reported_subjects(
                     &scope,
                 )
                 .after_unrecorded_calls(unrecorded_calls)
-                .after_xml_reports(xml_before.as_ref());
+                .after_xml_reports(xml_before.as_ref())
+                .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws);
                 let messages = match psiblast_prefetched.as_ref() {
                     Some(ranks) => {
                         let prefetched = titles.prefetched_ranks(

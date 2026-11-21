@@ -944,3 +944,99 @@ fn the_cache_keeps_answers_without_texts_in_a_slot_per_taxid() {
         assert_eq!(asked, 1);
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:154-161
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:199
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+/// A `taxdb.bti` or `taxdb.btd` that does not open (mode 000) is `SeqDbError::TaxdbThrows`, with
+/// `CMemoryFile`'s exception, and the lazy handle gives it again at every lookup, as NCBI's
+/// taxonomy file object throws at every lookup (line WQA D18b, 2026-11-21). An index too short
+/// for one entry is missing before it is opened (NCBI takes its length first), and a data file
+/// is not opened where the index has a wrong magic number. Skipped for a user that reads every
+/// file.
+#[cfg(unix)]
+#[test]
+fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+    };
+    let good = fixture_dir().join("good");
+    for file in ["taxdb.bti", "taxdb.btd"] {
+        let dir = temp_dir("unopened");
+        for name in ["taxdb.bti", "taxdb.btd"] {
+            std::fs::copy(good.join(name), dir.join(name)).unwrap();
+        }
+        let path = dir.join(file);
+        mode(&path, 0o000);
+        if std::fs::File::open(&path).is_ok() {
+            // A user that reads every file (the superuser).
+            mode(&path, 0o644);
+            return;
+        }
+        let search = path_of(&dir);
+        let expect = |error: SeqDbError| match error {
+            SeqDbError::TaxdbThrows {
+                path: failed,
+                reason,
+                exception,
+            } => {
+                assert_eq!(failed, path, "{file}");
+                assert_eq!(reason, "Permission denied", "{file}");
+                let message = format!(
+                    "CMemoryFile: Cannot memory map file '{}':Permission denied",
+                    path.display()
+                );
+                assert_eq!(exception.get_msg(), message.as_bytes(), "{file}");
+                let error = SeqDbError::TaxdbThrows {
+                    path: failed,
+                    reason,
+                    exception,
+                };
+                // Not NCBI's database error: the exception, exit status 255 where nothing
+                // catches it; blastdbcmd's request writes its message.
+                assert_eq!(error.ncbi_message(), None, "{file}");
+                assert!(error.ncbi_exception().is_some(), "{file}");
+                assert_eq!(
+                    error.ncbi_request_message(),
+                    Some(message.into_bytes()),
+                    "{file}"
+                );
+                assert_eq!(
+                    error.to_string(),
+                    format!("{} cannot be opened: Permission denied", path.display())
+                );
+            }
+            other => panic!("{file}: {other:?}"),
+        };
+        match TaxDb::open(&search) {
+            Err(error) => expect(error),
+            Ok(_) => panic!("{file}: opened"),
+        }
+        let lazy = LazyTaxDb::new(search.search.clone());
+        for _ in 0..2 {
+            let mut messages = Vec::new();
+            expect(lazy.names(9606, &mut messages).expect_err(file));
+            assert!(messages.is_empty(), "{file}");
+        }
+        mode(&path, 0o644);
+    }
+    // An index too short for one entry: missing, though it does not open.
+    let dir = temp_dir("short-unopened");
+    std::fs::write(dir.join("taxdb.bti"), [0u8; 8]).unwrap();
+    std::fs::copy(good.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
+    mode(&dir.join("taxdb.bti"), 0o000);
+    let db = TaxDb::open(&path_of(&dir)).unwrap();
+    assert!(db.is_missing());
+    mode(&dir.join("taxdb.bti"), 0o644);
+    // An index of a wrong magic number: missing with NCBI's text, the data file never opened.
+    let dir = temp_dir("bad-magic-unopened");
+    let bad = fixture_dir().join("bad_magic");
+    std::fs::copy(bad.join("taxdb.bti"), dir.join("taxdb.bti")).unwrap();
+    std::fs::copy(bad.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
+    mode(&dir.join("taxdb.btd"), 0o000);
+    let db = TaxDb::open(&path_of(&dir)).unwrap();
+    assert!(db.is_missing());
+    assert_eq!(db.open_messages(), [MSG_WRONG_MAGIC]);
+    mode(&dir.join("taxdb.btd"), 0o644);
+}

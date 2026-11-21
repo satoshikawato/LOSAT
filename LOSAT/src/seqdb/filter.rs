@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
-use super::lmdb_read::{Db, Env};
+use super::lmdb_read::{Db, Env, ReadError};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::SeqIdWarning;
@@ -656,6 +656,7 @@ impl LmdbEntry {
                 path: path.to_path_buf(),
                 message,
             },
+            tax_files::TaxError::Unreadable(error) => error,
             other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
         };
         let mut found = if negative {
@@ -686,6 +687,7 @@ impl LmdbEntry {
                 path: ntf_path.clone(),
                 message,
             },
+            tax_files::TaxError::Unreadable(error) => error,
             other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
         })
     }
@@ -709,7 +711,7 @@ impl LmdbEntry {
             path: path.clone(),
             message,
         };
-        let lookup = tax_files::OidTaxIds::open(&file).map_err(format)?;
+        let lookup = tax_files::OidTaxIds::open(&file).map_err(|error| error.into_seqdb(format))?;
         let (mut skipped, mut next) = (0u32, 0usize);
         for &oid in oids {
             let file_oid = if self.partial {
@@ -723,7 +725,11 @@ impl LmdbEntry {
             } else {
                 oid
             };
-            tax_ids.extend(lookup.taxids(file_oid).map_err(format)?);
+            tax_ids.extend(
+                lookup
+                    .taxids(file_oid)
+                    .map_err(|error| error.into_seqdb(format))?,
+            );
         }
         Ok(())
     }
@@ -772,13 +778,17 @@ impl LmdbEntry {
     /// info.`, the text of NCBI's LMDB manager for a `.pdb`/`.ndb` without `acc2oid`: a
     /// database made without `-parse_seqids`, probe S48) and for a damaged one.
     fn first_oid(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Option<u32>, SeqDbError> {
-        tax_files::acc_first_oid(env, acc).map_err(|message| self.lookup_error(message))
+        tax_files::acc_first_oid(env, acc).map_err(|error| self.lookup_error(error))
     }
 
     /// The error of a lookup in the `acc2oid` table: NCBI's exception for a database without
     /// the table and for an empty key (`MDB_BAD_VALSIZE`, probe H01), LOSAT's for a damaged
     /// file.
-    fn lookup_error(&self, message: String) -> SeqDbError {
+    fn lookup_error(&self, error: ReadError) -> SeqDbError {
+        let message = match error {
+            ReadError::Format(message) => message,
+            ReadError::Unreadable(error) => return error,
+        };
         let name = Self::base_name(&self.lmdb);
         if message == tax_files::NO_ACCESSION_INFO {
             SeqDbError::NotFound(message.into_bytes())
@@ -805,13 +815,13 @@ impl LmdbEntry {
 
     /// `oids` in the entry's LMDB file opened as `env` (`open_env`).
     pub(super) fn oids_in(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
-        tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
+        tax_files::acc_oids(env, acc).map_err(|error| self.lookup_error(error))
     }
 
     /// The `acc2oid` database of the LMDB file opened as `env` (`tax_files::acc2oid`), for
     /// `oids_of` and `case_variant_oids_in`.
     pub(super) fn acc2oid_in(&self, env: &Env<DbFile>) -> Result<Db, SeqDbError> {
-        tax_files::acc2oid(env).map_err(|message| self.lookup_error(message))
+        tax_files::acc2oid(env).map_err(|error| self.lookup_error(error))
     }
 
     /// `oids_in` in the `acc2oid` database `db` of `env` (`acc2oid_in`).
@@ -821,7 +831,7 @@ impl LmdbEntry {
         db: &Db,
         acc: &[u8],
     ) -> Result<Vec<u32>, SeqDbError> {
-        tax_files::acc_oids_of(env, db, acc).map_err(|message| self.lookup_error(message))
+        tax_files::acc_oids_of(env, db, acc).map_err(|error| self.lookup_error(error))
     }
 
     /// The OIDs of the other keys that differ from `acc` only in the case of letters at or after
@@ -836,7 +846,7 @@ impl LmdbEntry {
         prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
     ) -> Result<Vec<u32>, SeqDbError> {
         tax_files::acc_case_variant_oids(env, db, acc, from, prefixes)
-            .map_err(|message| self.lookup_error(message))
+            .map_err(|error| self.lookup_error(error))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
@@ -885,21 +895,22 @@ impl LmdbEntry {
         pairs.sort();
         let nos_path = self.lookup_file("os");
         let nos_file = DbFile::open(&nos_path).map_err(lookup_file_error)?;
-        let lookup =
-            tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
+        let lookup = tax_files::OidSeqIds::open(&nos_file).map_err(|error| {
+            error.into_seqdb(|message| SeqDbError::Format {
                 path: nos_path.clone(),
                 message,
-            })?;
+            })
+        })?;
         let mut excluded = Vec::new();
         let mut i = 0;
         while i < pairs.len() {
             let current_oid = pairs[i].0;
-            let file_ids = lookup
-                .seqids(current_oid)
-                .map_err(|message| SeqDbError::Format {
+            let file_ids = lookup.seqids(current_oid).map_err(|error| {
+                error.into_seqdb(|message| SeqDbError::Format {
                     path: nos_path.clone(),
                     message,
-                })?;
+                })
+            })?;
             let mut input_ids = Vec::new();
             while i < pairs.len() && pairs[i].0 == current_oid {
                 input_ids.push(pairs[i].1);
@@ -1025,7 +1036,21 @@ pub(super) fn entries_accessions_to_oids(
 /// text for an empty file (probe SR4; an empty `.ptf` of a taxid list: line WQA D18 review M4,
 /// NCBI BLAST+ 2.17.0 on 2026-11-21), a file of another format (SR3) and another LMDB version;
 /// LOSAT's for the rest.
-fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
+fn lmdb_open_error(file: &DbFile, error: ReadError) -> SeqDbError {
+    let message = match error {
+        ReadError::Format(message) => message,
+        // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3683-3712
+        // `mdb_env_open` reads the two meta pages with `pread` before it maps the file, so a read
+        // that fails there is NCBI's `mdb_env_open` error with the system's text, as an open or a
+        // first byte that fails (line WQA D18c, 2026-11-21).
+        ReadError::Unreadable(SeqDbError::Read { path, source }) => {
+            return match crate::utils::os_error_text::ncbi_strerror(&source) {
+                Some(strerror) => mdb_env_open_error(&strerror),
+                None => SeqDbError::Read { path, source },
+            };
+        }
+        ReadError::Unreadable(error) => return lmdb_file_error(error),
+    };
     let what = if file.is_empty() {
         "Bad file descriptor"
     } else if message.contains("MDB_VERSION_MISMATCH") {
@@ -1038,6 +1063,11 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
             message,
         };
     };
+    mdb_env_open_error(what)
+}
+
+/// NCBI's error of an LMDB file that `mdb_env_open` refuses, with LMDB's or the system's text.
+fn mdb_env_open_error(what: &str) -> SeqDbError {
     SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}").into())
 }
 
@@ -1050,9 +1080,7 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
 fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
     if let SeqDbError::Open { source, .. } | SeqDbError::Map { source, .. } = &error {
         if let Some(strerror) = crate::utils::os_error_text::ncbi_strerror(source) {
-            return SeqDbError::NotFound(
-                format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
-            );
+            return mdb_env_open_error(&strerror);
         }
     }
     error
@@ -1522,15 +1550,17 @@ impl SeqDb {
         for (lmdb, range) in groups {
             let file = DbFile::open(&lmdb).map_err(lmdb_file_error)?;
             let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
-            let listed = tax_files::volumes(&env).map_err(|message| {
-                if tax_files::is_ncbi_volume_error(&message) {
-                    SeqDbError::NotFound(message.into_bytes())
-                } else {
-                    SeqDbError::Format {
-                        path: lmdb.clone(),
-                        message,
+            let listed = tax_files::volumes(&env).map_err(|error| {
+                error.into_seqdb(|message| {
+                    if tax_files::is_ncbi_volume_error(&message) {
+                        SeqDbError::NotFound(message.into_bytes())
+                    } else {
+                        SeqDbError::Format {
+                            path: lmdb.clone(),
+                            message,
+                        }
                     }
-                }
+                })
             })?;
             let held = &self.volumes[range.clone()];
             if held.len() > listed.len() {

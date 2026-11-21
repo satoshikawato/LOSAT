@@ -13,9 +13,10 @@ use crate::ncbi_app::files::{
 };
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
-use crate::seqdb::tax_sqlite::TaxonomySqlite;
+use crate::seqdb::lmdb_read::ReadError;
+use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
 use crate::seqdb::taxdb::{TaxLookup, TaxNames};
-use crate::seqdb::{SearchPath, SeqDb};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
 
 use super::{database_error, refusal, Diag};
 
@@ -80,7 +81,9 @@ pub(super) fn tax_id_list(
     let taxonomy = match &source {
         Some(file) => match TaxonomySqlite::open(file) {
             Ok(taxonomy) => Some(taxonomy),
-            Err(_) => {
+            // Every exception of NCBI's constructor, a read that SQLite fails included
+            // (`tax_sqlite::QueryReadFailure`; review 1 of line WQA D18b, L3).
+            Err(ReadError::Unreadable(_) | ReadError::Format(_)) => {
                 diag.post(NO_TAXONOMY_WARNING.trim_end_matches('\n'));
                 None
             }
@@ -99,11 +102,21 @@ pub(super) fn tax_id_list(
         };
         tax_ids.insert(taxid);
         if let Some(taxonomy) = &taxonomy {
-            let descendants = taxonomy.descendants(taxid).map_err(|reason| {
-                Ended(diag.refuse(&refusal(&format!(
+            let descendants = taxonomy.descendants(taxid).map_err(|error| match error {
+                // A read that SQLite fails: the statement's destructor posts the error, then the
+                // step's exception ends the run (`tax_sqlite::QueryReadFailure`; review 1 of line
+                // WQA D18b, L3).
+                ReadError::Unreadable(_) => {
+                    diag.write_text(&QueryReadFailure::finalize_post("blastdbcmd"));
+                    Ended(database_error(
+                        diag,
+                        SeqDbError::Ncbi(QueryReadFailure::step()),
+                    ))
+                }
+                ReadError::Format(reason) => Ended(diag.refuse(&refusal(&format!(
                     "{TAXONOMY_FILE}: the descendants of taxid {taxid} are not readable \
                      ({reason})"
-                ))))
+                )))),
             })?;
             tax_ids.extend(descendants);
         }

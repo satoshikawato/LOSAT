@@ -895,7 +895,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "tblastx", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -1585,7 +1588,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "tblastx", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts) =
@@ -3261,6 +3264,14 @@ fn run_batch_loop(
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
     ));
+    // Whether the reports write the same where every load of a subject with a positive taxid throws
+    // (`db_subject::unchanged_by_load_throws`).
+    let reports_unchanged_by_load_throws =
+        crate::report::db_subject::unchanged_by_load_throws_outfmts(
+            outputs.formats.iter().map(|format| format.outfmt),
+            crate::blastinput::app::Program::Tblastx,
+            crate::report::archive::options::RequestKind::Tblastx,
+        );
     let (query_code, db_code) = (
         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
         crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
@@ -3811,7 +3822,10 @@ fn run_batch_loop(
                         &reports.titles.borrow(),
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                             .after_unrecorded_calls(unrecorded_calls)
-                            .after_xml_reports(xml_before.as_ref()),
+                            .after_xml_reports(xml_before.as_ref())
+                            .where_reports_unchanged_by_load_throws(
+                                reports_unchanged_by_load_throws,
+                            ),
                     );
                     drop(reads);
                     let messages = match prefetch {

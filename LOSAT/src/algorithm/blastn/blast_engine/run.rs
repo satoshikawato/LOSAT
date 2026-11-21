@@ -6169,7 +6169,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "blastn", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -7104,7 +7107,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -8868,7 +8871,10 @@ fn run_in_pool(
             // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0);
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .where_reports_unchanged_by_load_throws(
+                        database::reports_unchanged_by_load_throws(&output_formats),
+                    );
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats

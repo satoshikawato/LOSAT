@@ -37,6 +37,8 @@ mod database_sequence_without_letters;
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
+#[path = "../db_taxdb_unreadable.rs"]
+mod db_taxdb_unreadable;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
 #[path = "../db_unreadable_files.rs"]

@@ -31,7 +31,8 @@ use super::{
     blastp_get_ungapped_hsp_context_with_bounds, blastp_restricted_align_enabled,
     blastp_save_init_hsp, blastp_timing_start, blastp_trace_init_hsp_overlaps_target,
     build_restricted_align_array_into, chain_blastp_init_hsps, extend_preliminary_blastp_hit,
-    ncbi_qsort_init_hsps_by_score, preliminary_tree_hsp,
+    ncbi_qsort_init_hsps_by_score, ncbi_qsort_preliminary_hits,
+    preliminary_hits_is_sorted_by_score_ncbi, preliminary_score_compare, preliminary_tree_hsp,
     prepare_preliminary_hits_for_kappa_in_place, rebuild_preliminary_interval_tree_from_list,
     remove_preliminary_hits_for_query, should_retry_exact_preliminary_gapped_alignment,
     split_preliminary_hits_by_query_into, x_bp_tree_max_cells,
@@ -46,8 +47,8 @@ use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
     extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
 };
-use crate::algorithm::blastp::gapalign::BlastpGappedAlignmentMode;
-use crate::algorithm::blastp::hsp::reap_hsplist_by_evalue;
+use crate::algorithm::blastp::gapalign::{BlastpGappedAlignmentMode, BlastpPreliminaryHsp};
+use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue};
 use crate::algorithm::blastp::kappa::{blastp_trace_hsp_target, blastp_trace_matches_pair};
 use crate::algorithm::blastp::x_seed_fused::XContextTable;
 use crate::algorithm::blastp::x_ungapped_sent::XSentQuery;
@@ -56,6 +57,7 @@ use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{X_BLASTP, X_BLASTP_MATRIX};
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::config::ScoringMatrix;
+use crate::core::blast_hits::reap_by_query_coverage;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// What the kernel reads of `run_call` (`search_subject` and its gapped half `gapped_subject`): each
@@ -697,14 +699,168 @@ impl BlastpPrelimKernel<'_> {
             );
         }
         // The gapped half (`gapped_subject`): from the order of the ungapped hits to the subject's HSP
-        // lists in `subject_result`, with the subject's letters and word cutoffs made above.
+        // lists in `subject_result`, with the subject's letters and word cutoffs made above. An
+        // ungapped search (`-ungapped`) takes `ungapped_subject` instead: its HSPs are the ungapped
+        // hits (decision D2 of task O4b: the one place where the mode enters the kernel).
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
             values,
             word_cutoff_scores,
         };
-        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps);
+        if args.ungapped {
+            self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps);
+        } else {
+            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps);
+        }
+    }
+
+    /// The ungapped half of the kernel for one subject with letters (`-ungapped`, in place of
+    /// `gapped_subject`): the subject's ungapped hits become its HSPs, in the order of the sorted
+    /// list of hits, sorted by score, without the purge of common endpoints and without a
+    /// containment test; the HSPs of a negative length are deleted (`Blast_HSPTest`); the list of
+    /// each query then takes its E-values from the context's own Karlin block (`kbp_std`, no sum
+    /// statistics, no Gumbel block), is reaped by the preliminary E-value and by
+    /// `-qcov_hsp_perc`, and goes into `subject_result`. Arguments and the scratch's arrays as
+    /// `gapped_subject`'s: the list of hits goes back to the scratch before the method returns.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
+    /// (BLASTP has no `link_hsp_params` without psiblast's `-sum_stats`, which has no `-ungapped`;
+    /// the bit scores are made by the final stage, `UngappedFinish::run`.)
+    #[cold]
+    #[inline(never)]
+    fn ungapped_subject(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        scanned: ScannedSubject<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        mut init_hsps: Vec<InitHSP>,
+    ) {
+        let Self {
+            args,
+            query_ids,
+            contexts,
+            context_lookup_bounds,
+            concatenated_query,
+            ..
+        } = *self;
+        let ScannedSubject {
+            subject, values, ..
+        } = scanned;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
+        ncbi_qsort_init_hsps_by_score(&mut init_hsps);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4752-4770
+        let mut preliminary_hsp_list = std::mem::take(&mut scratch.preliminary_hsp_list);
+        preliminary_hsp_list.clear();
+        for init_hsp in &init_hsps {
+            let mut init_hsp = *init_hsp;
+            let (context_idx, ctx, _) = blastp_adjust_hsp_offsets_and_get_query_data(
+                concatenated_query,
+                contexts,
+                context_lookup_bounds,
+                &mut init_hsp,
+            );
+            let ungapped = init_hsp.ungapped_data;
+            preliminary_hsp_list.push(BlastpPreliminaryHsp {
+                query_start: ungapped.q_start,
+                query_end: ungapped.length + ungapped.q_start,
+                subject_start: ungapped.s_start,
+                subject_end: ungapped.length + ungapped.s_start,
+                gapped_query_start: init_hsp.q_seed_absolute,
+                gapped_subject_start: init_hsp.s_seed,
+                raw_score: ungapped.score,
+                query_context: i32::try_from(context_idx)
+                    .expect("NCBI BLAST preliminary blastp context index must fit in Int4"),
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: ctx.aa_len,
+                q_idx: ctx.q_idx,
+                s_idx: s_idx as u32,
+            });
+        }
+        scratch.init_hsps = init_hsps;
+        x_ih_pool::at_subject_end(&mut scratch.init_hsps);
+        scratch.init_hsps.clear();
+        if !preliminary_hits_is_sorted_by_score_ncbi(&preliminary_hsp_list) {
+            ncbi_qsort_preliminary_hits(&mut preliminary_hsp_list, preliminary_score_compare);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2713-2733
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-999
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list of every query, sorted by score, before the test
+        // below deletes the HSPs of a negative length: the step sees them, as NCBI's does (it runs
+        // in the engine; the reevaluation that deletes them is the caller's).
+        if args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(&mut preliminary_hsp_list, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hsp.query_context),
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
+        }
+        // BLASTP has no `-perc_identity` and its minimum hit length is 0: the test deletes an HSP
+        // of a negative length (`align_length` of an ungapped HSP is the length of its query range,
+        // blast_hits.c:773-780) and keeps the others, whose scores did not change, in their order.
+        delete_failed_hsp_tests(&mut preliminary_hsp_list);
+        // The lists of the queries (`Blast_HSPListSplitByQuery` of the HSP stream's writer), then
+        // each list's E-values from the context's own block (`context_block`), the reap by the
+        // preliminary E-value and by `-qcov_hsp_perc`, as NCBI's lines cited above do on the
+        // subject's list (a HSP's evalue depends on its own HSP only).
+        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
+        split_preliminary_hits_by_query_into(
+            &mut preliminary_hsp_list,
+            contexts,
+            query_ids.len(),
+            &mut preliminary_hits_by_query,
+        );
+        for (q_idx, preliminary_hits) in preliminary_hits_by_query
+            .iter_mut()
+            .take(query_ids.len())
+            .enumerate()
+        {
+            if preliminary_hits.is_empty() {
+                continue;
+            }
+            let ctx = &contexts[q_idx];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1869-1873
+            // `kbp` is `sbp->kbp` (`kbp_std`) for an ungapped search and there is no Gumbel block.
+            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                preliminary_hits.iter(),
+                s_idx as u32,
+                q_idx as u32,
+                ctx.aa_len,
+                subject.aa_len,
+                &ctx.karlin_params,
+                None,
+                &values.search_spaces[q_idx],
+                None,
+            );
+            reap_hsplist_by_evalue(&mut compact_hsp_list, values.prelim_evalue);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2010-2045 (cited at
+            // `core::blast_hits::reap_by_query_coverage`)
+            if reap_by_query_coverage(&mut compact_hsp_list.hsps, args.query_cov_hsp_perc, |hsp| {
+                (
+                    i64::from(hsp.hsp.query_start),
+                    i64::from(hsp.hsp.query_end),
+                    hsp.hsp.query_length as i64,
+                )
+            }) {
+                update_best_evalue(&mut compact_hsp_list);
+            }
+            if !compact_hsp_list.hsps.is_empty() {
+                compact_hsp_list.hsps.shrink_to_fit();
+                subject_result
+                    .x_compact_hsp_lists
+                    .push((q_idx, compact_hsp_list));
+            }
+            preliminary_hits.clear();
+        }
+        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
+        scratch.preliminary_hsp_list = preliminary_hsp_list;
     }
 
     /// The gapped half of the kernel for one subject with letters (`search_subject`'s last statement,
@@ -1154,3 +1310,18 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_list = preliminary_hsp_list;
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2713-2733 (cited at
+// `BlastpPrelimKernel::ungapped_subject`) and c++/src/algo/blast/core/blast_hits.c:993-999
+/// `Blast_HSPTest` of the HSPs of an ungapped search's subject (`Blast_HSPListReevaluateUngapped`):
+/// BLASTP has no `-perc_identity` and its minimum hit length is 0, so the test deletes an HSP of a
+/// negative length (`align_length` of an ungapped HSP is the length of its query range,
+/// blast_hits.c:773-780) and keeps the others, an HSP of length 0 among them, in their order (their
+/// scores did not change).
+fn delete_failed_hsp_tests(hsps: &mut Vec<BlastpPreliminaryHsp>) {
+    hsps.retain(|hsp| hsp.query_end - hsp.query_start >= 0);
+}
+
+#[cfg(test)]
+#[path = "prelim_kernel_tests.rs"]
+mod tests;

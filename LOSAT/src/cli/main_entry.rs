@@ -115,6 +115,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("convert2blastmask") {
         std::process::exit(crate::convert2blastmask::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
+    // `losat makembindex` too.
+    if let Some(start) = started("makembindex") {
+        std::process::exit(crate::makembindex::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv

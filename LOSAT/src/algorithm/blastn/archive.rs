@@ -80,6 +80,8 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them
     // only then, blast_args.cpp:280-286,487-489) and `-no_greedy` (the algorithms); the
@@ -652,6 +654,8 @@ pub(crate) fn apply_strategy(
             Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
             Setter::PercentIdentity(v) => out.percent_identity = Some(*v),
             Setter::SubjectBestHit => out.subject_besthit = true,
+            Setter::BestHitOverhang(v) => out.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => out.best_hit_score_edge = Some(*v),
             Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
             Setter::GappedMode(gapped) => out.ungapped = !*gapped,
             Setter::WindowMaskerTaxId(n) => out.window_masker_taxid = Some(*n),

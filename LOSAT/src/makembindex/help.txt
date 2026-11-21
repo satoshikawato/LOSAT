@@ -1,0 +1,73 @@
+USAGE
+  makembindex [-h] [-help] [-xmlhelp] [-input input_file_name]
+    [-output output_file_name] [-verbosity reporting_level]
+    [-iformat input_format] [-legacy use_legacy_index_format]
+    [-idmap generate_idmap] [-db_mask filtering_algorithm] [-show_filters]
+    [-nmer nmer_size] [-ws_hint word_size_hint] [-volsize volume_size]
+    [-stat statistics_file] [-stride stride] [-old_style_index boolean]
+    [-logfile File_Name] [-conffile File_Name] [-version] [-version-full]
+    [-version-full-xml] [-version-full-json] [-dryrun]
+
+DESCRIPTION
+   Create a BLAST database index.
+
+OPTIONAL ARGUMENTS
+ -h
+   Print USAGE and DESCRIPTION;  ignore all other parameters
+ -help
+   Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters
+ -xmlhelp
+   Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other
+   parameters
+ -input <String>
+   input file name
+ -output <String>
+   output file name
+    * Incompatible with:  show_filters
+ -verbosity <String, `normal', `quiet', `verbose'>
+   how much to report
+   Default = `normal'
+ -iformat <String, `blastdb', `fasta'>
+   type of input used (default is "blastdb" for new style index, "fasta" for
+   old style index)
+ -legacy <Boolean>
+   use legacy (0-terminated offset lists) dbindex format
+   Default = `true'
+ -idmap <Boolean>
+   generate id map for the sequences in the index
+   Default = `false'
+ -db_mask <String>
+   use the specified filtering algorithm from BLAST DB
+    * Requires:  input
+ -show_filters
+   show the info about available database filtering algorithms and exit
+    * Incompatible with:  output
+ -nmer <Integer, 8..15>
+   length of the indexed words
+ -ws_hint <Integer, greater or equal to 1>
+   most likely word size used in searches
+ -volsize <Integer, greater or equal to 1>
+   size of an index volume in MB
+ -stat <String>
+   write index statistics into file with that name (for testing and debugging
+   purposes only).
+ -stride <Integer, greater or equal to 1>
+   distance between stored database positions
+ -old_style_index <Boolean>
+   Use old style index (deprecated)
+   Default = `false'
+ -logfile <File_Out>
+   File to which the program log should be redirected
+ -conffile <File_In>
+   Program's configuration (registry) data file
+ -version
+   Print version number;  ignore other arguments
+ -version-full
+   Print extended version data;  ignore other arguments
+ -version-full-xml
+   Print extended version data in XML format;  ignore other arguments
+ -version-full-json
+   Print extended version data in JSON format;  ignore other arguments
+ -dryrun
+   Dry run the application: do nothing, only test all preconditions
+

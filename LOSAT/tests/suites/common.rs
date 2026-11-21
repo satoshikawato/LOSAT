@@ -61,6 +61,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_fixtures.rs"]
+mod makembindex_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]

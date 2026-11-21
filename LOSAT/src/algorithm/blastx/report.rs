@@ -1258,6 +1258,7 @@ fn pairwise_metadata(
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).
+        gapped: true,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     }

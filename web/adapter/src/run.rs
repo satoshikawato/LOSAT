@@ -3061,8 +3061,10 @@ mod tests {
     /// NCBI BLAST+ 2.17.0's frozen outputs of the formats besides 0, 6 and 7 (rows of
     /// `LOSAT/tests/outfmt0_manifest.tsv`: id and argv, run from LOSAT/): every program in 5, 8, 9,
     /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
-    /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, and SAM (17).
-    const FORMAT_ROWS: [(&str, &[&str]); 55] = [
+    /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, SAM (17), and
+    /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
+    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b).
+    const FORMAT_ROWS: [(&str, &[&str]); 60] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3822,6 +3824,121 @@ mod tests {
                 "20",
             ],
         ),
+        (
+            "ungapped.blastp.sc4a.8",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/sc4a_q.faa",
+                "-subject",
+                "tests/fasta/PajaWSV.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "5",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "ungapped.blastp.sc4a.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/sc4a_q.faa",
+                "-subject",
+                "tests/fasta/PajaWSV.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "5",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.5",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.8",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.15",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "15",
+            ],
+        ),
     ];
 
     /// Stream 3 of a run whose own -outfmt is structured: NCBI's standard error `own` of its command
@@ -3967,13 +4084,14 @@ mod tests {
     // for `-out results`, and NCBI's master file (`results.json` / `results.xml`), which lists them by
     // those names; stream 3 is NCBI's standard error, then the lines that the run's outfmt 0, 6
     // and 7 add (`and_the_lines_of`), and the other streams are those of the run without -outfmt
-    // (the 22 rows of the manifest with side files).
+    // (the 23 rows of the manifest with side files; `ungapped.blastp.sc4a.13` is BLASTP's ungapped
+    // search, line NP item O4b).
     #[test]
     fn outfmt_13_and_14_are_an_archive_of_ncbis_files() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
         let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
         let rows = manifest_rows(|_, _, files| files == "xinclude");
-        assert_eq!(rows.len(), 22);
+        assert_eq!(rows.len(), 23);
         let programs: std::collections::BTreeSet<&str> =
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
         assert_eq!(programs.len(), 5);

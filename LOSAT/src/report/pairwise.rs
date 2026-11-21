@@ -409,6 +409,9 @@ pub struct BlastpPairwiseReport {
     pub gapped_karlin: KarlinParams,
     /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
     pub gumbel: Option<BlastGumbelBlk>,
+    /// A gapped search (`options.GetGappedMode()`); BLASTP's `-ungapped` search has no `Gapped`
+    /// Karlin block in a query's footer and no `Gap Penalties:` line in the epilog.
+    pub gapped: bool,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -1971,14 +1974,18 @@ fn write_blastp_query_footer_spacing<W: Write>(
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
     gumbel: Option<BlastGumbelBlk>,
+    gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
-    let Some(gumbel) = gumbel else {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478 (cited
+    // above): `kbp_gap` (the `Gapped` block) is printed only where the search made it; an
+    // ungapped search has neither it nor a Gumbel block.
+    let Some(gumbel) = gumbel.filter(|_| gapped) else {
         return write_nucleotide_query_footer_spacing(
             writer,
             Some((ungapped_karlin, gapped_karlin)),
-            true,
+            gapped,
             effective_search_space,
             trailing,
         );
@@ -2054,11 +2061,15 @@ fn write_blastp_final_footer<W: Write>(
         )?,
     }
     write_matrix_line(writer, report.matrix_name.as_deref())?;
-    writeln!(
-        writer,
-        "Gap Penalties: Existence: {}, Extension: {}",
-        report.gap_open, report.gap_extend
-    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2270-2288 (cited at
+    // `write_blastn_final_footer`): `if (options.GetGappedMode() == true) { ... "Gap Penalties: "`.
+    if report.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, report.gap_extend
+        )?;
+    }
     if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
@@ -2503,6 +2514,31 @@ pub(crate) fn blastp_section_aborts(
     )
 }
 
+/// Whether the merge of the query-anchored section (`view`) of query `q_idx` of a BLASTP
+/// `-ungapped` search frees a segment that it still reads (`query_anchored::section_frees`, which
+/// NCBI BLAST+ crashes on): an HSP of length 0 among the section's aligned subjects, `rows` the
+/// rows of the call's hits in the final order and `joins` the copies of one database record
+/// (`blastp_report_group`).
+pub(crate) fn blastp_section_frees(
+    view: PairwiseView,
+    sort: super::hit_sort::ReportSort,
+    num_alignments: usize,
+    q_idx: usize,
+    rows: &[PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    joins: impl Fn(u32, u32) -> bool,
+) -> io::Result<bool> {
+    if view == PairwiseView::Pairwise {
+        return Ok(false);
+    }
+    let Some(group) =
+        blastp_report_group(view.report_sort(sort), q_idx, rows, subject_titles, joins)
+    else {
+        return Ok(false);
+    };
+    super::query_anchored::section_frees(&blastp_section_hsps(num_alignments, &group, |_| false))
+}
+
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
 /// `-subject` search (`query_anchored::ncbi_aborts`), `rows` the rows of its hits in the final
 /// order: the section of the report (`QuerySections::alignments`), whose group is sorted by
@@ -2690,6 +2726,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                     query.ungapped_karlin,
                     self.gapped_karlin(q_idx),
                     report.gumbel,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -2800,6 +2837,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             query.ungapped_karlin,
             self.gapped_karlin(q_idx),
             self.report.gumbel,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -4453,6 +4491,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                     query.ungapped_karlin,
                     self.report.gapped_karlin,
                     self.report.gumbel,
+                    self.report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -4567,6 +4606,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             query.ungapped_karlin,
             self.report.gapped_karlin,
             self.report.gumbel,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -5147,6 +5187,7 @@ fn write_blastx_query_footer(
             query.ungapped_karlin,
             gapped_karlin,
             report.gumbel,
+            true,
             query.effective_search_space,
             false,
         );

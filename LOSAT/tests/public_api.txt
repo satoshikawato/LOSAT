@@ -310,6 +310,8 @@ impl core::panic::unwind_safe::UnwindSafe for losat::api::Id
 pub struct losat::api::Inputs<'a>
 impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
+pub fn losat::api::Inputs<'a>::msa(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::msa_database(&'a std::path::Path, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
@@ -518,6 +520,7 @@ pub fn losat::api::run_collect(&losat::api::Search, losat::api::Inputs<'_>, &[&s
 pub fn losat::api::run_convert2blastmask(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_dustmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_makembindex(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_segmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_to_file(&losat::api::Search, losat::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::validate(losat::api::Program, &[&str]) -> core::result::Result<losat::api::Search, losat::api::Error>

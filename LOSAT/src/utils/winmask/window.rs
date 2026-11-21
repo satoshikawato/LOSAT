@@ -1,14 +1,6 @@
 //! The window of units that slides along the sequence (`CSeqMaskerWindow`).
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_window.cpp:46, 63-69
-/// ```c
-/// Uint1 CSeqMaskerWindow::LOOKUP[kMax_UI1];
-/// ...
-///         LOOKUP[unsigned('A')] = 1;
-///         LOOKUP[unsigned('C')] = 2;
-///         LOOKUP[unsigned('G')] = 3;
-///         LOOKUP[unsigned('T')] = 4;
-/// ```
 /// Every other letter is 0 (an ambiguity: the window is filled again after it). The data is
 /// iupacna, upper case (`CBioseq_Handle::eCoding_Iupac`).
 static LOOKUP: [u8; 256] = {
@@ -38,23 +30,6 @@ pub(super) struct Window<'a> {
 
 impl<'a> Window<'a> {
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_window.cpp:49-58, 78-86
-    /// ```c
-    /// CSeqMaskerWindow::CSeqMaskerWindow( const CSeqVector & arg_data,
-    ///                                     Uint1 arg_unit_size,
-    ///                                     Uint1 arg_window_size,
-    ///                                     Uint4 arg_window_step,
-    ///                                     Uint1 arg_unit_step,
-    ///                                     Uint4 winstart,
-    ///                                     Uint4 arg_winend )
-    /// ...
-    ///     units.resize( NumUnits(), 0 );
-    ///     unit_mask = (unit_size == 16) ? 0xFFFFFFFF : (1ULL << (unit_size << 1)) - 1;
-    ///
-    ///     if( winend == 0 )
-    ///         winend = data.size();
-    ///
-    ///     FillWindow( winstart );
-    /// ```
     /// `num_units` is `NumUnits()` (`seq_masker_window.hpp`:
     /// `(window_size - unit_size)/unit_step + 1`), 1 to 255 for a window of at least one unit.
     pub(super) fn new(
@@ -126,14 +101,6 @@ impl<'a> Window<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_window.hpp:128-133
-    /// ```c
-    ///     TUnit operator[]( Uint1 index ) const
-    ///     {
-    ///         return first_unit + index < NumUnits() ?
-    ///             units[first_unit + index] :
-    ///             units[first_unit + index - NumUnits()];
-    ///     }
-    /// ```
     #[inline]
     pub(super) fn unit(&self, index: usize) -> u32 {
         let i = self.first_unit + index;
@@ -145,41 +112,6 @@ impl<'a> Window<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_window.cpp:93-128
-    /// ```c
-    ///     if( step >= window_size || unit_step > 1 )
-    ///     {
-    ///         FillWindow( start + step );
-    ///         return;
-    ///     }
-    ///
-    ///     Uint1 num_units = NumUnits();
-    ///     Uint1 last_unit = first_unit ? first_unit - 1 : num_units - 1;
-    ///     Uint4 unit = units[last_unit];
-    ///     Uint4 iter = 0;
-    ///
-    ///     for( ; ++end < winend && iter < step ; ++iter, ++start )
-    ///     {
-    ///         Uint1 letter = LOOKUP[unsigned(data[end])];
-    ///
-    ///         if( !(letter--) )
-    ///         {
-    ///             FillWindow( end );
-    ///             return;
-    ///         }
-    ///
-    ///         unit = ((unit<<2)&unit_mask) + letter;
-    ///
-    ///         if( ++first_unit == num_units ) first_unit = 0;
-    ///
-    ///         if( ++last_unit == num_units ) last_unit = 0;
-    ///
-    ///         units[last_unit] = unit;
-    ///     }
-    ///
-    ///     --end;
-    ///
-    ///     if( iter != step ) state = false;
-    /// ```
     pub(super) fn advance(&mut self, step: u32) {
         if step >= self.window_size as u32 || self.unit_step > 1 {
             self.fill_window(self.start.wrapping_add(step));
@@ -228,32 +160,6 @@ impl<'a> Window<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_window.cpp:131-157
-    /// ```c
-    ///     first_unit = 0;
-    ///     TUnit unit = 0;
-    ///     Int4 iter = 0;
-    ///     end = winstart;
-    ///
-    ///     for( ; iter < window_size && end < data.size(); ++iter, ++end )
-    ///     {
-    ///         Uint1 letter = LOOKUP[unsigned(data[end])];
-    ///
-    ///         if( !(letter--) )
-    ///         {
-    ///             iter = -1;
-    ///             continue;
-    ///         }
-    ///
-    ///         unit = ((unit<<2)&unit_mask) + letter;
-    ///
-    ///         if( iter >= unit_size - 1 )
-    ///             if( !((iter + 1 - unit_size)%unit_step) )
-    ///                 units[(iter + 1- unit_size)/unit_step] = unit;
-    ///     }
-    ///
-    ///     start = (end--) - window_size;
-    ///     state = (iter == window_size);
-    /// ```
     fn fill_window(&mut self, winstart: u32) {
         self.first_unit = 0;
         let mut unit: u32 = 0;
@@ -284,9 +190,6 @@ impl<'a> Window<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_window.hpp:176
-/// ```c
-///     Uint1 NumUnits() const{ return (window_size - unit_size)/unit_step + 1; }
-/// ```
 fn units_in_window(unit_size: u8, window_size: u8, unit_step: u8) -> u8 {
     (((window_size as i32 - unit_size as i32) / unit_step as i32) + 1) as u8
 }

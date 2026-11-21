@@ -26,14 +26,7 @@
 //! with hits (`txr_q3.faa`, `txr_q2.fna`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-//! ```c++
-//!        		const CBioseq_Handle& subject_bh =
-//!                 scope.GetBioseqHandle(align.GetSeq_id(1));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
-//! ```c++
-//!             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
-//! ```
 
 use std::process::{Command, Stdio};
 

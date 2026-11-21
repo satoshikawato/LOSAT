@@ -19,20 +19,6 @@
 //! `db-gencode` and the gap costs of `XmlValues`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
-//! ```c++
-//!     } else if (m_FormatType == CFormattingArgs::eXml) {
-//!         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-//!         res->TrimSeqAlign(m_HitlistSize);
-//!         m_AccumulatedResults.push_back(res);
-//!         ...
-//!         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
-//!                                                    m_AccumulatedResults,
-//!                                                    *m_Options, m_DbName, m_DbIsAA,
-//!                                                    m_QueryGenCode, m_DbGenCode,
-//!                                                    m_IsRemoteSearch);
-//!         	BlastXML_FormatReport(xml_output, &report_data, &m_Outfile,
-//!                                   m_BlastXMLIncremental.GetPointer());
-//! ```
 //! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
 //! one query.)
 
@@ -138,16 +124,6 @@ pub(super) struct PreparedXml {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-// ```c++
-//     // find the first valid context corresponding to this query
-//     for (i = 0; i < context_per_query; i++) {
-//         BlastContextInfo *ctx = query_info->contexts +
-//                                 query_number * context_per_query + i;
-//         if (ctx->is_valid) {
-//             m_SearchSpace = ctx->eff_searchsp;
-//             m_LengthAdjustment = ctx->length_adjustment;
-//             break;
-// ```
 /// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
 /// values for a query without a valid context.
 pub(super) fn query_stats(
@@ -329,16 +305,6 @@ pub(super) fn prepare(
         // NCBI prints the filtering options (`BlastFilteringOptionsToString` of `SSegOptions`), as
         // blastp, blastx and tblastx do, not the parameters `SegParametersNewAa` makes of them.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1146-1154
-        // ```c
-        //         sparamsp = SegParametersNewAa();
-        //         sparamsp->overlaps = TRUE;
-        //         if (seg_options->window > 0)
-        //             sparamsp->window = seg_options->window;
-        //         if (seg_options->locut > 0.0)
-        //             sparamsp->locut = seg_options->locut;
-        //         if (seg_options->hicut > 0.0)
-        //             sparamsp->hicut = seg_options->hicut;
-        // ```
         filter: filter::filter_string(None, seg_filter, None, None, values.soft_masking),
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
@@ -575,14 +541,14 @@ impl PreparedXml {
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                                 let hsp = &linked.hsp;
                                 let frame = i32::from(hsp.frame);
-                                // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;
                                 let (s_start, s_end) =
                                     super::stage_e_report::subject_endpoints(hsp, subject_len);
                                 // The rows, without the lower case of the masks (a PSSM query's
-                                // Bioseq letters as they are: alnvec.cpp:116-121, quoted at
+                                // Bioseq letters as they are: alnvec.cpp:116-121, cited at
                                 // `in_pssm::query_residues`).
                                 aligned_sequences_into(
                                     crate::report::row_letters::QueryLetters::new(

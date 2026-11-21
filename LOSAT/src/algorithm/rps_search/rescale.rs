@@ -13,47 +13,18 @@ const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 /// `BLAST_SCORE_RANGE_MAX`: the size of `RPSRescalePssm`'s array of score probabilities.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:56
-/// ```c
-/// #define BLAST_SCORE_RANGE_MAX   (BLAST_SCORE_MAX - BLAST_SCORE_MIN) /**< maximum allowed range of BLAST scores. */
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4710
-/// ```c
-///     scoreArray = (double *)malloc(BLAST_SCORE_RANGE_MAX * sizeof(double));
-/// ```
 const BLAST_SCORE_RANGE_MAX: i64 = i16::MAX as i64 - i16::MIN as i64;
 /// `AMINOACID_TO_NCBISTDAA['X']`.
 const X_LETTER: usize = 21;
 /// BLOSUM62's ungapped Lambda (`RPSfindUngappedLambda`: the first row of NCBI's table).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-259
-/// ```c
-/// static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
-///     {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
-/// ```
 pub(crate) const BLOSUM62_UNGAPPED_LAMBDA: f64 = 0.3176;
 
 /// `Blast_FillResidueProbability`: each letter's share of the query, X left out of both.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4577-4600
-/// ```c
-///     denominator = length;
-///     for(i = 0; i < BLASTAA_SIZE; i++)
-///         frequency[i] = 0;
-///
-///     for(i = 0; i < length; i++) {
-///         if (sequence[i] != AMINOACID_TO_NCBISTDAA['X'])
-///             frequency[sequence[i]]++;
-///         else
-///             denominator--;
-///     }
-///
-///     for(i = 0; i < BLASTAA_SIZE; i++) {
-///         if (frequency[i] == 0)
-///             resProb[i] = 0.0;
-///         else
-///             resProb[i] = ((double) frequency[i]) /((double) denominator);
-///     }
-/// ```
 pub(crate) fn residue_probabilities(sequence: &[u8]) -> [f64; BLASTAA_SIZE] {
     let mut frequency = [0i32; BLASTAA_SIZE];
     let mut denominator = sequence.len() as i32;
@@ -78,70 +49,7 @@ pub(crate) fn residue_probabilities(sequence: &[u8]) -> [f64; BLASTAA_SIZE] {
 /// rows into `out`, or `false` where NCBI returns NULL (no ungapped Lambda; the list is skipped).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4649-4691 (`RPSFillScores`)
-/// ```c
-///     minScore = maxScore = 0;
-///     for (i = 0; i < matrixLength; i++) {
-///         for (j = 0 ; j < alphabet_size; j++) {
-///             if (j == AMINOACID_TO_NCBISTDAA['X'])
-///                 continue;
-///             if ((matrix[i][j] > BLAST_SCORE_MIN) &&
-///                 (matrix[i][j] < minScore))
-///                 minScore = matrix[i][j];
-///             if (matrix[i][j] > maxScore)
-///                 maxScore = matrix[i][j];
-///         }
-///     }
-///
-///     return_sfp->obs_min = minScore;
-///     return_sfp->obs_max = maxScore;
-///     memset(scoreArray, 0, (maxScore - minScore + 1) * sizeof(double));
-///
-///     return_sfp->sprob = &(scoreArray[-minScore]); /*center around 0*/
-///     recipLength = 1.0 / (double) matrixLength;
-///     for(i = 0; i < matrixLength; i++) {
-///         for (j = 0; j < alphabet_size; j++) {
-///             if (j == AMINOACID_TO_NCBISTDAA['X'])
-///                 continue;
-///             if(matrix[i][j] >= minScore)
-///                 return_sfp->sprob[matrix[i][j]] += recipLength *
-///                                                 queryProbArray[j];
-///         }
-///     }
-///
-///     return_sfp->score_avg = 0;
-///     for(i = minScore; i <= maxScore; i++)
-///         return_sfp->score_avg += i * return_sfp->sprob[i];
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4719-4757 (`RPSRescalePssm`)
-/// ```c
-///     initialUngappedLambda = RPSfindUngappedLambda(sbp->name);
-///     ASSERT(initialUngappedLambda > 0.0);
-///     scaledInitialUngappedLambda = initialUngappedLambda / scalingFactor;
-///     correctUngappedLambda = Blast_KarlinLambdaNR(return_sfp,
-///                                               scaledInitialUngappedLambda);
-///     ...
-///     if(correctUngappedLambda == -1.0)
-///         return NULL;
-///
-///     finalLambda = correctUngappedLambda/scaledInitialUngappedLambda;
-///     ...
-///     for (index = 0; index < db_seq_length; index++) {
-///         for (inner_index = 0; inner_index < alphabet_size; inner_index++) {
-///             if (posMatrix[index][inner_index] <= BLAST_SCORE_MIN ||
-///                 inner_index == AMINOACID_TO_NCBISTDAA['X']) {
-///                 returnMatrix[index][inner_index] =
-///                     posMatrix[index][inner_index];
-///             }
-///             else {
-///                temp = ((double)(posMatrix[index][inner_index])) * finalLambda;
-///                returnMatrix[index][inner_index] = (Int4)BLAST_Nint(temp);
-///            }
-///         }
-///         for (; inner_index < BLASTAA_SIZE; inner_index++) {
-///            returnMatrix[index][inner_index] = BLAST_SCORE_MIN;
-///         }
-///     }
-/// ```
 /// A profile whose scores span more than NCBI's array (`BLAST_SCORE_RANGE_MAX`, which NCBI's
 /// `memset` overruns) is LOSAT's refusal. `calc_lambda_of_score_probs` is NCBI's
 /// `Blast_KarlinLambdaNR` on the observed range as given, with this function's average.

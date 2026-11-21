@@ -37,18 +37,6 @@
 //! freed when the block search ends.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-227
-//! ```c++
-//!     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
-//!         CRef<CSeq_id> next_seqid(new CSeq_id());
-//!         string id_token = NcbiEmptyString;
-//!
-//!         if (((*itr)->IsGeneral() &&
-//!             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-//!             != string::npos) ||
-//! 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-//!             vector<string> title_tokens;
-//!             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-//! ```
 //! NCBI makes a subject's ID from its Bioseq each time a row is written; the ID depends on the
 //! record only, so one value per subject serves every block. Reuse only.
 

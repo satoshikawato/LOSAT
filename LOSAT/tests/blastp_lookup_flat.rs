@@ -15,11 +15,6 @@
 //! depend on the defaults of the strict set.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-//! ```c
-//!     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//!                                     query, locations);
-//!     s_CompressedLookupFinalize(lookup);
-//! ```
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

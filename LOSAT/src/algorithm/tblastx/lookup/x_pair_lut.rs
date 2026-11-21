@@ -8,56 +8,8 @@
 //! (`prepare_lookup_query`, `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
-//! ```c
-//!     for (loc = locations; loc; loc = loc->next) {
-//!         Int4 from = loc->ssr->left;
-//!         Int4 to = loc->ssr->right;
-//! ...
-//!         seq = query->sequence + from;
-//!         word_target = seq + lut_word_length;
-//!
-//!         for (offset = from; offset <= to; offset++, seq++) {
-//!
-//!             if (seq >= word_target) {
-//!                 BlastLookupAddWordHit(backbone,
-//!                                       lut_word_length, charsize,
-//!                                       seq - lut_word_length,
-//!                                       offset - lut_word_length);
-//!             }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-//! ```c
-//!     for (i = 0; i < lookup->backbone_size; i++) {
-//!         if (exact_backbone[i] != NULL) {
-//!             s_AddWordHits(lookup, matrix, query->sequence,
-//!                           exact_backbone[i], query_bias, row_max);
-//!             sfree(exact_backbone[i]);
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:338-358
-//! ```c
-//!       for (i = 0; i < lookup->backbone_size; i++) {
-//!         /* if there are hits there, */
-//!         if (lookup->thin_backbone[i] ) {
-//!             Int4 * dest = NULL;
-//!             /* set the corresponding bit in the pv_array */
-//!             PV_SET(pv, i, PV_ARRAY_BTS);
-//!             bbc[i].num_used = lookup->thin_backbone[i][1];
-//!             /* if there are three or fewer hits, */
-//!             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-//!                 /* copy them into the thick_backbone cell */
-//!                 dest = bbc[i].payload.entries;
-//!             else /* more than three hits; copy to overflow array */
-//!             {
-//!                 bbc[i].payload.overflow_cursor = overflow_cursor;
-//!                 dest = (Int4 *) lookup->overflow;
-//!                 dest += overflow_cursor;
-//!                 overflow_cursor += lookup->thin_backbone[i][1];
-//!             }
-//!             for (j=0; j <lookup->thin_backbone[i][1]; j++)
-//!                 dest[j] = lookup->thin_backbone[i][j + 2];
-//! ```
 //!
 //! # What is built
 //!
@@ -186,11 +138,6 @@ fn x_group_zeroed<T: Copy + Default>(elements: usize, mapped: bool) -> Vec<T> {
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:103-105
 // (ComputeTableIndex: `wordsize` letters of `charsize` bits)
-// ```c
-//   for(i = 0; i < wordsize; i++) {
-//     index = (index << charsize) | word[i];
-//   }
-// ```
 // The precondition of the direct builders (`x_build_direct`, `x_build_group`): their neighbour
 // lists hold backbone indices in 16 bits (`x_target_list`), so the index of a word, `word_length`
 // letters of `charsize` bits (5 for the 28 letters), must fit 16 bits: words of 2 and 3 letters
@@ -217,13 +164,6 @@ pub(crate) const fn x_tables_cover(word_length: usize) -> bool {
 
 impl XPairLutQuery {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-    // ```c
-    // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-    //                       &lookup_wrap->lut);
-    // ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-    // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-    //                           query, lookup_segments, 0);
-    // ```
     // The query preparation of `build_ncbi_lookup` -> `build_ncbi_lookup_for_profile` (BLOSUM62,
     // LOOKUP_WORD_LENGTH, the same bounds and ideal parameters), by the reference function. The
     // table itself is not built here.
@@ -328,16 +268,6 @@ impl XPairLutQuery {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1056
-    // ```c
-    //       start_offset = query_info->contexts[context].query_offset;
-    //       end_offset = query_info->contexts[context].query_length
-    //           + start_offset - 1;
-    // ...
-    //       if (mask_loc == NULL || mask_loc->seqloc_array[context] == NULL) {
-    // ...
-    //          tail = BlastSeqLocNew(tail ? &tail : complement_mask,
-    //                                start_offset, end_offset);
-    // ```
     // The lookup locations are made per context, inside the context. Here they are split by
     // group (`starts[g]` = first context of group g, the groups of `x_pair_par.rs::group_starts`)
     // with the `group_of` of `build_groups`, and both ends of a location must fall into the same
@@ -372,51 +302,7 @@ impl XPairLutQuery {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
-    // ```c
-    //     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-    // ...
-    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                       lookup->charsize, lookup->word_length,
-    //                                       query, location);
-    // ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-297,338-358
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (lookup->thin_backbone[i]) {
-    // ...
-    //             if (lookup->thin_backbone[i][1] > AA_HITS_PER_CELL){
-    // ...
-    //                 overflow_cells_needed += lookup->thin_backbone[i][1];
-    //             }
-    //             if (lookup->thin_backbone[i][1] > longest_chain)
-    //                 longest_chain = lookup->thin_backbone[i][1];
-    // ...
-    //       for (i = 0; i < lookup->backbone_size; i++) {
-    //         /* if there are hits there, */
-    //         if (lookup->thin_backbone[i] ) {
-    //             Int4 * dest = NULL;
-    //             /* set the corresponding bit in the pv_array */
-    //             PV_SET(pv, i, PV_ARRAY_BTS);
-    //             bbc[i].num_used = lookup->thin_backbone[i][1];
-    //             /* if there are three or fewer hits, */
-    //             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-    //                 /* copy them into the thick_backbone cell */
-    //                 dest = bbc[i].payload.entries;
-    //             else /* more than three hits; copy to overflow array */
-    //             {
-    //                 bbc[i].payload.overflow_cursor = overflow_cursor;
-    //                 dest = (Int4 *) lookup->overflow;
-    //                 dest += overflow_cursor;
-    //                 overflow_cursor += lookup->thin_backbone[i][1];
-    //             }
-    //             for (j=0; j <lookup->thin_backbone[i][1]; j++)
-    //                 dest[j] = lookup->thin_backbone[i][j + 2];
-    // ```
     // The count, layout and fill passes of `x_lut_direct.rs::x_build_direct` on the reference
     // exact backbone of `locations` (one group's lookup locations), reading the prepared query in
     // place. The neighbour lists come from a memo of TBLASTX's builds (`x_with_tbx_memo`).
@@ -605,20 +491,7 @@ impl XPairLutQuery {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-    // ```c
-    //    case eAaLookupTable:
-    //       offset_array_size = OFFSET_ARRAY_SIZE +
-    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:294-299
-    // ```c
-    //             if (lookup->thin_backbone[i][1] > longest_chain)
-    //                 longest_chain = lookup->thin_backbone[i][1];
-    //         }
-    //     }
-    //     lookup->overflow_size = overflow_cells_needed;
-    //     lookup->longest_chain = longest_chain;
-    // ```
     // The table the reference code holds when the unit path scans with the group tables only: the
     // header fields of the full table (expressions of `build_lookup_from_prepared`; the full
     // chain of a cell is the union of its group chains, so `longest_chain` is the largest summed
@@ -700,17 +573,6 @@ pub(crate) fn x_cells_with_entries(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:343-346,351-354
-// ```c
-//             PV_SET(pv, i, PV_ARRAY_BTS);
-//             bbc[i].num_used = lookup->thin_backbone[i][1];
-//             /* if there are three or fewer hits, */
-//             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-// ...
-//                 bbc[i].payload.overflow_cursor = overflow_cursor;
-//                 dest = (Int4 *) lookup->overflow;
-//                 dest += overflow_cursor;
-//                 overflow_cursor += lookup->thin_backbone[i][1];
-// ```
 // No computation: the unit tests compare every field of the two tables of a group (the cells, the
 // overflow array, the presence vector and the header) and the bounds of the entries.
 /// Assert that the direct table of group `g` equals the one `build_groups` filtered out of the
@@ -764,18 +626,6 @@ pub(crate) fn x_assert_same_group(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:236-245
-// ```c
-//     lookup->charsize = ilog2(BLASTAA_SIZE) + 1;
-//     lookup->word_length = opt->word_size;
-//
-//     for (i = 0; i < lookup->word_length; i++)
-//         lookup->backbone_size |= (BLASTAA_SIZE - 1) << (i * lookup->charsize);
-//     lookup->backbone_size++;
-//
-//     lookup->mask = (1 << (opt->word_size * lookup->charsize)) - 1;
-//     lookup->alphabet_size = BLASTAA_SIZE;
-//     lookup->threshold = (Int4)opt->threshold;
-// ```
 // No computation: the header fields of two tables compared (all but `longest_chain`, which the
 // callers compare with the value that applies).
 #[cfg(test)]
@@ -800,11 +650,6 @@ fn x_assert_same_header(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-// ```c
-//    case eAaLookupTable:
-//       offset_array_size = OFFSET_ARRAY_SIZE +
-//          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-// ```
 // No computation: the stub must carry the values the reference code reads from the full table
 // (`longest_chain` for the offset-pair array, the header for the context search), the full
 // table's presence-vector size and no entry.
@@ -831,14 +676,6 @@ pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLoo
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
-// ```c
-// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-// ...
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ...
-// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-// ```
 // No computation: the contexts handed out with the stub come from the same `prepare_lookup_query`
 // as those `build_ncbi_lookup` returns; the unit tests check that they are the same, field by field
 // (the Karlin parameters bitwise).
@@ -1017,26 +854,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-106
-    // ```c
-    //     for (loc = locations; loc; loc = loc->next) {
-    //         Int4 from = loc->ssr->left;
-    //         Int4 to = loc->ssr->right;
-    // ...
-    //         seq = query->sequence + from;
-    //         word_target = seq + lut_word_length;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-509,518-519
-    // ```c
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         for (i = 0; i < offset_list[1]; i++) {
-    //             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-    //                                   lookup->charsize, w,
-    //                                   query_bias + offset_list[i + 2]);
-    //         }
-    // ...
-    //     if (lookup->threshold == 0)
-    //         return;
-    // ```
     #[test]
     fn direct_groups_equal_the_filtered_full_table() {
         let mut seed = 0x5eed_0001u64;
@@ -1081,16 +899,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-590
-    // ```c
-    //         for (i = 0; i < alphabet_size; i++) {
-    //             if (score + row[i] >= threshold) {
-    //                 subject_word[current_pos] = i;
-    //                 for (j = 0; j < offset_list[1]; j++) {
-    //                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-    //                                           charsize, subject_word,
-    //                                           query_bias + offset_list[j + 2]);
-    //                 }
-    // ```
     // A threshold of INT_MIN (NCBI's conversion of a threshold beyond Int4) makes every word a
     // neighbour of every query word.
     #[test]
@@ -1112,11 +920,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1047
-    // ```c
-    //       start_offset = query_info->contexts[context].query_offset;
-    //       end_offset = query_info->contexts[context].query_length
-    //           + start_offset - 1;
-    // ```
     // Several queries: more than six contexts, taken as groups of several contexts, and a context
     // that is masked from end to end.
     #[test]
@@ -1165,13 +968,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1095-1099
-    // ```c
-    //          right = filter_start - 1;
-    //
-    //          /* Cache the tail of the list to avoid the overhead of traversing the
-    //           * list when appending to it */
-    //          tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
-    // ```
     // A mask interval that starts past the end of its context (SEG never makes one) gives a
     // location that runs into the next context: such a batch is left to the reference builder.
     #[test]

@@ -6,81 +6,14 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:361-382
 //! (`s_BlastDiagHashRetrieve`)
-//! ```c
-//!     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-//!     Uint4 index = table->backbone[bucket];
-//!
-//!     while (index) {
-//!         if (table->chain[index].diag == diag) {
-//!             *level = table->chain[index].level;
-//!             *hit_len = table->chain[index].hit_len;
-//!             *hit_saved = table->chain[index].hit_saved;
-//!             return 1;
-//!         }
-//!
-//!         index = table->chain[index].next;
-//!     }
-//!     return 0;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-841,887
 //! (`s_BlastnDiagHashExtendInitialHit`: the two-hit and the one-hit branch)
-//! ```c
-//!     diag = s_off - q_off;
-//!     s_end = s_off + word_length;
-//!     s_off_pos = s_off + hash_table->offset;
-//!     s_end_pos = s_end + hash_table->offset;
-//!
-//!     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-//!
-//!     /* if there is no record in hashtable, we set last_hit to be a very negative number */
-//!     if(!rc)  last_hit = 0;
-//!
-//!     /* hit within the explored area should be rejected*/
-//!     if (s_off_pos < last_hit) return 0;
-//!
-//!     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-//! ...
-//!     }  else if (check_masks) {
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:396-450
 //! (`s_BlastDiagHashInsert`)
-//! ```c
-//!     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-//!     Uint4 index = table->backbone[bucket];
-//! ...
-//!         if (table->chain[index].diag == diag) {
-//!             table->chain[index].level = level;
-//! ...
-//!             if ( s_off - table->chain[index].level > window_size) {
-//!                 table->chain[index].diag = diag;
-//!                 table->chain[index].level = level;
-//! ...
-//!     cell = table->chain + table->occupancy;
-//!     cell->diag = diag;
-//!     cell->level = level;
-//! ...
-//!     cell->next = table->backbone[bucket];
-//!     table->backbone[bucket] = table->occupancy;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:174-181
-//! ```c
-//!     } else if (ewp->hash_table) {
-//!         if (ewp->hash_table->offset >= INT4_MAX / 4) {
-//!             ewp->hash_table->occupancy = 1;
-//!             ewp->hash_table->offset = ewp->hash_table->window;
-//!             memset(ewp->hash_table->backbone, 0,
-//!                    ewp->hash_table->num_buckets * sizeof(Int4));
-//!         } else {
-//!             ewp->hash_table->offset += subject_length + ewp->hash_table->window;
-//! ```
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
 //! (`s_BlastnDiagHashExtendInitialHit`: the insert at the end of every seed)
-//! ```c
-//!     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-//!                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-//!                           hit_ready, s_off_pos, window_size + Delta + 1);
-//! ```
 //!
 //! The bound of a seed at `s_off_pos` (`LvSeeds::bound`; `level_bound` for one seed) is
 //! `s_off_pos + 1` (the `last_hit` test) and, with two hits, at most `s_end_pos - window_size`
@@ -294,15 +227,6 @@ pub(super) fn lv2_on() -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-841
-/// ```c
-///     s_end = s_off + word_length;
-///     s_off_pos = s_off + hash_table->offset;
-///     s_end_pos = s_end + hash_table->offset;
-/// ...
-///     if (s_off_pos < last_hit) return 0;
-///
-///     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-/// ```
 /// What the level bound and the decisions read of a fold's seeds, fixed for a chunk
 /// (the reference fold) or a fold call (the strips folds) and made there once: whether the
 /// seeds take two hits, the word length that `s_end` adds to `s_off`, and the window. A seed's
@@ -409,13 +333,6 @@ impl DiagHashTable {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368-381
-    /// ```c
-    ///     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
-    ///     Uint4 index = table->backbone[bucket];
-    ///
-    ///     while (index) {
-    ///         if (table->chain[index].diag == diag) {
-    /// ```
     /// `retrieve` for a seed of `seeds` at `s_off_pos`, or `None` without a walk when every cell
     /// of `diag`'s bucket has a level below the seed's bound (`max_level`). A table without
     /// bounds always walks. With `MEMO` (the folds of a dc-megablast strips stage only, after the
@@ -598,13 +515,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:396-450
-    // ```c
-    //         if (table->chain[index].diag == diag) {
-    //             table->chain[index].level = level;
-    // ...
-    //             if ( s_off - table->chain[index].level > window_size) {
-    //                 table->chain[index].diag = diag;
-    // ```
     // Random inserts (diagonals d + 512 k share a bucket, so cells are matched, taken over
     // and appended, the chain grows past 256 cells, levels go up and down, some negative),
     // offset advances between "subjects" and clears at INT4_MAX / 4: after every step the
@@ -702,12 +612,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:833-841
-    // ```c
-    //     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-    //     if(!rc)  last_hit = 0;
-    //     if (s_off_pos < last_hit) return 0;
-    //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-    // ```
     // Random tables filled as a fold fills them (seed positions rising from the hash offset,
     // levels at or past the seed), probed at random diagonals and positions with the bounds
     // of one hit (megablast and blastn word lengths, window 0) and of two hits
@@ -810,12 +714,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368-381,396-450
-    // ```c
-    //     while (index) {
-    //         if (table->chain[index].diag == diag) {
-    // ...
-    //             if ( s_off - table->chain[index].level > window_size) {
-    // ```
     // LOSAT_X_DIAGLV2: tables filled as the dc-megablast fold fills them (seeds in rising
     // order, an insert after every probe; diagonals d + 512 k share a bucket, so cells are
     // matched, taken over and appended), with offset advances between "subjects" and clears at
@@ -1034,15 +932,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:839-841,939-941
-    // ```c
-    //     if (s_off_pos < last_hit) return 0;
-    //
-    //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-    // ...
-    //     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-    //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-    //                           hit_ready, s_off_pos, window_size + Delta + 1);
-    // ```
     // The bound at its edge, for every setting the command line reaches: two hits with window
     // 40 and templates 16, 18 and 21 (`scan_range` 0), and one hit with words 7, 11 and 28. One
     // cell on the probed diagonal at `bound - 1` (with `hit_saved` 0 and 1) is skipped

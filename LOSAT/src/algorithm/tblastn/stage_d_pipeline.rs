@@ -1730,26 +1730,24 @@ fn run_local_search_with_pool(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526 uses the masked working query;
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
-                let (report_ident, report_positives, _, report_mismatches, _, _) =
+                let (report_ident, _, _, report_mismatches, _, _) =
                     postredo_converted_stats_with_matrix(
                         &converted,
                         &report_queries[context],
                         &mut target,
                         scoring.matrix,
                     )?;
-                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                let (report_ident, report_mismatches) = shown_report_counts(
                     &converted,
                     &report_queries[context],
                     &mut target,
-                    scoring.matrix,
-                    (report_ident, report_positives, report_mismatches),
+                    (report_ident, report_mismatches),
                 )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
                     report_num_ident: report_ident,
-                    report_num_positives: report_positives,
                     report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
@@ -3615,12 +3613,11 @@ fn finish_local_ungapped(
                         &mut target,
                         steps.matrix,
                     )?;
-                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                let (report_ident, report_mismatches) = shown_report_counts(
                     &converted,
                     &steps.query_nomask[context],
                     &mut target,
-                    steps.matrix,
-                    (ident, positives, mismatches),
+                    (ident, mismatches),
                 )?;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
                 // The bit score of the context's ungapped block: (score * Lambda - ln K) / ln 2.
@@ -3630,7 +3627,6 @@ fn finish_local_ungapped(
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
                     report_num_ident: report_ident,
-                    report_num_positives: report_positives,
                     report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
@@ -3816,12 +3812,11 @@ fn finish_local_mode0_no_sum_stats(
                         &mut target,
                         scoring.matrix,
                     )?;
-                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                let (report_ident, report_mismatches) = shown_report_counts(
                     &converted,
                     &query_nomask[context],
                     &mut target,
-                    scoring.matrix,
-                    (ident, positives, mismatches),
+                    (ident, mismatches),
                 )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
@@ -3830,7 +3825,6 @@ fn finish_local_mode0_no_sum_stats(
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
                     report_num_ident: report_ident,
-                    report_num_positives: report_positives,
                     report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
@@ -5016,7 +5010,6 @@ mod tests {
                             (
                                 hsp.hsp.score,
                                 payload.report_num_ident,
-                                payload.report_num_positives,
                                 payload.align_length,
                                 payload.report_mismatches,
                                 payload.gap_letters,
@@ -5102,7 +5095,6 @@ mod tests {
                                 (
                                     f[2].parse().unwrap(),
                                     f[5].parse().unwrap(),
-                                    f[6].parse().unwrap(),
                                     f[7].parse().unwrap(),
                                     f[8].parse().unwrap(),
                                     f[9].parse().unwrap(),
@@ -5249,7 +5241,6 @@ mod tests {
                                 (
                                     hsp.hsp.score,
                                     payload.report_num_ident,
-                                    payload.report_num_positives,
                                     payload.align_length,
                                     payload.report_mismatches,
                                     payload.gap_letters,
@@ -5273,7 +5264,6 @@ mod tests {
                         (
                             f[2].parse().unwrap(),
                             f[5].parse().unwrap(),
-                            f[6].parse().unwrap(),
                             f[7].parse().unwrap(),
                             f[8].parse().unwrap(),
                             f[9].parse().unwrap(),
@@ -5291,7 +5281,6 @@ mod tests {
                     (
                         score,
                         ident,
-                        pos,
                         length,
                         mismatch,
                         gaps,
@@ -5309,8 +5298,7 @@ mod tests {
                 {
                     assert_eq!(
                         (
-                            score, ident, pos, length, mismatch, gaps, gapopen, q0, q1, s0, s1,
-                            frame
+                            score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame
                         ),
                         expected,
                         "{name} report values/order"
@@ -5452,7 +5440,6 @@ mod tests {
                         (
                             hsp.hsp.score,
                             payload.report_num_ident,
-                            payload.report_num_positives,
                             payload.align_length,
                             payload.report_mismatches,
                             payload.gap_letters,
@@ -5503,7 +5490,6 @@ mod tests {
                     (
                         f[2].parse().unwrap(),
                         f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
                         f[7].parse().unwrap(),
                         f[8].parse().unwrap(),
                         f[9].parse().unwrap(),
@@ -5630,7 +5616,6 @@ mod tests {
                         (
                             hsp.hsp.score,
                             payload.report_num_ident,
-                            payload.report_num_positives,
                             payload.align_length,
                             payload.report_mismatches,
                             payload.gap_letters,
@@ -5681,7 +5666,6 @@ mod tests {
                     (
                         f[2].parse().unwrap(),
                         f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
                         f[7].parse().unwrap(),
                         f[8].parse().unwrap(),
                         f[9].parse().unwrap(),
@@ -5802,7 +5786,6 @@ mod tests {
                             (
                                 hsp.hsp.score,
                                 payload.report_num_ident,
-                                payload.report_num_positives,
                                 payload.align_length,
                                 payload.report_mismatches,
                                 payload.gap_letters,
@@ -5888,7 +5871,6 @@ mod tests {
                             (
                                 f[2].parse().unwrap(),
                                 f[5].parse().unwrap(),
-                                f[6].parse().unwrap(),
                                 f[7].parse().unwrap(),
                                 f[8].parse().unwrap(),
                                 f[9].parse().unwrap(),
@@ -5992,7 +5974,6 @@ mod tests {
                 assert_eq!(
                     (
                         payload.report_num_ident,
-                        payload.report_num_positives,
                         payload.align_length,
                         payload.report_mismatches,
                         payload.gap_letters,
@@ -6000,7 +5981,6 @@ mod tests {
                     ),
                     (
                         f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
                         f[7].parse().unwrap(),
                         f[8].parse().unwrap(),
                         f[9].parse().unwrap(),
@@ -6226,11 +6206,6 @@ mod tests {
                         payload.report_num_ident,
                         custom_fields[5].parse().unwrap(),
                         "code {code} {label} report identities"
-                    );
-                    assert_eq!(
-                        payload.report_num_positives,
-                        custom_fields[6].parse().unwrap(),
-                        "code {code} {label} positives"
                     );
                     assert_eq!(
                         payload.align_length,

@@ -324,7 +324,6 @@ pub(super) fn render(
             subject_letters,
             hitlists,
             genetic_code,
-            scoring.matrix,
         )?;
     }
     let hitlists: &[KappaResultHitList] = hitlists;
@@ -1521,7 +1520,7 @@ pub(super) fn recounts_shown_counts(
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
 // `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
 // tabular.hpp:543-547
-/// The report counts (`report_num_ident`, `report_num_positives`, `report_mismatches`) of the HSPs
+/// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
 /// letters `query_bioseq`, or its gap residue). Stage D counts on the searched NCBIstdaa codes;
@@ -1535,7 +1534,6 @@ fn recount_shown_counts(
     subject_letters: SubjectLetters<'_>,
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
-    matrix: crate::config::ScoringMatrix,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut x_window = Vec::new();
@@ -1569,12 +1567,6 @@ fn recount_shown_counts(
                     .filter(|(q, s)| q == s)
                     .count();
                 payload.report_num_ident = ident;
-                payload.report_num_positives = crate::report::row_letters::display_positives(
-                    qseq.as_bytes(),
-                    sseq.as_bytes(),
-                    matrix,
-                    letters.case(),
-                );
                 payload.report_mismatches = i64::try_from(payload.align_length)?
                     - i64::try_from(ident + payload.gap_letters)?;
             }

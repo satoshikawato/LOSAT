@@ -1708,7 +1708,6 @@ mod tests {
                         num_ident: i32::try_from(identities[index]).unwrap(),
                         num_positives: stats[index].1,
                         report_num_ident: identities[index],
-                        report_num_positives: stats[index].1,
                         report_mismatches: i64::try_from(stats[index].3).unwrap(),
                         align_length: stats[index].2,
                         mismatches: stats[index].3,

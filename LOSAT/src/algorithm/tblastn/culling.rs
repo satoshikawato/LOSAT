@@ -348,7 +348,6 @@ mod tests {
             num_ident: 0,
             num_positives: 0,
             report_num_ident: 0,
-            report_num_positives: 0,
             report_mismatches: 0,
             align_length: 0,
             mismatches: 0,

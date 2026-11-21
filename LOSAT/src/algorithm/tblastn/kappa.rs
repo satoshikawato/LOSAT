@@ -276,20 +276,19 @@ pub(super) fn postredo_converted_stats_with_matrix(
 // row is translated again from its codons (`stage_e_report::aligned_sequences`); the search's
 // translation and the rows differ only where an ambiguous codon's residues are D/N, E/Q or I/L:
 // X in the search, B, Z or J in the rows. The Seq-aligns keep the search's counts.
-/// The report counts (identities, positives, mismatches) of `converted`, from `counts`, the
-/// search's counts on `report_query` (`postredo_converted_stats_with_matrix`): each subject
-/// residue that the search reads as X and the reports show as another letter
-/// (`TargetTranslation::shown_residue`) is compared as shown, its positive by the display's
-/// matrix (`protein_display_score`).
+/// The report counts (identities, mismatches) of `converted`, from `counts`, the search's counts
+/// on `report_query` (`postredo_converted_stats_with_matrix`): each subject residue that the
+/// search reads as X and the reports show as another letter (`TargetTranslation::shown_residue`)
+/// is compared as shown. The reports' positives are counted on the rows by each report
+/// (`report::row_letters::display_positives`, the XML's `FormattingMatrix`), with matrices of
+/// their own, so they are not kept here.
 pub(super) fn shown_report_counts(
     converted: &ConvertedKappaHsp,
     report_query: &[u8],
     target: &mut TargetTranslation<'_>,
-    matrix: ScoringMatrix,
-    counts: (usize, usize, usize),
-) -> Result<(usize, usize, usize)> {
+    counts: (usize, usize),
+) -> Result<(usize, usize)> {
     const X: u8 = 21;
-    const LETTERS: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let hsp = &converted.hsp;
     // The (query, subject residue) pairs of the substitutions whose subject residue is X.
     let mut read_as_x = Vec::new();
@@ -323,7 +322,7 @@ pub(super) fn shown_report_counts(
             }
         }
     }
-    let (mut ident, mut positives, mut mismatches) = counts;
+    let (mut ident, mut mismatches) = counts;
     let mut buffer = Vec::new();
     for (qi, offset) in read_as_x {
         let shown = target.shown_residue(hsp.frame, offset, &mut buffer)?;
@@ -334,19 +333,11 @@ pub(super) fn shown_report_counts(
             .get(qi)
             .context("TBLASTN report query offset overflow")?;
         let was_ident = q == X;
-        let was_positive = was_ident || crate::utils::matrix::protein_score(matrix, q, X) > 0;
         let is_ident = q == shown;
-        let is_positive = is_ident
-            || crate::utils::matrix::protein_display_score(
-                matrix,
-                LETTERS[usize::from(q)],
-                LETTERS[usize::from(shown)],
-            ) > 0;
         ident = ident + usize::from(is_ident) - usize::from(was_ident);
         mismatches = mismatches + usize::from(was_ident) - usize::from(is_ident);
-        positives = positives + usize::from(is_positive) - usize::from(was_positive);
     }
-    Ok((ident, positives, mismatches))
+    Ok((ident, mismatches))
 }
 
 /// NCBI's engine positives of an HSP of a redone match (`BlastHSP::num_positives`, which the
@@ -2426,7 +2417,6 @@ mod tests {
                 num_ident: i32::try_from(stats.0).unwrap(),
                 num_positives: stats.1,
                 report_num_ident: stats.0,
-                report_num_positives: stats.1,
                 report_mismatches: i64::try_from(stats.3).unwrap(),
                 align_length: stats.2,
                 mismatches: stats.3,
@@ -2668,15 +2658,9 @@ mod tests {
                 (4, 4, 5, 1),
                 "frame {frame}"
             );
-            let shown = shown_report_counts(
-                &converted,
-                &query,
-                &mut target,
-                ScoringMatrix::Blosum62,
-                (ident, positives, mismatches),
-            )
-            .unwrap();
-            assert_eq!(shown, (3, 4, 2), "frame {frame}");
+            let shown =
+                shown_report_counts(&converted, &query, &mut target, (ident, mismatches)).unwrap();
+            assert_eq!(shown, (3, 2), "frame {frame}");
         }
     }
 }

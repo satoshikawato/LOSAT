@@ -13,6 +13,7 @@ use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqmasks_io::run::post_read_texts;
+use crate::utils::os_bytes::path_from_bytes;
 use crate::utils::winmask::{
     convert_counts, generate, CountsFormat, CountsWriter, FinalizeError, GenCountsSettings,
     GenError, GenomeSource, MaskerParams, PctSettings, DEFAULT_TH,
@@ -123,12 +124,15 @@ fn finalize(
 /// open or read gives no more names.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
-fn file_list(input: &str, fa_list: bool) -> Vec<String> {
+fn file_list(input: &str, fa_list: bool) -> Vec<Vec<u8>> {
     if !fa_list {
         if input.is_empty() {
             return Vec::new();
         }
-        return input.split(',').map(str::to_string).collect();
+        return input
+            .split(',')
+            .map(|name| name.as_bytes().to_vec())
+            .collect();
     }
     let mut bytes = Vec::new();
     if let Ok(mut file) = File::open(input) {
@@ -141,7 +145,7 @@ fn file_list(input: &str, fa_list: bool) -> Vec<String> {
     };
     input_lines(&bytes, text_mode)
         .into_iter()
-        .map(|line| String::from_utf8_lossy(line).into_owned())
+        .map(<[u8]>::to_vec)
         .collect()
 }
 
@@ -166,7 +170,8 @@ fn read_error() -> NcbiException {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:171-215
 pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
-    files: Vec<String>,
+    /// The names of the files, as their bytes (a `-fa_list` line is not text).
+    files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
     registry: Result<Option<&'r str>, &'r str>,
@@ -210,9 +215,10 @@ impl GenomeInput<'_, '_, '_, '_> {
     fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
-                database_source(name, self.registry, false)?
+                database_source(&String::from_utf8_lossy(name), self.registry, false)?
             } else {
-                let file = File::open(name).map_err(|_| Failure::Ncbi(read_error()))?;
+                let file = File::open(path_from_bytes(name.as_slice()))
+                    .map_err(|_| Failure::Ncbi(read_error()))?;
                 fasta_source(file, false)?
             };
             while let Some(record) = source.next_record(self.out, self.diag)? {

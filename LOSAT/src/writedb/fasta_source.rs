@@ -34,7 +34,7 @@ use reader::{
 /// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceError {
-    pub message: String,
+    pub message: Vec<u8>,
     pub kind: SourceErrorKind,
 }
 
@@ -51,18 +51,12 @@ pub enum SourceErrorKind {
 
 impl SourceError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
-    // ```c++
-    //     catch (const std::bad_alloc&) {                                         \
-    //         LOG_POST(Error << "BLAST ran out of memory");                       \
-    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-    //     }                                                                       \
-    // ```
     // `CFastaBioseqSource::GetNext` catches the reader's parse exception only and
     // `s_FixBioseqDeltas` only `CInvalidChoiceSelection`, so a `std::bad_alloc` of
     // either reaches this clause (after `AddFasta` has ended the build).
     fn out_of_memory() -> Self {
         Self {
-            message: "BLAST ran out of memory".to_string(),
+            message: b"BLAST ran out of memory".to_vec(),
             kind: SourceErrorKind::OutOfMemory,
         }
     }
@@ -84,16 +78,7 @@ impl<R: Read> FastaBioseqSource<R> {
     /// (`fRequireID | fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:701-734
-    /// ```c++
-    /// CFastaBioseqSource::CFastaBioseqSource(CNcbiIstream & fasta_file,
-    ///                                        bool is_protein,
-    ///                                        bool parse_ids,
-    ///                                        bool long_ids)
-    ///     : m_FastaReader(NULL)
-    /// {
-    ///     m_LineReader.Reset(new CBufferedLineReader(fasta_file));
-    /// ```
-    /// The flags are quoted at `reader::ReaderFlags::fasta_bioseq_source`.
+    /// The flags are cited at `reader::ReaderFlags::fasta_bioseq_source`.
     pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
         Self {
             reader: Some(FastaReader::new(
@@ -108,67 +93,9 @@ impl<R: Read> FastaBioseqSource<R> {
     /// sequence, or `None` at the end of the input.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:755-792
-    /// ```c++
-    /// CConstRef<CBioseq> CFastaBioseqSource::GetNext()
-    /// {
-    ///     CConstRef<CBioseq> rv;
-    ///
-    ///     if (m_LineReader.NotEmpty() && ! m_LineReader->AtEOF()) {
-    ///         CRef<CSeq_entry> entry;
-    ///         try { entry = m_FastaReader->ReadOneSeq(); }
-    ///         catch (const CObjReaderParseException& e) {
-    ///             static const string kKeyword("m_Pos = ");
-    ///             SIZE_TYPE start = NStr::Find(e.what(), kKeyword);
-    ///             SIZE_TYPE end = NStr::Find(e.what(), ")", start);
-    ///             string pos("unknown");
-    ///             if (start != NPOS && end != NPOS) {
-    ///                 start += kKeyword.size();
-    ///                 pos = string(e.what()).substr(start, end-start);
-    ///             }
-    ///             string msg = e.GetMsg();
-    ///             const string extra_string("CFastaReader: ");
-    ///             if (NStr::StartsWith(msg, extra_string)) {
-    ///                 msg.erase(0, extra_string.size());
-    ///             }
-    ///             NCBI_THROW(CWriteDBException, eFileErr, msg);
-    ///         }
-    ///
-    ///         if (entry.NotEmpty()) {
-    ///             _ASSERT(entry->IsSeq());
-    ///             rv.Reset(& entry->GetSeq());
-    ///         }
-    ///     }
-    ///
-    ///     // Any failure to read a Bioseq is considered an EOF.
-    ///
-    ///     if (rv.Empty()) {
-    ///         m_LineReader.Reset();
-    ///     }
-    ///
-    ///     return rv;
-    /// }
-    /// ```
     /// `x_EditAndAddBioseq` then takes the deflines and fixes the deltas:
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-488
-    /// ```c++
-    ///     CRef<CBlast_def_line_set> headers =
-    ///         CWriteDB::ExtractBioseqDeflines(*bs, m_ParseIDs, m_LongIDs,
-    ///                 m_ScanBioseq4CFastaReaderUsrObjct);
-    ///
-    ///     x_EditHeaders(headers);
-    ///
-    ///     // Add the sequence
-    ///     if (sv) {
-    ///         m_OutputDb->AddSequence(*bs, *sv);
-    ///     } else {
-    ///         bs = s_FixBioseqDeltas(bs);
-    ///         if(bs->GetInst().CanGetSeq_data())
-    ///         	m_OutputDb->AddSequence(*bs);
-    ///         else
-    ///         	return false;
-    ///     }
-    /// ```
     /// `AddSequences` tests the length of the sequence before that call, and
     /// `s_FixBioseqDeltas` can make a sequence longer (a gap of unknown length becomes one
     /// `N`) but not empty or the reverse, so `Bioseq::length` is the length after it. A
@@ -212,7 +139,7 @@ impl<R: Read> FastaBioseqSource<R> {
                 // Only convert2blastmask's reader throws other exceptions.
                 self.reader = None;
                 return Err(SourceError {
-                    message: exception.get_msg().to_string(),
+                    message: exception.get_msg().to_vec(),
                     kind: SourceErrorKind::Creation,
                 });
             }
@@ -224,7 +151,7 @@ impl<R: Read> FastaBioseqSource<R> {
                     .map(str::to_string)
                     .unwrap_or(message);
                 return Err(SourceError {
-                    message,
+                    message: message.into_bytes(),
                     kind: SourceErrorKind::Creation,
                 });
             }
@@ -246,7 +173,7 @@ impl<R: Read> FastaBioseqSource<R> {
                 Err(message) => {
                     self.reader = None;
                     return Err(SourceError {
-                        message: message.to_string(),
+                        message: message.to_string().into_bytes(),
                         kind: SourceErrorKind::Creation,
                     });
                 }
@@ -296,7 +223,7 @@ impl<R: Read> FastaBioseqSource<R> {
 
 fn read_error_message(error: &std::io::Error) -> SourceError {
     SourceError {
-        message: format!("Read error: {error}"),
+        message: format!("Read error: {error}").into_bytes(),
         kind: SourceErrorKind::Creation,
     }
 }
@@ -307,66 +234,11 @@ fn read_error_message(error: &std::io::Error) -> SourceError {
 /// empty definition line, the title descriptor (`x_BuildDeflinesFromBioseq`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:802-829
-/// ```c++
-///         if (bin_hdr.empty()) {
-/// 	    try {
-///             x_GetFastaReaderDeflines(*bioseq,
-///                                      deflines,
-///                                      membbits,
-///                                      linkouts,
-///                                      pig,
-///                                      false,
-///                                      parse_ids,
-///                                      long_ids,
-///                                      scan_bioseq_4_cfastareader_usrobj);
-/// 	      } catch ( const CSeqIdException&e ) {
-/// 		//LOG_POST(Info << "x_GetFastaReaderDeflines " << e.GetMsg() );
-/// 	    }
-///         }
-///
-///         if(!s_UseFastaReaderDeflines(bioseq, deflines, long_ids)) {
-///         	deflines.Reset();
-///         }
-///
-///         if (bin_hdr.empty() && deflines.Empty()) {
-///             x_BuildDeflinesFromBioseq(*bioseq,
-///                                       deflines,
-///                                       membbits,
-///                                       linkouts,
-///                                       pig);
-///         }
-///     }
-/// ```
 /// `s_UseFastaReaderDeflines` keeps the deflines of the user object, because the record
 /// has only a local ID:
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:736-750
-/// ```c++
-/// static bool s_UseFastaReaderDeflines(CConstRef<CBioseq> & bioseq, CConstRef<CBlast_def_line_set> & deflines, bool long_seqid)
-/// {
-/// 	if(deflines.Empty())
-/// 		return false;
-///
-/// 	const CSeq_id * bioseq_id = bioseq->GetNonLocalId();
-///
-/// 	if(bioseq_id == NULL ||
-///        // For bare pir and prf ids go with the one from defline.
-///        // This is to parse bare ids as local ones. The bare pdb ids are pdb in
-///        // bioseq (parsed by CFastaReader), but local in deflines (parsed by
-///        // CSeq_id).
-///        (!long_seqid && (bioseq_id->IsPrf() || bioseq_id->IsPir()))) {
-///         return true;
-///        }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:610-613,694
-/// ```c++
-///         if (desc.IsTitle()) {
-///             //defline->SetTitle((**iter)->GetTitle());
-///             titles = (**iter).GetTitle();
-///         }
-/// ...
-///         defline->SetTitle(titles);
-/// ```
 /// The definition line is empty only for the empty line of `line_reader`'s module
 /// comment read as a definition line; such a record has no residues.
 fn extract_title(
@@ -382,85 +254,6 @@ fn extract_title(
 /// `s_FixBioseqDeltas`: the length and the sequence data of a record.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:290-295,306-311,318-334,343-382,395-398
-/// ```c++
-/// static CConstRef<CBioseq> s_FixBioseqDeltas(CConstRef<objects::CBioseq> bs)
-/// {
-///     if ((! bs->CanGetInst()) || bs->GetInst().CanGetSeq_data() ||
-///     	 ! bs->GetInst().CanGetExt() || ! bs->GetInst().GetExt().IsDelta()) {
-///         return bs;
-///     }
-/// ...
-///     try {
-///         const CDelta_ext & dext = bs->GetInst().GetExt().GetDelta();
-///
-///         if(dext.Get().front()->Which() != CDelta_seq::e_Literal)
-///         	return bs;
-///
-/// ...
-///         string seq8na;
-///         if (bs->GetInst().CanGetLength()) {
-///             seq8na.reserve(bs->GetInst().GetLength());
-///         }
-///
-///         string na8;
-///
-///         ITERATE(TItems, item, dext.Get()) {
-///         	if(((**item).IsLoc()) && ((**item).GetLoc().IsNull())) {
-///                 seq8na.append(1, 0x0f);
-///         		continue;
-///         	}
-///
-///             const CSeq_literal & L = (**item).GetLiteral();
-///
-///             if (!L.CanGetSeq_data()) {
-///                 if (L.CanGetLength()){
-/// ...
-///             if (L.GetSeq_data().IsNcbi2na()) {
-///                 CSeqConvert::Convert(L.GetSeq_data().GetNcbi2na(),
-///                                      CSeqUtil::e_Ncbi2na,
-///                                      0,
-///                                      L.GetLength(),
-///                                      na8,
-///                                      CSeqUtil::e_Ncbi8na);
-///             } else if (L.GetSeq_data().IsNcbi4na()) {
-///                 CSeqConvert::Convert(L.GetSeq_data().GetNcbi4na(),
-///                                      CSeqUtil::e_Ncbi4na,
-///                                      0,
-///                                      L.GetLength(),
-///                                      na8,
-///                                      CSeqUtil::e_Ncbi8na);
-/// 	    } else if (L.GetSeq_data().IsGap()) {
-///                 seq8na.append(L.GetLength(), 0x0f);
-///             } else {
-///                 NCBI_THROW(CMultisourceException, eArg,
-///                            "Unhandled type of sequence data encountered.");
-///             }
-///
-///             seq8na += na8;
-///             na8.resize(0);
-///         }
-///
-///         // Now convert back to 4na, since WriteDB does not yet handle
-///         // 8na sequences.
-///
-///         int length = seq8na.size();
-///         vector<char> seq4na;
-///         CSeqConvert::Convert(seq8na,
-///                              CSeqUtil::e_Ncbi8na,
-///                              0,
-///                              length,
-///                              seq4na,
-///                              CSeqUtil::e_Ncbi4na);
-///
-///         // Copy the needed fields of the CBioseq (but remove the delta
-///         // sequence) and add a Seq-data.
-///
-/// ...
-///         inst->SetSeq_data().SetNcbi4na().Set().swap(seq4na);
-///         inst->SetMol(CSeq_inst::eMol_na);
-///         inst->SetLength(length);
-///         inst->SetRepr(CSeq_inst::eRepr_raw);
-/// ```
 /// A sequence with `seq-data` (raw) or without a delta (virtual) is returned as it is.
 /// The delta of a protein does not occur (`reader::SeqInst`), nor a literal without a
 /// length or a `Seq-loc` other than null. A delta whose first piece is not a literal (a

@@ -19,9 +19,6 @@
 //! letters (`-lcase_masking`: the lowercase subject rows).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-//! ```c++
-//! CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-//! ```
 
 mod run_local_support;
 

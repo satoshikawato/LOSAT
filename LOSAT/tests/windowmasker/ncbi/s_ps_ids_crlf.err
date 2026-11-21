@@ -1,0 +1,3 @@
+Error: CWinMaskConfig::FillIdList(): can't understand id: rec1: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Malformatted ID rec1
+: ignoring

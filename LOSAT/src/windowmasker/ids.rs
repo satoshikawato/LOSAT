@@ -1,11 +1,22 @@
 //! `-ids` and `-exclude_ids`: the id lists of `CWinMaskConfig::FillIdList`, matched as text
-//! (`CWinMaskUtil::CIdSet_TextMatch`) against the first word of each sequence's title
-//! (`sequence::GetTitle`), and `CWinMaskUtil::consider`.
+//! (`CWinMaskUtil::CIdSet_TextMatch`, the default) against the first word of each sequence's
+//! title (`sequence::GetTitle`), or as Seq-ids (`CWinMaskUtil::CIdSet_SeqId`, `-text_match false`
+//! with `-infmt blastdb`) against the sequence's Seq-ids, and `CWinMaskUtil::consider`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ncbi_app::files::{input_lines, LineEnds};
+use crate::ncbi_app::Diag;
+use crate::seqid::accguide::parse_flags;
+use crate::seqid::mask_handle::{
+    handle_seq_id, mask_handle_key, mask_info_key, GiimTree, TreeHandle,
+};
+use crate::seqid::parse::{seq_id_from_text, SeqIdError};
 use crate::seqid::ParsedSeqId;
+
+use crate::seqmasks_io::writer::access_seq_id;
+
+use super::work::{post_seq_id_warning, Record};
 
 /// `CWinMaskUtil::CIdSet_TextMatch`: the ids of a list, by their number of `|`-words
 /// (`nword_sets_`).
@@ -40,7 +51,7 @@ fn split(id: &[u8]) -> Vec<usize> {
 }
 
 impl TextMatchIds {
-    /// `CIdSet_TextMatch::insert( id_str )`.
+    /// `CIdSet_TextMatch::insert` of `id`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:103-123
     /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[-1]`: `EmptyId`.
@@ -62,7 +73,7 @@ impl TextMatchIds {
         self.nword_sets.is_empty()
     }
 
-    /// `CIdSet_TextMatch::find( id_str )`: whether a run of consecutive words of `id` is an id
+    /// `CIdSet_TextMatch::find` of an id: whether a run of consecutive words of `id` is an id
     /// of the list with as many words.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:154-175
@@ -86,7 +97,7 @@ impl TextMatchIds {
         false
     }
 
-    /// `CIdSet_TextMatch::find( bsh )` of a sequence whose `GetTitle` is `title`.
+    /// `CIdSet_TextMatch::find` of a sequence whose `GetTitle` is `title`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:126-145
     fn find(&self, title: &[u8]) -> bool {
@@ -105,18 +116,20 @@ impl TextMatchIds {
     }
 }
 
-/// `CWinMaskConfig::FillIdList( file_name, id_list )`: the ids of the file `name`, one per
-/// line; a file that does not open gives none.
+/// `CWinMaskConfig::FillIdList`: `insert` of each id of the file `name`,
+/// one per line, in order; a file that does not open gives none.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:471-484
 /// The lines are those of `NcbiGetlineEOL` on the host (`ncbi_app::files::input_lines`: on Linux
-/// a `\r` stays in the line, so a CRLF list matches nothing, as NCBI's Linux build), and the
-/// empty ones are skipped. A line that starts with a space or a tab gives an empty id; one
+/// a `\r` stays in the line, so a CRLF list matches nothing as text, as NCBI's Linux build), and
+/// the empty ones are skipped. A line that starts with a space or a tab gives an empty id; one
 /// whose first space comes at 0 after `>` (`> x`) too.
-pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
-    let mut ids = TextMatchIds::default();
+pub(super) fn fill_id_list<E>(
+    name: &str,
+    mut insert: impl FnMut(&[u8]) -> Result<(), E>,
+) -> Result<(), E> {
     let Ok(bytes) = std::fs::read(name) else {
-        return Ok(ids);
+        return Ok(());
     };
     for line in input_lines(&bytes, LineEnds::HOST) {
         let stop = line
@@ -129,44 +142,215 @@ pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
         } else {
             &[][..]
         };
-        ids.insert(id)?;
+        insert(id)?;
     }
-    Ok(ids)
+    Ok(())
+}
+
+/// `CWinMaskUtil::CIdSet_SeqId`: the `CSeq_id_Handle`s of a list's ids (`idset`), as NCBI's id
+/// mapper gives them (`seqid::mask_handle`). They live for the whole run (the set is a member of
+/// `CWinMaskConfig`), so the info of each is the one its list id made, also for the handles of
+/// the sequences that share it.
+#[derive(Debug, Default)]
+pub(super) struct SeqIdSet {
+    /// The handles that a pure function knows (`mask_handle_key`).
+    keys: HashSet<Vec<u8>>,
+    /// The list id that made each info of those handles (`mask_info_key`), the first to reach it.
+    made_from: HashMap<Vec<u8>, ParsedSeqId>,
+    /// The `giim` tree of NCBI's mapper while the set holds its handles (`giim_handles`): the
+    /// handle of a `giim` id depends on the handles made before it (`TreeHandle::Giim`).
+    giim: GiimTree,
+    giim_handles: HashSet<usize>,
+    /// The handles that equal no other (a Textseq-id with neither accession nor name): they
+    /// match nothing, and the set is not empty. No list id reaches it today: NCBI's parse throws
+    /// for such a Textseq-id (Textseq_id.cpp:128-132), as LOSAT's does.
+    fresh: usize,
+}
+
+impl SeqIdSet {
+    /// `CIdSet_SeqId::insert`: the handle of the Seq-id that `CSeq_id`'s constructor reads from
+    /// `id`; an id that it cannot read (`CSeqIdException`) is posted as an error and skipped. The
+    /// parse's own warnings (error code 1306) are posted as they come.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:47-57
+    /// NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:135-136
+    /// The constructor parses with `fParse_AnyRaw`. The post carries the exception's `what()`
+    /// (NCBI's report, a line feed at its end) in LOSAT's words (`crate::wording`).
+    pub(super) fn insert(&mut self, id: &[u8], diag: &mut Diag) {
+        let parsed = seq_id_from_text(id, parse_flags::ANY_RAW, &mut |warning| {
+            post_seq_id_warning(diag, &warning)
+        });
+        match parsed {
+            Ok(seq_id) => self.add(&seq_id),
+            Err(error) => diag.err_post_bytes(&cannot_read(id, &error)),
+        }
+    }
+
+    /// The handle of `id` (`CSeq_id_Handle::GetHandle`), added to the set.
+    fn add(&mut self, id: &ParsedSeqId) {
+        match mask_handle_key(id) {
+            Ok(Some(key)) => {
+                self.keys.insert(key);
+                if let Ok(Some(info)) = mask_info_key(id) {
+                    self.made_from.entry(info).or_insert_with(|| id.clone());
+                }
+            }
+            Ok(None) => self.fresh += 1,
+            Err(TreeHandle::Giim { .. }) => {
+                let ParsedSeqId::Giim(giim) = id else {
+                    unreachable!("only a giim Seq-id has a tree handle")
+                };
+                let (handle, _) = self.giim.find_or_create(giim);
+                self.giim_handles.insert(handle);
+            }
+        }
+    }
+
+    /// `empty()`.
+    fn is_empty(&self) -> bool {
+        self.keys.is_empty() && self.giim_handles.is_empty() && self.fresh == 0
+    }
+
+    /// `CIdSet_SeqId::find` of a sequence whose Seq-ids are `ids`: whether one of their handles is
+    /// in the set.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:60-73
+    /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:244-257
+    /// The handles are made when the sequence's scope adds its Bioseq, in the order of its
+    /// Seq-ids, and dropped with that scope after the sequence: a `giim` id's handle is found
+    /// in the tree of the list's handles and those made before it for the same sequence.
+    fn find(&self, ids: &[ParsedSeqId]) -> bool {
+        let mut giim = None;
+        ids.iter().any(|id| match mask_handle_key(id) {
+            Ok(Some(key)) => self.keys.contains(&key),
+            Ok(None) => false,
+            Err(TreeHandle::Giim { .. }) => {
+                let ParsedSeqId::Giim(id) = id else {
+                    unreachable!("only a giim Seq-id has a tree handle")
+                };
+                let tree = giim.get_or_insert_with(|| self.giim.clone());
+                let (handle, _) = tree.find_or_create(id);
+                self.giim_handles.contains(&handle)
+            }
+        })
+    }
+
+    /// `GetSeqId()` of the access handle of a sequence whose Seq-ids are `ids`
+    /// (`seqmasks_io::writer::access_seq_id`) where a list id made its info; `None` where the
+    /// sequence's own Seq-id did. The access Seq-id is the sequence's first gi, Textseq-id or
+    /// other Seq-id, so no Seq-id of the sequence before it can share its info: only the list's.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:300-312
+    fn handle_seq_id(&self, ids: &[ParsedSeqId]) -> Option<ParsedSeqId> {
+        let id = access_seq_id(ids);
+        match mask_info_key(id) {
+            Ok(Some(info)) => self
+                .made_from
+                .get(&info)
+                .map(|first| handle_seq_id(first, id)),
+            Ok(None) => None,
+            Err(TreeHandle::Giim { id: number }) => {
+                let ParsedSeqId::Giim(value) = id else {
+                    unreachable!("only a giim Seq-id has a tree handle")
+                };
+                let handle = self.giim.find(value)?;
+                Some(ParsedSeqId::Giim(
+                    self.giim.made_from(number, handle).clone(),
+                ))
+            }
+        }
+    }
+}
+
+/// The error that `CIdSet_SeqId::insert` posts for the id `id` that `CSeq_id` cannot read
+/// (`error`), in LOSAT's words: NCBI's message with the exception's `what()`, mapped as a whole.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:52-55
+fn cannot_read(id: &[u8], error: &SeqIdError) -> Vec<u8> {
+    let message = [
+        b"CWinMaskConfig::FillIdList(): can't understand id: ".as_slice(),
+        id,
+        b": ",
+        &error.ncbi_what_bytes(),
+        b": ignoring",
+    ]
+    .concat();
+    crate::wording::losat_bytes(&message).into_owned()
+}
+
+/// An id list of `CWinMaskConfig` (`CIdSet`): matched as text, or as Seq-ids.
+#[derive(Debug)]
+pub(super) enum IdSet {
+    Text(TextMatchIds),
+    SeqId(SeqIdSet),
+}
+
+/// An id list matched as text that asks for the title of a sequence of which LOSAT does not
+/// make it (`Title::FromSource`).
+pub(super) struct TitleFromSource;
+
+impl IdSet {
+    /// `empty()`.
+    fn is_empty(&self) -> bool {
+        match self {
+            IdSet::Text(ids) => ids.is_empty(),
+            IdSet::SeqId(ids) => ids.is_empty(),
+        }
+    }
+
+    /// `find` of `record`.
+    fn find(&self, record: &Record) -> Result<bool, TitleFromSource> {
+        match self {
+            IdSet::Text(ids) => {
+                match get_title(&record.ids, record.title.as_deref(), record.any_source) {
+                    Title::Text(title) => Ok(ids.find(&title)),
+                    Title::FromSource => Err(TitleFromSource),
+                }
+            }
+            IdSet::SeqId(ids) => Ok(ids.find(&record.ids)),
+        }
+    }
 }
 
 /// The `-ids` and `-exclude_ids` lists of the run (`CWinMaskConfig::Ids`, `ExcludeIds`).
 #[derive(Debug, Default)]
 pub(super) struct IdLists {
-    pub(super) ids: Option<TextMatchIds>,
-    pub(super) exclude_ids: Option<TextMatchIds>,
+    pub(super) ids: Option<IdSet>,
+    pub(super) exclude_ids: Option<IdSet>,
 }
 
 impl IdLists {
-    /// Whether a list asks for the titles (`consider` returns at once without one).
-    pub(super) fn active(&self) -> bool {
-        let used = |list: &Option<TextMatchIds>| list.as_ref().is_some_and(|ids| !ids.is_empty());
-        used(&self.ids) || used(&self.exclude_ids)
-    }
-
-    /// `CWinMaskUtil::consider( bsh, ids, exclude_ids )` of a sequence whose `GetTitle` is
-    /// `title` (asked only when a list is not empty).
+    /// `CWinMaskUtil::consider` of `record` and the two lists.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:218-245
-    pub(super) fn consider(&self, title: &[u8]) -> bool {
+    pub(super) fn consider(&self, record: &Record) -> Result<bool, TitleFromSource> {
         let mut result = true;
         if let Some(ids) = self.ids.as_ref().filter(|ids| !ids.is_empty()) {
-            result = ids.find(title);
+            result = ids.find(record)?;
         }
         if let Some(exclude) = self.exclude_ids.as_ref().filter(|ids| !ids.is_empty()) {
-            if exclude.find(title) {
+            if exclude.find(record)? {
                 result = false;
             }
         }
-        result
+        Ok(result)
+    }
+
+    /// `GetSeqId()` of the access handle of a sequence whose Seq-ids are `ids` where the handle of
+    /// an id of a list matched as Seq-ids made its info (`SeqIdSet::handle_seq_id`), as the
+    /// `seqloc_*` and `maskinfo_*` writers print it; `None` otherwise.
+    pub(super) fn handle_seq_id(&self, ids: &[ParsedSeqId]) -> Option<ParsedSeqId> {
+        [&self.ids, &self.exclude_ids]
+            .into_iter()
+            .flatten()
+            .find_map(|list| match list {
+                IdSet::SeqId(set) => set.handle_seq_id(ids),
+                IdSet::Text(_) => None,
+            })
     }
 }
 
-/// What `sequence::GetTitle( bsh )` gives for a sequence of the FASTA or database reader, or
+/// What `sequence::GetTitle` gives for a sequence of the FASTA or database reader, or
 /// the case LOSAT does not reproduce.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Title {
@@ -176,7 +360,7 @@ pub(super) enum Title {
     FromSource,
 }
 
-/// `sequence::GetTitle( bsh )` (flags 0) of a sequence with the Seq-ids `ids`, the title
+/// `sequence::GetTitle` (flags 0) of a sequence with the Seq-ids `ids`, the title
 /// descriptor `title` and a source when `has_source`: the readers' Bioseqs have no MolInfo,
 /// no GenBank or EMBL block and no PDB descriptor, and are nucleotides of the raw or delta
 /// representation, so of the function only these steps apply.
@@ -293,5 +477,198 @@ mod tests {
         );
         assert_eq!(get_title(&[tpg], None, false), Title::Text(Vec::new()));
         assert_eq!(get_title(&[], Some(b"."), true), Title::FromSource);
+    }
+
+    fn seq_id(text: &str) -> ParsedSeqId {
+        seq_id_from_text(text.as_bytes(), parse_flags::ANY_RAW, &mut |_| {}).unwrap()
+    }
+
+    fn seq_id_list(ids: &[&str]) -> SeqIdSet {
+        let mut set = SeqIdSet::default();
+        for id in ids {
+            set.add(&seq_id(id));
+        }
+        set
+    }
+
+    fn record(ids: Vec<ParsedSeqId>) -> Record {
+        Record {
+            ids,
+            title: Some(b"title".to_vec()),
+            taxname: None,
+            has_source: false,
+            any_source: false,
+            iupac: b"ACGT".to_vec(),
+            texts: Vec::new(),
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 windowmasker -text_match F on a database made with -parse_seqids (probe
+    // s1 of line NP M5, 2026-11-21: tmf_wm_ps_ids_case, _unver, _forms, _lcl).
+    #[test]
+    fn seq_ids_match_as_ncbi_s_handles() {
+        let set = seq_id_list(&["ab000001.1", "nc_000099.1", "lcl|REC2", "lcl|rec4."]);
+        assert!(set.find(&[seq_id("gb|AB000001.1|")]));
+        assert!(set.find(&[seq_id("ref|NC_000099.1|")]));
+        assert!(set.find(&[seq_id("lcl|rec2")]));
+        assert!(set.find(&[seq_id("lcl|rec4.")]));
+        assert!(!set.find(&[seq_id("lcl|rec1")]));
+        let bare = seq_id_list(&["BK000001.1", "P12345"]);
+        assert!(bare.find(&[seq_id("tpg|BK000001.1|")]));
+        let unversioned = seq_id_list(&["AB000001", "NC_000099", "AB000001.2"]);
+        assert!(!unversioned.find(&[seq_id("gb|AB000001.1|")]));
+        assert!(!unversioned.find(&[seq_id("ref|NC_000099.1|")]));
+    }
+
+    // tmf_wm_ids_ord of the same probe: `gnl|BL_ORD_ID|0` names OID 0 by a string tag "0"
+    // (`CObject_id::SetStrOrId` takes 1-9 first), which is not the integer tag of the database.
+    #[test]
+    fn an_ordinal_id_of_zero_is_a_string_tag() {
+        let set = seq_id_list(&["gnl|BL_ORD_ID|0", "gnl|BL_ORD_ID|3"]);
+        let ord = |oid| {
+            ParsedSeqId::General(crate::seqid::model::Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: crate::seqid::model::ObjectId::Id(oid),
+            })
+        };
+        assert!(!set.find(&[ord(0)]));
+        assert!(set.find(&[ord(3)]));
+        assert!(set.find(&[ord(1), ord(3)]));
+    }
+
+    // The giim tree finds the first handle whose Giimport-id is not `Equals` (seq_id_tree.cpp
+    // 2926-2941): an equal giim id of a sequence gets a new handle, another one of the same
+    // number the list's.
+    #[test]
+    fn a_giim_id_finds_the_handle_of_another_giimport_id() {
+        let set = seq_id_list(&["gim|5", "gim|5"]);
+        assert!(!set.is_empty());
+        assert!(!set.find(&[seq_id("gim|5")]));
+        assert!(!set.find(&[seq_id("gim|6")]));
+        let other = ParsedSeqId::Giim(crate::seqid::model::GiimportId {
+            id: 5,
+            db: Some(b"x".to_vec()),
+            release: None,
+        });
+        assert!(set.find(&[other]));
+    }
+
+    fn printed(lists: &IdLists, ids: &[&str]) -> Option<String> {
+        let ids: Vec<ParsedSeqId> = ids.iter().map(|id| seq_id(id)).collect();
+        lists.handle_seq_id(&ids).map(|id| {
+            let mut out = Vec::new();
+            crate::seqid::label::fasta(&id, &mut out);
+            String::from_utf8(out).unwrap()
+        })
+    }
+
+    // The list's handles live for the run, so the info of a database id's handle is the one a
+    // list id made: a packed GenBank/EMBL/DDBJ accession takes its alternative (another number of
+    // the same prefix, digit count and version too), a name keeps the list's case, a local string
+    // gets the sequence's case back. The access handle is the first gi, else Textseq-id.
+    #[test]
+    fn the_writers_print_the_seq_id_that_a_list_id_made() {
+        let lists = |ids: &[&str]| IdLists {
+            ids: Some(IdSet::SeqId(seq_id_list(ids))),
+            exclude_ids: None,
+        };
+        let ddbj = lists(&["AB000001.1", "sp|P12345|abc_human", "lcl|REC1"]);
+        assert_eq!(
+            printed(&ddbj, &["gb|AB000001.1|"]).as_deref(),
+            Some("dbj|AB000001.1|")
+        );
+        assert_eq!(
+            printed(&ddbj, &["gb|AB000003.1|"]).as_deref(),
+            Some("dbj|AB000003.1|")
+        );
+        assert_eq!(
+            printed(&ddbj, &["lcl|x", "emb|AB000004.1|"]).as_deref(),
+            Some("dbj|AB000004.1|")
+        );
+        assert_eq!(printed(&ddbj, &["gb|AB000001.2|"]), None);
+        assert_eq!(printed(&ddbj, &["gb|AB0000001.1|"]), None);
+        assert_eq!(printed(&ddbj, &["gi|5", "gb|AB000001.1|"]), None);
+        assert_eq!(
+            printed(&ddbj, &["sp|P12345|ABC_HUMAN"]).as_deref(),
+            Some("sp|P12345|abc_human")
+        );
+        assert_eq!(printed(&ddbj, &["lcl|rec1"]).as_deref(), Some("lcl|rec1"));
+        let excluded = IdLists {
+            ids: None,
+            exclude_ids: Some(IdSet::SeqId(seq_id_list(&["emb|AB000002.1|"]))),
+        };
+        assert_eq!(
+            printed(&excluded, &["gb|AB000001.1|"]).as_deref(),
+            Some("emb|AB000001.1|")
+        );
+        let text = IdLists {
+            ids: Some(IdSet::Text(TextMatchIds::default())),
+            exclude_ids: None,
+        };
+        assert_eq!(printed(&text, &["gb|AB000001.1|"]), None);
+    }
+
+    // A list of which no id was read is empty: `consider` keeps every sequence.
+    #[test]
+    fn an_empty_seq_id_list_keeps_every_sequence() {
+        let lists = IdLists {
+            ids: Some(IdSet::SeqId(SeqIdSet::default())),
+            exclude_ids: None,
+        };
+        assert!(matches!(
+            lists.consider(&record(vec![seq_id("lcl|x")])),
+            Ok(true)
+        ));
+        let lists = IdLists {
+            ids: Some(IdSet::SeqId(seq_id_list(&["lcl|y"]))),
+            exclude_ids: None,
+        };
+        assert!(matches!(
+            lists.consider(&record(vec![seq_id("lcl|x")])),
+            Ok(false)
+        ));
+        assert!(matches!(
+            lists.consider(&record(vec![seq_id("lcl|Y")])),
+            Ok(true)
+        ));
+        let lists = IdLists {
+            ids: None,
+            exclude_ids: Some(IdSet::SeqId(seq_id_list(&["lcl|y"]))),
+        };
+        assert!(matches!(
+            lists.consider(&record(vec![seq_id("lcl|y")])),
+            Ok(false)
+        ));
+    }
+
+    // tmf_wm_ids_bad of probe s1: NCBI's post (its build tree aside), here in LOSAT's words; the
+    // id keeps its bytes.
+    #[test]
+    fn an_id_that_cseq_id_cannot_read_is_posted_with_ncbi_s_report() {
+        let parse = |id: &[u8]| seq_id_from_text(id, parse_flags::ANY_RAW, &mut |_| {});
+        let error = parse(b"gb|").unwrap_err();
+        assert_eq!(
+            String::from_utf8(error.ncbi_what_bytes()).unwrap(),
+            format!(
+                "NCBI C++ Exception:\n    T0 \"{}/src/objects/seq/../seqloc/Seq_id.cpp\", line \
+                 2501: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - \
+                 Malformatted ID gb|\n",
+                crate::ncbi_exception::NCBI_BUILD_ROOT
+            )
+        );
+        assert_eq!(
+            cannot_read(b"gb|", &error),
+            b"CWinMaskConfig::FillIdList(): can't understand id: gb|: Malformatted ID gb|\n: ignoring"
+        );
+        let error = parse(b"caf\xe9\r").unwrap_err();
+        assert_eq!(
+            cannot_read(b"caf\xe9\r", &error),
+            b"CWinMaskConfig::FillIdList(): can't understand id: caf\xe9\r: Malformatted ID caf\xe9\n: ignoring"
+        );
+        let error = parse(b"").unwrap_err();
+        assert_eq!(
+            cannot_read(b"", &error),
+            b"CWinMaskConfig::FillIdList(): can't understand id: : Empty bare accession supplied\n: ignoring"
+        );
     }
 }

@@ -43,6 +43,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - `-infmt fasta` (the default) reads FASTA. `-infmt blastdb` reads every sequence of a nucleotide database named by `-in`, in every volume. `-infmt seqids` stops with NCBI's error, as NCBI's does.
 - `-parse_seqids` parses the ids of the FASTA definition lines, so the output names sequences by their ids. Use it when the masks are for a database built with `makeblastdb -parse_seqids`.
 - `-ids FILE` masks only the sequences that match one of the ids in `FILE` (one per line); `-exclude_ids FILE` masks all others. As in NCBI's, an id matches the first word of a sequence's title, whole or by its `|`-separated parts. The other sequences are left out of the output.
+- `-text_match F` (with `-infmt blastdb` only) reads each id of the `-ids` or `-exclude_ids` file as a Seq-id, such as `gb|AB000001.1|` or `AB000001.1`, and matches it against the Seq-ids of each database sequence, as NCBI's does: case does not matter (except in a PDB chain), the versions must agree (`AB000001` does not match `AB000001.1`), and an accession alone does not match an id stored with a name (`P12345` does not match `sp|P12345|ABC_HUMAN`). A database made with `-parse_seqids` stores a FASTA id that is a bare word, such as `rec1`, as `lcl|rec1`; in a database made without it, the second sequence is `gnl|BL_ORD_ID|1`, the third `gnl|BL_ORD_ID|2`, and so on; `gnl|BL_ORD_ID|0` matches no sequence, as in NCBI's. An id that is not a Seq-id, such as a bare word, is written to the standard error as an error and skipped; when no id of the file can be read, every sequence is masked. With `-outfmt seqloc_*` or `maskinfo_*`, a sequence's Seq-id is written as NCBI's writes it once the list has named it: `AB000001.1` in the list is a DDBJ accession, so `gb|AB000001.1|`, and every other GenBank, EMBL or DDBJ accession with the same letters, number of digits and version, is written as a DDBJ id, and a name is written in the list's case.
 
 ## Common options
 
@@ -77,7 +78,7 @@ The masks: `-outfmt` is one of:
 | --- | --- |
 | `interval` | For each sequence, its definition line, then one line `START - END` per masked interval. Positions count from 0 and include both ends. |
 | `fasta` | The sequences with masked letters in lower case. |
-| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. |
+| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. A sequence with several Seq-ids is named, here and in `maskinfo_*`, by its gi, else its first accession-type id (GenBank, RefSeq, Swiss-Prot, ...), else its first Seq-id, as NCBI's does. |
 | `maskinfo_asn1_text`, `maskinfo_asn1_bin`, `maskinfo_xml` | The intervals as masking information. The `maskinfo_asn1_*` files are the input of `makeblastdb -mask_data`. |
 
 Warnings about the input, such as a counts file without percentages when a `-t_*_pct` option is given, are written to the standard error, as NCBI writes them.
@@ -92,8 +93,7 @@ None that change the output of a normal run. When the reader of the output close
 - `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none): NCBI writes its percentages as its C runtime prints 0/0.
 - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers.
 - `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536: NCBI's result is undefined.
-- `-text_match F` with `-infmt blastdb` and `-ids` or `-exclude_ids`: LOSAT does not match ids as Seq-ids yet.
-- An ids file with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
+- An ids file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
 
 See [What LOSAT refuses](../refusals.md#windowmasker).
 

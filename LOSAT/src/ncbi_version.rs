@@ -1,4 +1,4 @@
-//! NCBI corelib/version.cpp: what an NCBI application prints for `-version`, `-version-full`,
+//! NCBI reference (598d8ae6): c++/src/corelib/version.cpp: what an NCBI application prints for `-version`, `-version-full`,
 //! `-version-full-xml` and `-version-full-json` (`CVersionAPI::Print`, `PrintXml`, `PrintJson`),
 //! the words that its application start reads before the arguments (`ncbi_environment::preparse`).
 //!
@@ -19,12 +19,6 @@
 /// status 0 (`ncbi_environment::preparse`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:84-87
-/// ```c++
-/// const char* s_ArgVersion         = "-version";
-/// const char* s_ArgFullVersion     = "-version-full";
-/// const char* s_ArgFullVersionXml  = "-version-full-xml";
-/// const char* s_ArgFullVersionJson = "-version-full-json";
-/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VersionRequest {
     /// `-version`: `Print(appname, fVersionInfo | fPackageShort)`.
@@ -61,34 +55,6 @@ impl VersionRequest {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-1000
-// ```c++
-//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print VERSION
-//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//
-//                 // Full version
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print full VERSION
-//                 cout << GetFullVersion().Print( appname );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersionXml) == 0 ) {
-//                 delete[] v;
-//                 // Print full VERSION in XML format
-//                 cout << GetFullVersion().PrintXml( appname );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersionJson) == 0 ) {
-//                 delete[] v;
-//                 // Print full VERSION in JSON format
-//                 cout << GetFullVersion().PrintJson( appname );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-// ```
 /// The text that `request` prints for the program `appname` whose version prints as `version`
 /// (`CVersionInfo::Print`: `2.17.0+` for the BLAST+ programs, whose `CBlastVersion::Print` adds
 /// the `+`, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
@@ -196,14 +162,6 @@ fn components_json(components: &[Component]) -> String {
 /// package's build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:737-742
-/// ```c++
-///     if (flags & ( fPackageShort | fPackageFull )) {
-///         os << " Package: " << GetPackageName() << ' '
-///            << GetPackageVersion().Print() << ", build "
-///            << NCBI_SBUILDINFO_DEFAULT().date
-///            << endl;
-///     }
-/// ```
 fn package_line() -> String {
     format!(
         " Package: LOSAT {}, output compatible with blast {}\n",
@@ -217,35 +175,6 @@ fn package_line() -> String {
 /// GIs and an empty build information (`SBuildInfo::Print` writes a line per value).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:743-769
-/// ```c++
-///     if (flags & fPackageFull) {
-///         os << " Package-Config: " << ' ' << GetPackageConfig() << endl;
-///     }
-/// #endif
-///
-/// #ifdef NCBI_SIGNATURE
-///     if (flags & fBuildSignature) {
-///         os << " Build-Signature: " << ' ' << NCBI_SIGNATURE << endl;
-///     }
-/// #endif
-///     if (flags & fGI64bit) {
-/// #ifdef NCBI_INT8_GI
-///         os << " GI-64bit:  TRUE" << endl;
-/// #else
-///         os << " GI-64bit:  FALSE" << endl;
-/// #endif
-///     }
-///
-///     if (flags & fBuildInfo) {
-///         os << m_BuildInfo.Print();
-///     }
-///
-///     if (flags & fComponents) {
-///         for (const auto& c : m_Components) {
-///             os << endl << ' ' <<  c->Print() << endl;
-///         }
-///     }
-/// ```
 fn print_text(appname: &str, version: &str) -> String {
     format!(
         "{appname}: {version}\n{} Package-Config:  \n GI-64bit:  TRUE\n",
@@ -257,44 +186,8 @@ fn print_text(appname: &str, version: &str) -> String {
 /// is LOSAT, with its version, an empty build information and an empty `config`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:778-820
-/// ```c++
-///     os << "<?xml version=\"1.0\"?>\n"
-///         "<ncbi_version xmlns=\"ncbi:version\"\n"
-///         "  xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
-///         "  xs:schemaLocation=\"ncbi:version ncbi_version.xsd\">\n";
-///
-///     if (flags & fVersionInfo) {
-///         if ( !appname.empty() ) {
-///             os << "<appname>" << NStr::XmlEncode(appname) << "</appname>\n";
-///         }
-///         os << m_VersionInfo->PrintXml();
-///     }
-///     ...
-///     if (flags & ( fPackageShort | fPackageFull )) {
-///         os << "<package name=\"" << NStr::XmlEncode(GetPackageName()) << "\">\n" <<
-///             GetPackageVersion().PrintXml() <<
-///             NCBI_SBUILDINFO_DEFAULT().PrintXml();
-///         if (flags & fPackageFull) {
-///             os << "<config>" << NStr::XmlEncode(GetPackageConfig()) << "</config>\n";
-///         }
-///         os << "</package>\n";
-///     }
-///     ...
-///     if (flags & fBuildInfo) {
-///         os << m_BuildInfo.PrintXml();
-///     }
-///
-///     os << "</ncbi_version>\n";
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:567-579 (`SBuildInfo::PrintXml`,
 /// without a date, tag or other value)
-/// ```c++
-///     os << "<build_info";
-///     ...
-///     os << ">" << endl;
-///     ...
-///     os << "</build_info>" << endl;
-/// ```
 fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
     format!(
         "<?xml version=\"1.0\"?>\n\
@@ -323,48 +216,6 @@ fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
 /// components is empty, as NCBI's BLAST+ programs write it, except for windowmasker.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:829-884
-/// ```c++
-///     os << "{\n  \"ncbi_version\": {\n";
-///
-///     if (flags & fVersionInfo) {
-///         if ( !appname.empty() ) {
-///             os << "    \"appname\": " << NStr::JsonEncode(appname, NStr::eJsonEnc_Quoted) << ",\n";
-///         }
-///         os << "    \"version_info\": " << m_VersionInfo->PrintJson();
-///         need_separator = true;
-///     }
-///
-///     if (flags & fComponents) {
-///         if ( need_separator ) os << ",\n";
-///         os << "    \"component\": [";
-///         ...
-///         os << "]";
-///         need_separator = true;
-///     }
-///
-/// #if NCBI_PACKAGE
-///     if (flags & ( fPackageShort | fPackageFull )) {
-///         if ( need_separator ) os << ",\n";
-///         os << "    \"package\": {\n" <<
-///             "      \"name\": " << NStr::JsonEncode(GetPackageName(), NStr::eJsonEnc_Quoted) << ",\n" <<
-///             "      \"version_info\": " << GetPackageVersion().PrintJson() << ",\n" <<
-///             "      \"build_info\": " << NCBI_SBUILDINFO_DEFAULT().PrintJson();
-///         if (flags & fPackageFull) {
-///             os << ",\n      \"config\": " << NStr::JsonEncode(GetPackageConfig(), NStr::eJsonEnc_Quoted);
-///         }
-///         os << "}";
-///         need_separator = true;
-///     }
-/// #endif
-///     ...
-///     if (flags & fBuildInfo) {
-///         if ( need_separator ) os << ",\n";
-///         os << "    \"build_info\": " << m_BuildInfo.PrintJson();
-///         need_separator = true;
-///     }
-///
-///     os << "\n  }\n}\n";
-/// ```
 fn print_json(appname: &str, version: &str, components: &[Component]) -> String {
     format!(
         "{{\n  \"ncbi_version\": {{\n    \
@@ -419,23 +270,6 @@ impl<'a> VersionNumbers<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:137-153
-/// ```c++
-/// string CVersionInfo::PrintXml(void) const
-/// {
-///     CNcbiOstrstream os;
-///     os << "<version_info";
-///     if (m_Major >= 0) {
-///         os << " major=\"" << m_Major <<
-///             "\" minor=\"" << (m_Minor >= 0 ? m_Minor : 0) << "\"";
-///         if (m_PatchLevel >= 0) {
-///             os << " patch_level=\"" << m_PatchLevel << "\"";
-///         }
-///     }
-///     if ( !m_Name.empty() ) {
-///         os << " name=\"" << NStr::XmlEncode(m_Name) << "\"";
-///     }
-///     os << "/>\n";
-/// ```
 fn version_info_xml(version: &VersionNumbers) -> String {
     let VersionNumbers {
         major,
@@ -452,26 +286,6 @@ fn version_info_xml(version: &VersionNumbers) -> String {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:156-175
-/// ```c++
-/// string CVersionInfo::PrintJson(void) const
-/// {
-///     CNcbiOstrstream os;
-///     os << "{";
-///     bool need_separator = false;
-///     if (m_Major >= 0) {
-///         os << "\"major\": " << m_Major <<
-///             ", \"minor\": " << (m_Minor >= 0 ? m_Minor : 0);
-///         if (m_PatchLevel >= 0) {
-///             os << ", \"patch_level\": " << m_PatchLevel;
-///         }
-///         need_separator = true;
-///     }
-///     if ( !m_Name.empty() ) {
-///         if ( need_separator ) os << ", ";
-///         os << "\"name\": " << NStr::JsonEncode(m_Name, NStr::eJsonEnc_Quoted);
-///     }
-///     os << "}";
-/// ```
 fn version_info_json(version: &VersionNumbers) -> String {
     let VersionNumbers {
         major,

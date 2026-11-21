@@ -340,3 +340,49 @@ v_smem65536	-convert -in counts/u4.ascii -sformat obinary -smem 65536 -out @OUT@
 v_smem1	-convert -in counts/u4.ascii -sformat obinary -smem 1
 v_pct	-convert -in counts/u4.ascii -sformat ascii -t_thres_pct 50
 v_dryrun	-convert -in counts/u4.ascii -dryrun
+# -text_match F with -infmt blastdb: each id of the list read as a Seq-id (CIdSet_SeqId) and matched against the database sequence's Seq-ids; an id that CSeq_id cannot read is posted and skipped (probe s1 of line NP M5; rows added 2026-11-21 by M5c).
+s_wm_ids_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_db.txt -text_match F
+s_wm_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_a.txt -text_match F
+s_wm_ids_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_ord.txt -text_match F
+s_wm_ids_case	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_case.txt -text_match F
+s_wm_ids_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_forms.txt -text_match F
+s_wm_ids_bad	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_bad.txt -text_match F
+s_wm_ex_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -exclude_ids in/ids_db.txt -text_match F
+s_wm_ex_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -exclude_ids in/ids_ord.txt -text_match F
+s_ps_ids_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F
+s_ps_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_a.txt -text_match F
+s_ps_ids_unver	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_unver.txt -text_match F
+s_ps_ids_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_ord.txt -text_match F
+s_ps_ids_case	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_case.txt -text_match F
+s_ps_ids_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_forms.txt -text_match F
+s_ps_ids_bad	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_bad.txt -text_match F
+s_ps_ids_lcl	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_lcl.txt -text_match F
+s_ps_ids_sp	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_sp.txt -text_match F
+s_ps_ids_tpa	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_tpa.txt -text_match F
+s_ps_ids_err	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_seqid_err.txt -text_match F
+s_ps_ex_err	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_seqid_err.txt -text_match F
+s_ps_ids_crlf	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_seqid_crlf.txt -text_match F
+s_ps_ids_missing	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/nonexistent.txt -text_match F
+s_ps_ex_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_db.txt -text_match F
+s_ps_ex_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_forms.txt -text_match F
+s_ps_ids_forms_fasta	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_forms.txt -outfmt fasta -text_match F
+s_ps_ex_forms_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_forms.txt -outfmt maskinfo_asn1_text -parse_seqids -text_match F
+# -text_match F after the M5c review (2026-11-21): the Seq-id that seqloc_* and maskinfo_* print once a list id made the info of the handle (another alternative, another number, another case), ordinal ids of a list of two databases, a database with a gi, two definition lines and a local id first; and FASTA records whose Seq-id of the handle is not the first.
+s_ps_ids_db_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F -outfmt maskinfo_asn1_text
+s_ps_ids_db_sl	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F -outfmt seqloc_asn1_text
+s_ps_ex_emb_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_emb2.txt -text_match F -outfmt maskinfo_asn1_text
+s_ps_ids_case_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_case_mi.txt -text_match F -outfmt maskinfo_asn1_text
+s_wm2_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm" -ids in/ids_ord8.txt -text_match F
+s_wm2_ids_ord3	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm" -ids in/ids_ord3.txt -text_match F
+s_mid_ids_gi5	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_gi5.txt -text_match F -outfmt maskinfo_asn1_text
+s_mid_ids_gibar	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_gi5_bar.txt -text_match F
+s_mid_ids_ab5	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_ab5.txt -text_match F
+s_mid_ids_ab6	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_ab6.txt -text_match F
+s_mid_ids_aj7	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_aj7.txt -text_match F
+s_mid_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -outfmt maskinfo_asn1_text
+s_mid_ps	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -parse_seqids
+s_fa_access_sl	-ustat ../winmask/counts/dm2L_u9.binary -in in/access.fa -parse_seqids -outfmt seqloc_asn1_text
+s_fa_access_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/access.fa -parse_seqids -outfmt maskinfo_asn1_text
+s_wmb_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm_b" -ids in/ids_ord8.txt -text_match F
+s_bwm_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm_b db/wm" -ids in/ids_ord8.txt -text_match F
+s_ps_ids_warn	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_warn.txt -text_match F

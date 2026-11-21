@@ -15,13 +15,6 @@
 //! queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-356
-//! ```c
-//! for (align = *alignments; NULL != align; align = align->next) {
-//!     GapEditScript * editScript = align->context;
-//!     align->context = NULL;
-//!     status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
-//! }
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

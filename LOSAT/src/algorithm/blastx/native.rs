@@ -7,13 +7,6 @@ use super::{
     archive,
     args::BlastxArgs,
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
     input::{
         read_fasta_stream_batches, stream_is_empty, FastaParseError, InputWarning, NoDeflineError,
         QueryStreamSettings,
@@ -37,13 +30,6 @@ use anyhow::{bail, Result};
 use std::{
     fmt,
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
     io::{self, Write},
     path::Path,
 };
@@ -57,11 +43,6 @@ mod run_parts;
 use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
@@ -96,18 +77,6 @@ pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
 /// (`fasta_reader::no_defline_error`), every other error is `input_error`'s.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
-/// ```c++
-///         catch (const CObjReaderParseException& e) {
-///             auto err = e.GetErrCode();
-///             if (err == CObjReaderParseException::eEOF) {
-///                 break;
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 CNcbiStrstream ss;
-///                 ss << "Query input doesn't start with "
-///                     "a defline or comment, line " << e.GetPos() << ends;
-///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-///             }
-/// ```
 pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
     match error.downcast_ref::<NoDeflineError>() {
         Some(NoDeflineError(line)) => crate::blastinput::fasta_reader::no_defline_error(*line),
@@ -115,13 +84,6 @@ pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
 pub(super) fn output_error(_: io::Error) -> anyhow::Error {
     NativeError {
         exit: 6,
@@ -143,32 +105,10 @@ pub(super) fn archive_error(error: anyhow::Error) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
 pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-    // ```c++
-    // CBlastTabularInfo::~CBlastTabularInfo()
-    // {
-    //     m_Ostream.flush();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-    // ```c++
-    // {
-    //     m_Outfile.exceptions(NcbiBadbit);
-    // ```
     if error.is::<super::blast_xml::XmlRefusal>()
         || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
@@ -196,16 +136,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
             || e.exit == 255
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
-        // ```c++
-        //     catch (const CSeqDBException& e) {                                      \
-        // ```
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
-        // ```c++
-        //         else {                                                              \
-        //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-        //         	exit_code = BLAST_DATABASE_ERROR;                               \
-        //         }                                                                   \
-        // ```
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
         // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
@@ -226,95 +157,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-70
-// ```c++
-//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-//     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-//     m_BlastDbArgs->SetIPGFilteringSupport(true);
-//     arg.Reset(m_BlastDbArgs);
-//     m_Args.push_back(arg);
-//
-//     m_StdCmdLineArgs.Reset(new CStdCmdLineArgs);
-//     arg.Reset(m_StdCmdLineArgs);
-//     m_Args.push_back(arg);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2537
-// ```c++
-//             subj_input_stream = &args[kArgSubject].AsInputFile();
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2554-2557
-// ```c++
-//         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-//                                        subj_range, parse_deflines,
-//                                        use_lcase_masks, subjects, m_IsMapper);
-//         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3468-3468
-// ```c++
-//             m_InputStream = &args[kArgQuery].AsInputFile();
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3479-3479
-// ```c++
-//         m_OutputStream = &args[kArgOutput].AsOutputFile();
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:198-200
-// ```c++
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
-// ```c++
-//         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-//            	ERR_POST(Warning << "Query is Empty!");
-//            	return BLAST_EXIT_SUCCESS;
-//         }
-//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
-// ```c++
-//         formatter.PrintProlog();
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:260-297
-// ```c++
-// 	    BLAST_PROF_START( APP.LOOP.PRE );
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-//
-//             CRef<CSearchResultSet> results;
-// 	    BLAST_PROF_STOP( APP.LOOP.PRE );
-//
-//             if (m_CmdLineArgs->ExecuteRemotely()) {
-//                 CRef<CRemoteBlast> rmt_blast =
-//                     InitializeRemoteBlast(queries, db_args, m_OptsHndl,
-//                           m_CmdLineArgs->ProduceDebugRemoteOutput(),
-//                           m_CmdLineArgs->GetClientId());
-//                 results = rmt_blast->GetResultSet();
-//             } else {
-// 	        BLAST_PROF_START( APP.LOOP.BLAST );
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// 	        BLAST_PROF_STOP( APP.LOOP.BLAST );
-//             }
-// 	    BLAST_PROF_START( APP.LOOP.FMT );
-//             if (fmt_args->ArchiveFormatRequested(args)) {
-//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//                 m_Bah.ResetMessages();
-//             } else {
-//                 BlastFormatter_PreFetchSequenceData(*results, scope,
-//                 		                            fmt_args->GetFormattedOutputChoice());
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-//             }
-// 	    BLAST_PROF_STOP( APP.LOOP.FMT );
-// 	    batch_num++;
-//         }
-//         BLAST_PROF_START( APP.POST );
-//         formatter.PrintEpilog(opt);
-// ```
 fn run_inner(
     args: &BlastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -322,14 +172,7 @@ fn run_inner(
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     strategy_slot: &mut Option<crate::report::archive::strategy::StrategyExport>,
 ) -> Result<()> {
-    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
-    // ```c
-    //     // Setup some debugging features from environment variables.
-    //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-    //         SetDiagTrace(eDT_Enable, eDT_Enable);
-    //     }
-    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
     // NCBI's application layer reads its environment and registry files before blastx's own
     // code runs; LOSAT rejects the settings that change the output first, before any option or
     // file of the run, in `main` as for its other programs: `settings` are those of the run's
@@ -352,25 +195,7 @@ fn run_inner(
         resolution,
     } = RunSetup::open(args, &settings, program, archive_slot, strategy_slot)?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-735
-    // ```c++
-    //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-    //             if ( !fstrm->is_open() ) {
-    //                 delete fstrm;
-    //                 fstrm = NULL;
-    //             } else {
-    //                 m_DeleteFlag = true;
-    //             }
-    //         }
-    //         m_Ios = fstrm;
-    // ```
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
     // `-db`: the database opens after the options are processed (below).
     let subject_path = args.subject.as_deref();
     // NCBI opens the `-subject` and `-query` files inside `Run`, after the diagnostics handler
@@ -379,7 +204,7 @@ fn run_inner(
         write_run_error_archive(args, archive.as_ref(), &error);
         error
     };
-    // `-subject -` is `cin` (ncbiargs.cpp:717-721, quoted at `input_files::open_input`), the
+    // `-subject -` is `cin` (ncbiargs.cpp:717-721, cited at `input_files::open_input`), the
     // stream that `-query -` names too: one owner opens both (`open_input`).
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
@@ -451,14 +276,6 @@ fn run_inner(
     }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // ```c++
-    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-    //     : m_QueryVector(& queries)
-    // {
-    //     if (queries.Empty()) {
-    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-    //     }
-    // ```
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
@@ -519,42 +336,12 @@ fn run_inner(
     // error archive in the same output (`run`).
     let writer = output.insert(stream);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
-    // ```c++
-    //     if(hitlist_size < 5){
-    //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
-    // ```c++
-    //     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
-    //     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
-    //     		NCBI_THROW(CInputException, eInvalidInput,
-    //     		                        "SAM format is only applicable to blastn" );
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:110-126
-    // ```c++
-    //     arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
-    //     m_Args.push_back(arg);
-    //
-    //     m_FormattingArgs.Reset(new CFormattingArgs);
-    //     arg.Reset(m_FormattingArgs);
-    //     m_Args.push_back(arg);
-    // ...
-    //     arg.Reset(new CCompositionBasedStatsArgs);
-    //     m_Args.push_back(arg);
-    // ```
     // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
-    // ```c++
-    //     // set the sequence range
-    //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
-    //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
-    //                                      "Invalid specification of query location");
-    //     }
-    // ```
     // The query options handler comes before the genetic code and formatting handlers
     // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
     // value parsers, `resolve`).
@@ -570,23 +357,9 @@ fn run_inner(
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
-    // ```c++
-    //     catch (const blast::CInputException& e) {                               \
-    //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-    //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    // ```
     let mut options = resolution.map_err(options_error)?;
     options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
-    // ```c++
-    //         /*** Initialize the database/subject ***/
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope;
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
     let database = match args.database_name() {
@@ -627,16 +400,7 @@ fn run_inner(
         }
         None => None,
     };
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-    // ```c++
-    // void CBlastTabularInfo::x_CheckTaxDB()
-    // {
-    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
-    //     ...
-    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-    //    		if(resolved.empty())
-    //    			ERR_POST(Warning << "Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-135
     options.filtered_empty = database
         .as_ref()
         .is_some_and(|database| database.filtered_empty());
@@ -707,7 +471,7 @@ fn run_inner(
         )
     };
     let mut read_ahead_scopes = None;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (cited at
     // `blast_xml::write_blastx_xml`)
     // Where the run's XML format fails for a matrix name that NCBI's BLAST XML report data does not
     // know (`blast_xml::xml_matrix_failure`, decided once for the run): before any report is
@@ -777,28 +541,8 @@ fn run_inner(
         }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-    // ```c++
-    // 	char c;
-    // 	CNcbiStreampos orig_p = in.tellg();
-    // 	// Piped input
-    // 	if(orig_p < 0)
-    // 		return false;
-    //
-    // 	IOS_BASE::iostate orig_state = in.rdstate();
-    // 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-    //
-    // 	if(! (in >> c))
-    // 		return true;
-    //
-    // 	in.seekg(orig_p);
-    // 	in.flags(orig_flags);
-    // 	in.clear();
-    // 	in.setstate(orig_state);
-    //
-    // 	return false;
-    // ```
     let mut query_stream = query_settings.stream(query_file);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (cited at
     // `input::emit_fasta_batch`: the batch drops a record whose range starts past its end, after
     // the reader added it to its scope)
     // The records that `-query_loc` skips are kept for NCBI's scope of a batch's prefetch, which
@@ -814,12 +558,6 @@ fn run_inner(
         query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-245
-    // ```c++
-    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-    //     CRef<CBlastInput> input(new CBlastInput(fasta));
-    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-    //     sequences = input->GetAllSeqs(*scope);
-    // ```
     // With `-query -` and `-subject -` the subjects were read from `cin` to its end above: the
     // stream has failed, its `tellg()` is negative, and the test above answers "not empty" even
     // for a regular file as the standard input. No query batch is read then: outfmt 7 writes
@@ -836,20 +574,7 @@ fn run_inner(
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:217-218
-    // ```c++
-    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
-    // ```c++
-    //     // used for experimentation purposes
-    //     char* batch_sz_str = getenv("BATCH_SIZE");
-    //     if (batch_sz_str) {
-    //         retval = NStr::StringToInt(batch_sz_str);
-    //         _TRACE("DEBUG: Using query batch size " << retval);
-    //         return retval;
-    //     }
-    // ```
     // The letters of a reader / report batch: `BATCH_SIZE` when it is set, else 10002. The
     // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
     // large a reader batch is: a reader batch is split into units that are searched as the
@@ -857,33 +582,8 @@ fn run_inner(
     // is searched. (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-    // ```c++
-    //         catch(CBlastException & e ) {
-    //         	// Skip bad subject sequence
-    //         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-    //         		seqblk_vec->push_back(subj);
-    //         		string warning = kEmptyStr;
-    //         		const CSeq_id *  id = subjects.GetSeqId(i);
-    //         		string title = subjects.GetTitle(i);
-    //         		if(id != NULL) {
-    //         			warning = id->GetSeqIdString() + " ";
-    //         		}
-    //         		warning += subjects.GetTitle(i);
-    //         		if(warning != kEmptyStr){
-    //         			warning += ": ";
-    //         		}
-    //         		warning += "Subject sequence contains no data";
-    //         		ERR_POST(Warning << warning);
-    //         		continue;
-    // ```
     write_empty_subject_warnings(&subjects, &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
-    // ```c++
-    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
-    //         }
-    //         formatter.PrintProlog();
-    // ```
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
@@ -1050,14 +750,6 @@ fn run_inner(
             .write(writer, diagnostics, queries, results, queries_before);
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288
-        // ```c++
-        //             if (fmt_args->ArchiveFormatRequested(args)) {
-        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-        //                 m_Bah.ResetMessages();
-        //             } else {
-        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-        //                 		                            fmt_args->GetFormattedOutputChoice());
-        // ```
         // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
         // search and, with `-db`, the read of its reported sequences' titles (NCBI's traceback,
         // `batch_titles`): a value that NCBI cannot convert stops the first batch here, after the
@@ -1175,12 +867,6 @@ fn run_inner(
         writer.flush().map_err(output_error)
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
-    // ```c++
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
     // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
     // writes once its query factory is made, before its search: the loop takes each batch here
     // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
@@ -1259,13 +945,6 @@ fn run_inner(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
-// ```c++
-//                 BlastFormatter_PreFetchSequenceData(*results, scope,
-//                 		                            fmt_args->GetFormattedOutputChoice());
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ```
 /// What the reports of a query batch read of its database sequences
 /// (`ReportedSubjects::for_batch`): the arguments of one format (`of`), or of several (`or`).
 #[derive(Clone, Copy, Default)]
@@ -1408,7 +1087,7 @@ pub(super) fn batch_titles(
     titles.map(Some).map_err(reported_error)
 }
 
-/// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, quoted at `reported_batch`) does
+/// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, cited at `reported_batch`) does
 /// with a query batch.
 pub(super) struct BatchPrefetch {
     /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
@@ -1484,7 +1163,7 @@ impl BatchPrefetch {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313 (cited at
 // `common::database::stop_lookup_unsure`: the formatter keeps its scope after a batch in outfmt
 // 5 only)
 /// NCBI's scope of the query records at the prefetch of each query batch of a BLASTX run
@@ -1606,13 +1285,6 @@ pub(super) fn reported_batch(
         reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //             	ITERATE(CSearchResultSet, result, *results) {
-    //                	    formatter.PrintOneResultSet(**result, query_batch);
-    //             	}
-    // ```
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database
     // writes its messages there (`ReportedSubjects::batch_prefetch`: the
@@ -1629,17 +1301,6 @@ pub(super) fn reported_batch(
     // holds, and the run holds where one could come
     // (`BlastxDatabase::later_batch_may_refuse`), as XML2's does.
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
-    // ```c++
-    // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
-    // {
-    // 	if ((format_type == CFormattingArgs::eAsnText) ||
-    // 	    (format_type == CFormattingArgs::eAsnBinary) ||
-    // 	    (format_type == CFormattingArgs::eArchiveFormat)||
-    // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
-    // 		return false;
-    // 	}
-    // 	return true;
-    // ```
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
     let prefetch_format = match options.outfmt {
@@ -1765,10 +1426,6 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
-// ```c++
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
 /// The error of the search of a query batch as a `-db` run reports it, and a `-subject` run
 /// (no `x_stream`, nothing `unreadable`).
 pub(super) fn database_search_error(
@@ -1813,12 +1470,6 @@ pub(super) fn database_search_error(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
-// ```c++
-//     catch (const blast::CInputException& e) {                               \
-//         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-//         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-// ```
 /// NCBI's error of the options that `BlastxArgs::resolve` defers (`SemanticOptionsError`).
 /// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): uses `USER_MANUAL_FOOTER`.
 /// The message of a `SemanticOptionsError` keeps its bytes (probe R9 of line LIB-B).
@@ -1830,15 +1481,6 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-// ```c++
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         ...
-//         		warning += "Subject sequence contains no data";
-//         		ERR_POST(Warning << warning);
-//         		continue;
-// ```
 /// The warning of each `-subject` record without letters, as every program writes it
 /// (`input_files::write_empty_subject_warnings_of`: the id, then the title's bytes as read).
 pub(super) fn write_empty_subject_warnings(
@@ -1902,34 +1544,13 @@ pub(super) fn run_query_batches(
     let x_t_loop = super::x_timing::lap();
     let x_batches = {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:260-261
-        // ```c++
-        // 	    BLAST_PROF_START( APP.LOOP.PRE );
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        // ```
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
-        // ```c++
-        //             	ITERATE(CSearchResultSet, result, *results) {
-        //                	    formatter.PrintOneResultSet(**result, query_batch);
-        // ```
         // The reader and formatter use the same diagnostic stream at distinct
         // times. RefCell only serializes Rust borrows; it does not defer events.
         let diagnostics = std::cell::RefCell::new(diagnostics);
         // The batch loop as a function of the pool its searches run on, so that one pool can serve
         // all batches.
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
-        // ```c
-        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        // ...
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        // ...
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // ...
-        //             	ITERATE(CSearchResultSet, result, *results) {
-        //                	    formatter.PrintOneResultSet(**result, query_batch);
-        //             	}
-        // ```
         // NCBI runs this loop: take the next batch of queries, search it, print its results.
         // x_run_batches is the same loop (the code below the batched branch is the original loop
         // body) as a closure over the pool its searches run on, so that one pool can serve all
@@ -1952,18 +1573,6 @@ pub(super) fn run_query_batches(
             // A batch with a long query is split into chunks that use the whole
             // pool already; it is flushed at once, never queued with others.
             // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:345-357
-            // ```c
-            // 		while (master_node.Processing()) {
-            // 			if (!input.AtEOF()) {
-            // 			 	if (!master_node.IsFull()) {
-            // ...
-            // 					int num_q = input.GetQueryBatch(qb, q_index);
-            // 					if (num_q > 0) {
-            // 						CBlastNodeMailbox * mb(new CBlastNodeMailbox(chunk_num, master_node.GetBuzzer()));
-            // 						CBlastxNode * t(new CBlastxNode(chunk_num, GetArguments(), args, m_Bah, qb, q_index, num_q, mb));
-            // 						master_node.RegisterNode(t, mb);
-            // 						chunk_num ++;
-            // ```
             // NCBI has a similar mode (-mt_mode 1, x_RunMTBySplitQuery): several query batches are
             // searched at the same time as nodes of a master node. Here the batches are queued and
             // replayed in input order; the results printed are those of the one-batch-at-a-time
@@ -2117,19 +1726,6 @@ pub(super) fn run_query_batches(
                 );
                 }
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
-                // ```c
-                //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-                // ...
-                //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-                // ...
-                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-                //                 results = lcl_blast.Run();
-                // ...
-                //             	ITERATE(CSearchResultSet, result, *results) {
-                //                	    formatter.PrintOneResultSet(**result, query_batch);
-                //             	}
-                // ```
                 // x_flush searches the queued batches (side by side, or one after another with the
                 // whole pool inside each) and then writes warnings and results in the order the
                 // reader produced them, which is the order of the loop above.
@@ -2277,30 +1873,11 @@ pub(super) fn run_query_batches(
             read(
                 &mut |queries| {
                     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
-                    // ```c++
-                    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-                    // 	    BLAST_PROF_START( APP.LOOP.PRE );
-                    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-                    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-                    // ```
                     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-                    // ```c++
-                    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-                    //     : m_QueryVector(& queries)
-                    // {
-                    //     if (queries.Empty()) {
-                    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-                    //     }
-                    // ```
                     if queries.is_empty() {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-                    // ```c
-                    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-                    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-                    //                 results = lcl_blast.Run();
-                    // ```
                     // Dispatch point: with a kept pool the batch is searched on it; without one,
                     // search_internal runs as before. Both searches compute the same result (the
                     // pool only changes who runs the work).
@@ -2337,11 +1914,6 @@ pub(super) fn run_query_batches(
             )
         };
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-        // ```c
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // ```
         // Dispatch point: NCBI builds a CLocalBlast, and so its worker threads, for every batch.
         // With 2+ threads one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
@@ -2443,123 +2015,12 @@ fn write_run_error_archive(
     }
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013
-// ```c++
-//         FASTA_WARNING_EX(LineNumber(),
-//             "CFastaReader: Hyphens are invalid and will be ignored around line " << LineNumber(),
-//             ILineError::eProblem_IgnoredResidue,
-//             kEmptyStr, kEmptyStr, "-" );
-//     }
-//
-//     // before throwing, be sure that we're in a valid state so that callers can
-//     // parse multiple lines and get the invalid residues in all of them.
-//
-//     if( ! bad_pos_vec.empty() ) {
-//         if (TestFlag(fValidate)) {
-//                         NCBI_THROW2(CBadResiduesException, eBadResidues,
-//                 "CFastaReader: There are invalid " + x_NucOrProt() + "residue(s) in input sequence",
-//                 CBadResiduesException::SBadResiduePositions( m_BestID, bad_pos_vec, bad_pos_line_num ) );
-//         } else {
-//             stringstream warn_strm;
-//             warn_strm << "FASTA-Reader: Ignoring invalid " << x_NucOrProt()
-//                 << "residues at position(s): ";
-//             CBadResiduesException::SBadResiduePositions(
-//                 m_BestID, bad_pos_vec, bad_pos_line_num ).ConvertBadIndexesToString(warn_strm);
-//
-//             FASTA_WARNING(0,
-//                 warn_strm.str(),
-//                 ILineError::eProblem_InvalidResidue,
-//                 kEmptyStr );
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2217
-// ```c++
-// void CFastaReader::PostWarning(
-//             ILineErrorListener * pMessageListener,
-//             EDiagSev _eSeverity, size_t _uLineNum, CTempString _MessageStrmOps, CObjReaderParseException::EErrCode _eErrCode, ILineError::EProblem _eProblem, CTempString _sFeature, CTempString _sQualName, CTempString _sQualValue) const
-// {
-//     if (find(m_ignorable.begin(), m_ignorable.end(), _eProblem) != m_ignorable.end())
-//         // this is a problem that should be ignored
-//         return;
-//
-//     string sSeqId = ( m_BestID ? m_BestID->AsFastaString() : kEmptyStr);
-//     AutoPtr<CObjReaderLineException> pLineExpt(
-//         CObjReaderLineException::Create(
-//         (_eSeverity), static_cast<unsigned>(_uLineNum),
-//         _MessageStrmOps,
-//         (_eProblem),
-//         sSeqId, (_sFeature),
-//         (_sQualName), (_sQualValue),
-//         _eErrCode) );
-//     if ( ! pMessageListener && (_eSeverity) <= eDiag_Warning ) {
-//         LOG_POST_X(1, Warning << pLineExpt->Message());
-//     } else if ( ! pMessageListener || ! pMessageListener->PutError( *pLineExpt ) )
-//     {
-//         throw CObjReaderParseException(DIAG_COMPILE_INFO, 0, _eErrCode, _MessageStrmOps, _uLineNum, _eSeverity);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_exception.cpp:106-137
-// ```c++
-//                 ++iRangesFound;
-//                 continue;
-//             }
-//
-//             const TSeqPos last_idx = rangesFound.back().second;
-//             if( idx == (last_idx+1) ) {
-//                 // extend previous range
-//                 ++rangesFound.back().second;
-//                 continue;
-//             }
-//
-//             if( iRangesFound >= maxRanges ) {
-//                 break;
-//             }
-//
-//             // create new range
-//             rangesFound.push_back(TRange(idx, idx));
-//             ++iRangesFound;
-//         }
-//
-//         // turn the ranges found on this line into a string
-//         out << line_prefix << "On line " << lineNum << ": ";
-//         line_prefix = ", ";
-//
-//         const char *pos_prefix = "";
-//         for( unsigned int rng_idx = 0;
-//             ( rng_idx < rangesFound.size() );
-//             ++rng_idx )
-//         {
-//             out << pos_prefix;
-//             const TRange &range = rangesFound[rng_idx];
-//             out << (range.first + 1); // "+1" because 1-based for user
-// ```
 // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta_exception.hpp:90-92
-// ```c++
-//         void ConvertBadIndexesToString(
-//             CNcbiOstream & out,
-//             unsigned int maxRanges = 1000 ) const;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2117-2125
-// ```c++
-// std::string CFastaReader::x_NucOrProt(void) const
-// {
-//     if( m_CurrentSeq && m_CurrentSeq->IsSetInst() &&
-//         m_CurrentSeq->GetInst().IsSetMol() )
-//     {
-//         return ( m_CurrentSeq->GetInst().IsAa() ? "protein " : "nucleotide " );
-//     } else {
-//         return kEmptyStr;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:226-230
-// ```c++
-// #define LOG_POST(message)                                               \
-//     ( NCBI_NS_NCBI::CNcbiDiag(DIAG_COMPILE_INFO,                        \
-//       NCBI_NS_NCBI::eDiag_Error,                                        \
-//       NCBI_NS_NCBI::eDPF_Log | NCBI_NS_NCBI::eDPF_IsNote).GetRef()      \
-//       << message                                                        \
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:747-747
-// ```c++
-//     eDPF_Log                = 0,
-// ```
 // ParseDataLine precedes AssignMolType (fasta.cpp:409,1360), so fresh
 // BLAST FASTA records have no molecule label when this warning is posted.
 // LOG_POST_X uses the log flags without severity/prefix. Positions in the
@@ -3252,13 +2713,6 @@ mod archive_error_tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-944
-    // ```c++
-    //         if (m_Option & eShowTotalScore) {
-    //             out << kTwoSpaceMargin << kOneSpaceMargin << (*iter)->total_bit_string;
-    //             CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen -
-    //                                    (*iter)->total_bit_string.size());
-    //         }
-    // ```
     // A BLASTX report with `-sorthits` whose one subject (the table's last row) totals more than
     // 99999 bits: the report's `TotalScoreRefusal`, which `report_error` passes on. It is not
     // NCBI's "BLAST failed to write output" (exit status 6), so `exit_on_native_error` leaves it

@@ -2,18 +2,6 @@
 //! `HitList::x_room_for_one`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3219-3240
-//! ```c
-//!     const int kStartValue = 100;
-//! ...
-//!     if (hit_list->hsplist_current <= 0)
-//!        hit_list->hsplist_current = kStartValue;
-//!     else
-//!        hit_list->hsplist_current =
-//!           MIN(2*hit_list->hsplist_current, hit_list->hsplist_max);
-//!     hit_list->hsplist_array =
-//!        (BlastHSPList**) realloc(hit_list->hsplist_array,
-//!                                 hit_list->hsplist_current*sizeof(BlastHSPList*));
-//! ```
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
 //! `0`. It changes only how much room a hit list's array holds (the lib test
 //! `hit_list_array_grows_as_lists_come_within_ncbi_array_size`), never which lists it keeps, so

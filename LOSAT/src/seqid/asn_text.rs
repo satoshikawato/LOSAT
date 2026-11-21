@@ -11,11 +11,6 @@ use crate::seqid::model::{
 
 impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
-    // ```text
-    // Object-id ::= CHOICE {
-    //     id INTEGER ,
-    //     str VisibleString }
-    // ```
     pub(crate) fn object_id(&mut self) -> Result<ObjectId> {
         Ok(if self.choice(&["id", "str"])? == 0 {
             ObjectId::Id(self.int4()?)
@@ -25,11 +20,6 @@ impl<S: AsnSource> Reader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:71-73
-    // ```text
-    // Dbtag ::= SEQUENCE {
-    //     db VisibleString ,          -- name of database or system
-    //     tag Object-id }         -- appropriate tag
-    // ```
     pub(crate) fn dbtag(&mut self) -> Result<Dbtag> {
         let mut members = self.begin_members()?;
         let (mut db, mut tag) = (None, None);
@@ -46,20 +36,6 @@ impl<S: AsnSource> Reader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65
-    // ```text
-    // Date ::= CHOICE {
-    //     str VisibleString ,        -- for those unparsed dates
-    //     std Date-std }             -- use this if you can
-    //
-    // Date-std ::= SEQUENCE {        -- NOTE: this is NOT a unix tm struct
-    //     year INTEGER ,             -- full year (including 1900)
-    //     month INTEGER OPTIONAL ,   -- month (1-12)
-    //     day INTEGER OPTIONAL ,     -- day of month (1-31)
-    //     season VisibleString OPTIONAL ,  -- for "spring", "may-june", etc
-    //     hour INTEGER OPTIONAL ,    -- hour of day (0-23)
-    //     minute INTEGER OPTIONAL ,  -- minute of hour (0-59)
-    //     second INTEGER OPTIONAL }  -- second of minute (0-59)
-    // ```
     pub(crate) fn date(&mut self) -> Result<Date> {
         if self.choice(&["str", "std"])? == 0 {
             return Ok(Date::Str(self.string()?));
@@ -98,61 +74,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// A `Seq-id` of any variant.
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-74
-    // ```text
-    // Seq-id ::= CHOICE {
-    //     local Object-id ,            -- local use
-    //     gibbsq INTEGER ,             -- Geninfo backbone seqid
-    //     gibbmt INTEGER ,             -- Geninfo backbone moltype
-    //     giim Giimport-id ,           -- Geninfo import id
-    //     genbank Textseq-id ,
-    //     embl Textseq-id ,
-    //     pir Textseq-id ,
-    //     swissprot Textseq-id ,
-    //     patent Patent-seq-id ,
-    //     other Textseq-id ,           -- for historical reasons, 'other' = 'refseq'
-    //     general Dbtag ,              -- for other databases
-    //     gi INTEGER ,                 -- GenInfo Integrated Database
-    //     ddbj Textseq-id ,            -- DDBJ
-    //     prf Textseq-id ,             -- PRF SEQDB
-    //     pdb PDB-seq-id ,             -- PDB sequence
-    //     tpg Textseq-id ,             -- Third Party Annot/Seq Genbank
-    //     tpe Textseq-id ,             -- Third Party Annot/Seq EMBL
-    //     tpd Textseq-id ,             -- Third Party Annot/Seq DDBJ
-    //     gpipe Textseq-id ,           -- Internal NCBI genome pipeline processing ID
-    //     named-annot-track Textseq-id -- Internal named annotation tracking ID
-    // }
-    // ...
-    // Patent-seq-id ::= SEQUENCE {
-    //     seqid INTEGER ,         -- number of sequence in patent
-    //     cit Id-pat }           -- patent citation
-    //
-    // Textseq-id ::= SEQUENCE {
-    //     name VisibleString OPTIONAL ,
-    //     accession VisibleString OPTIONAL ,
-    //     release VisibleString OPTIONAL ,
-    //     version INTEGER OPTIONAL }
-    //
-    // Giimport-id ::= SEQUENCE {
-    //     id INTEGER ,                     -- the id to use here
-    //     db VisibleString OPTIONAL ,      -- dbase used in
-    //     release VisibleString OPTIONAL } -- the release
-    //
-    // PDB-seq-id ::= SEQUENCE {            --
-    //       mol PDB-mol-id ,                    -- the molecule name
-    //       chain INTEGER DEFAULT 32 ,          -- Deprecated:  'chain' can't support multiple character
-    //       ...
-    //       rel Date OPTIONAL ,                 -- release date, month and year
-    //       chain-id VisibleString OPTIONAL }   -- chain identifier; length-independent generalization of 'chain'
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
-    // ```text
-    // Id-pat ::= SEQUENCE {           -- just to identify a patent
-    //     country VisibleString ,         -- Patent Document Country
-    //     id CHOICE {
-    //         number VisibleString ,      -- Patent Document Number
-    //         app-number VisibleString } ,   -- Patent Doc Appl Number
-    //     doc-type VisibleString OPTIONAL }  -- Patent Doc Type
-    // ```
     // `gi` is `TGi`, an `Int8` in NCBI's 64-bit build.
     pub(crate) fn seq_id(&mut self) -> Result<ParsedSeqId> {
         let variant = self.choice(&SEQ_ID_ALTERNATIVES)?;

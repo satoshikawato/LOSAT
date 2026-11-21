@@ -376,16 +376,6 @@ fn an_oid_past_the_volumes_is_not_found_by_the_locator() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3394-3401
-// ```c++
-// int CSeqDBVol::GetColumnId(const string   & title,
-//                            CSeqDBLockHold & locked)
-// {
-//     //m_Atlas.Lock(locked);
-//
-//     if (! m_HaveColumns) {
-//         x_OpenAllColumns(locked);
-//     }
-// ```
 /// The columns are opened by their readers only (`x_OpenAllColumns`), never when the database
 /// is opened or its sequences and headers are read, as a search reads them: a column whose index
 /// is not a column index changes nothing until the masks are asked for (line SW, SW8 follow-up 2;

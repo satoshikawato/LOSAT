@@ -208,9 +208,6 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
-// ```c++
-//         formatter.PrintProlog();
-// ```
 // BLASTP's query-anchored formats 1 to 4 read the queries as outfmt 0 does: the refusal of a query
 // with a subject's id comes with the query's batch, after the prolog that NCBI's application writes
 // before its first batch, the same bytes as outfmt 0's (line RG T3a review D3). The reference bytes
@@ -556,14 +553,6 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 // The `Run` of each of the five programs ends so. `CATCH_ALL` posts the error, which the handler
 // writes to standard error at once (blast_aux.cpp:1155-1159), before `PrintErrorArchive` writes the
 // error archive: in one stream of both (`2>&1`) the error comes between the archives written

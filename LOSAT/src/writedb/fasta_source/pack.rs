@@ -21,40 +21,10 @@ pub(crate) struct Segment {
 /// case, NCBI4na for every other byte.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_best_codings.inc:34-62
-/// ```c++
-/// #define N2 CSeqUtil::e_Ncbi2na
-/// #define N4 CSeqUtil::e_Ncbi4na
-/// #define NX CSeqUtil::e_Ncbi4na_expand // mix of the above
-///
-/// #ifdef COUNT_GAPS
-/// #  define gp CSeqUtil::e_not_set
-/// #else
-/// #  define gp N4
-/// #endif
-/// ...
-/// #define N_ gp
-/// //////////////// iupacna
-/// {
-///     ...
-///     N_, N2, N4, N2, N4, N4, N4, N2, N4, N4, N4, N4, N4, N4, gp, N4, // ACGN
-///     N4, N4, N4, N4, N2, N2, N4, N4, N4, N4, N4, N_, N_, N_, N_, N_, // TU
-///     N_, N2, N4, N2, N4, N4, N4, N2, N4, N4, N4, N4, N4, N4, gp, N4, // acgn
-///     N4, N4, N4, N4, N2, N2, N4, N4, N4, N4, N4, N_, N_, N_, N_, N_, // tu
-/// ```
 /// The table without gaps is the one used: `CDelta_ext_PackTarget::GapsOK` is the
 /// `gaps_ok` of `AddAndSplit`, which `CFastaReader::AssembleSeq` passes as false.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1064-1071
-/// ```c++
-///     bool gaps_ok = dst.GapsOK(CSeqUtil::GetCodingType(src_coding));
-///     const SBestCodings& best_codings = (gaps_ok ? kBestCodingsWithGaps
-///                                         : kBestCodingsWithoutGaps);
-///     const TCoding* best_coding = NULL;
-///     switch (src_coding) {
-///     case CSeqUtil::e_Iupacna:
-///         best_coding = best_codings.iupacna;
-///         break;
-/// ```
 const fn best_coding_iupacna(residue: u8) -> Coding {
     match residue {
         b'A' | b'C' | b'G' | b'T' | b'U' | b'a' | b'c' | b'g' | b't' | b'u' => Coding::Ncbi2na,
@@ -74,17 +44,6 @@ const BEST_IS_NCBI4NA: [u8; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_shared.cpp:195-203
-/// ```c++
-/// SIZE_TYPE GetBytesNeeded(CSeqUtil::TCoding coding, TSeqPos length)
-/// {
-///     switch (coding) {
-///     case CSeqUtil::e_not_set:  return 0;
-///     case CSeqUtil::e_Ncbi2na:  return (length + 3) / 4;
-///     case CSeqUtil::e_Ncbi4na:  return (length + 1) / 2;
-///     default:                   return length;
-///     }
-/// }
-/// ```
 /// The sums are made in 64 bits (NCBI's `TSeqPos` sum wraps for a length above
 /// 4,294,967,292, which the reader never packs).
 fn bytes_needed(coding: Coding, length: u32) -> u64 {
@@ -97,24 +56,11 @@ fn bytes_needed(coding: Coding, length: u32) -> u64 {
 /// `CDelta_ext_PackTarget::GetOverhead` of a segment with data.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:126-129
-/// ```c++
-///     // Rough memory overhead per segment, in bytes.  The actual values
-///     // are system specific, but this code's behavior shouldn't be.
-///     SIZE_TYPE GetOverhead(TCoding coding) const
-///         { return coding == CSeqUtil::e_not_set ? 96 : 128; }
-/// ```
 const OVERHEAD: u64 = 128;
 
 /// `CPacker::x_GetWideCoding(e_Iupacna)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1292-1296
-/// ```c++
-///     switch (coding) {
-///     case CSeqUtil::e_Iupacna:
-///     case CSeqUtil::e_Ncbi4na_expand:
-///     case CSeqUtil::e_Ncbi8na: // ignore values >= 16 for now
-///         return CSeqUtil::e_Ncbi4na;
-/// ```
 const WIDE_CODING: Coding = Coding::Ncbi4na;
 
 /// No coding before the first one of an arrangement.
@@ -152,64 +98,6 @@ impl Packer {
     /// `new_coding` is `None` for `kNoCoding` (the end of the residues).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1194-1249
-    /// ```c++
-    /// void CSeqConvert_imp::CPacker::x_AddBoundary(TSeqPos pos, TCoding new_coding)
-    /// {
-    ///     if (m_Boundaries.empty()) {
-    ///         _ASSERT(pos == 0);
-    ///         m_Boundaries.push_back(pos);
-    ///         m_EndingNarrow.AddCoding(new_coding);
-    ///         m_EndingWide.AddCoding(m_WideCoding);
-    ///         m_EndingWide.cost   = m_Target.GetOverhead(m_WideCoding);
-    ///         m_EndingNarrow.cost = m_Target.GetOverhead(new_coding);
-    ///         return;
-    ///     }
-    ///
-    ///     TSeqPos last_length = pos - m_Boundaries.back();
-    ///     _ASSERT(last_length > 0);
-    ///     m_Boundaries.push_back(pos);
-    ///
-    ///     TCoding last_narrow = m_EndingNarrow.codings->GetLast();
-    ///     // This always rounds up to full bytes, and as such can slightly
-    ///     // overestimate the total cost of ncbi4na.
-    ///     m_EndingNarrow.cost += GetBytesNeeded(last_narrow,  last_length);
-    ///     m_EndingWide.cost   += GetBytesNeeded(m_WideCoding, last_length);
-    ///     if (last_narrow == m_WideCoding) {
-    ///         _ASSERT(m_EndingNarrow.cost == m_EndingWide.cost);
-    ///     }
-    ///
-    ///     // _TRACE(static_cast<char>('@' + last_narrow) << last_length << ": ("
-    ///     //        << m_EndingNarrow.cost << ", " << m_EndingWide.cost << ')');
-    ///
-    ///     _ASSERT(new_coding != last_narrow);
-    ///     if (new_coding == kNoCoding) {
-    ///         return;
-    ///     }
-    ///
-    ///     if (new_coding != m_WideCoding
-    ///         &&  m_EndingNarrow.cost > m_EndingWide.cost) {
-    ///         m_EndingNarrow = m_EndingWide;
-    ///         // _TRACE("N <- W before N'");
-    ///     }
-    ///
-    ///     SIZE_TYPE alt_wide_cost
-    ///         = m_EndingNarrow.cost + m_Target.GetOverhead(m_WideCoding);
-    ///     m_EndingNarrow.cost += m_Target.GetOverhead(new_coding);
-    ///
-    ///     if (m_EndingWide.cost > alt_wide_cost) {
-    ///         m_EndingWide = m_EndingNarrow;
-    ///         m_EndingWide.cost = alt_wide_cost;
-    ///         // _TRACE("W <- N");
-    ///     } else if (new_coding == m_WideCoding) {
-    ///         m_EndingNarrow = m_EndingWide;
-    ///         // _TRACE("N <- W before W");
-    ///     }
-    ///     // _TRACE('(' << m_EndingNarrow.cost << ", " << m_EndingWide.cost << ')');
-    ///
-    ///     m_EndingNarrow.AddCoding(new_coding);
-    ///     m_EndingWide.AddCoding(m_WideCoding);
-    /// }
-    /// ```
     fn add_boundary(&mut self, pos: u32, new_coding: Option<Coding>) {
         let Some(&last_boundary) = self.boundaries.last() else {
             let Some(new_coding) = new_coding else {
@@ -257,91 +145,8 @@ impl Packer {
 /// 4,294,967,295 of them).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:201-205
-/// ```c++
-///     if (allow_packing)
-///     {
-///         CDelta_ext_PackTarget dst(*this, gaps_ok);
-///         CSeqConvert::Pack(src.data(), length, coding, dst);
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1058-1063,1105-1107
-/// ```c++
-/// SIZE_TYPE CSeqConvert_imp::Pack(const char* src, TSeqPos length,
-///                                 TCoding src_coding, IPackTarget& dst)
-/// {
-///     if (length == 0) {
-///         return 0;
-///     }
-///     if (best_coding != NULL) {
-///         return CPacker(src_coding, best_coding, gaps_ok, dst)
-///             .Pack(src, length);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
-/// ```c++
-/// SIZE_TYPE CSeqConvert_imp::CPacker::Pack(const char* src, TSeqPos length)
-/// {
-///     const char* src_end   = src + GetBytesNeeded(m_SrcCoding, length);
-///     TCoding     prev_type = kNoCoding;
-///
-///     for (const char* p = src;  p < src_end;  ++p) {
-///         unsigned char residue;
-///         TCoding       curr_type;
-///         do {
-///             residue = static_cast<unsigned char>(*p);
-///             curr_type = m_BestCoding[residue];
-///         } while (curr_type == prev_type  &&  ++p < src_end);
-///
-///         if (curr_type == CSeqUtil::e_Ncbi4na_expand) {
-///             ...
-///         } else if (p != src_end) {
-///             _ASSERT(curr_type != kNoCoding);
-///             x_AddBoundary(TSeqPos((p - src) * m_SrcDensity), curr_type);
-///             prev_type = curr_type;
-///         }
-///     }
-///     x_AddBoundary(length, kNoCoding);
-///
-///     _ASSERT(m_Boundaries.at(0) == 0);
-///
-///     SArrangement* best_arrangement
-///         = (m_EndingNarrow.cost < m_EndingWide.cost
-///            ? &m_EndingNarrow : &m_EndingWide);
-///
-///     // XXX - fine-tune 4na/2na boundaries to minimize wastage?
-///
-///     size_t n = m_Boundaries.size() - 1;
-///     vector<TCoding> coding_vec(n);
-///     SCodings*       codings = best_arrangement->codings;
-///     for (size_t i = 0;  i < n;
-///          i += codings->current_used, codings = codings->previous) {
-///         _ASSERT(codings != NULL);
-///         memcpy(coding_vec.data() + (n - i - codings->current_used),
-///                codings->current, codings->current_used * sizeof(TCoding));
-///     }
-///     _ASSERT(codings == NULL);
-///
-///     SIZE_TYPE result = 0;
-///     for (size_t i = 0;  i < n;  ++i) {
-///         TCoding coding  = coding_vec[i];
-///         TSeqPos start   = m_Boundaries[i];
-///         while (i < n - 1  &&  coding_vec[i + 1] == coding) {
-///             ++i; // merge when possible
-///         }
-///
-///         TSeqPos len = m_Boundaries[i + 1] - start;
-///         char* segment = m_Target.NewSegment(coding, len);
-///         if (coding == CSeqUtil::e_not_set) { // gap
-///             _ASSERT(m_GapsOK);
-///             result += len;
-///         } else {
-///             result += CSeqConvert::Convert(src, m_SrcCoding, start, len,
-///                                            segment, coding);
-///         }
-///     }
-///
-///     return result;
-/// }
-/// ```
 /// A boundary is where the best coding of the residues changes (`m_SrcDensity` is 1 for
 /// IUPACna). The two arrangements cost the same when the residues are one run of one or
 /// two unambiguous bases (128 + 1 byte in either coding), and the comparison then takes
@@ -414,7 +219,7 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
 /// The NCBI2na code of the unambiguous IUPACna letters (`CIupacnaTo2na`'s rows `A`: 0,
 /// `C`: 1, `G`: 2, `T` and `U`: 3; the table has the code shifted to each of the four
 /// places of a byte). Only these letters reach an NCBI2na segment.
-const fn ncbi2na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi2na_code(residue: u8) -> u8 {
     match residue {
         b'C' => 1,
         b'G' => 2,
@@ -429,15 +234,7 @@ const fn ncbi2na_code(residue: u8) -> u8 {
 /// hyphen of a reader without `fParseGaps` among them.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-394,409-410
-/// ```c++
-/// const Uint1 CIupacnaTo4na::scm_Table[512] = {
-///     0xf0,0xf,  0xf0,0xf,  0xf0,0xf,  0xf0,0xf,
-///     0xf0,0xf,  0xf0,0xf,  0xf0,0xf,  0xf0,0xf,
-/// ...
-///     0xf0,0xf,  0x10,0x1,  0xe0,0xe,  0x20,0x2,
-///     0xd0,0xd,  0xf0,0xf,  0xf0,0xf,  0x40,0x4,
-/// ```
-const fn ncbi4na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi4na_code(residue: u8) -> u8 {
     match residue.to_ascii_uppercase() {
         b'A' => 1,
         b'C' => 2,
@@ -478,41 +275,6 @@ const NCBI4NA_CODES: [u8; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:257-289
-/// ```c++
-/// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacnaTo2na
-/// (const char* src,
-///  TSeqPos pos,
-///  TSeqPos length,
-///  char* dst)
-/// {
-///     // The iupacna to ncbi2na table is constructed such that each row
-///     // correspond to an iupacna letter and each column corresponds to
-///     // that letter being in one of the 4 possible offsets within the
-///     // ncbi2na byte
-///     const Uint1* table = CIupacnaTo2na::GetTable();
-///
-///     const char* src_i = src + pos;
-///     for ( size_t count = length / 4; count; --count ) {
-///         *dst =
-///             table[*src_i * 4          ] |
-///             table[*(src_i + 1) * 4 + 1] |
-///             table[*(src_i + 2) * 4 + 2] |
-///             table[*(src_i + 3) * 4 + 3];
-///         src_i += 4;
-///         ++dst;
-///     }
-///
-///     // Handle overhang
-///     if ( length % 4 != 0 ) {
-///         *dst = 0x0;
-///         for( size_t i = 0; i < (length % 4); ++i, ++src_i ) {
-///             *dst |= (char)table[static_cast<Uint1>(*src_i) * 4 + i];
-///         }
-///     }
-///
-///     return length;
-/// }
-/// ```
 pub(crate) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len().div_ceil(4));
     let mut chunks = src.chunks_exact(4);
@@ -534,36 +296,6 @@ pub(crate) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
-/// ```c++
-/// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacnaTo4na
-/// (const char* src,
-///  TSeqPos pos,
-///  TSeqPos length,
-///  char* dst)
-/// {
-///
-///     // The iupacna to ncbi4na table is constructed such that each row
-///     // correspond to an iupacna letter and each column corresponds to
-///     // that letter being in one of the 2 possible offsets within the
-///     // ncbi4na byte
-///     const Uint1* table = CIupacnaTo4na::GetTable();
-///
-///     const char* src_i = src + pos;
-///
-///     for ( size_t count = length / 2; count; --count ) {
-///         *dst = table[*src_i * 2] | table[*(src_i + 1) * 2 + 1];
-///         src_i += 2;
-///         ++dst;
-///     }
-///
-///     // handle overhang
-///     if ( length % 2 != 0 ) {
-///         *dst = table[static_cast<Uint1>(*src_i) * 2];
-///     }
-///
-///     return length;
-/// }
-/// ```
 pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len().div_ceil(2));
     let mut chunks = src.chunks_exact(2);
@@ -584,48 +316,11 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
 /// (`tests::ncbi8na_of_both_codings`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
-/// ```c++
-///             if (L.GetSeq_data().IsNcbi2na()) {
-///                 CSeqConvert::Convert(L.GetSeq_data().GetNcbi2na(),
-///                                      CSeqUtil::e_Ncbi2na,
-///                                      0,
-///                                      L.GetLength(),
-///                                      na8,
-///                                      CSeqUtil::e_Ncbi8na);
-///             } else if (L.GetSeq_data().IsNcbi4na()) {
-///                 CSeqConvert::Convert(L.GetSeq_data().GetNcbi4na(),
-///                                      CSeqUtil::e_Ncbi4na,
-///                                      0,
-///                                      L.GetLength(),
-///                                      na8,
-///                                      CSeqUtil::e_Ncbi8na);
-/// ```
 pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
     seq8na.extend(src.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
 }
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-/// ```c++
-/// SIZE_TYPE CSeqConvert_imp::x_Convert8naTo4na
-/// (const char* src,
-///  TSeqPos pos,
-///  TSeqPos length,
-///  char *dst)
-/// {
-///     const char* iter = src + pos;
-///
-///     for ( size_t i = length / 2; i; --i, ++dst ) {
-///         *dst = char((*iter << 4) | (*(iter + 1)));
-///         iter += 2;
-///     }
-///
-///     if ( (length % 2) != 0 ) {
-///         *dst = char((*iter << 4) & 0xf0);
-///     }
-///
-///     return length;
-/// }
-/// ```
 /// The length of `src` can be one that the input states rather than holds (a gap line),
 /// so the allocation of the result can fail without the process being short of memory
 /// for anything else; that failure is returned (`fix_bioseq_deltas`).

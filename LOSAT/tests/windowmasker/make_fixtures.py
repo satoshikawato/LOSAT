@@ -6,11 +6,12 @@ a new empty directory there; the files the run leaves in it follow its standard 
 a line "@OUT@/<name> <length>" after a newline and the file's bytes (tests/masker_fixtures.rs
 reads LOSAT's runs the same way), and the directory's path in the standard error is written
 @OUT@. First makes db/wm and db/wm_ps with NCBI makeblastdb from in/multi.fa (the second with
--parse_seqids), db/cd from in/cd.fa, and the counts files of the -convert rows in counts/ with
-NCBI windowmasker (units of 4 letters of dm2L_60k.fa in each format; the ascii file without its
-##pct lines; the optimized binary file of -t_high 1000, whose counts above 511 overflow; the
-files of -t_high_pct 0; the binary counts written to the standard output). NCBI is run here
-only, never by the tests.
+-parse_seqids), db/multi_ids and db/wm_b from in/multi_ids.fa (the first with -parse_seqids),
+db/cd from in/cd.fa, and the counts files of the -convert rows in counts/ with NCBI windowmasker
+(units of 4 letters of dm2L_60k.fa in each format; the ascii file without its ##pct lines; the
+optimized binary file of -t_high 1000, whose counts above 511 overflow; the files of
+-t_high_pct 0; the binary counts written to the standard output). NCBI is run here only, never
+by the tests.
 
 Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb>"""
 import argparse
@@ -88,8 +89,10 @@ def main():
     db = os.path.join(HERE, "db")
     shutil.rmtree(db, ignore_errors=True)
     os.makedirs(db)
-    for name, fasta, extra in (("wm", "multi", []), ("wm_ps", "multi", ["-parse_seqids"]), ("cd", "cd", [])):
-        subprocess.run([makeblastdb, "-in", f"in/{fasta}.fa", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
+    for name, source, extra in (("wm", "multi.fa", []), ("wm_ps", "multi.fa", ["-parse_seqids"]),
+                                ("multi_ids", "multi_ids.fa", ["-parse_seqids"]), ("wm_b", "multi_ids.fa", []),
+                                ("cd", "cd.fa", [])):
+        subprocess.run([makeblastdb, "-in", f"in/{source}", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
                        cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     make_counts(windowmasker, env)
     out_dir = os.path.join(HERE, "ncbi")

@@ -116,7 +116,7 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - `-use_sw_tback`.
 - With `-ungapped`, a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or a matrix file that NCBI BLAST+ finds.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
-- An `-evalue` of 1.7976931348623157e308 or more.
+- An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.

@@ -687,19 +687,13 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
         )?;
     }
     let (compo_adjust_mode, _) = composition(args);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's tblastn dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        anyhow::bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
-            args.evalue
-        );
-    }
+    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    crate::blastinput::protein_options_check::check_evalue_limit(
+        args.evalue,
+        compo_adjust_mode.is_enabled(),
+        "TBLASTN",
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.

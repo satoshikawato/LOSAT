@@ -200,6 +200,8 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
 | A hit list size of 2^31 - 50 or more (2^30 - 25 or more with composition-based statistics) | Refused. NCBI crashes. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused. See Rare inputs. |
+| An infinite `-evalue` (`+inf`, `1e999`) | Refused. |
+| An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) with composition-based statistics (`-comp_based_stats` 1 to 3) | Refused. NCBI's `blastp` crashes on some inputs with it. With `-comp_based_stats 0` or `-matrix IDENTITY` it runs. |
 
 <details>
 <summary>Rare inputs</summary>
@@ -258,7 +260,8 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
-| An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
+| An infinite `-evalue` (`+inf`, `1e999`) | Refused. |
+| An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) with composition-based statistics (`-comp_based_stats` 1 to 3) | Refused. NCBI's `tblastn` crashes on some inputs with it. With `-comp_based_stats 0`, `-matrix IDENTITY` or `-ungapped` it runs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback, or with `-ungapped` the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-in_pssm` | See the next section. |
 
@@ -339,6 +342,7 @@ These refusals apply to every search program that reads databases.
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size that overflows NCBI's 32-bit integer | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
+| An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-in_pssm` with a binary or XML PSSM | Refused. |
@@ -418,6 +422,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | An empty or inconsistent `.rps` or `.loo` file, or an inconsistent `.aux` file | Refused. NCBI reads past its buffers or crashes. |
 | `rpsblast` in the library API and the Web engine | Refused. |
 | The profile-database cases named in Alias files above | Refused. |
+| An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics (the default of `rpsblast`) | Refused, as in `blastp`. |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number or an empty `.aux` come as in NCBI (exit status 3).
 

@@ -47,11 +47,11 @@ use crate::writedb::fasta_source::reader::{
     Record, SeqInst,
 };
 
-// libstdc++ (GCC 14, the compiler of NCBI's 2.17.0 build): bits/fstream.tcc
-// (`basic_filebuf::xsgetn`), which NCBI's line reader calls through `istream::read`.
-// (`what()` is the text, `: ` and the `strerror` of `errno`: `-in` naming a directory gives
-// `basic_filebuf::xsgetn error reading the file: Is a directory`, dustmasker and segmasker
-// fixtures `in_dir`.)
+// The text is observed, not taken from a library's source: NCBI's line reader reads through
+// `istream::read`, and a failed read makes NCBI's 2.17.0 binaries write `what()`: `basic_filebuf::
+// xsgetn error reading the file`, `: ` and the `strerror` of `errno` (`-in` naming a directory
+// gives `basic_filebuf::xsgetn error reading the file: Is a directory`, the dustmasker and
+// segmasker fixtures `tests/dustmasker/ncbi/in_dir.err` and `tests/segmasker/ncbi/in_dir.err`).
 /// The `what()` of the `std::ios_base::failure` that a failed read of the input
 /// (`MaskReadError::Read`) is in NCBI's stream; `None` for an error without an OS error code,
 /// whose text LOSAT does not know.

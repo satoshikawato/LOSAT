@@ -174,9 +174,8 @@ impl<'a> Line<'a> {
     }
 
     /// `substr(pos, n)`: `n` clipped to the end; `pos` past the end throws `out_of_range`.
-    // libstdc++ (GCC 13): bits/basic_string.h:385-393
-    // (`substr` calls `_M_check(__pos, "basic_string::substr")`, bits/basic_string.h:3163-3165;
-    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // The C++ standard's `basic_string::substr` throws `out_of_range` when `pos > size()`; the text
+    // is that of NCBI's build, observed: NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
     // for a `cdtrack.txt` line of an accession alone, PS16a review oracle A4-1 case `ct3`.)
     //
@@ -662,9 +661,9 @@ impl CddData {
     // The generic file is read without the trims of the specific one (the line, the accession,
     // the index and the title keep their white space). A coordinates field at the line's end
     // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, more than a
-    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error`:
-    // libstdc++ (GCC 13): bits/vector.tcc:64-71
-    // (NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error` (the C++
+    // standard's `vector::reserve` throws it for a count above `max_size()`; the text is observed:
+    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // vector::reserve` and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
     fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {
         if !file_exists(path) {

@@ -1,0 +1,5 @@
+TITLE ol k range
+DBLIST ../or/tfp
+OIDLIST k.msk
+FIRST_OID 3
+LAST_OID 15

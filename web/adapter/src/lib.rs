@@ -71,21 +71,24 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 9 since a run of `-db`, which takes no subject
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 11 since a run of `-db`, which takes no subject
 /// handle and reads the database from the run's working directory, which the host preopens as
-/// `/work` (line WQA D12a, 2026-11-20); 8 since the index scan and `register` read as the engine's
-/// reader with the run's data loaders (`scan_begin` and `register` take the program, the role and
-/// the setting, which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line
-/// reader joins are indexed, and the reader's refusals come in its words; line WQA's D13 and D16,
-/// 2026-11-20); 7 since a run that fails keeps the output of the argv up to its error and drops the
-/// other outputs with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6
-/// are taken by other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs
-/// of a run with `-parse_deflines`, and the signal of stream 9 for every output stream that failed
-/// (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard
-/// a stream that failed alone after a chunk of it was sent (line RG item T7-W).
+/// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
+/// merged first: no module has 9); 10 since a run prints the text that the command line prints in
+/// place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and the *start*
+/// field `prints` (line WQA's D14, 2026-11-20); 8 since the index scan and `register` read as the engine's reader with
+/// the run's data loaders (`scan_begin` and `register` take the program, the role and the setting,
+/// which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line reader joins
+/// are indexed, and the reader's refusals come in its words; line WQA's D13 and D16, 2026-11-20); 7
+/// since a run that fails keeps the output of the argv up to its error and drops the other outputs
+/// with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 are taken by
+/// other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs of a run
+/// with `-parse_deflines`, and the signal of stream 9 for every output stream that failed (line
+/// WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard a
+/// stream that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    9
+    11
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -439,6 +442,12 @@ pub unsafe extern "C" fn losat_web2_run(
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
         let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
+        // A run that prints a text in place of a search reads no input, as the command line reads
+        // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
+        if run::prints(&argv).is_some() {
+            run::run(&argv, &[], &[])?;
+            return Ok(0);
+        }
         store::with_inputs(
             program,
             query_handle,

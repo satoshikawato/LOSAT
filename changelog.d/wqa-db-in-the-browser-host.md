@@ -1,4 +1,4 @@
-- Web engine (npm package `losat`, ABI version 9): a search of `-db` runs in the browser with the same
+- Web engine (npm package `losat`, ABI version 11): a search of `-db` runs in the browser with the same
   bytes as the command line, with its filters (`-seqidlist`, `-taxids`, `-taxidlist`, `-gilist` and their
   negatives) and BLASTN's database masks. The host gives the run the database's files as `File`s
   (`EngineRunRequest.files`, named as the command line names them from its directory), and the engine

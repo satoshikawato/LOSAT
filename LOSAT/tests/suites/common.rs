@@ -23,6 +23,8 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastn_mb_index_fixtures.rs"]
+mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
@@ -37,6 +39,8 @@ mod db_empty_title;
 mod db_seqidlist;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
+#[path = "../db_unreadable_files.rs"]
+mod db_unreadable_files;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../entry_names.rs"]

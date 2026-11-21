@@ -1462,7 +1462,7 @@ impl RecordState {
             };
             post_warning(ignored, problem, message, warn);
         }
-        if title_has_mods(text) {
+        if crate::blastinput::title_parser::has_mods(text) {
             post_warning(
                 ignored,
                 Problem::ModifierFoundButNoneExpected,
@@ -1538,30 +1538,6 @@ pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
     } else {
         None
     }
-}
-
-/// `CTitleParser::HasMods(title)`: whether the title has a modifier, `[name=value]`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_reader.cpp:793-850
-/// `x_FindBrackets` returns true only with `eq_pos < stop`, so `HasMods` is true at the
-/// first bracket pair that it finds: the first `]` that closes the outermost `[`, with an
-/// `=` after that `[`.
-fn title_has_mods(title: &[u8]) -> bool {
-    let mut eq_pos = None;
-    let mut unmatched = 0u32;
-    for (i, &c) in title.iter().enumerate() {
-        match c {
-            b'[' => unmatched += 1,
-            b'=' if unmatched > 0 && eq_pos.is_none() => eq_pos = Some(i),
-            b']' => match unmatched {
-                0 => return false,
-                1 => return eq_pos.is_some_and(|eq| eq < i),
-                _ => unmatched -= 1,
-            },
-            _ => {}
-        }
-    }
-    false
 }
 
 /// `CDelta_ext::AddAndSplit` of the IUPACna residues `residues[start..end]`: one literal

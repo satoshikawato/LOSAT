@@ -1423,7 +1423,11 @@ impl ReportStream {
     /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
     /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
     /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
-    pub(crate) fn finish(&mut self, result: anyhow::Result<()>, throws: bool) -> anyhow::Result<()> {
+    pub(crate) fn finish(
+        &mut self,
+        result: anyhow::Result<()>,
+        throws: bool,
+    ) -> anyhow::Result<()> {
         use anyhow::Context;
         let flushed = std::io::Write::flush(self);
         let badbit = result.as_ref().is_err_and(BadbitInsertion::is);

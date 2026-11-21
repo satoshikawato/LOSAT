@@ -262,8 +262,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     // 208-221 reads it for a FASTA query only).
     let sizes = match inputs.query_file {
         Some(_) => BatchSizes::Fixed(1),
-        None => batch_sizes(&command, inputs, &start)
-            .map_err(|error| Error::search(&error))?,
+        None => batch_sizes(&command, inputs, &start).map_err(|error| Error::search(&error))?,
     };
     let query_range = query_range_of(&command);
     let skipped = lengths

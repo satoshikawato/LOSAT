@@ -773,7 +773,10 @@ fn the_librarys_start_refuses_what_the_command_line_refuses() {
 /// ran the start of a search of records only for `-logfile`, `-conffile` and `-dryrun`).
 #[test]
 fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
-    for (name, ncbirc) in [("ncbircrefused", &b"[BLAST]\nLONG_SEQID=1\n"[..]), ("ncbircbad", b"\xef")] {
+    for (name, ncbirc) in [
+        ("ncbircrefused", &b"[BLAST]\nLONG_SEQID=1\n"[..]),
+        ("ncbircbad", b"\xef"),
+    ] {
         let dir = scratch(name);
         fs::write(dir.join(".ncbirc"), ncbirc).unwrap();
         for (program, search) in SEARCHES {
@@ -782,10 +785,17 @@ fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
             words.extend(["-outfmt", "6"]);
             let cli = run_in(&dir, &words, &[]);
             let refused = name == "ncbircrefused";
-            assert_eq!(cli.status.code(), Some(i32::from(refused)), "{words:?}: {cli:?}");
+            assert_eq!(
+                cli.status.code(),
+                Some(i32::from(refused)),
+                "{words:?}: {cli:?}"
+            );
             let stderr = text(&cli.stderr);
             if refused {
-                assert!(stderr.starts_with("Error: ") && stderr.contains("LONG_SEQID"), "{stderr}");
+                assert!(
+                    stderr.starts_with("Error: ") && stderr.contains("LONG_SEQID"),
+                    "{stderr}"
+                );
             } else {
                 assert!(stderr.contains("Error reading the registry"), "{stderr}");
             }

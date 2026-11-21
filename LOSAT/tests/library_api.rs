@@ -3206,7 +3206,10 @@ fn failure_rule(stderr: &[u8], diagnostics: &[u8], error: &Error) -> Option<&'st
 
 /// `bytes` without its last newlines (the command line's text of a reader's or a tool's error).
 fn without_last_newlines(bytes: &[u8]) -> &[u8] {
-    let end = bytes.iter().rposition(|&byte| byte != b'\n').map_or(0, |at| at + 1);
+    let end = bytes
+        .iter()
+        .rposition(|&byte| byte != b'\n')
+        .map_or(0, |at| at + 1);
     &bytes[..end]
 }
 
@@ -3348,7 +3351,14 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
                 let context = format!("{program} -query {query_name} -subject {subject_name}");
                 let cli = cli_output(
                     program.name(),
-                    &["-query", query_name, "-subject", subject_name, "-outfmt", "6"],
+                    &[
+                        "-query",
+                        query_name,
+                        "-subject",
+                        subject_name,
+                        "-outfmt",
+                        "6",
+                    ],
                 );
                 let (result, report, diagnostics) =
                     search_of_files(program, &[], query, subject, "6");
@@ -3425,10 +3435,18 @@ fn an_ncbi_message_keeps_its_newline() {
     let (query_name, subject_name) = (query.to_str().unwrap(), subject.to_str().unwrap());
     for (options, outfmt, status) in [(&["-query_loc", "5-3"][..], "6", 3), (&[], "99", 255)] {
         let context = format!("{options:?} -outfmt {outfmt}");
-        let mut words = vec!["-query", query_name, "-subject", subject_name, "-outfmt", outfmt];
+        let mut words = vec![
+            "-query",
+            query_name,
+            "-subject",
+            subject_name,
+            "-outfmt",
+            outfmt,
+        ];
         words.extend_from_slice(options);
         let cli = cli_output("blastp", &words);
-        let (result, _, diagnostics) = search_of_files(Program::Blastp, options, &query, &subject, outfmt);
+        let (result, _, diagnostics) =
+            search_of_files(Program::Blastp, options, &query, &subject, outfmt);
         let error = result.unwrap_err();
         assert_eq!(cli.status.code(), Some(status), "{context}");
         assert!(error.message().ends_with(b"\n"), "{context}: {error:?}");
@@ -3460,8 +3478,13 @@ fn a_losat_refusal_is_its_text_without_error_and_the_newline() {
         "6",
     ];
     let cli = cli_output("blastp", &words);
-    let (result, _, diagnostics) =
-        search_of_files(Program::Blastp, &["-parse_deflines"], &records, &subject, "6");
+    let (result, _, diagnostics) = search_of_files(
+        Program::Blastp,
+        &["-parse_deflines"],
+        &records,
+        &subject,
+        "6",
+    );
     let error = result.unwrap_err();
     assert_eq!(cli.status.code(), Some(1));
     assert!(matches!(error, Error::Search(_)), "{error:?}");
@@ -3542,7 +3565,8 @@ fn a_start_that_ends_the_program_is_its_text_without_the_last_newline() {
     ];
     words.extend(options);
     let cli = cli_output("blastp", &words);
-    let (result, _, diagnostics) = search_of_files(Program::Blastp, &options, &query, &subject, "6");
+    let (result, _, diagnostics) =
+        search_of_files(Program::Blastp, &options, &query, &subject, "6");
     let error = result.unwrap_err();
     assert_eq!(cli.status.code(), Some(255));
     assert!(matches!(error, Error::Search(_)), "{error:?}");

@@ -1,0 +1,2 @@
+BLAST engine error: rps_mini contains no frequency ratios needed for composition-based statistics.
+Please disable composition-based statistics when searching against rps_mini.

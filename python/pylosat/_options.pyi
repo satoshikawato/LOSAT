@@ -188,6 +188,8 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     ungapped: bool
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
@@ -408,6 +410,8 @@ class TblastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     num_threads: int
     mt_mode: int
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
@@ -483,6 +487,7 @@ class TblastxOptions(TypedDict, total=False):
     sum_stats: bool
     """Use sum statistics [default: true]"""
     lcase_masking: bool
+    strand: Literal['both', 'plus', 'minus']
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
@@ -491,6 +496,8 @@ class TblastxOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
@@ -556,6 +563,8 @@ class PsiblastOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     xdrop_gap: float

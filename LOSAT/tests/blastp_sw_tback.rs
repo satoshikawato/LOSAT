@@ -17,31 +17,10 @@
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
-//! ```c
-//!     for (i = 0; i < actual_num_threads; ++i) {
-//!         if (status_code_tld[i] != 0) {
-//!             status_code = status_code_tld[i];
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
-//! ```c++
-//!     if (status) {
-//!         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3796-3802 (the arrays of
 //! every query's heap are freed, then the first query's heap is popped:
 //! `BlastCompo_HeapPop`, compo_heap.c:444-457, reads `heapArray[1]` when its count is above 0)
-//! ```c
-//!             if (redoneMatches_tld[i] != NULL) {
-//!                 int qi;
-//!                 for (qi = 0; qi < numQueries; ++qi) {
-//!                     sfree(redoneMatches_tld[i][qi].array);
-//!                     sfree(redoneMatches_tld[i][qi].heapArray);
-//!                 }
-//!                 s_ClearHeap(redoneMatches_tld[i]);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,21 +66,7 @@ fn sw_search_with(
     threads: usize,
     env: &[(&str, &str)],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-    for (name, _) in std::env::vars_os() {
-        let text = name.to_string_lossy();
-        // `LOSAT_BLASTX_WORKER_LOG` is the log file of the build with `--all-features` (its worker
-        // probe), not a code path.
-        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
-            || matches!(
-                text.as_ref(),
-                "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE" | "RAYON_NUM_THREADS"
-            )
-        {
-            command.env_remove(name);
-        }
-    }
-    let output = command
+    let output = losat_command()
         .envs(env.iter().copied())
         .arg("blastp")
         .arg("-query")
@@ -118,6 +83,25 @@ fn sw_search_with(
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
     }
+}
+
+/// `losat` without the variables that choose a code path or NCBI's batches.
+fn losat_command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        // `LOSAT_BLASTX_WORKER_LOG` is the log file of the build with `--all-features` (its worker
+        // probe), not a code path.
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
+            || matches!(
+                text.as_ref(),
+                "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE" | "RAYON_NUM_THREADS"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+    command
 }
 
 /// The query ids of the rows of a tabular report.
@@ -362,4 +346,76 @@ fn x5_a_failure_in_the_redo_comes_before_a_later_batchs_refusal() {
         assert!(alone0.stdout.starts_with(&pairwise.stdout), "n{threads}");
         assert_eq!(pairwise.stderr, TRACEBACK_FAILED, "n{threads}");
     }
+}
+
+// The rows `db.x4excl.*` (`tests/db_search_manifest/blastp.x4excl.tsv`, line RG item X4-excl): a
+// `-negative_seqidlist` that keeps a subject of a version 5 database (`tests/db_search/x4excl`)
+// without any of its definition lines, so NCBI's fetch excludes that subject's match at the redo,
+// which sets the batch's status back to 0 unless the redo ends early at it
+// (`redo_run::query_fetch_excluded_reached`). The rows' bytes are NCBI's at one thread, which
+// `db_search_fixtures.py check` compares on ws; this test is what CI runs of them. Each row runs
+// at `-num_threads` 1, 2, 4 and 8 with every redo path (`LOSAT_X_BPREDOPAR` unset and `=0`) and
+// must exit with the row's status and, at every count and path, write the bytes of the first run;
+// a tabular row (outfmt 6) of kind `ncbi` must also write the frozen NCBI stdout. Rows
+// `last.kept.*` and `last.q2.*` keep two matches or more, so above one thread they reach a redo
+// with more than one job: a redo path there that does not read the places of the excluded lists
+// (`RedoInputs::fetch_excluded`) fails or refuses them, where NCBI exits 0.
+#[test]
+fn x4excl_rows_end_alike_at_every_thread_count_and_redo_path() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = std::fs::read_to_string(root.join("tests/db_search_manifest/blastp.x4excl.tsv"))
+        .expect("read blastp.x4excl.tsv");
+    let mut rows = 0;
+    for line in manifest.lines() {
+        if line.starts_with('#') || line.starts_with("row_id\t") || line.is_empty() {
+            continue;
+        }
+        let cells: Vec<&str> = line.split('\t').collect();
+        let (row_id, kind, db, query, extra, outfmt, rc) = (
+            cells[0], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7],
+        );
+        assert!(row_id.starts_with("db.x4excl."), "{row_id}");
+        rows += 1;
+        let run = |threads: usize, env: &[(&str, &str)]| {
+            let output = losat_command()
+                // The paths of the row are relative to LOSAT/, where the fixture tool runs both
+                // programs; no `.ncbirc` is in that directory.
+                .current_dir(root)
+                .env("HOME", root)
+                .env("USERPROFILE", root)
+                .env_remove("BLASTDB")
+                .envs(env.iter().copied())
+                .args(["blastp", "-db", db, "-query", query])
+                .args(extra.split_whitespace())
+                .args(["-outfmt", outfmt, "-num_threads", &threads.to_string()])
+                .output()
+                .expect("run LOSAT");
+            (output.status.code(), output.stdout, output.stderr)
+        };
+        let first = run(1, &[]);
+        let expected_code: i32 = rc.parse().expect("rc");
+        assert_eq!(
+            first.0,
+            Some(expected_code),
+            "{row_id}: {}",
+            String::from_utf8_lossy(&first.2)
+        );
+        if kind == "ncbi" && outfmt == "6" {
+            let frozen = std::fs::read(root.join(format!("tests/fixtures/db_search/{row_id}.out")))
+                .expect("read the frozen stdout");
+            assert_eq!(first.1, frozen, "{row_id}: the frozen NCBI stdout");
+        }
+        for threads in [1, 2, 4, 8] {
+            for env in [&[][..], &[("LOSAT_X_BPREDOPAR", "0")][..]] {
+                let again = run(threads, env);
+                assert_eq!(
+                    again,
+                    first,
+                    "{row_id} n{threads} {env:?}: {}",
+                    String::from_utf8_lossy(&again.2)
+                );
+            }
+        }
+    }
+    assert_eq!(rows, 13, "the rows of blastp.x4excl.tsv");
 }

@@ -7,62 +7,7 @@
 //! of those kernels.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-635
-//! ```c
-//!         for (b_index = first_b_index; b_index < b_size; b_index++) {
-//! ...
-//!             if (matrix_index == FENCE_SENTRY) {
-//! ...
-//!             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-//! ...
-//!             if (score < score_gap_col) {
-//!                 script = SCRIPT_GAP_IN_B;
-//!                 score = score_gap_col;
-//!             }
-//!             if (score < score_gap_row) {
-//!                 script = SCRIPT_GAP_IN_A;
-//!                 score = score_gap_row;
-//!             }
-//!
-//!             if (best_score - score > x_dropoff) {
-//!
-//!                 if (first_b_index == b_index)
-//!                     first_b_index++;
-//!                 else
-//!                     score_array[b_index].best = MININT;
-//!             }
-//!             else {
-//!                 last_b_index = b_index;
-//!                 if (score > best_score) {
-//!                     best_score = score;
-//!                     *a_offset = a_index;
-//! ...
-//!                 if (score_gap_row < (score - gap_open_extend))
-//!                     score_gap_row = score - gap_open_extend;
-//!                 else
-//!                     script += script_row;
-//!
-//!                 score_array[b_index].best = score;
-//! ...
-//!             edit_script_row[b_index] = script;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:652-673
-//! ```c
-//!         if (last_b_index < b_size - 1) {
-//!             b_size = last_b_index + 1;
-//!         }
-//!         else {
-//!             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
-//!
-//!                 score_array[b_size].best = score_gap_row;
-//!                 score_array[b_size].best_gap = score_gap_row - gap_open_extend;
-//!                 score_gap_row -= gap_extend;
-//!                 edit_script_row[b_size] = SCRIPT_GAP_IN_A;
-//!                 b_size++;
-//! ...
-//!         if (b_size <= N) {
-//!             score_array[b_size].best = MININT;
-//!             score_array[b_size].best_gap = MININT;
-//! ```
 //!
 //! Why the result is exact. The argument at the head of `x_xdrop_avx2.rs` holds unchanged: the
 //! same stored values (`score - base + bias`, 0 = minus infinity), the same `bias`, rebase limit,
@@ -144,10 +89,6 @@ pub(super) fn switch_on() -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
-/// ```c
-///     if (!score_only) {
-///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
-/// ```
 /// Dispatch point of these kernels: `tb == false` is the score-only recurrence
 /// (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` is `ALIGN_EX`. The lane width
 /// is the one the 128-bit dispatch would choose (`fits_8bit`). None: not handled here; the caller
@@ -481,13 +422,6 @@ struct C16 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:601,610-612
-// ```c
-//             if (best_score - score > x_dropoff) {
-// ...
-//                 if (score > best_score) {
-//                     best_score = score;
-//                     *a_offset = a_index;
-// ```
 // The row gap entering the next block (`score_gap_row`), the running `best_score`, the threshold
 // `best_score - x_dropoff` (each the same in every lane of one register) and the cell where the
 // best was last raised, carried across the blocks of a row.
@@ -500,27 +434,6 @@ struct Row {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-631
-/// ```c
-///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-/// ...
-///             if (score < score_gap_col) {
-///                 script = SCRIPT_GAP_IN_B;
-///                 score = score_gap_col;
-///             }
-///             if (score < score_gap_row) {
-///                 script = SCRIPT_GAP_IN_A;
-///                 score = score_gap_row;
-///             }
-///
-///             if (best_score - score > x_dropoff) {
-/// ...
-///                 score_gap_row -= gap_extend;
-///                 score_gap_col -= gap_extend;
-///                 if (score_gap_col < (score - gap_open_extend)) {
-///                     score_array[b_index].best_gap = score - gap_open_extend;
-/// ...
-///                 score_array[b_index].best = score;
-/// ```
 /// One block of 16 cells of one row: `D` = `next_score` of the diagonal, `E` = `score_gap_col`,
 /// `F` = `score_gap_row`, `H` = `score`, the lane operations of `block16` of the AVX2 file with the
 /// row gap of item 2 at the head of this file; `hpm` clears the first lane's diagonal (lanes of
@@ -587,24 +500,6 @@ unsafe fn block16<const TB: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,563,638,652-673
-// ```c
-//     score_array[0].best = 0;
-//     score_array[0].best_gap = -gap_open_extend;
-// ...
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ...
-//         for (b_index = first_b_index; b_index < b_size; b_index++) {
-// ...
-//         if (first_b_index == b_size || (fence_hit && *fence_hit))
-//             break;
-// ...
-//         if (last_b_index < b_size - 1) {
-//             b_size = last_b_index + 1;
-//         }
-// ...
-//         if (b_size <= N) {
-//             score_array[b_size].best = MININT;
-// ```
 // The whole DP on 16-bit lanes, the steps of `align16` of the AVX2 file in the same order (row 0,
 // then per row: column residues, fence, row table, rebase, blocks, band update). None for a
 // problem the lanes do not hold (the caller then runs the next dispatch).
@@ -939,22 +834,6 @@ struct C8 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-631
-/// ```c
-///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-/// ...
-///             if (score < score_gap_col) {
-///                 script = SCRIPT_GAP_IN_B;
-///                 score = score_gap_col;
-///             }
-///             if (score < score_gap_row) {
-///                 script = SCRIPT_GAP_IN_A;
-///                 score = score_gap_row;
-///             }
-///
-///             if (best_score - score > x_dropoff) {
-/// ...
-///                 score_array[b_index].best = score;
-/// ```
 /// One block of 32 cells on 8-bit lanes: the lane operations of `block8` of the AVX2 file, row
 /// gap as in item 2 at the head of this file. Returns (drop mask, script).
 #[inline(always)]
@@ -1016,13 +895,6 @@ unsafe fn block8<const TB: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-631
-/// ```c
-///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-/// ...
-///             if (best_score - score > x_dropoff) {
-/// ...
-///                 score_array[b_index].best = score;
-/// ```
 /// `block8` on 16 lanes (one register: the tail of a row and the row-gap extension), with the
 /// same values (`block8x` of the AVX2 file).
 #[inline(always)]
@@ -1083,21 +955,6 @@ unsafe fn block8x<const TB: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,563,638,652-673
-// ```c
-//     score_array[0].best = 0;
-//     score_array[0].best_gap = -gap_open_extend;
-// ...
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ...
-//         for (b_index = first_b_index; b_index < b_size; b_index++) {
-// ...
-//         if (first_b_index == b_size || (fence_hit && *fence_hit))
-//             break;
-// ...
-//         if (last_b_index < b_size - 1) {
-//             b_size = last_b_index + 1;
-//         }
-// ```
 // The whole DP on 8-bit lanes, the steps of `align8` of the AVX2 file in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 unsafe fn align8<const TB: bool, const NIB: bool>(
@@ -1629,18 +1486,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:541-557
-    // ```c
-    //         if (!(gap_align->positionBased)) {
-    //             if(reverse_sequence)
-    //                 matrix_row = matrix[ A[ M - a_index ] ];
-    //             else
-    //                 matrix_row = matrix[ A[ a_index ] ];
-    // ...
-    //         if(reverse_sequence)
-    //             b_ptr = &B[N - first_b_index];
-    //         else
-    //             b_ptr = &B[first_b_index];
-    // ```
     // Random problems run through the scalar loops (`reference`), the 128-bit NEON kernels and the
     // kernels of this file, with the rows and columns given forward and reversed (as the call sites
     // pass them for the left extension), on 16-bit lanes and, where the problem fits, 8-bit lanes,

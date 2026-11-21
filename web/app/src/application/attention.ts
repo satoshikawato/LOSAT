@@ -128,7 +128,7 @@ export class Attention {
     const draft = this.deps.draft?.get();
     const on =
       this.state.get().busy ||
-      this.deps.runs.get().runs.some((run) => run.status === 'completed') ||
+      this.deps.runs.get().runs.some(holdsResults) ||
       (draft !== undefined && holdsInputs(draft));
     if (on === this.leaveGuard) return;
     this.leaveGuard = on;
@@ -238,14 +238,14 @@ export class Attention {
   }
 
   /**
-   * The numbers of the completed runs among `runIds`, in order. A run no longer in the list is left out, and so is
-   * one that is not completed: a run whose commit reached the Data worker but whose answer did not is failed here.
+   * The numbers of the runs that hold results (a completed run, or a failed one that kept its outputs) among `runIds`,
+   * in order. A run no longer in the list is left out, and so is one without results: a run whose commit reached the Data worker but whose answer did not is failed here.
    */
   private completed(runIds: readonly string[]): number[] {
     const ids = new Set(runIds);
     return this.deps.runs
       .get()
-      .runs.filter((run) => run.status === 'completed' && ids.has(run.snapshot.runId))
+      .runs.filter((run) => holdsResults(run) && ids.has(run.snapshot.runId))
       .map((run) => run.snapshot.number)
       .sort((a, b) => a - b);
   }
@@ -257,4 +257,9 @@ export class Attention {
     }
     this.state.set(next as AttentionState);
   }
+}
+
+/** A run that holds results of its session: a completed run, or a failed one that kept the outputs it wrote (D15, 2026-11-21). */
+export function holdsResults(run: { readonly status: string; readonly result?: unknown }): boolean {
+  return run.status === 'completed' || run.result !== undefined;
 }

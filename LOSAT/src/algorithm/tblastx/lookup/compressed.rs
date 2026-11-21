@@ -1,7 +1,7 @@
 //! Compressed amino-acid lookup primitives for the future `blastp-fast` path.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
-//! Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c
+//! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h
 
 use super::{ilog2, PV_ARRAY_BTS, PV_ARRAY_MASK};
 use crate::algorithm::tblastx::scan::OffsetPair;
@@ -16,56 +16,27 @@ use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 // it uses this file's private builder pieces (x_clut_direct.rs, exactness argument in its header).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 #[path = "x_clut_direct.rs"]
 pub mod x_clut_direct;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:186-201
-// ```c
-// #define COMPRESSED_HITS_PER_BACKBONE_CELL 4
-// #define COMPRESSED_HITS_CELL_MASK 0x03
-// #define COMPRESSED_HITS_PER_OVERFLOW_CELL 4
-// #define COMPRESSED_OVERFLOW_CELLS_IN_BANK 209710
-// #define COMPRESSED_OVERFLOW_MAX_BANKS 1024
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:186-201
 pub const COMPRESSED_HITS_PER_BACKBONE_CELL: usize = 4;
 pub const COMPRESSED_HITS_CELL_MASK: usize = 0x03;
 pub const COMPRESSED_HITS_PER_OVERFLOW_CELL: usize = 4;
 pub const COMPRESSED_OVERFLOW_CELLS_IN_BANK: usize = 209_710;
 pub const COMPRESSED_OVERFLOW_MAX_BANKS: usize = 1024;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1303-1306
-// ```c
-// /* compute a custom score matrix, for use only
-//    with lookup table creation. The matrix dimensions
-//    are BLASTAA_SIZE x compressed_alphabet_size, and
-//    the score entries are scaled up by kMatrixScale */
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1306
 pub type CompressedScoreMatrix = [[i32; BLASTAA_SIZE]; BLASTAA_SIZE];
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:203-208
-// ```c
-// typedef struct CompressedOverflowCell {
-//     struct CompressedOverflowCell* next;
-//     Int4 query_offsets[COMPRESSED_HITS_PER_OVERFLOW_CELL];
-// } CompressedOverflowCell;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:203-208
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompressedOverflowCell {
     pub next: Option<usize>,
     pub query_offsets: [i32; COMPRESSED_HITS_PER_OVERFLOW_CELL],
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:763-775
-// ```c
-// lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(...);
-// return lookup->overflow_banks[lookup->curr_overflow_bank] +
-//                                lookup->curr_overflow_cell++;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:763-775
 impl Default for CompressedOverflowCell {
     fn default() -> Self {
         Self {
@@ -75,18 +46,7 @@ impl Default for CompressedOverflowCell {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:210-231
-// ```c
-// typedef struct CompressedMixedOffsets{
-//     Int4 query_offsets[COMPRESSED_HITS_PER_BACKBONE_CELL-2];
-//     CompressedOverflowCell* head;
-// } CompressedMixedOffsets;
-// typedef struct CompressedLookupBackboneCell {
-//     Int4 num_used;
-//     Int4 query_offset;
-//     union { Int4 query_offsets[4]; CompressedMixedOffsets overflow_list; } payload;
-// } CompressedLookupBackboneCell;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:210-231
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompressedBackbonePayload {
     Inline([i32; COMPRESSED_HITS_PER_BACKBONE_CELL]),
@@ -96,26 +56,14 @@ pub enum CompressedBackbonePayload {
     },
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:787-801
-// ```c
-// CompressedLookupBackboneCell *backbone_cell = lookup->backbone + index;
-// Int4 num_entries = backbone_cell->num_used;
-// switch (num_entries) { case 0: ... case 1: ... }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-801
 impl Default for CompressedBackbonePayload {
     fn default() -> Self {
         Self::Inline([0; COMPRESSED_HITS_PER_BACKBONE_CELL])
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:221-231
-// ```c
-// typedef struct CompressedLookupBackboneCell {
-//     Int4 num_used;
-//     Int4 query_offset;
-//     union { ... } payload;
-// } CompressedLookupBackboneCell;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:221-231
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CompressedLookupBackboneCell {
     pub num_used: i32,
@@ -123,21 +71,7 @@ pub struct CompressedLookupBackboneCell {
     pub payload: CompressedBackbonePayload,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:236-267
-// ```c
-// typedef struct BlastCompressedAaLookupTable {
-//     Int4 threshold;
-//     Int4 word_length;
-//     Int4 alphabet_size;
-//     Int4 compressed_alphabet_size;
-//     Int4 reciprocal_alphabet_size;
-//     ...
-//     PV_ARRAY_TYPE *pv;
-//     Int4 pv_array_bts;
-//     Uint1* compress_table;
-//     Int4* scaled_compress_table;
-// } BlastCompressedAaLookupTable;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:236-267
 // `alphabet_size` and `backbone_size` are not stored: nothing reads them.
 #[derive(Clone, Debug)]
 pub struct BlastCompressedAaLookupTable {
@@ -152,13 +86,7 @@ pub struct BlastCompressedAaLookupTable {
     pub pv_array_bts: i32,
     pub compress_table: [u8; BLASTAA_SIZE],
     pub scaled_compress_table: [i32; BLASTAA_SIZE],
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
-    // ```c
-    // scaled_compress_table = lookup->scaled_compress_table;
-    // ...
-    // compressed_char = scaled_compress_table[next_char];
-    // next_char = s[word_length];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:269-291
     //
     // Rust keeps a byte-wide scan mirror so the hot compressed BLASTP scan can
     // index by `Uint1`-equivalent subject bytes without an Option/bounds branch;
@@ -176,26 +104,11 @@ pub struct BlastCompressedAaLookupTable {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1321-1330
-// ```c
-//     lookup->overflow_banks = (CompressedOverflowCell **) calloc(
-//                                          COMPRESSED_OVERFLOW_MAX_BANKS,
-//                                          sizeof(CompressedOverflowCell *));
-//     ...
-//     lookup->curr_overflow_cell = COMPRESSED_OVERFLOW_CELLS_IN_BANK;
-//     lookup->curr_overflow_bank = -1;
-// ```
 // The cells a table can take before `s_CompressedListGetNewCell` writes past `overflow_banks`.
 const NCBI_OVERFLOW_CELL_CAPACITY: usize =
     COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:935-952
-// ```c
-// typedef struct CompressedNeighborInfo {
-//     Int4 row_max[BLASTAA_SIZE];
-//     Int4 matrixSorted[BLASTAA_SIZE][BLASTAA_SIZE];
-//     Uint1 matrixSortedChar[BLASTAA_SIZE][BLASTAA_SIZE];
-// } CompressedNeighborInfo;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:935-952
 #[derive(Clone, Debug)]
 pub struct CompressedNeighborInfo {
     row_max: [i32; BLASTAA_SIZE],
@@ -203,26 +116,8 @@ pub struct CompressedNeighborInfo {
     matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1320
-// ```c
-// lookup->word_length = word_size;
-// lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
-// if (word_size == 6 || word_size == 5) {
-//     lookup->compressed_alphabet_size = 15;
-//     lookup->reciprocal_alphabet_size = 286331154;
-// }
-// else {
-//     lookup->compressed_alphabet_size = 10;
-//     lookup->reciprocal_alphabet_size = 429496730;
-// }
-// lookup->backbone_size = (Int4)pow(lookup->compressed_alphabet_size,
-//                                   word_size) + 1;
-// lookup->backbone = calloc(lookup->backbone_size, sizeof(...));
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1289-1320
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1292
-// ```c
-//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
-// ```
 /// The threshold of a compressed table in NCBI's matrix units, for a caller of the builders that
 /// take it converted (BLASTX, `blastx/seed.rs`).
 pub(crate) fn x_compressed_scaled_threshold(threshold: f64) -> i32 {
@@ -262,29 +157,8 @@ impl BlastCompressedAaLookupTable {
         })
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:753-775
-    // ```c
-    // if (lookup->curr_overflow_cell == COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-    //     lookup->overflow_banks[bank_idx] = malloc(...);
-    //     lookup->curr_overflow_bank++;
-    //     lookup->curr_overflow_cell = 0;
-    // }
-    // return lookup->overflow_banks[lookup->curr_overflow_bank] +
-    //                            lookup->curr_overflow_cell++;
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:759-768
-    // ```c
-    //     if (lookup->curr_overflow_cell ==
-    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-    //         /* need a new bank */
-    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
-    //         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
-    //                                            COMPRESSED_OVERFLOW_CELLS_IN_BANK *
-    //                                            sizeof(CompressedOverflowCell));
-    //         ASSERT(bank_idx < COMPRESSED_OVERFLOW_MAX_BANKS);
-    //         ASSERT(lookup->overflow_banks[bank_idx]);
-    //         lookup->curr_overflow_bank++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:753-775
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
     // The release build has no ASSERT, so after the last bank NCBI writes past
     // `overflow_banks`; the table is marked and the last cell is reused, and the words that
     // are left are not added. The capacity is that of NCBI's banks, except for BLASTP's
@@ -313,38 +187,7 @@ impl BlastCompressedAaLookupTable {
         cell_index
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
-    // ```c
-    // switch (num_entries) {
-    // case 0:
-    //     backbone_cell->query_offset = query_offset;
-    //     break;
-    // case 1: case 2: case 3: case 4:
-    //     backbone_cell->payload.query_offsets[num_entries-1] = query_offset;
-    //     break;
-    // case 5:
-    //     tmp_offset_0 = backbone_cell->payload.query_offsets[0];
-    //     tmp_offset_1 = backbone_cell->payload.query_offsets[1];
-    //     new_cell = s_CompressedListGetNewCell(lookup);
-    //     new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
-    //     new_cell->query_offsets[1] = backbone_cell->payload.query_offsets[3];
-    //     new_cell->query_offsets[2] = query_offset;
-    //     backbone_cell->payload.overflow_list.query_offsets[0] = tmp_offset_0;
-    //     backbone_cell->payload.overflow_list.query_offsets[1] = tmp_offset_1;
-    //     backbone_cell->payload.overflow_list.head = new_cell;
-    //     break;
-    // default:
-    //     cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK;
-    //     if (cell_index == 0) {
-    //         new_cell = s_CompressedListGetNewCell(lookup);
-    //         new_cell->next = backbone_cell->payload.overflow_list.head;
-    //         backbone_cell->payload.overflow_list.head = new_cell;
-    //     }
-    //     backbone_cell->payload.overflow_list.head->query_offsets[cell_index] =
-    //         query_offset;
-    // }
-    // backbone_cell->num_used++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
     pub fn add_word_hit(&mut self, index: usize, query_offset: i32) {
         let num_entries = self.backbone[index].num_used;
         match num_entries {
@@ -407,23 +250,7 @@ impl BlastCompressedAaLookupTable {
         self.backbone[index].num_used += 1;
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-909
-    // ```c
-    // switch (lookup->word_length) {
-    // case 5:
-    //     index = w[0] + W6p1[w[1]] + W6p2[w[2]] +
-    //             W6p3[w[3]] + W6p4[w[4]];
-    //     break;
-    // case 6:
-    //     index = w[0] + W6p1[w[1]] + W6p2[w[2]] +
-    //             W6p3[w[3]] + W6p4[w[4]] + W6p5[w[5]];
-    //     break;
-    // case 7:
-    //     index = w[0] + W7p1[w[1]] + ... + W7p6[w[6]];
-    //     break;
-    // }
-    // s_CompressedLookupAddWordHit(lookup, index, query_offset);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-909
     pub fn add_encoded(&mut self, word: &[u8], query_offset: i32) {
         let index = compute_encoded_compressed_index(
             self.word_length as usize,
@@ -433,14 +260,7 @@ impl BlastCompressedAaLookupTable {
         self.add_word_hit(index, query_offset);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:919-929
-    // ```c
-    // index = s_ComputeCompressedIndex(lookup->word_length, w,
-    //                                  lookup->compressed_alphabet_size,
-    //                                  &skip, lookup);
-    // if (skip == 0)
-    //     s_CompressedLookupAddWordHit(lookup, index, query_offset);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:919-929
     pub fn add_unencoded(&mut self, word: &[u8], query_offset: i32) -> bool {
         let (index, skip) = compute_compressed_index(
             self.word_length as usize,
@@ -456,25 +276,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1071-1110
-    // ```c
-    // lookup->exact_matches++;
-    // score = 0;
-    // for (i = 0; i < lookup->word_length; i++) {
-    //     int c = lookup->compress_table[w[i]];
-    //     if (c >= lookup->compressed_alphabet_size)
-    //         return;
-    //     score += info->matrix[w[i]][c];
-    // }
-    // if (lookup->threshold == 0 || score < lookup->threshold) {
-    //     s_CompressedLookupAddUnencoded(lookup, w, query_offset);
-    // }
-    // ...
-    // score = info->row_max[w[0]];
-    // for (i = 1; i < lookup->word_length; i++)
-    //     score += info->row_max[w[i]];
-    // s_CompressedAddWordHitsCore(info, score, 0);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1121
     pub fn add_word_hits(
         &mut self,
         info: &CompressedNeighborInfo,
@@ -515,26 +317,7 @@ impl BlastCompressedAaLookupTable {
         self.add_word_hits_core(info, word, &mut subject_word, score, 0, query_offset);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1008-1053
-    // ```c
-    // score -= info->row_max[currQueryChar];
-    // rowSorted = info->matrixSorted[currQueryChar];
-    // charSorted = info->matrixSortedChar[currQueryChar];
-    // if (current_pos == info->wordsize - 1) {
-    //     for (i = 0; i < info->compressed_alphabet_size &&
-    //            (score + rowSorted[i] >= info->threshold); i++) {
-    //         subject_word[current_pos] = charSorted[i];
-    //         s_CompressedLookupAddEncoded(lookup, subject_word, query_offset);
-    //     }
-    //     return;
-    // }
-    // for (i = 0; i < info->compressed_alphabet_size &&
-    //        (score + rowSorted[i] >= info->threshold); i++) {
-    //     subject_word[current_pos] = charSorted[i];
-    //     s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-    //                                 current_pos + 1);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1008-1053
     fn add_word_hits_core(
         &mut self,
         info: &CompressedNeighborInfo,
@@ -582,22 +365,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1137-1176
-    // ```c
-    // for (i = 0; i < lookup->alphabet_size; i++) {
-    //     info.row_max[i] = compressed_matrix[i][0];
-    //     for (j = 1; j < lookup->compressed_alphabet_size; j++)
-    //         info.row_max[i] = MAX(info.row_max[i], compressed_matrix[i][j]);
-    // }
-    // s_loadSortedMatrix(&info);
-    // for (loc = location; loc; loc = loc->next){
-    //     Int4 from = loc->ssr->left;
-    //     Int4 to = loc->ssr->right - lookup->word_length + 1;
-    //     for (offset = from; offset <= to; offset++){
-    //         s_CompressedAddWordHits(&info, query->sequence, offset);
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1137-1176
     #[cfg(test)]
     pub fn add_neighboring_words(
         &mut self,
@@ -610,16 +378,6 @@ impl BlastCompressedAaLookupTable {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-    // ```c
-    //     for (loc = location; loc; loc = loc->next){
-    //         Int4 from = loc->ssr->left;
-    //         Int4 to = loc->ssr->right - lookup->word_length + 1;
-    //
-    //         for (offset = from; offset <= to; offset++){
-    //             s_CompressedAddWordHits(&info, query->sequence, offset);
-    //         }
-    //     }
-    // ```
     // The loop of `add_neighboring_words`. No NCBI counterpart: `after_word` sees the table
     // after the words of each query offset (BLASTP's test of its query batches' own tables)
     // and stops the loop when it returns `false`; it changes no word that is added.
@@ -649,23 +407,7 @@ impl BlastCompressedAaLookupTable {
         true
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
-    // ```c
-    // dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-    // if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
-    //     for (i = 0; i < numhits-1; i++)
-    //         dest[i].qs_offsets.q_off = backbone_cell->payload.query_offsets[i];
-    // } else {
-    //     first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
-    //     dest[1].qs_offsets.q_off =
-    //          backbone_cell->payload.overflow_list.query_offsets[0];
-    //     dest[2].qs_offsets.q_off =
-    //          backbone_cell->payload.overflow_list.query_offsets[1];
-    //     for (i = 0; i < first_cell_entries; i++)
-    //         dest[i].qs_offsets.q_off = curr_cell->query_offsets[i];
-    //     while (curr_cell != NULL) { ... }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:343-384
     #[cfg(test)]
     pub fn query_offsets_in_scan_order(&self, index: usize) -> Vec<i32> {
         let cell = &self.backbone[index];
@@ -724,17 +466,7 @@ impl BlastCompressedAaLookupTable {
         offsets
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
-    // ```c
-    // dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-    // dest[0].qs_offsets.s_off = s_off;
-    // if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
-    //     for (i = 0; i < numhits-1; i++) {
-    //         dest[i].qs_offsets.q_off = backbone_cell->payload.query_offsets[i];
-    //         dest[i].qs_offsets.s_off = s_off;
-    //     }
-    // } else { ... while (curr_cell != NULL) { ... } }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:343-384
     #[allow(dead_code)]
     fn copy_scan_hits(&self, index: usize, s_off: u32, dest: &mut [OffsetPair]) {
         let cell = &self.backbone[index];
@@ -811,23 +543,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:229-384
-    // ```c
-    // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-    //     for(s = s_first; s <= s_last; s++){
-    //         index = s_ComputeCompressedIndex(word_length - 1, s, ...);
-    //         if(!skip) break;
-    //     }
-    //     next_char = ((s <= s_last)? s[word_length-1] : 0);
-    //     preshift = (Int4)((((Int8)index) * recip) >> 32);
-    //     for (; s <= s_last; s++) {
-    //         compressed_char = scaled_compress_table[next_char];
-    //         next_char = s[word_length];
-    //         ...
-    //         if (PV_TEST(pv, index, pv_array_bts)) { ... }
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:229-384
     #[allow(dead_code)]
     pub(crate) fn scan_subject(
         &self,
@@ -860,13 +576,6 @@ impl BlastCompressedAaLookupTable {
             let mut index = 0i32;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-500
-            // ```c
-            //     scan_range[1] = subject->seq_ranges[0].left;
-            //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-            //
-            //     if (scan_range[2] < scan_range[1])
-            //         scan_range[2] = scan_range[1];
-            // ```
             // A subject shorter than the word is still primed once, and the priming word
             // reads past the subject into its closing NULLB and beyond. The NULLB has no
             // compressed letter (its scaled_compress_table entry is -1, so skip is set), so
@@ -912,16 +621,7 @@ impl BlastCompressedAaLookupTable {
                 next_char = subject.get(s + word_length).copied().unwrap_or(0);
 
                 if compressed_char < 0 {
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:278-300
-                    // ```c
-                    // if(compressed_char < 0){ /* flush (rare) "bad" character(s) */
-                    //     preshift = 0;
-                    //     s++;
-                    //     for(skip = word_length-1; skip && (s <= s_last) ; s++){ ... }
-                    //     s--; /*undo the following increment*/
-                    //     continue;
-                    // }
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:278-311
                     preshift = 0;
                     s += 1;
                     let mut skip = self.word_length - 1;
@@ -966,11 +666,7 @@ impl BlastCompressedAaLookupTable {
                             );
                             totalhits += numhits;
                         } else {
-                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
-                            // ```c
-                            // s_range[1] = (Int4)(s - subject->sequence);
-                            // return totalhits;
-                            // ```
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
                             s_range[1] = i32::try_from(s)
                                 .expect("NCBI BLAST compressed subject offset fits Int4");
                             return totalhits;
@@ -986,27 +682,7 @@ impl BlastCompressedAaLookupTable {
         totalhits
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
-    // ```c
-    // for (i = count = 0; i < lookup->backbone_size; i++) {
-    //     if (lookup->backbone[i].num_used)
-    //         count++;
-    // }
-    // pv_array_bts = PV_ARRAY_BTS;
-    // if (count <= 0.01 * lookup->backbone_size) {
-    //     pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
-    // }
-    // pv = lookup->pv = calloc((lookup->backbone_size >> pv_array_bts) + 1,
-    //                          sizeof(PV_ARRAY_TYPE));
-    // for (i = 0; i < lookup->backbone_size; i++) {
-    //     count = lookup->backbone[i].num_used;
-    //     if (count > 0) {
-    //         PV_SET(pv, i, pv_array_bts);
-    //         longest_chain = MAX(count, longest_chain);
-    //     }
-    // }
-    // lookup->longest_chain = longest_chain;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1246
     pub fn finalize(&mut self) {
         let nonempty_count = self
             .backbone
@@ -1034,18 +710,7 @@ impl BlastCompressedAaLookupTable {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
-// ```c
-// while (range[1] > range[2]) {
-//     range[0]++;
-//     if (range[0] >= subject->num_seq_ranges)
-//         return FALSE;
-//     range[1] = subject->seq_ranges[range[0]].left +
-//                word_length - lut_word_length;
-//     range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
-// }
-// return TRUE;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58
 #[inline(always)]
 #[allow(dead_code)]
 fn determine_compressed_scanning_offsets(
@@ -1066,10 +731,7 @@ fn determine_compressed_scanning_offsets(
     true
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:272-274
-// ```c
-// preshift = (Int4)((((Int8)index) * recip) >> 32);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:284
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size: i64) -> i32 {
@@ -1077,22 +739,7 @@ pub(crate) fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size:
 }
 
 impl CompressedNeighborInfo {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:969-998
-    // ```c
-    // for (longChar = 0; longChar < BLASTAA_SIZE; longChar++) {
-    //     for (shortChar = 0; shortChar < info->compressed_alphabet_size; shortChar++) {
-    //         sortTable[shortChar].diff = info->row_max[longChar] -
-    //                                     info->matrix[longChar][shortChar];
-    //         sortTable[shortChar].letter = shortChar;
-    //     }
-    //     qsort(sortTable, info->compressed_alphabet_size,
-    //           sizeof(LetterAndScoreDifferencePair), ScoreDifferenceSort);
-    //     for (i = 0; i < info->compressed_alphabet_size; i++) {
-    //         info->matrixSorted[longChar][i] = info->matrix[longChar][letter];
-    //         info->matrixSortedChar[longChar][i] = letter;
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:969-998
     pub fn new(matrix: &CompressedScoreMatrix, compressed_alphabet_size: usize) -> Self {
         let mut row_max = [0i32; BLASTAA_SIZE];
         for row in 0..BLASTAA_SIZE {
@@ -1131,17 +778,7 @@ impl CompressedNeighborInfo {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1299
-// ```c
-// if (word_size == 6 || word_size == 5) {
-//     lookup->compressed_alphabet_size = 15;
-//     lookup->reciprocal_alphabet_size = 286331154;
-// }
-// else {
-//     lookup->compressed_alphabet_size = 10;
-//     lookup->reciprocal_alphabet_size = 429496730;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1289-1300
 pub fn compressed_lookup_parameters(word_size: usize) -> Option<(usize, i32)> {
     match word_size {
         5 | 6 => Some((15, 286_331_154)),
@@ -1150,11 +787,7 @@ pub fn compressed_lookup_parameters(word_size: usize) -> Option<(usize, i32)> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4949-4952
-// ```c
-// static const char* s_alphabet10 = "IJLMV AST BDENZ KQR G FY P H C W";
-// static const char* s_alphabet15 = "ST IJV LM KR EQZ A G BD P N F Y H C W";
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4949-4952
 fn compressed_alphabet_string(compressed_alphabet_size: usize) -> Option<&'static [u8]> {
     match compressed_alphabet_size {
         10 => Some(b"IJLMV AST BDENZ KQR G FY P H C W"),
@@ -1163,19 +796,7 @@ fn compressed_alphabet_string(compressed_alphabet_size: usize) -> Option<&'stati
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4786-4805
-// ```c
-// if (isspace(c)) {
-//     compressed_letter++;
-//     j = 0;
-// }
-// else if (isalpha(c)) {
-//     Int4 aa_letter = AMINOACID_TO_NCBISTDAA[c];
-//     table[aa_letter] = compressed_letter;
-//     rev_table[compressed_letter][j++] = aa_letter;
-//     rev_table[compressed_letter][j] = -1;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4786-4805
 fn build_compressed_reverse_lookup(compressed_alphabet_size: usize) -> Option<Vec<Vec<usize>>> {
     let alphabet = compressed_alphabet_string(compressed_alphabet_size)?;
     let mut reverse = vec![Vec::new(); compressed_alphabet_size];
@@ -1195,20 +816,7 @@ fn build_compressed_reverse_lookup(compressed_alphabet_size: usize) -> Option<Ve
     Some(reverse)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4786-4805
-// ```c
-// for (i = 0; i < BLASTAA_SIZE; i++)
-//     table[i] = compressed_alphabet_size;
-// ...
-// if (isspace(c)) {
-//     compressed_letter++;
-//     j = 0;
-// }
-// else if (isalpha(c)) {
-//     Int4 aa_letter = AMINOACID_TO_NCBISTDAA[c];
-//     table[aa_letter] = compressed_letter;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4786-4805
 pub fn build_compressed_translation(compressed_alphabet_size: usize) -> Option<[u8; BLASTAA_SIZE]> {
     let alphabet = compressed_alphabet_string(compressed_alphabet_size)?;
     let mut table = [compressed_alphabet_size as u8; BLASTAA_SIZE];
@@ -1228,36 +836,13 @@ pub fn build_compressed_translation(compressed_alphabet_size: usize) -> Option<[
     Some(table)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
-// ```c
-// long BLAST_Nint(double x)
-// {
-//    x += (x >= 0. ? 0.5 : -0.5);
-//    return (long)x;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
 #[inline]
 fn blast_nint(x: f64) -> i32 {
     (x + if x >= 0.0 { 0.5 } else { -0.5 }) as i32
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4818-4858
-// ```c
-// Blast_ResFreqStdComp(sbp, rfp);
-// for (letter = 0; letter < compressed_alphabet_size; letter++) {
-//     double prob_sum = 0.;
-//     for (i = 0; i < BLASTAA_SIZE; i++) {
-//         Int4 aa = rev_table[letter][i];
-//         if (aa < 0) break;
-//         prob_sum += rfp->prob[aa];
-//     }
-//     for (i = 0; i < BLASTAA_SIZE; i++) {
-//         Int4 aa = rev_table[letter][i];
-//         if (aa < 0) break;
-//         compressed_prob[aa] = rfp->prob[aa] / prob_sum;
-//     }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4818-4858
 // Always inlined: BLOSUM62's builder keeps the code it had as the only caller.
 #[inline(always)]
 fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLASTAA_SIZE]> {
@@ -1276,25 +861,7 @@ fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLA
     Some(compressed_prob)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4886-4937
-// ```c
-// lambda = RPSfindUngappedLambda(sbp->name);
-// matrix_scale_factor /= lambda;
-// std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
-// ...
-// for (q = 0; q < BLASTAA_SIZE; q++) {
-//     for (s = 0; s < compressed_alphabet_size; s++) {
-//         double val = 0;
-//         for (i = 0; i < BLASTAA_SIZE; i++) {
-//             Int4 aa = rev_table[s][i];
-//             if (aa < 0) break;
-//             val += std_freqs->data[q][aa] * compressed_prob[aa];
-//         }
-//         val = (val < 1e-8) ? min_freq : log(val);
-//         scores[q][s] = (Int4)BLAST_Nint(val * matrix_scale_factor);
-//     }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4886-4937
 pub fn build_blosum62_compressed_score_matrix(
     compressed_alphabet_size: usize,
 ) -> Option<CompressedScoreMatrix> {
@@ -1343,16 +910,7 @@ fn compressed_score_matrix_of(
     Some(scores)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1283-1355
-// ```c
-// new_alphabet = SCompressedAlphabetNew(sbp,
-//                             lookup->compressed_alphabet_size,
-//                             kMatrixScale);
-// ...
-// s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                 query, locations);
-// s_CompressedLookupFinalize(lookup);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1283-1355
 // `Some(Err(()))` when the words fill NCBI's overflow banks (`s_CompressedListGetNewCell`),
 // past which NCBI writes beyond `overflow_banks`.
 #[cfg(test)]
@@ -1463,33 +1021,7 @@ impl CompressedScores for ScoringMatrix {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
-// ```c++
-//     // 5. Create the lookup table
-//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-//         LookupTableWrap* lut =
-//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-//                                              sbp, lookup_segments_wrap,
-//                                              retval->m_InternalData->m_RpsData,
-//                                              seqsrc,
-//                                              num_threads);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:798-834
-// ```c
-//     case 5:
-//     {
-//         ...
-//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//         ...
-//     default:
-//     {
-//         ...
-//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//
-//         if (cell_index == 0 ) { /* can't be empty => it's full  */
-//
-//             /* fetch next vacant cell */
-//         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-// ```
 // NCBI builds a table for each query batch; this is one table for all of them, whose
 // cells hold the offsets of each batch in the batch's order, one batch after another.
 // `overflow_cell_capacity` is that of NCBI's banks (a parameter for the tests).
@@ -1554,11 +1086,6 @@ fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 // One of NCBI's tables (a query batch's lookup segments), built with NCBI's capacity only to
 // see whether its words fill the banks; it stops there. Its offsets are those of the whole
 // query, which changes no count of a cell.
@@ -1583,51 +1110,8 @@ fn compressed_table_fills_banks(
     table.overflow_banks_exhausted
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1110
-// ```c
-//     lookup->exact_matches++;
-//     score = 0;
-//     for (i = 0; i < lookup->word_length; i++) {
-//         int c = lookup->compress_table[w[i]];
-//         if (c >= lookup->compressed_alphabet_size)
-//             return;
-//         score += info->matrix[w[i]][c];
-//     }
-//     ...
-//     if (lookup->threshold == 0 || score < lookup->threshold) {
-//         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
-//     }
-//     ...
-//     if (lookup->threshold == 0)
-//         return;
-//     ...
-//     score = info->row_max[w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += info->row_max[w[i]];
-//     s_CompressedAddWordHitsCore(info, score, 0);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1121
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
-// ```c
-//     score -= info->row_max[currQueryChar];
-//     rowSorted = info->matrixSorted[currQueryChar];
-//     ...
-//     if (current_pos == info->wordsize - 1) {
-//         ...
-//         for (i = 0; i < info->compressed_alphabet_size &&
-//                (score + rowSorted[i] >= info->threshold); i++) {
-//             subject_word[current_pos] = charSorted[i];
-//             s_CompressedLookupAddEncoded(lookup, subject_word,
-//                                          query_offset);
-//         ...
-//         return;
-//     }
-//     ...
-//     for (i = 0; i < info->compressed_alphabet_size &&
-//            (score + rowSorted[i] >= info->threshold); i++) {
-//         subject_word[current_pos] = charSorted[i];
-//         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-//                                     current_pos + 1);
-// ```
 // No NCBI counterpart: counts the words of `add_word_hits` (above) without a table, for LOSAT's
 // choice of a path and of the blocks' ends (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
 // `x_block_search_refuses_nothing` and `x_word_blocks`); it changes no value NCBI computes.
@@ -1839,17 +1323,7 @@ impl CompressedWordCount {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
-// ```c
-// table_scale = iexp(lookup->compressed_alphabet_size, word_size - 1);
-// for (i = 0; i < BLASTAA_SIZE; i++) {
-//     Uint1 letter = new_alphabet->compress_table[i];
-//     if (letter >= lookup->compressed_alphabet_size)
-//         lookup->scaled_compress_table[i] = -1;
-//     else
-//         lookup->scaled_compress_table[i] = table_scale * letter;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1339-1347
 pub fn build_scaled_compress_table(
     compress_table: &[u8; BLASTAA_SIZE],
     compressed_alphabet_size: usize,
@@ -1868,33 +1342,16 @@ pub fn build_scaled_compress_table(
     scaled
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
-// ```c
-// lookup->scaled_compress_table = (Int4 *)malloc(
-//                                    BLASTAA_SIZE * sizeof(Int4));
-// ...
-// lookup->scaled_compress_table[i] = table_scale * letter;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1337-1347
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
-// ```c
-// scaled_compress_table = lookup->scaled_compress_table;
-// ...
-// compressed_char = scaled_compress_table[next_char];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:269-290
 fn build_scaled_compress_table_u8(scaled_compress_table: &[i32; BLASTAA_SIZE]) -> [i32; 256] {
     let mut table = [-1i32; 256];
     table[..BLASTAA_SIZE].copy_from_slice(scaled_compress_table);
     table
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-909
-// ```c
-// index = w[0] + W6p1[w[1]] + W6p2[w[2]] + W6p3[w[3]] + W6p4[w[4]];
-// ...
-// index =  w[0] + W7p1[w[1]] + W7p2[w[2]] + W7p3[w[3]] +
-//          W7p4[w[4]] + W7p5[w[5]] + W7p6[w[6]];
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-909
 pub fn compute_encoded_compressed_index(
     word_size: usize,
     word: &[u8],
@@ -1942,19 +1399,7 @@ pub fn compute_encoded_compressed_index(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322
-// ```c
-// *skip = 0;
-// for(i = 0; i < wordsize; i++) {
-//     Int4 ch = scaled_compress_table[word[i]];
-//     if (ch < 0){
-//         *skip = i + 2;
-//         ch = 0;
-//     }
-//     index = index / compressed_alphabet_size +  ch;
-// }
-// return index;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:304-325
 pub fn compute_compressed_index(
     word_size: usize,
     word: &[u8],
@@ -1977,19 +1422,7 @@ pub fn compute_compressed_index(
     (index, skip)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322
-// ```c
-// *skip = 0;
-// for(i = 0; i < wordsize; i++) {
-//     Int4 ch = scaled_compress_table[word[i]];
-//     if (ch < 0){
-//         *skip = i + 2;
-//         ch = 0;
-//     }
-//     index = index / compressed_alphabet_size +  ch;
-// }
-// return index;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:304-325
 #[inline(always)]
 pub(crate) fn compute_compressed_index_u8(
     word_size: usize,
@@ -2010,23 +1443,13 @@ pub(crate) fn compute_compressed_index_u8(
     (index, skip)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-57
-// ```c
-// #define PV_SET(lookup, index, pv_array_bts) \
-//     lookup[(index) >> (pv_array_bts)] |= (1U << ((index) & PV_ARRAY_MASK))
-// #define PV_TEST(lookup, index, pv_array_bts) \
-//     (lookup[(index) >> (pv_array_bts)] & (1U << ((index) & PV_ARRAY_MASK)))
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
 #[inline(always)]
 pub fn compressed_pv_test(pv: &[u32], index: usize, pv_array_bts: usize) -> bool {
     (pv[index >> pv_array_bts] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-57
-// ```c
-// #define PV_SET(lookup, index, pv_array_bts) \
-//     lookup[(index) >> (pv_array_bts)] |= (1U << ((index) & PV_ARRAY_MASK))
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
 #[inline(always)]
 pub fn compressed_pv_set(pv: &mut [u32], index: usize, pv_array_bts: usize) {
     pv[index >> pv_array_bts] |= 1u32 << (index & PV_ARRAY_MASK);
@@ -2112,11 +1535,6 @@ mod tests {
     const LOW_THRESHOLD: i32 = 1100;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
-    // ```c++
-    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-    //         LookupTableWrap* lut =
-    //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-    // ```
     // (a) The table of all batches takes more cells than the capacity, no batch's own table
     // does: the table is built, and it is the table without a limit.
     #[test]
@@ -2168,13 +1586,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4888-4898
-    // ```c
-    //     lambda = RPSfindUngappedLambda(sbp->name);
-    // ...
-    //     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
-    //     if (std_freqs == NULL)
-    //         return -2;
-    // ```
     // The compressed score matrix of each search matrix: BLOSUM62's is the default builder's,
     // IDENTITY (no frequency ratios) has none, and each other matrix has its own. The table of
     // BLOSUM62 as a `ScoringMatrix` is the default builder's table.
@@ -2242,13 +1653,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
-    // ```c
-    //     if (lookup->curr_overflow_cell ==
-    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-    //         /* need a new bank */
-    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
-    //         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
-    // ```
     // (b) One batch's own table needs more cells than the capacity: refused, whether the
     // batch is the first (its table so far is the whole table) or a later one.
     #[test]
@@ -2299,15 +1703,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-841
-    // ```c
-    //     default:
-    //     {
-    //     	/* continue with existing overflow list */
-    //         ...
-    //         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-    //
-    //         if (cell_index == 0 ) { /* can't be empty => it's full  */
-    // ```
     // (c) On random queries: a batch's own table takes cells(n) = 0 (n <= 5) or floor(n / 4)
     // cells per backbone cell, the batch takes at least as many cells of the table of all
     // batches (the shortcut is sound), and the build refuses exactly when some batch's own
@@ -2409,14 +1804,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1110
-    // ```c
-    //     lookup->exact_matches++;
-    //     score = 0;
-    //     for (i = 0; i < lookup->word_length; i++) {
-    //         int c = lookup->compress_table[w[i]];
-    //         if (c >= lookup->compressed_alphabet_size)
-    //             return;
-    // ```
     // (d) `CompressedWordCount` gives the number of words that `add_word_hits` adds for each
     // offset, on random words of all NCBISTDAA letters (some without a compressed letter), with
     // and without a threshold, and the count of a word does not depend on the order of its
@@ -2588,14 +1975,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405
-    // ```c
-    //           else
-    //               /* not enough space in the destination array */
-    //           {
-    //               s_range[1] = (Int4)(s - subject->sequence);
-    //               return totalhits;
-    //           }
-    // ```
     // (f) BLASTP's block search (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/x_query_blocks.rs`): the
     // table of some queries (a block) gives, at each subject offset, the hits of those queries
     // that the table of all queries gives, not always in the same order (cells of more than 5
@@ -2667,20 +2046,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
-    // ```c
-    // case 5:
-    //     new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
-    //     new_cell->query_offsets[1] = backbone_cell->payload.query_offsets[3];
-    //     new_cell->query_offsets[2] = query_offset;
-    // ...
-    // default:
-    //     cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-    //     if (cell_index == 0 ) {
-    //         new_cell->next = backbone_cell->payload.overflow_list.head;
-    //         backbone_cell->payload.overflow_list.head = new_cell;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
     // `(Int4)(kMatrixScale * opt->threshold)` past `Int4` is `INT_MIN` (every word is a
     // neighbor); words past the overflow banks make the table `Err` (NCBI writes past its banks).
     #[test]
@@ -2726,11 +2092,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
-    // ```c
-    // PV_SET(pv, i, pv_array_bts);
-    // longest_chain = MAX(count, longest_chain);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1242
     #[test]
     fn compressed_finalize_sets_pv_and_longest_chain() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -2757,13 +2119,7 @@ mod tests {
         ));
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-929
-    // ```c
-    // s_CompressedLookupAddEncoded(lookup, subject_word, query_offset);
-    // ...
-    // if (skip == 0)
-    //     s_CompressedLookupAddWordHit(lookup, index, query_offset);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-929
     #[test]
     fn compressed_encoded_and_unencoded_indices_match() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -2788,17 +2144,7 @@ mod tests {
         assert_eq!(lookup.query_offsets_in_scan_order(encoded_index), vec![321]);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:322-384
-    // ```c
-    // if (PV_TEST(pv, index, pv_array_bts)) {
-    //     Int4 s_off = (Int4)(s - subject->sequence);
-    //     ...
-    //     dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-    //     dest[0].qs_offsets.s_off = s_off;
-    //     ...
-    //     totalhits += numhits;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:322-384
     #[test]
     fn compressed_scan_subject_emits_ncbi_subject_major_order() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -2842,13 +2188,7 @@ mod tests {
         assert_eq!(s_range[1], 6);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
-    // ```c
-    // else {
-    //     s_range[1] = (Int4)(s - subject->sequence);
-    //     return totalhits;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
     #[test]
     fn compressed_scan_subject_small_buffer_resumes_without_splitting_subject_offset() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Recheck retained raw evidence and export PR01 tables without changing gates.
 
-NCBI c++/src/objtools/align_format/tabular.cpp:1098-1108:
+NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108:
   x_PrintField(*iter); ... m_Ostream << "\n";
 Hashes here cover those complete ordered bytes; TSV tables summarize evidence
 and never replace the saved search output or its acceptance decision.
@@ -20,7 +20,7 @@ import wasm_performance as perf
 def series_result(rows, measurement):
     """Require every ordered raw-output gate, including the diagnostic output.
 
-    NCBI tabular.cpp:1098-1108: x_PrintField(*iter); ... m_Ostream << "\n";
+    NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108: x_PrintField(*iter); ... m_Ostream << "\n";
     A successful earlier output cannot stand in for a later failed command.
     """
     failed = next((s for s in rows if s["status"] != "PASS"), None)

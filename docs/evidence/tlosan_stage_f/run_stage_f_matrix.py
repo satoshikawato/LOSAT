@@ -62,8 +62,6 @@ def first_difference(expected: bytes, actual: bytes) -> int:
 
 
 # NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
-# *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
-# --hit_list->hsplist_count;
 # Compare complete output bytes after indexed subject work enters that stream.
 def compare_one(out: Path, log, name: str, query: Path, subject: Path,
                 common: list[str], fmt: int, expected: bytes,
@@ -133,8 +131,6 @@ def physical(out: Path, log) -> None:
 
 
 # NCBI c++/src/algo/blast/core/blast_engine.c:1452-1465:
-# seq_arg.seq->gen_code_string = GenCodeSingletonFind(db_options->genetic_code);
-# stat_length /= CODON_LENGTH;
 # The API oracle selects FindGeneticCode(code); code 1 is calibrated to the CLI.
 def codes(out: Path, log, api: Path) -> None:
     baseline = {(row["code"], row["outfmt"]): row for row in records(E / "all_codes_20260925/comparison.jsonl")}

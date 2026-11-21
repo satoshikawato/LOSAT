@@ -10,45 +10,6 @@
 //! BLASTP's square-matrix scaling stays in `adjust_scores.rs` until then.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1104-1158
-//! ```c
-//! int
-//! Blast_CompositionBasedStats(int ** matrix, double * LambdaRatio,
-//!                             const Blast_MatrixInfo * ss,
-//!                             const double queryProb[], const double resProb[],
-//!                             double (*calc_lambda)(double*,int,int,double),
-//!                             int pValueAdjustment)
-//! {
-//!     ...
-//!     if (ss->positionBased) {
-//!         out_of_memory =
-//!             s_GetPssmScoreProbs(&scoreArray, &obs_min, &obs_max,
-//!                                 ss->startMatrix, ss->rows, resProb);
-//!     } else {
-//!         ...
-//!     }
-//!     ...
-//!     correctUngappedLambda =
-//!         calc_lambda(scoreArray, obs_min, obs_max, ss->ungappedLambda);
-//!     ...
-//!     *LambdaRatio = correctUngappedLambda / ss->ungappedLambda;
-//!     if (0 == pValueAdjustment)
-//!       *LambdaRatio = MIN(1, *LambdaRatio);
-//!     *LambdaRatio = MAX(*LambdaRatio, LambdaRatioLowerBound);
-//!
-//!     if (*LambdaRatio > 0) {
-//!         double scaledLambda = ss->ungappedLambda/(*LambdaRatio);
-//!         if (ss->positionBased) {
-//!             s_ScalePSSM(matrix, ss->rows, ss->cols, ss->startFreqRatios,
-//!                         ss->startMatrix, resProb, scaledLambda);
-//!         } else {
-//!             ...
-//!         }
-//!     }
-//!     free(scoreArray);
-//!
-//!     return 0;
-//! }
-//! ```
 
 use crate::core::psi::PsiScoreBlk;
 use crate::stats::karlin_calc::calc_lambda_of_score_probs;
@@ -70,10 +31,6 @@ pub(crate) trait RedoInstance {
     /// frames of a translated sequence, each alignment in its frame.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2422-2423
-    /// ```c
-    ///     /* does this kind of search translate the database sequence */
-    ///     int subject_is_translated = (context->prog_number == eBlastTypeTblastn) || (context->prog_number == eBlastTypeRpsTblastn);
-    /// ```
     const SUBJECT_IS_TRANSLATED: bool = false;
 }
 
@@ -94,15 +51,6 @@ impl RedoInstance for FrameRedo {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:43-54
-// ```c
-// /**positions of true characters in protein alphabet*/
-// static int trueCharPositions[COMPO_NUM_TRUE_AA] =
-// {1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22};
-//
-// static int alphaConvert[COMPO_LARGEST_ALPHABET] =
-//   {(-1), 0, (-1),  4, 3, 6, 13, 7, 8, 9, 11, 10, 12, 2, 14, 5, 1, 15,
-//    16, 19, 17, (-1), 18, (-1), (-1), (-1), (-1), (-1)};
-// ```
 const TRUE_CHAR_POSITIONS: [usize; 20] = [
     1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
 ];
@@ -118,22 +66,12 @@ const TRUE_AMINO_ACID: [bool; BLASTAA_SIZE] = {
 };
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:80
-// ```c
-// static const double kMaximumXscore = -1.0;
-// ```
 const MAXIMUM_X_SCORE: f64 = -1.0;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1099-1101
-// ```c
-// #define LambdaRatioLowerBound 0.5
-// ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:607-608
-// ```c
-//     const double kPosEpsilon = 0.0001;   /* values below this cutoff
-//                                             are treated specially */
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:603-604,607-608
 const POS_EPSILON: f64 = 0.0001;
 
 /// The position-based `Blast_MatrixInfo` of a PSSM query (`positionBased`, `rows` = the query
@@ -163,22 +101,7 @@ impl PosMatrixInfo {
     /// frequencies (`Blast_ScoreFreqNew` NULL, review S1 of PS4b). `None` when the factor-1 PSSM
     /// has score frequencies but no Karlin-Altschul parameters (NCBI goes on with a Lambda of -1).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2227
-    /// ```c
-    ///     if (self->positionBased) {
-    ///         status = s_GetPosBasedStartFreqRatios(self->startFreqRatios,
-    ///                                               queryBlk->length,
-    ///                                               queryBlk->sequence,
-    ///                                               matrixName,
-    ///                                               sbp->psi_matrix->freq_ratios);
-    ///         if (status == 0) {
-    ///             status = s_ScalePosMatrix(self->startMatrix, matrixName,
-    ///                                       sbp->psi_matrix->freq_ratios,
-    ///                                       queryBlk->sequence,
-    ///                                       queryBlk->length, sbp, scale_factor);
-    ///             self->ungappedLambda = sbp->kbp_psi[0]->Lambda / scale_factor;
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2215-2227
     pub(crate) fn new(
         query: &[u8],
         freq_ratios: &[[f64; BLASTAA_SIZE]],
@@ -205,31 +128,7 @@ impl PosMatrixInfo {
 /// letter; a cell takes the PSSM's ratio over the letter's standard probability where both
 /// letters are standard, the column is neither `*` nor X, and the PSSM's ratio is above 1e-4.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:610-631
-/// ```c
-///     stdFreqRatios = _PSIMatrixFrequencyRatiosNew(matrixName);
-///     ...
-///     for (i = 0;  i < numPositions;  i++) {
-///         for (j = 0;  j < BLASTAA_SIZE;  j++) {
-///             returnRatios[i][j] = stdFreqRatios->data[query[i]][j];
-///         }
-///     }
-///     stdFreqRatios = _PSIMatrixFrequencyRatiosFree(stdFreqRatios);
-///
-///     standardProb = BLAST_GetStandardAaProbabilities();
-///     ...
-///     /*reverse multiplication done in posit.c*/
-///     for (i = 0;  i < numPositions;  i++) {
-///         for (j = 0;  j < BLASTAA_SIZE;  j++) {
-///             if ((standardProb[query[i]] > kPosEpsilon) &&
-///                 (standardProb[j] > kPosEpsilon) &&
-///                 (j != eStopChar) && (j != eXchar) &&
-///                 (startNumerator[i][j] > kPosEpsilon)) {
-///                 returnRatios[i][j] = startNumerator[i][j] / standardProb[j];
-///             }
-///         }
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:606-631
 fn pos_based_start_freq_ratios(
     query: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],
@@ -268,22 +167,7 @@ pub(crate) struct ScoreProbs {
 /// `s_GetScoreRange`: the smallest score above `COMPO_SCORE_MIN` (at most 0) and the largest
 /// score (at least 0) of the true amino-acid columns of `rows`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:806-827
-/// ```c
-///     minScore = maxScore = 0;
-///     for (irow = 0;  irow < rows;  irow++) {
-///         for (aa = 0;  aa < COMPO_NUM_TRUE_AA;  aa++) {
-///             jcol = trueCharPositions[aa];
-///             if (matrix[irow][jcol] < minScore &&
-///                 matrix[irow][jcol] > COMPO_SCORE_MIN)
-///                 minScore = matrix[irow][jcol];
-///             if (matrix[irow][jcol] > maxScore)
-///                 maxScore = matrix[irow][jcol];
-///         }
-///     }
-///     *obs_min = minScore;
-///     *obs_max = maxScore;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:806-828
 pub(crate) fn score_range<C: RedoInstance>(rows: &[[i32; BLASTAA_SIZE]]) -> (i32, i32) {
     let (mut min_score, mut max_score) = (0, 0);
     for row in rows {
@@ -303,25 +187,7 @@ pub(crate) fn score_range<C: RedoInstance>(rows: &[[i32; BLASTAA_SIZE]]) -> (i32
 /// `s_GetPssmScoreProbs`: the score probabilities of the PSSM `matrix` against a subject of the
 /// letter probabilities `subject_prob`, each position weighing `1/rows`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:922-940
-/// ```c
-///     s_GetScoreRange(obs_min, obs_max, matrix, rows);
-///     minScore = *obs_min;
-///     range = *obs_max - *obs_min + 1;
-///     *scoreProb = calloc(range, sizeof(double));
-///     ...
-///     sprob = &((*scoreProb)[-(*obs_min)]); /*center around 0*/
-///     onePosFrac = 1.0/ ((double) rows);
-///     for (irow = 0;  irow < rows;  irow++) {
-///         for (aa = 0;  aa < COMPO_NUM_TRUE_AA;  aa++) {
-///             jcol = trueCharPositions[aa];
-///             if (matrix[irow][jcol] >= minScore) {
-///                 sprob[matrix[irow][jcol]] +=
-///                     onePosFrac * subjectProbArray[jcol];
-///             }
-///         }
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:921-940
 pub(crate) fn pssm_score_probs<C: RedoInstance>(
     matrix: &[[i32; BLASTAA_SIZE]],
     subject_prob: &[f64; BLASTAA_SIZE],
@@ -363,13 +229,6 @@ pub(crate) fn lambda_ratio<C: RedoInstance>(
 /// `Blast_FreqRatioToScore` of one ratio: `COMPO_SCORE_MIN` for 0, `log(ratio)/Lambda` otherwise.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:403-415
-/// ```c
-///             if (0.0 == matrix[i][j]) {
-///                 matrix[i][j] = COMPO_SCORE_MIN;
-///             } else {
-///                 matrix[i][j] = log(matrix[i][j])/Lambda;
-///             }
-/// ```
 fn freq_ratio_to_score<C: RedoInstance>(ratio: f64, lambda: f64) -> f64 {
     if ratio == 0.0 {
         COMPO_SCORE_MIN as f64
@@ -382,17 +241,6 @@ fn freq_ratio_to_score<C: RedoInstance>(ratio: f64, lambda: f64) -> f64 {
 /// probabilities `probs`, at most -1.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:616-645
-/// ```c
-///     for (j = 0;  j < alphsize;  j++) {
-///         if (alphaConvert[j] >= 0) {
-///             /* If the column corresponds to a true amino acid */
-///             score_iX += M[j * incM] * probs[j];
-///         }
-///     }
-///     return score_iX;
-/// ...
-///     return MIN( s_CalcAvgScore(M, alphsize, incM, probs), kMaximumXscore);
-/// ```
 fn calc_x_score<C: RedoInstance>(row: &[f64; BLASTAA_SIZE], probs: &[f64; BLASTAA_SIZE]) -> f64 {
     let mut score_ix = 0.0;
     for j in 0..BLASTAA_SIZE {
@@ -406,19 +254,6 @@ fn calc_x_score<C: RedoInstance>(row: &[f64; BLASTAA_SIZE], probs: &[f64; BLASTA
 /// `s_RoundScoreMatrix` of one score: `INT_MIN` below it, the nearest integer (`Nint`) otherwise.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:707-738
-/// ```c
-/// static long Nint(double x)
-/// {
-///     x += (x >= 0. ? 0.5 : -0.5);
-///     return (long)x;
-/// }
-/// ...
-///             if (floatScoreMatrix[p][c] < INT_MIN) {
-///                 matrix[p][c] = INT_MIN;
-///             } else {
-///                 matrix[p][c] = Nint(floatScoreMatrix[p][c]);
-///             }
-/// ```
 pub(crate) fn round_score<C: RedoInstance>(score: f64) -> i32 {
     if score < i32::MIN as f64 {
         i32::MIN
@@ -432,23 +267,6 @@ pub(crate) fn round_score<C: RedoInstance>(score: f64) -> i32 {
 /// U the row's C, `*` the start matrix's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1025-1050
-/// ```c
-///     for (p = 0;  p < rows;  p++) {
-///         double Xscore;
-///         memcpy(row, freq_ratios[p], cols * sizeof(double));
-///
-///         Blast_FreqRatioToScore(row_matrix, 1, cols, Lambda);
-///         row[eXchar] = Xscore = s_CalcXScore(row, cols, 1, col_prob);
-///         /* use Cysteine score for Selenocysteine */
-///         row[eSelenocysteine] = row[eCchar];
-///         if (cols > eOchar) {
-///             row[eOchar] = Xscore;
-///         }
-///         s_RoundScoreMatrix(&matrix[p], 1, cols, row_matrix);
-///
-///         matrix[p][eStopChar] = start_matrix[p][eStopChar];
-///     }
-/// ```
 pub(crate) fn scale_pssm<C: RedoInstance>(
     matrix: &mut [[i32; BLASTAA_SIZE]],
     start_freq_ratios: &[[f64; BLASTAA_SIZE]],
@@ -499,13 +317,6 @@ pub(crate) fn pssm_composition_based_stats<C: RedoInstance>(
 /// zeros: its flag starts true).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:151-169
-/// ```c++
-///     bool freq_ratios_all_zeros = true;
-///     ...
-///                 if ((*freq_ratios)(r,c) > kEpsilon) {
-///                     freq_ratios_all_zeros = false;
-///                 }
-/// ```
 pub(crate) fn freq_ratios_all_zeros(freq_ratios: &[[f64; BLASTAA_SIZE]]) -> bool {
     !freq_ratios
         .iter()

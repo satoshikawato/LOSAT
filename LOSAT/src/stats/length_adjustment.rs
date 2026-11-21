@@ -8,7 +8,7 @@
 //! The code has been directly translated from C to Rust, line by line, to ensure
 //! exact compatibility with NCBI BLAST's behavior.
 //!
-//! Reference: NCBI BLAST source code (blast_stat.c)
+//! Reference: NCBI BLAST source code (c++/src/algo/blast/core/blast_stat.c)
 //!   - Function: `BLAST_ComputeLengthAdjustment`
 //!   - Location: `c++/src/algo/blast/core/blast_stat.c`
 //!   - The implementation matches NCBI BLAST exactly, with only minor differences

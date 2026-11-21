@@ -21,7 +21,7 @@ enum Failure {
     /// An NCBI exception that `Run` catches: `cerr << e.what() << endl`, exit status 1.
     Caught(NcbiException),
     /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, "Application's execution failed: "
-    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, quoted at dustmasker's `report`).
+    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, cited at dustmasker's `report`).
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
@@ -73,26 +73,6 @@ fn read_failure(error: std::io::Error) -> Failure {
 /// `CConvert2BlastMaskApplication::Run` on `args`; the exit status.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:219-236
-/// ```c++
-/// int CConvert2BlastMaskApplication::Run(void) {
-///     int retval = 0;
-///
-///     try {
-///         unique_ptr<CMaskFromFasta> reader(x_GetReader());
-///         unique_ptr<CMaskWriterBlastDbMaskInfo> writer(x_GetWriter());
-///
-///         while (reader->GetNextSequence()) {
-///             if(reader->HasMask()) writer->Print(reader->GetBestID(), reader->GetMask());
-///         }
-///     } catch (const CException& e) {
-///         cerr << e.what() << endl;
-///         retval = 1;
-///     }
-///     x_AddCmdOptions();
-///     m_UsageReport.AddParam(CBlastUsageReport::eExitStatus, retval);
-///     return retval;
-/// }
-/// ```
 /// The writer (`unique_ptr`) is destroyed as an exception leaves the `try` block, before the
 /// `catch` writes: a `maskinfo_*` writer writes its object first (`run_masks`). `cerr` is tied
 /// to `cout`, so the output is flushed before `e.what()`. `x_AddCmdOptions` and the usage
@@ -107,7 +87,7 @@ pub(super) fn run(
     match run_masks(args, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
-            diag.cerr(format!("{}\n", exception.what()).as_bytes());
+            diag.cerr(&[exception.what().as_slice(), b"\n"].concat());
             1
         }
         Err(Failure::Std(what)) => {
@@ -165,27 +145,6 @@ fn run_masks(
 /// program named by `-masking_algorithm` in lower case.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:199-217
-/// ```c++
-/// CMaskWriterBlastDbMaskInfo*
-/// CConvert2BlastMaskApplication::x_GetWriter() {
-///     const CArgs& args = GetArgs();
-///     const string& format(args["outfmt"].AsString());
-///     CNcbiOstream& output = args["out"].AsOutputFile();
-///
-///     string algo=args["masking_algorithm"].AsString();
-///     NStr::ToLower(algo);
-///     EBlast_filter_program prog;
-///     if     (algo == "not_set"     ) prog = eBlast_filter_program_not_set;
-///     else if(algo == "dust"        ) prog = eBlast_filter_program_dust;
-///     else if(algo == "seg"         ) prog = eBlast_filter_program_seg;
-///     else if(algo == "windowmasker") prog = eBlast_filter_program_windowmasker;
-///     else if(algo == "repeat"      ) prog = eBlast_filter_program_repeat;
-///     else                            prog = eBlast_filter_program_other;
-///
-///     return(new CMaskWriterBlastDbMaskInfo(output, format, 0,
-///                       prog, args["masking_options"].AsString()));
-/// }
-/// ```
 /// (`AsOutputFile` opens `-out` first: `run_masks` opens it before this. `NStr::ToLower` is
 /// `tolower` of each byte, the C locale's.)
 fn writer(outfmt: &str, algorithm: &str, options: &str) -> MaskInfoWriter {
@@ -223,18 +182,10 @@ struct MaskFromFasta<'a> {
 impl<'a> MaskFromFasta<'a> {
     /// `x_GetReader`: `new CMaskFromFasta(args["in"].AsInputFile(), args["parse_seqids"])`.
     /// The constructor of `CFastaReader` over a stream reads the line reader's first buffer
-    /// (quoted at `seqmasks_io::fasta_reader::MaskFastaReader::new`): a failed read throws
+    /// (cited at `seqmasks_io::fasta_reader::MaskFastaReader::new`): a failed read throws
     /// there, before `-out` is opened.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:192-197
-    /// ```c++
-    /// CMaskFromFasta*
-    /// CConvert2BlastMaskApplication::x_GetReader() {
-    ///     const CArgs& args = GetArgs();
-    ///     CNcbiIstream& input = args["in"].AsInputFile();
-    ///     return(new CMaskFromFasta(input, args["parse_seqids"]));
-    /// }
-    /// ```
     fn new(input: Box<dyn Read + 'a>, parse_seqids: bool) -> Result<Self, Failure> {
         let mut reader = FastaReader::new(input, ReaderFlags::mask_from_fasta(parse_seqids));
         match reader.take_read_error() {
@@ -250,16 +201,6 @@ impl<'a> MaskFromFasta<'a> {
     /// and comment lines only: `CFastaReader: Expected defline`), as no `ReadSet` catches it.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:67-74
-    /// ```c++
-    ///     bool GetNextSequence() {
-    ///         m_hasMask = false;
-    ///         m_mask.clear();
-    ///         if (AtEOF()) return false;
-    ///         SaveMask();
-    ///         ReadOneSeq();
-    ///         return true;
-    ///     }
-    /// ```
     /// `HasMask()` is whether `GetMask()` has an interval (each interval sets it). `GetBestID`
     /// is the id that `ParseDefLine` chose (`FindBestChoice(GetIDs(), CSeq_id::BestRank)`,
     /// fasta.cpp:593): with `-parse_seqids` among the record's ids, else the local id that the

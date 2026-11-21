@@ -1495,7 +1495,7 @@ test('many queries; view filters change the view, not the search; the notices te
     await expect(status).toHaveAttribute('data-run-status', 'failed');
     await expect(status).toHaveAttribute('data-phase', 'unavailable');
     await expect(status).toContainText('Run 2 failed: ');
-    await expect(status).toContainText('A failed run keeps no results.');
+    await expect(status).toContainText('It keeps the outputs written before the error.');
     // The header block still says which run this is.
     await expect(page.getByTestId('results-program')).toHaveText('TBLASTX');
     await expect(page.getByTestId('results-download-all')).toHaveCount(0);

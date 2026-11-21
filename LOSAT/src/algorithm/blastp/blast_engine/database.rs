@@ -70,12 +70,6 @@ pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
-// ```c
-// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
-// '-','A','B','C','D','E','F','G','H','I','K','L','M',
-// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
-// 'O', 'J'};
-// ```
 /// NCBIstdaa code of the gap character (`-`), which is also the sentinel byte.
 const NCBISTDAA_GAP: u8 = 0;
 
@@ -206,14 +200,6 @@ impl BlastpDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:145-150
-    // ```c++
-    // static Int4
-    // s_SeqDbGetMinLength(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetMinLength();
-    // }
-    // ```
     /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
     /// `min_subject_length` of `BLAST_GapAlignSetUp`): `CSeqDB::GetMinLength`
     /// (`SeqDb::min_length`: the alias files' `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH`
@@ -228,11 +214,6 @@ impl BlastpDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-906
-    // ```c
-    //    Uint4 min_subject_length;
-    //    Int8 total_length = -1;
-    //    Int4 num_seqs = -1;
-    // ```
     /// The total length the statistics' setup reads (`DbStatistics::setup_total`), NCBI's `Int8`
     /// on every target: an alias file's `LENGTH` declares it, so it is not bounded by the
     /// letters LOSAT holds (2^32 or more on a 32-bit target).
@@ -297,35 +278,6 @@ impl BlastpDatabase {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-848
-// ```c
-//          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-//                                        alpha/kbp->Lambda, beta,
-//                                        query_length, db_length,
-//                                        db_num_seqs, &length_adjustment);
-//
-//          if (effective_search_space == 0) {
-//
-//              /* if the database length was specified, do not
-//                 adjust it when calculating the search space;
-//                 it's counter-intuitive to specify a value and
-//                 not have that value be used */
-//         	 /* Changing this rule for now sicne cutoff score depends
-//         	  * on the effective seach space length. SB-902
-//         	  */
-//
-//         	 Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-//
-//         	 // Just in case effective_db_length < 0
-//         	 if (effective_db_length <= 0)
-//         		 effective_db_length = 1;
-//
-//              effective_search_space = effective_db_length *
-//                              (query_length - length_adjustment);
-//          }
-//       }
-//       query_info->contexts[index].eff_searchsp = effective_search_space;
-//       query_info->contexts[index].length_adjustment = length_adjustment;
-// ```
 /// The length adjustment and the effective search space of a query of `query_len`
 /// letters against a database of `db_length` letters (the real total, or `-dbsize`) and
 /// `db_num_seqs` sequences (NCBI's `Int4`), in NCBI's `Int8` (`stats::setup::calc_eff_lengths`):
@@ -358,71 +310,18 @@ pub(super) fn blastp_database_search_space(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593
-// ```c
-//     /* Initialize with BLAST_SCORE_MIN */
-//     for (i = 0; i < sbp->alphabet_size; i++) {
-//         for (j = 0; j < sbp->alphabet_size; j++) {
-//             matrix[i][j] = BLAST_SCORE_MIN;
-//         }
-//     }
-//
-//     for (i = 0; i < sbp->alphabet_size; i++) {
-//         for (j = 0; j < sbp->alphabet_size; j++) {
-//             /* skip special characters */
-//             if (i == AMINOACID_TO_NCBISTDAA['U'] ||
-//                 i == AMINOACID_TO_NCBISTDAA['O'] ||
-//                 i == AMINOACID_TO_NCBISTDAA['-'] ||
-//                 j == AMINOACID_TO_NCBISTDAA['U'] ||
-//                 j == AMINOACID_TO_NCBISTDAA['O'] ||
-//                 j == AMINOACID_TO_NCBISTDAA['-']) {
-//                 continue;
-//             }
-//             matrix[i][j] = NCBISM_GetScore((const SNCBIPackedScoreMatrix*) psm,
-//                                            i, j);
-//         }
-//     }
-//     /* Use the C scores for U and X scores for the O characters;
-//        if this is not done then they will never align to non-gap residues */
-//     x_index = AMINOACID_TO_NCBISTDAA['X'];
-//     u_index = AMINOACID_TO_NCBISTDAA['U'];
-//     o_index = AMINOACID_TO_NCBISTDAA['O'];
-//     c_index = AMINOACID_TO_NCBISTDAA['C'];
-//     for (i = 0; i < sbp->alphabet_size; i++) {
-//         matrix[u_index][i] = matrix[c_index][i];
-//         matrix[i][u_index] = matrix[i][c_index];
-//         matrix[o_index][i] = matrix[x_index][i];
-//         matrix[i][o_index] = matrix[i][x_index];
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:494-508
-// ```c
-//     score = matrix[w[0]][w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += matrix[w[i]][w[i]];
-//
-//     /* If the self-score is above the threshold, then the neighboring
-//        computation will automatically add the word to the lookup table.
-//        Otherwise, either the score is too low or neighboring is not done at
-//        all, so that all of these exact matches must be explicitly added to
-//        the lookup table */
-//
-//     if (lookup->threshold == 0 || score < lookup->threshold) {
-//         for (i = 0; i < offset_list[1]; i++) {
-//             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-//                                   lookup->charsize, w,
-//                                   query_bias + offset_list[i + 2]);
-// ```
-// NCBI searches the stored bytes in place, O (26) included. Its lookup table indexes all 28
-// letters (blast_aalookup.c:244), and the query never holds O (the query encoder reads it as X,
+// NCBI searches the stored bytes in place, O (26) included. Its lookup table indexes all 28 letters
+// (blast_aalookup.c:244), and the query never holds O (the query encoder reads it as X,
 // blast_setup_cxx.cpp:894-898), so a stored O meets a query word only as a neighbour: a word whose
-// score with O's row and column (those of X, above) is at the threshold or more. A query word whose
-// self score is under the threshold sits under its own letters only, so `AXA` (7 with BLOSUM62,
-// threshold 11) meets a stored `AXA` and not a stored `AOA`. The search therefore reads a stored O
-// as it is: the score rows of the extension give it X's row and column, a PSSM its own column O,
-// and the redo and the reports read the stored letter (`ListedSubjects`). A stored gap character
-// (0, which makeblastdb writes for `-` in a protein FASTA) is searched as the residue it is in
-// NCBI: row and column 0 stay `BLAST_SCORE_MIN`, so an ungapped extension stops at it and a gapped
-// alignment goes round it with a gap, and NCBI's reports show it as `-`
+// score with O's row and column (those of X, blast_stat.c:1583-1593) is at the threshold or more. A
+// query word whose self score is under the threshold sits under its own letters only, so `AXA` (7
+// with BLOSUM62, threshold 11) meets a stored `AXA` and not a stored `AOA`. The search therefore
+// reads a stored O as it is: the score rows of the extension give it X's row and column, a PSSM its
+// own column O, and the redo and the reports read the stored letter (`ListedSubjects`). A stored
+// gap character (0, which makeblastdb writes for `-` in a protein FASTA) is searched as the residue
+// it is in NCBI: row and column 0 stay `BLAST_SCORE_MIN`, so an ungapped extension stops at it and
+// a gapped alignment goes round it with a gap, and NCBI's reports show it as `-`
 // (`recount_shown_identities`). A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's
 // matrix past its rows and is rejected.
 /// Checks the block `block` (the sequences from the ordinal id `range.first_ordinal`) for the
@@ -492,21 +391,6 @@ fn block_subject(block: &SequenceBlock, i: usize) -> BlastpSubjectRef<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:160-172
-// ```c
-// Int2
-// Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)
-// {
-//     if (!ewp)
-//         return -1;
-//
-//     if (ewp->diag_table) {
-//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//             ewp->diag_table->offset = ewp->diag_table->window;
-//             s_BlastDiagClear(ewp->diag_table);
-//         } else {
-//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//         }
-// ```
 /// The offset of the diagonal table after the sequences of `range` when it is
 /// `diag_offset` before them: the recurrence of `BlastpSubjectScratch::finish_subject`
 /// over the sequence lengths of the index. A sequence without letters is not searched
@@ -549,25 +433,7 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
-// ```c
-//     db_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-//        Int4 stat_length;
-//        if (seq_arg.oid == BLAST_SEQSRC_ERROR)
-//            break;
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
-//            continue;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// The preliminary stage of a database search: every sequence, in the order of its
 /// ordinal id, through the per-subject kernel `process_subject`, with its HSP lists put
 /// into `x_compact_hit_lists` in that order (NCBI's loop with one thread).
@@ -834,40 +700,28 @@ pub(super) struct ListedSubjects {
     /// Whether a read of the redo or of the first Newton problems found a pyrrolysine (O) or a
     /// gap character, by rank (`x_list`).
     x_recounted: Vec<std::sync::atomic::AtomicBool>,
+    /// The places of the lists that the redo reaches and its fetch excludes, which left the
+    /// preliminary hit lists (`exclude_fetched`), by query and place.
+    pub(super) fetch_excluded: Vec<FetchExcludedMatch>,
+}
+
+/// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
+/// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
+/// list, and this mark keeps its place, `position` kept lists of the query before it, with what
+/// the redo reads of it there (its best e-value, the early termination test's).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FetchExcludedMatch {
+    pub(super) query: usize,
+    pub(super) position: usize,
+    pub(super) best_evalue: f64,
 }
 
 impl ListedSubjects {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
-    // ```c
-    //         if( program_number == eBlastTypeTblastn ) {
-    //             seq_info->seq_arg.encoding = eBlastEncodingNcbi4na;
-    //         } else {
-    //             seq_info->seq_arg.encoding = eBlastEncodingProtein;
-    //         }
-    // ```
     // NCBI's redo fetches each sequence of the hit lists again from the database, in the
     // encoding of the search: the stored bytes.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1620-1636
-    // ```c
-    //     /* Copy the sequence data */
-    //     for (idx = 0;  idx < seqData->length;  idx++) {
-    //         seqData->data[idx] = origData[idx];
-    //     }
-    //
-    //     if ( !(KAPPA_BLASTP_NO_SEG_SEQUENCE) ) {
-    //         if (compo_adjust_mode
-    //             && (!subject_maybe_biased || *subject_maybe_biased)) {
-    //
-    //             if ( (!shouldTestIdentical)
-    //                  || (shouldTestIdentical
-    //                      && (!s_TestNearIdentical(seqData, 0, queryData,
-    //                                               q_range->begin, query_words,
-    //                                               align)))) {
-    //
-    //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-    //                                              subject_maybe_biased);
-    // ```
     // Here the stored letter matters: a stored O (26) is not the X (21) that the query
     // holds for its own O (blast_setup_cxx.cpp:894-898), so an O aligned to an O counts
     // against "near identical" and the subject is then SEG-filtered, where the same
@@ -915,50 +769,9 @@ impl ListedSubjects {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
-    // ```c++
-    //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
-    //
-    //     vector<TSeqLocInfoVector> subj_masks;
-    //     TSeqAlignVector aligns =
-    //         LocalBlastResults2SeqAlign(hsp_results,
-    //                                    *qdata,
-    //                                    *m_SeqInfoSrc,
-    //                                    m_OptsMemento->m_ProgramType,
-    //                                    m_Options->GetGappedMode(),
-    //                                    m_Options->GetOutOfFrameMode(),
-    //                                    subj_masks,
-    //                                    m_ResultType);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
-    // ```c++
-    //     for (int index = 0; index < hit_list->hsplist_count; index++) {
-    //         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-    //         if (!hsp_list)
-    //             continue;
-    //
-    //         // Sort HSPs with e-values as first priority and scores as
-    //         // tie-breakers, since that is the order we want to see them in
-    //         // in Seq-aligns.
-    //         Blast_HSPListSortByEvalue(hsp_list);
-    //
-    //         const Uint4 kOid = hsp_list->oid;
-    //         TSeqPos subj_length = 0;
-    //         CRef<CSeq_id> subject_id;
-    //         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310
-    // ```c++
-    // CTempString
-    // CSeqDBVol::x_GetHdrAsn1Binary(int oid) const
-    // {
-    //     TIndx hdr_start = 0;
-    //     TIndx hdr_end   = 0;
-    //
-    //     //m_Atlas.Lock(locked);
-    //
-    //     if (!m_HdrFileOpened) x_OpenHdrFile();
-    // ```
-    // NCBI first reads a header file (and opens it, seqdbvol.cpp:127-133) when the
+    // NCBI first reads a header file (and opens it, c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:127-133) when the
     // traceback's results become Seq-aligns: after the batch's traceback, for the final
     // hit lists only, query by query and in the order of each hit list. A header file
     // that is missing or cannot be read fails the batch there (`BLAST Database error`,
@@ -1043,55 +856,105 @@ impl ListedSubjects {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
-// ```c
-//                     *pStatusCode = s_MatchingSequenceInitialize(
-//                             &matchingSeq,
-//                             program_number,
-//                             seqSrc,
-//                             default_db_genetic_code,
-//                             localMatch->oid,
-//                             ranges
-//                     );
-//                     if (*pStatusCode != 0) {
-//                         /*
-//                          * some sequences may have been excluded by membit filtering
-//                          * so this is not really an exception
-//                          */
-//                         *pStatusCode = 0;
-//                         goto match_loop_cleanup;
-//                     }
-// ```
 // `s_MatchingSequenceInitialize` fetches with `check_oid_exclusion` (blast_kappa.c:1378), as
 // the ordinary traceback does (blast_traceback.c:1567-1577): a subject that the negative seqid
 // list keeps without a line (`shared::FetchExcluded`) leaves the redo or the traceback before
 // it is aligned, after the early termination test of its match (which reads only the heaps,
 // where it never enters), so it takes no place in the final hit lists. LOSAT removes it from
-// the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS`); blastp
-// and psiblast are gapped here (`-ungapped` is refused).
-/// The preliminary hit lists of a call (subjects named by ordinal id) without the subjects
-/// that NCBI's fetches of the redo or the traceback exclude, in their order; LOSAT's refusal
-/// where a subject's header cannot be read there (`shared::FetchExcluded::refusal`).
+// the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS` and the
+// sort into the redo's order); blastp and psiblast are gapped here (`-ungapped` is refused).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
+// The redo's loop reaches such a list in its stream: when the early termination test holds it
+// frees the list and goes on, and otherwise the excluded fetch sets the status back to 0
+// (blast_kappa.c:3560-3575). With `-use_sw_tback` the status of the batch is the last reached
+// match's (`redo_run::one_thread_redo`), so the list's place counts: each list that the fetch
+// excludes (`shared::FetchMarks`) is removed and leaves a mark (`FetchExcludedMatch`) with its
+// place in its query's list, in the order the redo reads them (the lists are sorted before they
+// are listed). Shown on ws with NCBI 2.17.0 (rows
+// `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
+// status 0).
+/// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
+/// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
+/// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
+/// subject's header cannot be read there (`shared::FetchExcluded::refusal`).
 fn exclude_fetched(
     database: &BlastpDatabase,
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-) -> Result<()> {
-    let Some(excluded) = shared::FetchExcluded::of(&database.db) else {
-        return Ok(());
-    };
-    let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
-    for hit_list in hit_lists.iter_mut().flatten() {
-        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
-            .map_err(refused)?;
-        hit_list.hsplist_count = hit_list.hsplist_array.len();
+) -> Result<Vec<FetchExcludedMatch>> {
+    let excluded = shared::FetchExcluded::of(&database.db);
+    // Without a negative seqid list with ids the fetches exclude nothing: no list is read here.
+    if excluded.is_none() {
+        return Ok(Vec::new());
     }
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+    let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
+    let mut marks = Vec::new();
+    for (query, hit_list) in hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
+        // The redo reads a query's compact list where it has one (`x_expand_hit_list`).
+        let read = x_compact_hit_lists
+            .get(query)
+            .is_none_or(|compact| compact.is_none());
+        leave_fetched(
+            excluded.as_ref(),
+            query,
+            hit_list,
+            read.then_some(&mut marks),
+        )
+        .map_err(refused)?;
+    }
+    for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
+        if let Some(hit_list) = hit_list {
+            leave_fetched(excluded.as_ref(), query, hit_list, Some(&mut marks)).map_err(refused)?;
+        }
+    }
+    // By query; the marks of a query are in place order already (a stable sort).
+    marks.sort_by_key(|mark| mark.query);
+    Ok(marks)
+}
+
+/// `hit_list` (query `query`'s) without the lists whose subject the fetch excludes
+/// (`shared::FetchMarks`), in their order, each removed list leaving its mark in `marks` (where
+/// the redo reads this list) with the number of kept lists before it; nothing changes where
+/// none is excluded.
+///
+/// No NCBI counterpart: NCBI keeps these lists in the redo's stream, and its fetch excludes each
+/// subject when the redo reaches it (the reference lines are at `exclude_fetched`).
+fn leave_fetched<H>(
+    excluded: Option<&shared::FetchExcluded<'_>>,
+    query: usize,
+    hit_list: &mut BlastpHitList<H>,
+    mut marks: Option<&mut Vec<FetchExcludedMatch>>,
+) -> std::result::Result<(), (u32, crate::seqdb::SeqDbError)> {
+    let lists = &hit_list.hsplist_array[..hit_list.hsplist_count];
+    let fetch = shared::FetchMarks::of(excluded, lists, |list| Some(list.oid))?;
+    let mut kept = 0;
+    let mut removed = false;
+    for (index, list) in lists.iter().enumerate() {
+        if !fetch.excluded(index) {
+            kept += 1;
+            continue;
+        }
+        removed = true;
+        if let Some(marks) = marks.as_deref_mut() {
+            marks.push(FetchExcludedMatch {
+                query,
+                position: kept,
+                best_evalue: list.best_evalue,
+            });
+        }
+    }
+    if removed {
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
-            .map_err(refused)?;
+        let mut index = 0;
+        hit_list.hsplist_array.retain(|_| {
+            index += 1;
+            !fetch.excluded(index - 1)
+        });
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
     Ok(())
@@ -1658,15 +1521,6 @@ impl ListedTitles<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
-    // ```c++
-    //     try {
-    //         CSeqVector sv(seqloc, scope);
-    //         sv.SetCoding(CSeq_data::e_Ncbistdaa);
-    //         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
-    //     } catch (const CException&) {
-    //         sequence_data.erase();
-    //         ERR_POST(Warning << "Failed to retrieve sequence " <<
-    // ```
     /// What psiblast's PSSM reads of its subjects by their Seq-align ids, made from the
     /// Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`
     /// (`PssmReads`): NCBI reads the letters of each Seq-align's range by its Seq-align id, also
@@ -1803,8 +1657,8 @@ impl ListedTitles<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1182
-    // (quoted at `shared::SlotHolds::walk`)
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513 (quoted at
+    // (cited at `shared::SlotHolds::walk`)
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513 (cited at
     // `shared::pssm_load_texts`)
     // Where the batch's prefetch is off, the PSSM's read of a Seq-align id loads its blob where
     // no fetch of the run loaded it before, and `x_GetTaxonomy` looks each taxid of its
@@ -1947,11 +1801,6 @@ impl ListedTitles<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904
-    // ```c++
-    //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-    //     ...
-    //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-    // ```
     /// The ranks of the subjects of `hit_lists`, one for each HSP whose row reads the subject
     /// (`rows`, by the HSP's identities, the Seq-align's `num_ident`; psiblast's Seq-align holds
     /// -1 for none, blast_seqalign.cpp:1492-1496), where a query's report fetches them
@@ -2057,16 +1906,6 @@ impl ListedTitles<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
-    // ```c++
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //             	if(setSubjectIds) {
-    //             		x_SetSubjectIds(subject_bh, bdlRef);
-    //             	}
-    //             	if(setSubjectTaxInfoAll) {
-    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// The taxonomy of the custom tabular fields (`staxid`, `staxids`;
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported subjects (those with
     /// rows in `hit_lists`), by rank: from the definition lines of a subject with parsed Seq-ids,
@@ -2852,16 +2691,7 @@ mod tests {
         assert_eq!(database.name(), fixture("prot_mv"));
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
-    // ```c
-    //    Int8 total_length = -1;
-    //    Int4 num_seqs = -1;
-    //
-    //    if (seq_src) {
-    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-    //       if (total_length <= 0)
-    //           total_length = BlastSeqSrcGetTotLen(seq_src);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
     // An alias file's `LENGTH` of 2^32 letters or more over the 23 sequences of
     // `tests/db_search/taxfilter/tfp` (`tests/db_search/dbcounts`, rows db.cnt.l4295.bp.*,
     // db.cnt.l4294.bp.0 and db.cnt.avg2p32.bp_c0) is NCBI's `Int8` on every target, wasm32's
@@ -3802,7 +3632,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(multi_dir);
         }
 
-        // blast_aalookup.c:494-508 (quoted at `prepare_search_block`): NCBI scans the stored
+        // blast_aalookup.c:494-508 (cited at `prepare_search_block`): NCBI scans the stored
         // letters. Every driver of the preliminary stage gives the kernel each sequence as it is
         // stored, O (26) of p03 included, between its sentinel bytes, on one volume and on six, at
         // 1 and 3 threads (the window of LOSAT_X_BPDBKEEP in its two waiting sizes).
@@ -3997,6 +3827,75 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    // Line RG item X4-excl: under the negative seqid list of the rows `db.x4excl.*`
+    // (`tests/db_search/x4excl/fwd`), sx_frag (ordinal 3, a ti-only line) is kept without a line,
+    // so the redo's fetch excludes it (`exclude_fetched`): its lists leave the hit lists and leave
+    // marks of their places, by query, each with the number of kept lists before it in its
+    // query's order. Without the list nothing leaves and there is no mark.
+    #[test]
+    fn excluded_lists_leave_marks_of_their_places() {
+        let name = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/x4excl/fwd");
+        let mut warnings = Vec::new();
+        let negative = crate::seqdb::DbList::Seqids(crate::seqdb::SeqidList {
+            negative: true,
+            file: crate::seqdb::seqidlist::read_si_list(b"XX999999.1\n", &mut warnings).unwrap(),
+        });
+        let settings = ApplicationSettings::default();
+        // The hit list takes a list's best e-value from its HSPs (`update_best_evalue`).
+        let list = |oid: u32, raw_score: i32, best_evalue: f64| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![BlastpHsp {
+                e_value: best_evalue,
+                ..test_hsp(oid, raw_score)
+            }],
+            best_evalue,
+        };
+        // Query 0: sexact, sfail, sx_frag; query 2: sx_frag, sok1; query 1 has no list.
+        let make = || {
+            let mut first = BlastpHitList::new(10);
+            for (oid, score, evalue) in [(0, 430, 1e-49), (1, 419, 1e-47), (3, 26, 0.04)] {
+                first.update(list(oid, score, evalue));
+            }
+            let mut third = BlastpHitList::new(10);
+            for (oid, score, evalue) in [(3, 90, 1e-9), (2, 60, 1e-5)] {
+                third.update(list(oid, score, evalue));
+            }
+            vec![Some(first), None, Some(third)]
+        };
+        let oids = |lists: &[Option<BlastpHitList>]| -> Vec<Vec<u32>> {
+            lists
+                .iter()
+                .flatten()
+                .map(|hit_list| hit_list.hsplist_array.iter().map(|l| l.oid).collect())
+                .collect()
+        };
+        let database = BlastpDatabase::open_restricted(
+            name,
+            &settings,
+            "BLASTP",
+            Some(&negative),
+            &mut std::io::sink(),
+        )
+        .unwrap();
+        let mut lists = make();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+        assert_eq!(listed.ordinals, [0, 1, 2]);
+        assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
+        let mark = |query, position, best_evalue| FetchExcludedMatch {
+            query,
+            position,
+            best_evalue,
+        };
+        assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+        let database = BlastpDatabase::open(name, &settings, "BLASTP").unwrap();
+        let mut lists = make();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+        assert_eq!(listed.ordinals, [0, 1, 2, 3]);
+        assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
+        assert!(listed.fetch_excluded.is_empty());
     }
 
     // `x_list` lists the subjects and renames them to their ranks with the stored lengths and no
@@ -4735,7 +4634,7 @@ mod tests {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (cited at
 // `algorithm::psiblast::pssm::input_msa`)
 /// What psiblast's PSSM reads of the subjects with parsed Seq-ids that it includes, by rank,
 /// where that is not the subject's own letters (`ListedTitles::pssm_reads`): another sequence's

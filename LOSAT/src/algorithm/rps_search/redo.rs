@@ -17,25 +17,6 @@
 //! writes `kbp_gap[0]`'s K, the one the query's batch may print.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1260
-//! ```c
-//!       if (ext_params->options->compositionBasedStats > 0) {
-//!           Int4 offsets[2], query_index;
-//!           s_RPSFillFreqRatiosInPsiMatrix(sbp->psi_matrix, rpsblast_freqs + db_seq_start, seq_arg.seq->length);
-//!           one_query_info->first_context = one_query_info->last_context = 0;
-//!           one_query_info->num_queries = 1;
-//!           offsets[0] = 0;
-//!           offsets[1] = seq_arg.seq->length + 1;
-//!           one_query_info->max_length = seq_arg.seq->length;
-//!           OffsetArrayToContextOffsets(one_query_info, offsets, program_number);
-//!           query_index = hsp_list->query_index;
-//!           hsp_list->query_index = 0;
-//!           Blast_RedoAlignmentCore(program_number, seq_arg.seq, one_query_info, sbp,
-//!                                   one_query, NULL, default_db_genetic_code,
-//!                                   hsp_list, NULL, score_params, ext_params,
-//!                                   hit_params, psi_options, NULL);
-//!           hsp_list->query_index = query_index;
-//!           s_BlastHSPListRPSUpdate(program_number, hsp_list);
-//! ```
 
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
@@ -55,9 +36,6 @@ use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::KarlinParams;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:163
-// ```c
-// #define PSI_INCLUSION_ETHRESH 0.002 /**< Inclusion threshold for PSI BLAST */
-// ```
 /// The inclusion threshold of rpsblast's PSI options (`PSIBlastOptionsNew`), the e-value cutoff of
 /// the redo's heaps (blast_kappa.c:3074-3076).
 const PSI_INCLUSION_ETHRESH: f64 = 0.002;
@@ -89,18 +67,7 @@ pub(crate) struct RpsRedoParams<'a> {
     /// other mode).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:291-292
-    /// ```c
-    ///    const Boolean kSmithWaterman = (ext_options->eTbackExt ==
-    ///                                    eSmithWatermanTbckFull);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1210-1214
-    /// ```c++
-    /// inline void
-    /// CBlastOptionsLocal::SetSmithWatermanMode(bool m)
-    /// {
-    ///     if (m == true)
-    ///        m_ExtnOpts->eTbackExt = eSmithWatermanTbck;
-    /// ```
     pub(crate) smith_waterman: bool,
     /// The program of LOSAT's refusals (`RPSBLAST`, `RPSTBLASTN`).
     pub(crate) program: &'static str,
@@ -127,15 +94,7 @@ impl RpsTraceback<'_> {
     /// the `.aux` K) before its redo, so the last list read leaves the K that the query's batch
     /// may print (`k_mark`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1203-1208
-    /// ```c
-    ///          /* for CBS only allocate memory for PSSM matrix */
-    ///          if (ext_params->options->compositionBasedStats > 0) {
-    ///              sbp->psi_matrix->pssm->data = (Int4**)_PSIAllocateMatrix(
-    ///                                                           seq_arg.seq->length,
-    ///                                                           BLASTAA_SIZE,
-    ///                                                           sizeof(Int4));
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1202-1208
     /// (`_PSIAllocateMatrix` zeroes the matrix.) The Karlin block of the redo is
     /// `sbp->kbp_gap[0]` of the score block copy (`kbp_gap_std`, whose K was just written),
     /// its Lambda over the scaling factor (`s_RescaleSearch`); the first valid query of the
@@ -166,24 +125,7 @@ impl RpsTraceback<'_> {
         // before the insertion, so the heap stays empty and asks only `n < heapThreshold`.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
-        // ```c
-        //         for (query_index = 0; query_index < numQueries; query_index++) {
-        //             status_code =
-        //                 BlastCompo_HeapInitialize(&redoneMatches_tld[i][query_index],
-        //                                           hitParams->options->hitlist_size,
-        //                                           inclusion_ethresh);
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3702-3709
-        // ```c
-        //                     if (!seqSrc) {
-        //                         goto query_loop_cleanup;
-        //                     }
-        //                     if (BlastCompo_HeapWouldInsert(
-        //                             &redoneMatches[query_index],
-        //                             best_evalue,
-        //                             best_score,
-        //                             localMatch->oid
-        // ```
         let mut sw_heap: Option<BlastCompoHeap> = None;
         let kbp_psi = crate::core::psi::KarlinBlk {
             lambda: batch_kbp.lambda,
@@ -234,12 +176,7 @@ impl RpsTraceback<'_> {
             matrix.rows.clear();
             matrix.rows.resize(length, [0; 28]);
             let k = RPS_K_MULT * self.karlin_k[oid];
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383
-            // ```c
-            //     gapping_params->x_dropoff = (Int4)
-            //         MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
-            //             extendParams->gap_x_dropoff_final);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2380-2383
             // `options->gap_x_dropoff_final` is the search's final X-drop in bits
             // (`-xdrop_gap_final`; `RpsRun::gapped_x_drops` has checked the conversion).
             let mut run = RedoRun::new(

@@ -305,7 +305,7 @@ const START_VARIABLES: &[(&str, &str)] = &[(
 /// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
 /// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
 /// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
-/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// load that LOSAT refuses, the error of NCBI's load:
 /// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
 /// message that the command line writes to its standard error without `-logfile`, and the start
 /// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does

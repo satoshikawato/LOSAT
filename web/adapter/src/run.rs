@@ -1497,8 +1497,10 @@ fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
     }
 }
 
-/// Gives a search's command the run's counts source (`window_masker_counts`).
-fn give_counts(
+/// Gives a search's command what the run's start and host provide: the counts source
+/// (`window_masker_counts`) and, for BLASTN's `-filtering_db`, the repeat search that looks its
+/// database up with the run's settings.
+fn give_run_resources(
     command: &mut Commands,
     counts: Option<&Arc<dyn CountsSource>>,
     settings: &ApplicationSettings,
@@ -1506,7 +1508,8 @@ fn give_counts(
     if let (Commands::Blastn(args), Some(counts)) = (&mut *command, counts) {
         give_blastn_counts(args, counts, settings);
     }
-    // The repeat search of `-filtering_db` (a `-db` search gives it itself; the same call).
+    // The repeat search of `-filtering_db`, for a `-db` and a `-subject` search alike (a `-db`
+    // search's entry makes the same call).
     if let Commands::Blastn(args) = command {
         losat::web_adapter::resolve_blastn_repeat_filter(args, settings);
     }
@@ -1754,7 +1757,7 @@ fn search_all(
                 Some(command) => command,
                 None => parse(words)?.1,
             };
-            give_counts(&mut command, counts.as_ref(), settings);
+            give_run_resources(&mut command, counts.as_ref(), settings);
             let mut warnings = Vec::new();
             let result = match streamed && position == 0 {
                 true => search(

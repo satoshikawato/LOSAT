@@ -6905,7 +6905,8 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`); LOSAT Web has no databases.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`); a
+    // caller without settings has no repeat search.
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
             "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"

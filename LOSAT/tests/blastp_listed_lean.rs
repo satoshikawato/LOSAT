@@ -14,17 +14,6 @@
 //! in two blocks (`BLOCKS`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
-//! ```c++
-//!     for (int index = 0; index < hit_list->hsplist_count; index++) {
-//!         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-//!         if (!hsp_list)
-//!             continue;
-//! ...
-//!         const Uint4 kOid = hsp_list->oid;
-//!         TSeqPos subj_length = 0;
-//!         CRef<CSeq_id> subject_id;
-//!         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -178,6 +178,27 @@ impl SubjectPlan {
         self.split
             .next_chunk(crate::core::subject_split::DBSEQ_CHUNK_OVERLAP)
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500 and 762-766
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    // NCBI searches a hard chunk as a subject of its own. In a chunk shorter than the word the
+    // one-hit scan (`-window_size 0`) has an empty scan range, which nothing raises, so it reads
+    // no word. The two-hit scan raises the range's end to its start and reads the one word there,
+    // which runs past the chunk: each of its hits is the only one on its diagonal in the chunk
+    // (one subject offset) and is taken as a first hit, as every hit of a later chunk is on the
+    // diagonals of this one (`Blast_ExtendWordExit` moves the diagonal offset past the chunk's
+    // length and the window), so no extension starts from it.
+    /// The next hard chunk that holds a word of `word` letters ([`SubjectPlan::next_chunk`]): a
+    /// chunk shorter than the word is passed over, as NCBI's search of it finds nothing in the
+    /// one-hit scan and in the two-hit scan alike, and leaves nothing that a later chunk reads.
+    pub(crate) fn next_searched_chunk(&mut self, word: usize) -> Option<HardChunk> {
+        loop {
+            let chunk = self.next_chunk()?;
+            if chunk.length >= word {
+                return Some(chunk);
+            }
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1539

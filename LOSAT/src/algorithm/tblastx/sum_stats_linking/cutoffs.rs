@@ -1,7 +1,7 @@
 //! Cutoff calculations for HSP linking: TBLASTX's view of `CalculateLinkHSPCutoffs`, whose one
 //! port is `core::link_hsps::calculate_link_hsp_cutoffs` (BLASTX's ungapped search uses it too).
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c
 
 use crate::core::link_hsps::calculate_link_hsp_cutoffs;
 use crate::stats::KarlinParams;
@@ -17,13 +17,6 @@ use super::params::LinkHspCutoffs;
 /// blast_stat.c:4090-4130; the 22-bit gap trigger of TBLASTX's matrices is positive).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
-/// ```c
-///       if (hit_params->link_hsp_params && !kNucleotide &&
-///           !gapped_calculation) {
-///           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-///             hit_params->link_hsp_params, word_params, db_length,
-///             seq_arg.seq->length);
-/// ```
 pub fn calculate_link_hsp_cutoffs_ncbi(
     avg_query_length: i32,
     subject_len_nucl: i64,
@@ -61,7 +54,7 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
 #[cfg(test)]
 mod database_cutoff_tests {
     use super::*;
-    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:998-1082
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:998-1082
     // if (db_length > subject_length) { y_variable = log((double)db_length / subject_length)*kbp->K/gap_decay_rate; }
     // Expected values evaluated from the extracted NCBI C function.
     #[test]

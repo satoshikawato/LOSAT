@@ -563,7 +563,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(bounded(&[(1001, 1002)], (1012, 1015), 1012), (None, 1));
 }
 
-// blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (quoted at `strategy_params`): after
+// blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (cited at `strategy_params`): after
 // the formatter's warning the search strategy still writes a name as its key (probe of
 // `-export_search_strategy` with `-db_soft_mask dust`; frozen as the strategy case
 // blastn.db.dbmask.name), not the empty name or the id -1.
@@ -813,41 +813,32 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
 /// `HardMaskShape::of_scan` of the protein programs' scan (series NP, M4b): LOSAT's refusals that
 /// NCBI BLAST+ cannot freeze (a range longer than its chunks; a mask past the sequence, review L1
 /// of PR 1, which makeblastdb does not write), the ones that the rows db.pmask.*.rej.* also hold,
-/// and masks that the search takes.
+/// and masks that the search takes, chunks shorter than the word included (rows
+/// db.pmask.*.pshort.*, db.pmask.*.pe_tiny.w0.*).
 #[test]
 fn protein_shapes_of_the_hard_masks() {
-    let two_hit = HardScan::Protein { one_hit_word: None };
-    let one_hit = HardScan::Protein {
-        one_hit_word: Some(3),
-    };
+    let protein = HardScan::Protein;
     let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
         HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
     };
-    // Masks within the sequence that leave every chunk a word or more: searched.
-    for scan in [two_hit, one_hit] {
-        assert_eq!(of(&[(10, 20), (50, 60)], 100, scan), None);
-        // A mask that ends at the end after another chunk: the last chunk is not the first.
-        assert_eq!(of(&[(10, 20), (50, 100)], 100, scan), None);
-    }
+    // Masks within the sequence: searched, also where a chunk is shorter than the word (NCBI's
+    // one-hit scan reads no word of it, its two-hit scan one word that extends nothing).
+    assert_eq!(of(&[(10, 20), (50, 60)], 100, protein), None);
+    assert_eq!(of(&[(10, 20), (22, 60)], 100, protein), None);
+    assert_eq!(of(&[(10, 20), (20, 60)], 100, protein), None);
+    assert_eq!(of(&[(1, 10)], 100, protein), None);
+    // A mask that ends at the end after another chunk: the last chunk is not the first.
+    assert_eq!(of(&[(10, 20), (50, 100)], 100, protein), None);
     // A mask that runs to the end after the chunk from the start (Q1), at every word.
     assert_eq!(
-        of(&[(10, 100)], 100, two_hit),
+        of(&[(10, 100)], 100, protein),
         Some(HardMaskShape::TailMask {
             start: 10,
             end: 100
         })
     );
-    // Two letters between masks: the two-hit scan finds nothing there, the one-hit scan refuses.
-    assert_eq!(of(&[(10, 20), (22, 60)], 100, two_hit), None);
-    assert_eq!(
-        of(&[(10, 20), (22, 60)], 100, one_hit),
-        Some(HardMaskShape::ShortChunk {
-            offset: 20,
-            length: 2
-        })
-    );
     // A mask that ends past the sequence, or starts past it: its own shape, not a long range.
-    let past = of(&[(10, 20), (90, 120)], 100, two_hit);
+    let past = of(&[(10, 20), (90, 120)], 100, protein);
     assert_eq!(
         past,
         Some(HardMaskShape::PastEnd {
@@ -858,10 +849,10 @@ fn protein_shapes_of_the_hard_masks() {
     );
     assert!(past
         .unwrap()
-        .text(two_hit)
+        .text(protein)
         .starts_with("has a mask, [90, 120), ending past its 100 letters"));
     assert_eq!(
-        of(&[(150, 160)], 100, one_hit),
+        of(&[(150, 160)], 100, protein),
         Some(HardMaskShape::PastEnd {
             start: 150,
             end: 160,
@@ -870,7 +861,7 @@ fn protein_shapes_of_the_hard_masks() {
     );
     // A hard range longer than NCBI's chunks.
     let long = crate::core::subject_split::MAX_DBSEQ_LEN + 100;
-    let shape = of(&[(10, 20)], long, two_hit);
+    let shape = of(&[(10, 20)], long, protein);
     assert_eq!(
         shape,
         Some(HardMaskShape::LongRange {
@@ -880,14 +871,14 @@ fn protein_shapes_of_the_hard_masks() {
     );
     assert!(shape
         .unwrap()
-        .text(two_hit)
+        .text(protein)
         .contains("longer than the 5,000,000 letters"));
     // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
     assert_eq!(
         of(
             &[(10, 20)],
             crate::core::subject_split::MAX_DBSEQ_LEN + 20,
-            two_hit
+            protein
         ),
         None
     );

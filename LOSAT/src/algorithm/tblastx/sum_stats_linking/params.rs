@@ -1,6 +1,6 @@
 //! Linking parameters and helper functions.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 
 use crate::stats::KarlinParams;
 
@@ -22,19 +22,14 @@ impl LinkHspCutoffs {
     /// gap_prob is 0 too (`calculate_link_hsp_cutoffs_ncbi`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495
-    /// ```c
-    ///    ignore_small_gaps = (cutoff[0] == 0);
-    /// ```
     pub fn ignore_small_gaps(&self) -> bool {
         self.cutoff_small_gap == 0
     }
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455;
 /// c++/src/algo/blast/core/link_hsps.c:468-493
-/// CalculateLinkHSPCutoffs(..., db_length, subject->length);
-/// `cutoff[0] = link_hsp_params->cutoff_small_gap;`
-/// `cutoff[1] = link_hsp_params->cutoff_big_gap;`
+/// (the small-gap and big-gap cutoffs come from the link-HSP parameters)
 /// Per-subject state computed before search and shared by both linking passes.
 #[derive(Debug, Clone)]
 pub struct LinkingParams {
@@ -91,7 +86,7 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
     for &nucl_len in query_nucl_lengths {
         for context in 0..6u32 {
             // NCBI BLAST_GetTranslatedProteinLength:
-            // return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:928-928
             let prot_len = if nucl_len == 0 || nucl_len <= (context % 3) as usize {
                 0
             } else {
@@ -101,8 +96,7 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
             let prot_len = if strand_searched { prot_len } else { 0 };
 
             // NCBI s_QueryInfo_SetContext offset calculation:
-            // Uint4 shift = prev_len ? prev_len + 1 : 0;
-            // qinfo->contexts[index].query_offset = prev_loc + shift;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:75-77
             let (prev_offset, prev_len) = contexts.last().copied().unwrap_or((0, 0));
             let shift = if prev_len > 0 { prev_len + 1 } else { 0 };
             let new_offset = prev_offset + shift;

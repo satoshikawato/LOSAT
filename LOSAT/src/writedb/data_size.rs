@@ -14,16 +14,6 @@ pub fn uint8_to_string_data_size(value: u64) -> String {
     const MINPREC: u32 = 10;
     let mut v = value;
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:343-350
-    // ```c++
-    //     static string kMods = "KMGTPEZY";
-    //
-    //     size_t i(0);
-    //     for(i = 0; i < kMods.size(); i++) {
-    //         if (v < Uint8(minprec)*1024) {
-    //             v /= 1024;
-    //         }
-    //     }
-    // ```
     const K_MODS: &str = "KMGTPEZY";
 
     let mut i: usize = 0;
@@ -35,16 +25,6 @@ pub fn uint8_to_string_data_size(value: u64) -> String {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:352-359
-    // ```c++
-    //     string rv = NStr::UInt8ToString(v);
-    //
-    //     if (i) {
-    //         rv.append(kMods, i, 1);
-    //         rv.append("B");
-    //     }
-    //
-    //     return rv;
-    // ```
     let mut rv = v.to_string();
 
     if i != 0 {

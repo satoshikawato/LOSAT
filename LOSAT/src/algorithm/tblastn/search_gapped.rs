@@ -24,7 +24,7 @@ use crate::utils::matrix::protein_score;
 use crate::utils::seg::SegParams;
 use anyhow::{bail, Context, Result};
 
-// NCBI c++/include/algo/blast/core/blast_hits.h:96-103,126-143:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-103,126-143:
 // typedef struct BlastSeg { Int2 frame; Int4 offset, end, gapped_start; } BlastSeg;
 // typedef struct BlastHSP { Int4 score; ... BlastSeg query, subject; } BlastHSP;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,10 +39,8 @@ pub(super) struct GappedHsp {
     pub s_gapped_start: i32,
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:503-536,583-605;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-536,583-605;
 // c++/include/algo/blast/core/blast_hits.h:126-143:
-// Blast_HSPUpdateWithTraceback(gap_align, hsp);
-// hsp->gap_info = gap_align->edit_script; gap_align->edit_script = NULL;
 // Keep the transferred script on the same Rust HSP through purge and pruning.
 #[derive(Clone, Debug)]
 pub(super) struct TracebackOwnedHsp {
@@ -51,10 +49,7 @@ pub(super) struct TracebackOwnedHsp {
     pub edit_script: Vec<GapEditOp>,
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-// BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
-// GetGappedScore(..., init_hitlist, &hsp_list, ...);
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-552:
 // Score only this chunk's sorted initial HSPs before the next chunk scan.
 /// `subject_sequence` is the chunk's residues of `frame` and `subject_frame` the frame's residues
 /// from the chunk's first one on (`subject_sequence` and the letters after it); `score` is the
@@ -83,22 +78,14 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let mut results = Vec::new();
     debug_assert_eq!(subject_sequence.len(), chunk.length);
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:223-235:
-    // Blast_InitHitListSortByScore(init_hitlist);
-    // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:223-235:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:273-313:
     // compare score DESC, subject start ASC, length DESC, query start ASC.
     let mut frame_initial: Vec<_> = initial
         .iter()
         .filter(|hit| hit.frame == frame.frame && hit.chunk_offset == chunk.offset as u32)
         .collect();
-    // NCBI reference: c++/src/algo/blast/core/blast_extend.c:306-310
-    // ```c
-    // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-    // {
-    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-    //           sizeof(BlastInitHSP), score_compare_match);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
     // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
     frame_initial.sort_by(|a, b| {
         b.score
@@ -107,17 +94,13 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
             .then(b.length.cmp(&a.length))
             .then(a.q_start.cmp(&b.q_start))
     });
-    // NCBI c++/src/algo/blast/core/blast_engine.c:500:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500:
     // if (init_hitlist->total == 0) continue; GetGappedScore is skipped.
     if frame_initial.is_empty() {
         return Ok(Vec::new());
     }
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3827-3834,3908-3919,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3827-3834,3908-3919,
     // 4065-4091:
-    // tree = Blast_IntervalTreeInit(0, query->length+1, 0, subject->length+1);
-    // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    //                                   hit_options->min_diag_separation)) { ... }
-    // BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
     let mut tree = BlastIntervalTree::new(
         0,
         total_query_length + 1,
@@ -132,12 +115,8 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         x_grid_cells(frame_initial.len()),
     );
     for hit in frame_initial {
-        // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
-        // context = BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
-        // query_start = query_info->contexts[context].query_offset;
-        // init_hsp->offsets.qs_offsets.q_off -= query_start;
-        // init_hsp->ungapped_data->q_start -= query_start;
-        // NCBI c++/src/algo/blast/core/blast_itree.c:212-229:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:212-229:
         // s_GetQueryStrandOffset(query_info, context) returns the protein context's
         // query_offset, which is also used by containment and insertion.
         let context = context_offsets.partition_point(|&offset| offset <= hit.q_seed as i32) - 1;
@@ -160,12 +139,8 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         let q_start = usize::try_from(hit.q_start - context_offset)
             .context("negative context-local initial query start")?;
         let s_start = usize::try_from(hit.s_start).context("negative initial subject start")?;
-        // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-        // max_offset = BlastGetStartForGappedAlignment(query_tmp.sequence,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
         //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
-        // init_hsp->offsets.qs_offsets.s_off +=
-        //     max_offset - init_hsp->offsets.qs_offsets.q_off;
-        // init_hsp->offsets.qs_offsets.q_off = max_offset;
         // status = s_BlastProtGappedAlignment(...);
         // A negative Int4 length comes only from the one-hit word finder (`-window_size 0`,
         // aa_ungapped.c:1054,1083); NCBI reads it as Uint4 (`gapped_start_int4`), and its window
@@ -231,13 +206,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
                 scratch,
             )
         };
-        // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
-        // cutoff = hit_params->cutoffs[context].cutoff_score;
-        // if (gap_align->score >= cutoff) {
-        //     Blast_HSPInit(..., gap_align->score, ..., &new_hsp);
-        //     Blast_HSPListSaveHSP(hsp_list, new_hsp);
-        //     BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
-        // }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
         if gapped.score >= cutoff_scores[context] {
             let saved = GappedHsp {
                 frame: frame.frame,
@@ -274,26 +243,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654,
 // c++/src/algo/blast/core/blast_query_info.c:246-250 and
 // c++/src/algo/blast/core/blast_util.c:1058,1063-1064,1080,1098-1101
-// ```c
-//     int buflen = QueryInfo_GetSeqBufLen(qinfo);
-//     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-// ...
-//     BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
-// ...
-//     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
-// ...
-//    Uint4 buffer_length =2*(nucl_length+1)+2;
-// ...
-//    if ((translation_buffer =
-//         (Uint1*) malloc(buffer_length)) == NULL)
-// ...
-//    for (context = 0; context < NUM_FRAMES; ++context) {
-// ...
-//       /* Increment offset by 1 extra byte for the sentinel NULLB
-//          between frames. */
-//       offset += length + 1;
-//       frame_offsets[context+1] = offset;
-// ```
 /// The subject's side of NCBI's buffers that the gapped start of a one-hit HSP of negative length
 /// reads (`-window_size 0`; `BlastGetStartForGappedAlignment` with the length read as Uint4,
 /// blast_gapalign.c:3405-3413). Its window of HSP_MAX_WINDOW letters can pass the end of its
@@ -446,19 +395,6 @@ impl XOneHitBuffers {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603-605,635-657,703-712 and
 // :102-109 (s_IntervalNodeInit)
-// ```c
-//     while (1) {
-// ...
-//         else if (region_start > middle) {
-// ...
-//             old_index = nodes[root_index].rightptr;
-//             if (nodes[old_index].hsp == NULL) {
-// ...
-//         mid_index = s_IntervalNodeInit(tree, root_index, which_half, &retval);
-// ...
-//         new_node->leftend = (Int4) midpt + 1;
-//         new_node->rightend = parent_node->rightend;
-// ```
 /// `BlastIntervalTreeAddHSP` of an HSP of the one-hit word finder's chunk (`-window_size 0`). The
 /// gapped start of a one-hit HSP of negative length can lie up to 3 letters past its chunk
 /// (`x_score_only_past_chunk`), and the HSP's subject range then starts past the tree's `s_max`
@@ -488,11 +424,6 @@ fn x_add_one_hit_hsp(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3413
-// ```c
-//     hsp_end = q_start + HSP_MAX_WINDOW;
-//     query_var = query + q_start;
-//     subject_var = subject + s_start;
-// ```
 /// The gapped start of a one-hit HSP of negative `length` at `q_start` of the context's letters
 /// (`query_sequence`) and `s_start` of `chunk`: the query's window with the letters past the
 /// context read as NULLB (`gapped_start_window`), the subject's window in NCBI's translation
@@ -524,23 +455,6 @@ fn x_gapped_start_negative<S: super::score::TbnScore>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4251-4258,4266-4281,4295,4342-4345
-// ```c
-//       q_length = init_hsp->offsets.qs_offsets.q_off + 1;
-//       s_length = init_hsp->offsets.qs_offsets.s_off + 1;
-// ...
-//    AdjustSubjectRange(&s_length, &subject_length, q_length, query_length,
-//                       &subject_shift);
-// ...
-//             score_left = Blast_SemiGappedAlign(query, subject+subject_shift,
-//                                    q_length, s_length,
-// ...
-//    if (q_length < query_length && s_length < subject_length) {
-// ...
-//    if (found_end == FALSE) {    /* impossible for out-of-frame */
-//       gap_align->query_stop = init_hsp->offsets.qs_offsets.q_off;
-//       gap_align->subject_stop = init_hsp->offsets.qs_offsets.s_off;
-//    }
-// ```
 /// `s_BlastProtGappedAlignment` of a gapped start at or past the end of its chunk
 /// (`s_gapped_start >= chunk.length`), which only the window of a one-hit HSP of negative length
 /// gives: NCBI's `subject->sequence` goes on past the chunk with the frame's next letters or, past
@@ -572,15 +486,6 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
         );
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1094-1101
-    // ```c
-    //             BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
-    //                nucl_length, frame, translation_buffer+offset, genetic_code);
-    // ...
-    //       /* Increment offset by 1 extra byte for the sentinel NULLB
-    //          between frames. */
-    //       offset += length + 1;
-    //       frame_offsets[context+1] = offset;
-    // ```
     // A start at or past the frame's end (a chunk near it) needs a window that sums above 0
     // over the frame's NULLB, which only a PSSM whose '-' column is not BLAST_SCORE_MIN gives
     // (`TbnScore::GAPPED_START_PAST_FRAME`). NCBI's `subject->sequence` is the frame inside the
@@ -633,23 +538,8 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063,1098-1101 and
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058-1101 and
 // c++/src/algo/blast/core/blast_gapalign.c:4251-4258,4266-4281
-// ```c
-//    Uint4 buffer_length =2*(nucl_length+1)+2;
-// ...
-//    if ((translation_buffer =
-//         (Uint1*) malloc(buffer_length)) == NULL)
-// ...
-//       offset += length + 1;
-//       frame_offsets[context+1] = offset;
-// ...
-//       q_length = init_hsp->offsets.qs_offsets.q_off + 1;
-//       s_length = init_hsp->offsets.qs_offsets.s_off + 1;
-// ...
-//             score_left = Blast_SemiGappedAlign(query, subject+subject_shift,
-//                                    q_length, s_length,
-// ```
 /// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) of a gapped start past the NULLB after frame -3,
 /// the last byte that NCBI's translation buffer of the subject sets: a one-hit HSP of negative
 /// length whose window of HSP_MAX_WINDOW letters reaches past that NULLB (read as NULLBs, exception
@@ -667,25 +557,6 @@ fn x_gapped_start_past_translation() -> anyhow::Error {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609 and :569-575,
 // blast_hits.c:1175-1177,1189,1208,1225-1227 and blast_util.c:453
-// ```c
-//         score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,  &private_q_length, &private_s_length, rev_prelim_tback,
-// ...
-//             matrix_index = *b_ptr;
-// ...
-//          if (hsp->subject.offset < 0) {
-//              nucl_start = 0;
-//              nucl_end = target_t->subject_blk->length;
-// ...
-//          translation_length = 1+nucl_length/CODON_LENGTH;
-// ...
-//                    target_t->translations[context] = (Uint1*) malloc(translation_length+2);
-// ...
-//                if(hsp->subject.offset >= 0) {
-//                    target_t->translations[context][0] = FENCE_SENTRY;
-//                    target_t->translations[context][length+1] = FENCE_SENTRY;
-// ...
-// 	prot_seq[index_prot] = NULLB;
-// ```
 /// The refusal of the traceback of an HSP whose gapped start lies after its frame's NULLB (a one-hit
 /// HSP of negative length, `-in_pssm` with `-window_size 0`, `x_score_only_past_chunk`): NCBI's
 /// traceback reads the subject at the start first, a byte past the last one either translation of
@@ -721,7 +592,7 @@ fn x_traceback_start_in_frame(
     Ok(())
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // WordFinder -> GetGappedScore -> endpoint purge -> offset adjustment ->
 // Blast_HSPListsMerge runs within each chunk; Blast_HSPListAppend ends a frame.
 // The preliminary search keeps that function and input order for every unit.
@@ -745,33 +616,10 @@ pub(super) struct PreliminaryProfile<'a> {
     pub(super) subject_besthit: bool,
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // one chunk's WordFinder and gapped result precedes the next chunk's scan;
 // each frame's append precedes the next frame's scan.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
-// ```c
-//     while (TRUE) {
-// ...
-//             if (init_hitlist->total == 0) continue;
-// ...
-//         if (aux_struct->GetGappedScore) {
-//             status = aux_struct->GetGappedScore(program_number, query,
-//                     query_info,
-//                     subject, gap_align, score_params, ext_params, hit_params,
-//                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-//         }
-// ...
-//             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-// ...
-//         Blast_HSPListSortByScore(hsp_list);
-// ...
-//         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-//                      kHspNumMax, &(backup.offset), INT4_MIN,
-//                      overlap, score_options->gapped_calculation,
-//                      Blast_ProgramIsMapping(program_number));
-// ...
-//         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-// ```
 // Dispatch point: this is the preliminary stage of s_BlastSearchEngineCore for one subject. The
 // (frame, chunk) units run independently and are merged in NCBI order
 // (x_preliminary_protein_hsps_by_unit). The unit tests that check the stage against NCBI traces run
@@ -792,7 +640,7 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
     score: S,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
-    // aa_ungapped.c:214-224 (quoted at the units' word finder)
+    // aa_ungapped.c:214-224 (cited at the units' word finder)
     // Dispatch point: `-window_size 0` (no `multiple_hits`) takes the one-hit word finder, in an
     // instance of its own (`ONE_HIT`), so that the two-hit units keep their code.
     if profile.window == 0 {
@@ -821,17 +669,6 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256
-// ```c
-//         BlastSeqLoc *lcase_mask_slp = NULL;
-//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
-//         {
-//             ASSERT(context < query_blk->lcase_mask->total_size);
-//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
-// ...
-//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
-// ...
-//     BlastSeqLocCombine(filter_out, 0);
-// ```
 // XQueryFrames is the query-side state the unit-wise stage derives from the query set alone: the
 // query frames with the lowercase and SEG masks merged (as in x_query_frames below), and the
 // offsets of the contexts.
@@ -845,27 +682,13 @@ struct XQueryFrames {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256
-// ```c
-//         BlastSeqLoc *lcase_mask_slp = NULL;
-//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
-//         {
-//             ASSERT(context < query_blk->lcase_mask->total_size);
-//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
-// ...
-//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
-// ...
-//     BlastSeqLocCombine(filter_out, 0);
-// ```
 // The query frames of the preliminary stage, built once so that one value can serve all subjects
 // of a query set.
 fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<XQueryFrames> {
     let query_frames: Vec<_> = queries
         .iter()
         .map(|query| {
-            // NCBI c++/src/algo/blast/core/blast_setup.c:620-623:
-            // if (!mask_at_hash) {
-            //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
-            // }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:620-623:
             // Soft masking retains the unmasked WordFinder query while lookup still excludes the
             // SEG intervals used by the candidate scanner.
             if profile.soft_masking {
@@ -879,14 +702,6 @@ fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-623 (`BLAST_MainSetUp`)
-// ```c
-//     status = s_GetFilteringLocations(query_blk, query_info, program_number, qsup_options,
-//                                       &filter_maskloc, &blast_message);
-// ...
-//     if (!mask_at_hash) {
-//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
-//     }
-// ```
 // NCBI masks the query of a batch once, in its setup; the lookup table, the word finder and the
 // score block read that query. `x_query_frames` with the frames made already (by the batch's setup,
 // `stage_d_pipeline::query_set_setup`, which masks each query as `x_query_frames` does).
@@ -899,12 +714,10 @@ fn x_query_frames_of(query_frames: Vec<QueryFrame>, queries: &[&[u8]]) -> Result
         total_query_length += i32::try_from(query.len())? + 1;
     }
     total_query_length -= 1;
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:246-250:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250:
     // last context's query_offset + query_length is the sequence length;
     // each preceding protein context ends with one NULLB separator.
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
-    // retval->last_context = retval->num_queries * kNumContexts - 1;
-    // contexts[i].query_index = Blast_GetQueryIndexFromContext(i, program);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:68-96:
     // The concatenated query of the word finder: each masked context followed by its sentinel.
     let mut query_sequence = Vec::new();
     let mut init_context_offsets = Vec::with_capacity(queries.len());
@@ -922,13 +735,6 @@ fn x_query_frames_of(query_frames: Vec<QueryFrame>, queries: &[&[u8]]) -> Result
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
-// ```c
-//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                              &lookup_wrap->lut);
-//        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-//        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                                  query, lookup_segments, 0);
-// ```
 // NCBI builds the lookup table once per query batch. XQuerySide keeps the query frames and the
 // lookup table for all subjects of one query set. The frames are the ones the batch's setup masked
 // (`x_with_frames`); the table is built before the subjects on a pool of two or more threads
@@ -1006,14 +812,6 @@ impl XQuerySide {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99
-    // ```c
-    //        if (sbp->psi_matrix && sbp->psi_matrix->pssm) {
-    //            matrix = sbp->psi_matrix->pssm->data;
-    //            has_pssm = TRUE;
-    //        } else {
-    //            matrix = sbp->matrix->data;
-    //        }
-    // ```
     /// The query set's lookup table made by its setup: a PSSM query's (`in_pssm::lookup_table`),
     /// which the subjects' plans then read (`x_scan_plan`) instead of the matrix's.
     pub(super) fn x_set_lookup(
@@ -1025,10 +823,6 @@ impl XQuerySide {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100 (cited at
     // `x_scan_plan`) and c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // ```c
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // (*thread)->Run(); (*thread)->Join(&result);
-    // ```
     // NCBI builds the batch's table in its setup, before its threads search the subjects. The table
     // `x_scan_plan` builds at the first subject that needs it, built now, its lists on `pool`'s
     // threads (`x_build_lean_in`): the same table, from the frames the setup masked, which are the
@@ -1066,16 +860,6 @@ impl XQuerySide {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413
-// ```c
-//     if ((status = BlastExtendWordNew(query->length, word_params,
-//                                     &aux_struct->ewp)) != 0)
-// ...
-//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
-//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
-// ...
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // NCBI's search thread sets up its word-finder state (diagonal table, offset pairs, initial hit
 // list) and its gapped alignment memory once, before its loop over the subjects, and keeps them for
 // every subject. These are the same buffers of the unit path, kept by a thread between subjects.
@@ -1106,10 +890,6 @@ pub(super) fn x_free_unit_buffers() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
-// ```c
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // NCBI's units read the subject's translation buffer; a unit of a plan without residues translates
 // the part it reads into a buffer of its query batch's preliminary stage (up to a chunk of
 // 5,000,000 residues and the margin, about 5 MB), freed at the end of that stage.
@@ -1175,29 +955,6 @@ impl Drop for XUnitResidues<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
-// ```c
-//     while (TRUE) {
-// ...
-//             if (init_hitlist->total == 0) continue;
-// ...
-//         if (aux_struct->GetGappedScore) {
-//             status = aux_struct->GetGappedScore(program_number, query,
-//                     query_info,
-//                     subject, gap_align, score_params, ext_params, hit_params,
-//                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-//         }
-// ...
-//             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-// ...
-//         Blast_HSPListSortByScore(hsp_list);
-// ...
-//         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-//                      kHspNumMax, &(backup.offset), INT4_MIN,
-//                      overlap, score_options->gapped_calculation,
-//                      Blast_ProgramIsMapping(program_number));
-// ...
-//         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-// ```
 // The units of the loop at line 478 run independently here: WordFinder (two-hit pass with its own
 // diagonal array), the gapped score and the common-endpoint purge are computed per (frame, chunk)
 // unit; the merge (581) and the per-frame append (844) then run in NCBI order on one thread. This
@@ -1224,15 +981,12 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit, x_scan_unit_of};
     use super::x_subject_store::XPrelimSubject;
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
-    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // Every query context must supply its own measured cutoff.
     if profile.gapped_cutoff.len() != queries.len() {
         bail!("one preliminary gapped cutoff is required per query context");
     }
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-    // curr_context = BSearchContextInfo(query_offset, query_info);
-    // cutoffs = word_params->cutoffs + curr_context;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:547-583:
     // Require one x-drop and cutoff per query context for the indexed read.
     anyhow::ensure!(
         profile.word_xdrop.len() == queries.len() && profile.word_cutoff.len() == queries.len(),
@@ -1327,10 +1081,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         let frame = &plan.subject.frames[*frame_index];
         let chunk = *chunk;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
-        // ```c
-        //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-        //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-        // ```
         // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from the chunk's first residue on: the
         // plan's, or for a plan without residues those the unit reads, translated into a buffer
         // of the query batch (`XUnitResiduesPool`).
@@ -1376,13 +1126,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:214-224
-        // ```c
-        //     if (ewp->diag_table->multiple_hits) {
-        //         status = s_BlastAaWordFinder_TwoHit(subject, query,
-        // ...
-        //     } else {
-        //         status = s_BlastAaWordFinder_OneHit(subject, query,
-        // ```
         // Dispatch point: `-window_size 0` (no `multiple_hits`, blast_extend.c:137) takes the
         // one-hit word finder, with its own scan (no clamp of a short first range) and loop
         // (`XTwoHit::x_pairs_one_hit`); the two-hit loops below keep their code. Then a PSSM
@@ -1444,8 +1187,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 }
             }
         }
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:
-        // Blast_ExtendWordExit(ewp, subject->length);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609:
         // Right after the scan, before anything that can fail, so that the table is ready for the
         // next unit whatever this one returns.
         two_hit.exit(chunk.length);
@@ -1459,8 +1201,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         probe_event(unit, || {
             PreliminaryEvent::Initial(frame.frame, chunk.offset, hits.to_vec())
         });
-        // NCBI c++/src/algo/blast/core/blast_engine.c:500:
-        // if (init_hitlist->total == 0) continue;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500:
         if hits.is_empty() {
             return Ok(Vec::new());
         }
@@ -1485,9 +1226,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         )?;
         #[cfg(test)]
         let gapped = probe_gapped(unit, frame.frame, chunk.offset, gapped)?;
-        // NCBI c++/src/algo/blast/core/blast_engine.c:539-552:
-        // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
-        // Blast_HSPListSortByScore(hsp_list);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,555:
         let purged = purge_preliminary_common_endpoints(gapped);
         #[cfg(test)]
         probe_event(unit, || {
@@ -1496,15 +1235,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         Ok(purged)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482,805-812
-    // ```c
-    //     while (TRUE) {
-    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                        dbseq_chunk_overlap);
-    //
-    //         if (status == SUBJECT_SPLIT_DONE) break;
-    // ...
-    //     for (context=first_context; context<=last_context; context++) {
-    // ```
     // Dispatch point: NCBI visits the units one after another. With a pool the units run in
     // parallel (map_init gives each thread its own state); without one the loop below runs them in
     // order. The results are collected by unit index.
@@ -1547,14 +1277,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         }));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844
-    // ```c
-    //         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-    //                      kHspNumMax, &(backup.offset), INT4_MIN,
-    //                      overlap, score_options->gapped_calculation,
-    //                      Blast_ProgramIsMapping(program_number));
-    // ...
-    //         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-    // ```
     // Replay in NCBI order: the units of a frame are merged one by one (Blast_HSPListsMerge), then
     // the frame is appended (Blast_HSPListAppend). Only this thread runs it.
     let mut purged = purged.into_iter();
@@ -1571,8 +1293,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
             if unit_hsps.is_empty() {
                 continue;
             }
-            // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
-            // Blast_HSPListsMerge(&hsp_list, &hsp_list_for_chunks, ...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
             per_frame = merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max)?;
             #[cfg(test)]
             probe_push(|| {
@@ -1597,8 +1318,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 });
             }
         }
-        // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
-        // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:840-850:
         combined = append_preliminary_hsps(combined, per_frame, profile.hsp_num_max);
         #[cfg(test)]
         probe_push(|| {
@@ -1696,7 +1416,7 @@ fn probe_event(unit: usize, event: impl FnOnce() -> PreliminaryEvent) {
     with_probe(|probe| probe.unit_events[unit].push(event()));
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:525-552:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:525-552:
 // GetGappedScore returns hsp_list; immediately afterward the same list is
 // passed to Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE).
 // The hook edits that input for comparison-only artificial NCBI input states.
@@ -1969,7 +1689,7 @@ pub(super) fn scan_profile(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:1330-1382:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1382:
 // ScoreCompareHSPs sorts score DESC, then subject offset ASC,
 // subject end DESC, query offset ASC, query end DESC.
 fn sort_preliminary_by_score(hsps: &mut [(usize, GappedHsp)]) {
@@ -1977,12 +1697,7 @@ fn sort_preliminary_by_score(hsps: &mut [(usize, GappedHsp)]) {
         .windows(2)
         .any(|pair| compare_gapped_score(&pair[0].1, &pair[1].1).is_gt())
     {
-        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1379-1382
-        // ```c
-        //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-        //               ScoreCompareHSPs);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1382
         // The pinned NCBI BLAST+ runs on glibc, whose qsort is a stable merge sort.
         // ScoreCompareHSPs ignores the subject frame, so HSPs of other frames at the
         // same protein offsets keep their order (frames 1, 2, 3, -1, -2, -3 as
@@ -1991,14 +1706,14 @@ fn sort_preliminary_by_score(hsps: &mut [(usize, GappedHsp)]) {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
 // qsort(hsp_array, ..., s_QueryOffsetCompareHSPs); delete equal starts;
 // qsort(hsp_array, ..., s_QueryEndCompareHSPs); delete equal ends.
 // Context and subject frame must also agree before deletion.
 fn purge_preliminary_common_endpoints(
     mut incoming: Vec<(usize, GappedHsp)>,
 ) -> Vec<(usize, GappedHsp)> {
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2492:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2492:
     // qsort(..., s_QueryOffsetCompareHSPs) returns 0 for identical score,
     // query/subject starts and ends. The pinned NCBI oracle retains the first
     // score-355 HSP's gapped_start (192, 47944) on that exact comparator tie.
@@ -2024,7 +1739,7 @@ fn purge_preliminary_common_endpoints(
             i += 1;
         }
     }
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2330-2390,2497-2537:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2330-2390,2497-2537:
     // s_QueryEndCompareHSPs also returns 0 for these equal-endpoint HSPs;
     // retain their arrival order through the second purge pass.
     incoming.sort_by(|a, b| {
@@ -2050,7 +1765,7 @@ fn purge_preliminary_common_endpoints(
     incoming
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:2762-2864:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
 // if (!combined) adopt incoming; otherwise combine by ScoreCompareHSPs
 // up to hsp_num_max, preferring the existing list on a comparator tie.
 fn append_preliminary_hsps(
@@ -2093,11 +1808,8 @@ fn append_preliminary_hsps(
     selected
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
-// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-// Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
-//                     &(backup.offset), INT4_MIN, overlap, TRUE, FALSE);
-// NCBI c++/src/algo/blast/core/blast_hits.c:3037-3050:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3050:
 // Adjust subject offset, end and gapped_start before merging.
 fn merge_adjusted_chunk(
     per_frame: Vec<(usize, GappedHsp)>,
@@ -2133,10 +1845,9 @@ fn merge_adjusted_chunk(
     ))
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:1465-1537:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1465-1537:
 // start_diag = query.offset - subject.offset;
 // end_diag = query.end - subject.end;
-// if (subject.frame differs) return FALSE;
 // if either new endpoint is inside the old HSP, score_density is
 // (old.score + new.score) / (old.query length + new.query length);
 // merged score = MAX((int)(score_density * merged query length), old.score).
@@ -2167,12 +1878,9 @@ pub(super) fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_g
     true
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
-// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
 // overlap = backup.offset == hard_range.left ? 0 : DBSEQ_CHUNK_OVERLAP;
-// Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
-//                     &backup.offset, INT4_MIN, overlap, TRUE, FALSE);
-// NCBI c++/src/algo/blast/core/blast_hits.c:2857-3035:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035:
 // move overlap HSPs to the front, match equal contexts whose diagonals
 // differ by less than 10, merge, purge the consumed new HSPs, combine by score.
 // Input HSP coordinates must already include the chunk offset.
@@ -2233,11 +1941,7 @@ fn merge_subject_chunk_hsps(
             .windows(2)
             .any(|pair| compare_gapped_score(&pair[0].1, &pair[1].1).is_gt())
         {
-            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1379-1382
-            // ```c
-            //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-            //               ScoreCompareHSPs);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1382
             // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
             hsps.sort_by(|a, b| compare_gapped_score(&a.1, &b.1));
         }
@@ -2267,13 +1971,8 @@ fn merge_subject_chunk_hsps(
     selected
 }
 
-// NCBI c++/src/algo/blast/core/blast_util.c:1268-1317:
-// retval->partial = !is_ooframe;
-// retval->range = (Int4*) calloc(2*num_frames, sizeof(Int4));
-// NCBI c++/src/algo/blast/core/blast_hits.c:1156-1228:
-// start = target_t->range[2*context];
-// stop = target_t->range[2*context+1];
-// return target_t->translations[context] - target_t->range[2*context] + 1;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1268-1317:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1156-1228:
 #[derive(Default)]
 struct TargetFrameTranslation {
     start: usize,
@@ -2292,16 +1991,6 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
 // c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
-// ```c
-//       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
-// ...
-//     /* skip translation if full translation has already been done */
-//     if (target_t->partial && (start ||
-//         (stop < target_t->subject_blk->length / CODON_LENGTH -3)))
-// ...
-//     /* +1 as the first byte is a sentinel. */
-//     return target_t->translations[context] - target_t->range[2*context] + 1;
-// ```
 // NCBI skips the translation of a subject (its searched range, `-subject_loc`) of fewer than 12
 // bases (`stop < n / 3 - 3` is false, `core::blast_hits::target_translation_never_made`) and
 // returns the frame's translation that was never made: NULL + 1. Every caller reads from there
@@ -2345,17 +2034,6 @@ impl<'a> TargetTranslation<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1197-1201,1216-1218
-    // ```c
-    //          if (start_shift < start || start_shift+translation_length > stop) {
-    //                /* needs re-translation */
-    //                Int4 length = 0; /* actual translation length */
-    //                Uint1* nucl_seq = target_t->subject_blk->sequence + nucl_shift;
-    //                Uint1* nucl_seq_rev = NULL;
-    // ...
-    //                length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
-    //                        nucl_length, hsp->subject.frame, target_t->translations[context],
-    //                        target_t->gen_code_string);
-    // ```
     // NCBI translates `nucl_length` nucleotides from `nucl_shift`; a packed subject (EXPERIMENT,
     // LOSAT_X_TBNSTORE) gives the letters of that window when it is translated.
     /// The translations of `subject`, letters or (EXPERIMENT, LOSAT_X_TBNSTORE) packed.
@@ -2370,20 +2048,9 @@ impl<'a> TargetTranslation<'a> {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_hits.c:1154-1228:
-    // nucl_start = MAX(0, 3*hsp->subject.offset - kMaxTranslation);
-    // nucl_end = MIN(subject->length, 3*hsp->subject.end + kMaxTranslation);
-    // if (subject->length - nucl_end <= 21) nucl_end = subject->length;
-    // translation_length = 1+nucl_length/CODON_LENGTH;
-    // start_shift = nucl_start/CODON_LENGTH;
-    // if (start_shift < start || start_shift+translation_length > stop) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
     //     length = BLAST_GetTranslation(...);
-    //     target_t->range[2*context+1] = start_shift + length;
-    //     translations[context][0] = FENCE_SENTRY;
-    //     translations[context][length+1] = FENCE_SENTRY;
-    // }
-    // NCBI c++/src/algo/blast/core/blast_util.c:428-455:
-    // prot_seq[0] = NULLB; ... prot_seq[index_prot] = NULLB;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:428-455:
     pub(super) fn get(
         &mut self,
         frame: i8,
@@ -2436,7 +2103,7 @@ impl<'a> TargetTranslation<'a> {
                 };
                 let code = self.code;
                 let residues = self.residues.get_or_insert_with(|| x_codon_residues(code));
-                // NCBI translates only the HSP's frame (blast_hits.c:1216-1218,
+                // NCBI translates only the HSP's frame (c++/src/algo/blast/core/blast_hits.c:1216-1218,
                 // `BLAST_GetTranslation`); `translate_frame_into` writes its residues between the
                 // window's ends (below) in the frame's buffer.
                 target.sequence.clear();
@@ -2452,16 +2119,8 @@ impl<'a> TargetTranslation<'a> {
                 target.sequence.push(if offset >= 0 { 201 } else { 0 });
                 target.start = start_shift;
                 target.stop = start_shift + aa_len;
-                // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1224-1228
-                // ```c
-                //                /* partial translation needs to be fenced */
-                //                if(hsp->subject.offset >= 0) {
-                //                    target_t->translations[context][0] = FENCE_SENTRY;
-                //                    target_t->translations[context][length+1] = FENCE_SENTRY;
-                //                }
-                // ```
-                // NCBI c++/src/algo/blast/core/blast_hits.c:1235:
-                // return target_t->translations[context] - target_t->range[2*context] + 1;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1224-1228
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1235:
                 // The Rust slice begins at the left fence and `base` restores NCBI's
                 // absolute subject coordinates without allocating the unused prefix
                 // preceding a late partial window. A window from the first residue is
@@ -2474,7 +2133,7 @@ impl<'a> TargetTranslation<'a> {
                 };
             }
         } else if target.sequence.is_empty() {
-            // NCBI blast_hits.c:1162-1164,1234-1235: the frame never translated, NULL + 1
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235: the frame never translated, NULL + 1
             // (`x_traceback_of_an_untranslated_frame`). Only a subject of fewer than 12 bases skips
             // the first translation; every translation leaves at least its closing byte.
             debug_assert!(
@@ -2487,16 +2146,6 @@ impl<'a> TargetTranslation<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1648-1677
-    // ```c
-    //                         if (fence_hit) {
-    //                             /* Disable range support and refetch the
-    //                             (whole) subject sequence */
-    //
-    //                             seq_arg.reset_ranges = TRUE;
-    // ...
-    //                             /* Retry the alignment with fence_hit set*/
-    //                             Blast_TracebackFromHSPList(program_number, hsp_list,
-    // ```
     // After a fence NCBI aligns every HSP of the list again in the whole translation of its frame
     // (`get` with offset -1: the residues, no byte before the first, a 0 after the last). No NCBI
     // counterpart: LOSAT's speed (a whole frame of a chromosome is millions of residues, translated
@@ -2584,7 +2233,7 @@ impl<'a> TargetTranslation<'a> {
 /// traced again with windows 8 times as wide.
 const X_WHOLE_MARGIN: usize = 1 << 10;
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:1330-1382:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1382:
 // compare score DESC, subject.offset ASC, subject.end DESC,
 // query.offset ASC, query.end DESC; sort only if an adjacent pair is out of order.
 fn compare_gapped_score(a: &GappedHsp, b: &GappedHsp) -> std::cmp::Ordering {
@@ -2601,23 +2250,15 @@ fn sort_gapped_score_if_needed(hsps: &mut [GappedHsp]) {
         .windows(2)
         .any(|pair| compare_gapped_score(&pair[0], &pair[1]).is_gt())
     {
-        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1379-1382
-        // ```c
-        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-        //               ScoreCompareHSPs);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1382
         // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
         hsps.sort_by(compare_gapped_score);
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_itree.c:817-838,931-995:
-// query_start = s_GetQueryStrandOffset(query_info, hsp->context);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:537,817-838,931-995:
 // return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,
-//                         min_diag_separation);
-// NCBI c++/src/algo/blast/core/blast_traceback.c:352-360:
-// Blast_IntervalTreeInit(0, query_blk->length + 1,
-//   0, (subject_length > 0 ? subject_length : subject_blk->length / 3) + 1);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:352-360:
 fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
     TreeHsp {
         query_offset: hsp.q_start,
@@ -2632,28 +2273,14 @@ fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
-// purge |= (program != eBlastTypeBlastn);
-// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-// if (same context, query.offset, subject.offset, subject.frame) Blast_HSPFree(hsp);
-// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-// if (same context, query.end, subject.end, subject.frame) Blast_HSPFree(hsp);
-// NCBI c++/src/algo/blast/core/blast_hits.c:1330-1382:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1382:
 // BLAST_CMP(hsp2->score, hsp1->score), then subject.offset ASC,
 // subject.end DESC, query.offset ASC, query.end DESC.
 // This internal Stage C list has one protein query context; multi-query
 // context offsets remain a separate Stage C boundary.
 fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<TracebackOwnedHsp> {
-    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2478-2487
-    // ```c
-    //    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    //    i = 0;
-    //    while (i < hsp_count) {
-    //       j = 1;
-    //       while (i+j < hsp_count &&
-    //              ...
-    //              hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2487
     // glibc's qsort under the pinned NCBI BLAST+ is a stable merge sort. The
     // comparator ignores the subject frame and only the next HSP is compared, so
     // the order of other frames at equal offsets decides what is purged (TN-5).
@@ -2676,10 +2303,7 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
             i += 1;
         }
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2504
-    // ```c
-    //    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504
     // Stable, as glibc's qsort (TN-5).
     hsps.sort_by(|a, b| {
         a.hsp
@@ -2700,8 +2324,7 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
             i += 1;
         }
     }
-    // NCBI c++/src/algo/blast/core/blast_hits.c:1374-1382:
-    // if (!Blast_HSPListIsSortedByScore(hsp_list)) qsort(..., ScoreCompareHSPs);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1382:
     if hsps
         .windows(2)
         .any(|pair| compare_gapped_score(&pair[0].hsp, &pair[1].hsp).is_gt())
@@ -2712,16 +2335,9 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
     hsps
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:303-312,408-440,503-536,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:303-312,408-440,503-536,
 // 709-721,1644-1684:
-// orig_hsplist = BlastHSPListDup(hsp_list);
-// subject = Blast_HSPGetTargetTranslation(target_t, hsp, &subject_length);
-// BLAST_GappedAlignmentWithTraceback(..., fence_hit);
-// if (fence_error) break;
-// if (fence_error) Blast_HSPListSwap(hsp_list, orig_hsplist);
 // if (fence_hit) { /* refetch whole subject */
-//     Blast_TracebackFromHSPList(..., &fence_hit);
-// }
 // The NCBI endpoint purge and interval-tree pass follow traceback; ambiguity
 // reevaluation has no HSPs in this non-greedy, purge=TRUE profile.
 #[allow(dead_code)]
@@ -2748,22 +2364,13 @@ pub(super) fn full_translation_traceback_blosum62(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120
-// ```c
-// #define HSP_MAX_WINDOW 11
-// ```
 /// The window of residues in which the traceback's gapped start is looked for.
 const HSP_MAX_WINDOW: usize = 11;
 
-// NCBI c++/src/algo/blast/core/blast_gapalign.c:3248-3321:
-// if (q_length <= HSP_MAX_WINDOW) { *q_retval = q_start + q_length/2;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3248-3321:
 //     *s_retval = s_start + q_length/2; return TRUE; }
-// score += sbp->matrix->data[*query_var][*subject_var];
 // if (score > max_score) { max_score = score; max_offset = index1; }
-// if (max_score > 0) { *q_retval = max_offset;
 //     *s_retval = max_offset - q_start + s_start; return TRUE; }
-// if (score > 0) { *q_retval = hsp->query.end - HSP_MAX_WINDOW/2;
-//     *s_retval = hsp->subject.end - HSP_MAX_WINDOW/2; return TRUE; }
-// return FALSE;
 pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
     query: &[u8],
     subject: &[u8],
@@ -2822,10 +2429,7 @@ pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:508-513:
-// BLAST_GappedAlignmentWithTraceback(program_number, query, adjusted_subject,
-//     gap_align, score_params, q_start, s_start, query_length,
-//     adjusted_s_length, fence_hit);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:508-513:
 #[allow(dead_code)]
 fn full_translation_traceback_with_matrix(
     query: &[u8],
@@ -2856,10 +2460,7 @@ fn full_translation_traceback_with_matrix(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
-// Blast_HSPUpdateWithTraceback(gap_align, hsp);
-// delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-// if (delete_hsp) hsp_array[index] = Blast_HSPFree(hsp);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-605:
 // This diagnostic observer records the real call order and input offsets.
 #[allow(dead_code)]
 fn full_translation_traceback_with_matrix_and_events(
@@ -2898,11 +2499,8 @@ fn full_translation_traceback_with_matrix_and_events(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:614-625;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-625;
 // c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-// query = query_blk->sequence + context_offset;
-// query_nomask = query_blk->sequence_nomask + context_offset;
 // Soft masking keeps both traceback and identity inputs unmasked.
 #[allow(dead_code)]
 fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
@@ -2923,15 +2521,12 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     identity_events: Option<&mut Vec<(usize, usize)>>,
 ) -> Result<Vec<(GappedHsp, bool)>> {
-    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
-    // Blast_HSPListSortByScore(hsp_list);
-    // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
     // The Stage C observers pass one subject's preliminary HSPs, which reach the
     // traceback in this score order.
     let mut ordered = gapped.to_vec();
     sort_gapped_score_if_needed(&mut ordered);
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:583-605,675-693:
-    // Blast_HSPUpdateWithTraceback(...); Blast_HSPListSortByScore(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-605,675-693:
     // return the retained HSPs in source order to existing Stage C observers.
     Ok(
         full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
@@ -2959,10 +2554,9 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_traceback.c:503-536,583-605,675-693:
-// hsp->gap_info = gap_align->edit_script; gap_align->edit_script = NULL;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-536,583-605,675-693:
 // Blast_HSPListSortByScore(hsp_list); purge contained HSPs afterward.
-// NCBI c++/src/algo/blast/core/blast_traceback.c:294,425-433,717-719;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:294,425-433,717-719;
 // core/blast_hits.c:1231-1235: the last translated_length returned while
 // visiting input HSPs becomes the posttraceback statistical subject length.
 pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
@@ -3007,17 +2601,6 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:429-439,509-512
-// ```c
-//          if (hsp->query.gapped_start == 0 && hsp->subject.gapped_start == 0) {
-//             Boolean retval =
-//                 BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-//                                                   hsp, &q_start, &s_start);
-// ...
-//             BLAST_GappedAlignmentWithTraceback(program_number, query,
-//                  adjusted_subject, gap_align, score_params, q_start, s_start,
-//                  query_length, adjusted_s_length,
-//                  fence_hit);
-// ```
 // (`gap_align->sbp` holds the PSSM: `positionBased` reads its rows.)
 /// `full_translation_traceback_with_matrix_and_events_with_mask_mode_owned` of a PSSM query
 /// (`-in_pssm`, PSI-TBLASTN): the same traceback with the scores of the PSSM's rows; the
@@ -3087,10 +2670,7 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
     score: S,
 ) -> Result<(Vec<TracebackOwnedHsp>, i32, usize)> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-    // query = query_blk->sequence + context_offset;
-    // query_nomask = query_blk->sequence_nomask + context_offset;
-    // Blast_HSPGetNumIdentitiesAndPositives(query_nomask, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
     // Trace the masked working query, then count identities on its
     // separately retained unmasked sequence.
     let query_frame = if soft_masking {
@@ -3103,26 +2683,8 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         .aa_seq_nomask
         .as_ref()
         .map_or(query_sequence, |bytes| &bytes[1..bytes.len() - 1]);
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:358-365
-    // ```c
-    //    /* Make sure the HSPs in the HSP list are sorted by score, as they should
-    //       be. */
-    // #ifdef _DEBUG
-    //    {
-    //        Blast_HSPListSortByScore(hsp_list);
-    //    }
-    // #endif
-    //    ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:3269-3284
-    // ```c
-    //       if (!hit_list->heapified) {
-    //     	  /* make sure all hsp_list is sorted */
-    //           for (index =0; index < hit_list->hsplist_count; index++) {
-    //               Blast_HSPListSortByEvalue(hit_list->hsplist_array[index]);
-    //       ...
-    //       Blast_HSPListSortByEvalue(hsp_list);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:358-365
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3269-3284
     // The release traceback keeps the order the preliminary hit list left: by
     // score, or by E-value once that hit list was full and heapified. The order
     // decides which HSP is translated last, i.e. `stat_length` (TN-2).
@@ -3148,17 +2710,13 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         let mut stat_length = i32::try_from(subject.len())?;
         let mut results = Vec::new();
         let mut retry = false;
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:352-360,401-405,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:352-360,401-405,
         // 583-605:
         // tree = Blast_IntervalTreeInit(...);
-        // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-        //                                   hit_options->min_diag_separation)) { ... }
-        // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
         let mut tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
         for hit in &ordered {
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:403-405,607-609:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,607-609:
             // if (... || !BlastIntervalTreeContainsHSP(tree, hsp, ...)) { ... }
-            // else { hsp_array[index] = Blast_HSPFree(hsp); }
             // Test containment before
             // obtaining target translation or attempting traceback.
             let contained = tree.contains_hsp(&traceback_tree_hsp(hit, query_length), 0, 0);
@@ -3181,16 +2739,12 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
                 target.x_whole_window(hit.frame, hit.s_start, hit.s_end, margin)?
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:425-433:
-            // if (subject_length > 0) stat_length = subject_length;
             if translated_length > 0 {
                 stat_length = i32::try_from(translated_length)?;
             }
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:436-449:
-            // if (hsp->query.gapped_start == 0 && hsp->subject.gapped_start == 0) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
             //   retval = BlastGetOffsetsForGappedAlignment(...);
             //   if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
-            // } else { q_start = hsp->query.gapped_start;
-            //          s_start = hsp->subject.gapped_start; }
             let (q_start, s_start) = if hit.q_gapped_start == 0 && hit.s_gapped_start == 0 {
                 let q_offset = usize::try_from(hit.q_start)?;
                 let q_end = usize::try_from(hit.q_end)?;
@@ -3235,13 +2789,7 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             }
             let mut fence_hit = false;
             let mut scratch = S::traceback_scratch();
-            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
-            // ```c
-            //            BLAST_GappedAlignmentWithTraceback(program_number, query,
-            //                  adjusted_subject, gap_align, score_params, q_start, s_start,
-            //                  query_length, adjusted_s_length,
-            //                  fence_hit);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
             // The window's letters end before its sentinel (`subject_sequence` ends with it),
             // which only the last column of the right extension reads (TN-1).
             let alignment = score.traceback(
@@ -3263,31 +2811,19 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             }
             let alignment = alignment.context("NCBI protein traceback returned no alignment")?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520,583-596
-            // ```c
-            // fence_error = (fence_hit && *fence_hit);
-            // if (fence_error) { break; }
-            // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-            // Blast_HSPGetNumIdentitiesAndPositives(query_nomask, adjusted_subject, hsp, ...);
-            // ```
             // Array/report consumers run only after the caller's fence retry decision.
             let query_start = usize::try_from(alignment.query_start)?;
             let query_stop = usize::try_from(alignment.query_stop)?;
             let subject_start = usize::try_from(alignment.subject_start)?;
             let subject_stop = usize::try_from(alignment.subject_stop)?;
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
-            // Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, sbp);
-            // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-            // if (!delete_hsp) BlastIntervalTreeAddHSP(...);
-            // else hsp_array[index] = Blast_HSPFree(hsp);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:585-605:
             let align_length: usize = alignment
                 .edit_script
                 .iter()
                 .map(|op| op.num() as usize)
                 .sum();
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:583-596:
-            // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596:
             //     adjusted_subject, hsp, score_options, &align_length, sbp);
-            // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
             let num_ident = protein_identities_from_edit_ops(
                 query_nomask,
                 subject_sequence,
@@ -3323,18 +2859,16 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             if delete_hsp {
                 continue;
             }
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:446-448:
-            // hsp->query.gapped_start = q_start;
-            // hsp->subject.gapped_start = s_start;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:446-448:
             // The Rust subject slice is rebased; restore its global offset.
             let saved = GappedHsp {
                 frame: hit.frame,
                 score: alignment.score,
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583: Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583
                 q_start: alignment.query_start,
                 q_end: alignment.query_stop,
                 q_gapped_start: i32::try_from(q_start)?,
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599: Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599
                 s_start: alignment.subject_start + i32::try_from(subject_base)?,
                 s_end: alignment.subject_stop + i32::try_from(subject_base)?,
                 s_gapped_start: i32::try_from(s_start as isize + subject_base)?,
@@ -3352,20 +2886,13 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         }
         if !retry {
             let mut results = purge_traceback_common_endpoints(results);
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:675-693:
-            // Blast_HSPListSortByScore(hsp_list);
-            // Blast_IntervalTreeReset(tree);
-            // for (...) if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-            //        hit_options->min_diag_separation)) Blast_HSPFree(hsp);
-            // else BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:672-693:
             let mut final_tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
             results.retain(|item| {
                 let hsp = &item.hsp;
                 let tree_hsp = traceback_tree_hsp(hsp, query_length);
                 let contained = final_tree.contains_hsp(&tree_hsp, 0, 0);
-                // NCBI c++/src/algo/blast/core/blast_traceback.c:675-693:
-                // if (BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...))
-                //     hsp_array[index] = Blast_HSPFree(hsp);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:675-693:
                 // After score sort, test
                 // interval-tree containment again before retaining HSPs.
                 if let Some(events) = containment_events.as_deref_mut() {
@@ -3476,7 +3003,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4250-4258,4295,
-    // 4342-4345 (quoted at `x_score_only_past_chunk`) and :3405-3439
+    // 4342-4345 (cited at `x_score_only_past_chunk`) and :3405-3439
     // The word W V K at letters 14..17 of a frame of 19 letters (its last two N S), with the
     // probe's PSSM: a one-hit HSP of length -1 at (10, 14) whose window of 11 rows reads the
     // frame's last five letters, its NULLB (row 15, '-' 50) and five letters of the next frame
@@ -3578,7 +3105,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063,1098-1101 and
-    // blast_gapalign.c:4251-4258 (quoted at `x_gapped_start_past_translation`)
+    // blast_gapalign.c:4251-4258 (cited at `x_gapped_start_past_translation`)
     // The word W V K at letters 14..17 of frame -3, the last of the translation buffer, with the
     // probe's PSSM whose '-' column scores 50 at rows 13 to 20: the one-hit HSP of length -1 at
     // (10, 14) has a window of 11 rows that reads the frame's last letters, the NULLB after frame -3
@@ -3657,7 +3184,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609 and :569-575
-    // (quoted at `x_traceback_start_past_frame`)
+    // (cited at `x_traceback_start_past_frame`)
     /// The traceback's check of a gapped start against its frame's NULLB (`aa_len`, here 6 for
     /// frame +1 of 19 bases): before it and on it the traceback runs, after it NCBI reads a byte its
     /// translation does not set (rule 3), in frame coordinates whatever the window (`subject_base`
@@ -3681,7 +3208,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,
-    // 4281,4295,4342-4345 (quoted at `x_score_only_past_chunk`)
+    // 4281,4295,4342-4345 (cited at `x_score_only_past_chunk`)
     // A one-hit HSP of length -1 at letter `chunk.length - 3` of a chunk that is not its frame's
     // last, whose window of 11 letters (all of them past the chunk's end but 3) sums above 0: its
     // gapped start lies 2 letters past the chunk (`q_start + 5`). NCBI's left extension reads back
@@ -3776,7 +3303,7 @@ mod tests {
         assert!(error.to_string().contains("internal error"), "{error}");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1098-1101 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1098-1101 (cited at
     // `XOneHitBuffers`)
     // The subject's window reads NCBI's bytes: past a frame its NULLB and the next frame's letters;
     // past the NULLB after frame -3 every letter reads as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS
@@ -3848,7 +3375,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250 and
-    // c++/src/algo/blast/core/blast_util.c:1098-1101 (quoted at `XOneHitBuffers`)
+    // c++/src/algo/blast/core/blast_util.c:1098-1101 (cited at `XOneHitBuffers`)
     // A chunk that is not its frame's last can end fewer than HSP_MAX_WINDOW letters before the
     // frame does (the frame goes on 1 letter past it): a window from its end reads the frame's last
     // letters, its NULLB and the next frame's letters, as from the frame's last chunk. A next frame
@@ -3890,7 +3417,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1063-1064,1080,1098-1101
-    // (quoted at `XOneHitBuffers`)
+    // (cited at `XOneHitBuffers`)
     // The bytes after a frame of a plan without residues (LOSAT_X_TBNUNITXLATE, the large subjects'
     // plans), which the unit translates itself, are those of the plan with residues: the next
     // frames' letters, each with its NULLB, as NCBI's translation buffer holds them; for every
@@ -3936,7 +3463,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603-605,635-657,703-712,
-    // 102-109 (quoted at `x_add_one_hit_hsp`)
+    // 102-109 (cited at `x_add_one_hit_hsp`)
     // Two one-hit HSPs of length -1 whose gapped starts lie 2 and 3 letters past a chunk of 30
     // letters (`s_max` 31): B ends at (q10, s32) (W/W, then W/P), A at (q10, s33) with (q9, s32)
     // (W/W twice, then C/P); their windows sum above 0 through the W/W letters right of the starts,
@@ -4056,7 +3583,7 @@ mod tests {
         assert_eq!(pool.idle().len(), 2);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2537:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2537:
     // s_QueryOffsetCompareHSPs returns zero when score and both endpoints
     // match. The pinned NCBI Stage G probe retained the earlier score-355
     // gapped_start (192, 47944) over the later (270, 48024).
@@ -4081,8 +3608,7 @@ mod tests {
         assert_eq!(survivors, vec![(0, first)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
-    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // Read each query context's cutoff from the comparison-only probe.
     fn multi_query_cutoffs() -> [i32; 3] {
         let path = concat!(
@@ -4120,9 +3646,7 @@ mod tests {
         records
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:1765-1810:
-    // Blast_HSPListSortByScore(hsp_list);
-    // hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810:
     // compare the saved ordered NCBI link output after a Rust C-to-D call.
     fn assert_stage_d_link_list_matches_trace(list: &LinkedHspList, trace: &str, event: usize) {
         let prefix = format!("D_HSP\t{event}\tlink_after\t");
@@ -4163,7 +3687,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985;
     // c++/src/algo/blast/core/blast_parameters.c:774-815,902-999,302-383;
     // c++/src/algo/blast/core/blast_engine.c:1390-1445,870-885:
     // initial hit/word/link cutoff state is computed before the preliminary
@@ -4191,9 +3715,7 @@ mod tests {
             (subject.len() / 3) as i64,
         )
         .unwrap();
-        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
-        // db_num_seqs = eff_len_params->real_num_seqs;
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
         let parameters = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject.len() as i64,
@@ -4277,7 +3799,7 @@ mod tests {
             })
             .collect();
         assert_eq!(actual, expected);
-        // NCBI link_hsps.c:1765-1810 and blast_engine.c:643-676:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810 and c++/src/algo/blast/core/blast_engine.c:643-676:
         // the scored Stage C list is linked before preliminary E-value reap.
         let mut linked = link_preliminary_hsps(
             &preliminary,
@@ -4294,7 +3816,7 @@ mod tests {
         assert_eq!(linked.hsps.len(), 20);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985;
     // c++/src/algo/blast/core/blast_engine.c:478-586,870-885:
     // the initial computed hit/word cutoffs feed the chunked preliminary search;
     // the appended output is the link input before NCBI modifies num/E-value.
@@ -4317,9 +3839,7 @@ mod tests {
             (subject.len() / 3) as i64,
         )
         .unwrap();
-        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
-        // db_num_seqs = eff_len_params->real_num_seqs;
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             subject.len() as i64,
@@ -4400,7 +3920,7 @@ mod tests {
             })
             .collect();
         assert_eq!(actual, expected);
-        // NCBI link_hsps.c:1765-1810 and blast_engine.c:643-676:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810 and c++/src/algo/blast/core/blast_engine.c:643-676:
         // the scored Stage C list is linked before preliminary E-value reap.
         let mut linked = link_preliminary_hsps(
             &preliminary,
@@ -4417,10 +3937,10 @@ mod tests {
         assert_eq!(linked.hsps.len(), 2);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
     // s_AdjustHspOffsetsAndGetQueryData converts global initial offsets to
     // local query coordinates and preserves the context on Blast_HSPInit.
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3908-3919,4057-4091:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3919,4057-4091:
     // the frame-local tree checks containment before each saved gapped HSP.
     #[test]
     fn multi_query_gapped_hsps_match_ncbi_context_scores_offsets_and_order() {
@@ -4496,10 +4016,10 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
     // each frame is endpoint-purged, score-sorted, then appended to the
     // cumulative list at kHspNumMax. Compare every append snapshot.
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2809-2864:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2809-2864:
     // the first list is adopted and later lists are combined by score.
     #[test]
     fn multi_query_preliminary_append_snapshots_match_ncbi() {
@@ -4576,10 +4096,8 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
-    // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2455-2537,2809-2864:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2537,2809-2864:
     // Remove a lower-scoring
     // common-start HSP, then cap the cumulative score-sorted list.
     #[test]
@@ -4635,9 +4153,8 @@ mod tests {
             [(656, 1, 0, 200), (393, 1, 0, 225), (20, 1, 0, 200)]
         );
         assert_eq!(first_output, [(656, 1, 0, 200), (393, 1, 0, 225)]);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:525-552,840-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:525-552,840-850:
         // the comparison-only C probe changes this one HSP after the first
-        // GetGappedScore return and before the actual endpoint purge call;
         // all six real append calls receive hsp_num_max=3.
         let profile = PreliminaryProfile {
             seg: None,
@@ -4729,10 +4246,10 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:259-312,635-721:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:259-312,635-721:
     // query-indexed preliminary lists enter traceback independently;
     // a fence retries the same original list on the full subject.
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1644-1684:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1684:
     // only the second return with fence_hit=0 is retained here.
     #[test]
     fn multi_query_traceback_lists_match_ncbi_post_fence_hsps() {
@@ -4821,10 +4338,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
-    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-    // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-    // if (delete_hsp) hsp_array[index] = Blast_HSPFree(hsp);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-605:
     // The comparison-only C API input sets percent_identity=100.0 during
     // each real NCBI HSPTest call, yielding positive deletions.
     #[test]
@@ -4943,7 +4457,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3259-3321:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3321:
     // q_length <= 11 returns the midpoint; a strictly positive sliding
     // maximum wins; otherwise the terminal 11-residue window is tested.
     #[test]
@@ -5007,7 +4521,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-445:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
     // retval = BlastGetOffsetsForGappedAlignment(query, subject, sbp, hsp, ...);
     // if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3321: positive 11-residue window scores
@@ -5168,24 +4682,22 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-445:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
     // if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
     #[test]
     fn real_path_start_offset_failure_deletion_matches_ncbi() {
         compare_real_path_start_offset_with_ncbi(false);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-448:
-    // if (retval) { hsp->query.gapped_start = q_start;
-    //               hsp->subject.gapped_start = s_start; }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-448:
     #[test]
     fn real_path_start_offset_success_writeback_matches_ncbi() {
         compare_real_path_start_offset_with_ncbi(true);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
     // adjust the new HSP's subject offsets, then merge with overlap 100.
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2857-3035:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035:
     // only equal-context, close-diagonal overlap HSPs are merged.
     // The pinned oracle records old/new lists immediately before each call.
     #[test]
@@ -5246,8 +4758,7 @@ mod tests {
         assert_eq!(second[0].1.score, 660);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2762-2864:
-    // with hsp_num_max=3, sort both lists and select by ScoreCompareHSPs;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
     // when its five compared fields tie, choose the old list's HSP first.
     // The expected rows come from the direct comparison-only NCBI C API.
     #[test]
@@ -5279,7 +4790,7 @@ mod tests {
             hsp(1, 80, 2, 300),
             hsp(1, 70, 2, 400),
         ];
-        // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850: each frame's list is
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850: each frame's list is
         // endpoint-purged, then appended to the cumulative list at hsp_num_max = 3.
         let of_frame = |frame: i8| -> Vec<_> {
             input
@@ -5332,11 +4843,10 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953,4071-4091:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953,4071-4091:
     // max_offset = BlastGetStartForGappedAlignment(...);
     // status = s_BlastProtGappedAlignment(...);
-    // Blast_HSPInit(gap_align->query_start, gap_align->query_stop,
-    //               gap_align->subject_start, gap_align->subject_stop, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:811-811
     fn compare_fixture(fixture_name: &str, oracle_name: &str, lowercase: bool) {
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_c/{fixture_name}/",
@@ -5411,9 +4921,9 @@ mod tests {
         compare_fixture("ambiguity_20260923", "gapped_ambiguity_20260924", false);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552:
     // status = aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
     // max_offset = BlastGetStartForGappedAlignment(...);
     // status = s_BlastProtGappedAlignment(...);
     #[test]
@@ -5473,7 +4983,7 @@ mod tests {
             })
             .collect();
         assert_eq!(actual, expected);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
         // same function order and code-32 subject translation enter the
         // comparison-only NCBI C++ API gapped score oracle.
         assert_eq!(
@@ -5482,12 +4992,9 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1644-1677:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1677:
     // if (fence_hit) { /* refetch whole subject */ }
-    // Blast_TracebackFromHSPList(..., &fence_hit);
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:503-589:
-    // BLAST_GappedAlignmentWithTraceback(...);
-    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589:
     #[test]
     fn full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets() {
         let root = concat!(
@@ -5952,10 +5459,8 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_hits.c:1154-1228:
-    // start_shift = nucl_start/CODON_LENGTH;
-    // target_t->range[2*context+1] = start_shift + length;
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1644-1684:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1684:
     // if (fence_hit) { /* refetch whole subject and retry the HSP list */ }
     #[test]
     fn long_multi_hsp_partial_windows_and_retry_match_ncbi() {
@@ -6072,12 +5577,8 @@ mod tests {
         assert_eq!(actual, oracle);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_hits.c:1154-1228:
-    // nucl_start = MAX(0, 3*hsp->subject.offset - kMaxTranslation);
-    // return target_t->translations[context] - target_t->range[2*context] + 1;
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536,1644-1684:
-    // subject = Blast_HSPGetTargetTranslation(target_t, hsp, &subject_length);
-    // BLAST_GappedAlignmentWithTraceback(..., fence_hit);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:432:
     // Only a fence causes full-subject retry.
     #[test]
     fn nonzero_base_partial_traceback_without_fence_matches_ncbi() {
@@ -6180,13 +5681,8 @@ mod tests {
         assert_eq!(actual, oracle);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
-    // for (context=first_context; context<=last_context; context++) {
-    //     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-    // }
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:635-693:
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
-    // Blast_HSPListSortByScore(hsp_list);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-844:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:635-693:
     #[test]
     fn six_frame_merged_traceback_endpoint_deletion_matches_ncbi() {
         let root = concat!(
@@ -6237,10 +5733,7 @@ mod tests {
             .map(|(_, hsp, _)| *hsp)
             .collect::<Vec<_>>();
         assert_eq!(gapped, expected_gapped);
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:503-589,635-666:
-        // BLAST_GappedAlignmentWithTraceback(...);
-        // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-        // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589,635-666:
         // The extra -1 HSP grows from raw 38 to raw 236 before endpoint purge.
         let removed = gapped
             .iter()
@@ -6279,7 +5772,7 @@ mod tests {
                 let f: Vec<_> = line.split('\t').collect();
                 expected_removed = Some((
                     f[2].parse::<i32>().unwrap(),
-                    // NCBI c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start/query_stop/subject_start/subject_stop.
+                    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start/query_stop/subject_start/subject_stop.
                     f[4].parse::<i32>().unwrap(),
                     f[5].parse::<i32>().unwrap(),
                     f[6].parse::<i32>().unwrap(),
@@ -6341,10 +5834,9 @@ mod tests {
             .collect();
         assert_eq!(actual, expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4057-4091:
-    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4057-4091:
     // BLAST_GetGappedScore saves each qualifying HSP in frame/chunk order.
-    // NCBI c++/src/algo/blast/core/blast_engine.c:539-586,840-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-586,840-850:
     // purge, merge, and append follow each chunk's gapped extension.
     #[test]
     fn alternate_matrix_word2_gapped_and_append_match_ncbi() {
@@ -6452,10 +5944,7 @@ mod tests {
             .collect();
         assert_eq!(actual_snapshots, expected_snapshots);
     }
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:401-405,583-605:
-    // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
-    //     BLAST_GappedAlignmentWithTraceback(...);
-    // } else hsp_array[index] = Blast_HSPFree(hsp);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:401-405,583-605:
     // The pinned BLOSUM45/word-2 trace contains positive traceback-side
     // containment, including the full-translation retry.
     #[test]
@@ -6510,7 +5999,7 @@ mod tests {
         }
         assert_eq!(appended.len(), 22);
         let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
         // the same natural query/subject inputs pass through WordFinder, gapped extension, chunk
         // purge, merge and append (BLOSUM45/word-2) before the positive traceback interval-tree
         // containment call.
@@ -6548,7 +6037,7 @@ mod tests {
             })
             .collect();
         assert_eq!(actual_appended, appended);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:572-586,840-850;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586,840-850;
         // c++/src/algo/blast/core/blast_hits.c:2809-2864:
         // append keeps each merged HSP's gapped starts. Check the exact
         // traceback input state, which APPEND_OUT_HSP does not print.
@@ -6645,7 +6134,7 @@ mod tests {
             assert_eq!(actual, expected[context], "context {context}");
         }
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-552:
     // GetGappedScore receives the chunk-local translated subject before
     // Blast_HSPListAdjustOffsets and Blast_HSPListsMerge.
     #[test]
@@ -6666,9 +6155,7 @@ mod tests {
             subject.extend_from_slice(b"ATG");
         }
         assert_eq!(subject.len(), 15_000_962);
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 28.
         let profile = PreliminaryProfile {
             seg: None,
@@ -6715,10 +6202,7 @@ mod tests {
             .collect();
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 2);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
-        // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-        // Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-        //                     kHspNumMax, &(backup.offset), INT4_MIN, 100, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
         let mut second = actual[1];
         second.s_start += 4_999_900;
         second.s_end += 4_999_900;
@@ -6756,9 +6240,9 @@ mod tests {
         assert_eq!(snapshots.iter().map(Vec::len).collect::<Vec<_>>(), [1; 6]);
         assert_eq!(snapshots.last().unwrap(), &merged_expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // each long chunk uses its query-context cutoff during gapped scoring.
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
     // Both chunks merge, then the
     // frame list is appended in score order for both valid query contexts.
     #[test]
@@ -6807,8 +6291,7 @@ mod tests {
             }
         }
         let expected_cutoffs = [28, 25, i32::MAX];
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-        // cutoffs = word_params->cutoffs + curr_context;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:547-583:
         // the saved probe records 28, 25, INT4_MAX in all 12 chunk calls.
         let word_trace = fs::read_to_string(format!("{fixture}word_context_cutoffs.tsv")).unwrap();
         let word_rows: Vec<_> = word_trace
@@ -6838,7 +6321,7 @@ mod tests {
             }
         }
         let word_cutoffs = [28, 25, i32::MAX];
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234,547-614:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,547-614:
         // after per-context extension/cutoff, sorted chunk-local init HSPs
         // enter GetGappedScore; compare all rows before any gapped deletion.
         let wordfinder_trace = fs::read_to_string(format!("{fixture}frame_chunks.tsv")).unwrap();
@@ -6903,7 +6386,7 @@ mod tests {
                     .collect()
             })
             .collect();
-        // NCBI c++/src/algo/blast/core/blast_engine.c:572-586,840-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586,840-850:
         // The final merged HSPs
         // retain exact gapped starts through append into traceback.
         let expected_merged: Vec<_> = trace
@@ -6926,7 +6409,7 @@ mod tests {
                 )
             })
             .collect();
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
         // each chunk's scansub -> WordFinder -> GetGappedScore -> purge ->
         // offset adjustment -> merge precedes the next chunk; append ends
         // each frame. Compare this one-call Rust path with every saved NCBI
@@ -7097,7 +6580,7 @@ mod tests {
             4
         );
         assert_eq!((call, append), (12, 6));
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:259-312,401-449,583-721:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:259-312,401-449,583-721:
         // Process each
         // query-indexed appended list; a fence retries on full translation.
         let mut expected_final = vec![Vec::new(); refs.len()];
@@ -7120,7 +6603,7 @@ mod tests {
             }
         }
         for context in [1usize, 0] {
-            // NCBI c++/src/algo/blast/core/blast_traceback.c:259-312:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:259-312:
             // each query-indexed HSP list enters traceback from the completed
             // frame append stream; the saved trace visits context 1 then 0.
             let per_query: Vec<_> = integrated
@@ -7156,7 +6639,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:283-310,478-586:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:283-310,478-586:
     // the masked middle chunk returns SUBJECT_SPLIT_NO_RANGE; the later
     // positive-frame chunk yields one local HSP, then gets offset-adjusted.
     #[test]
@@ -7220,11 +6703,9 @@ mod tests {
                 )
             })
             .collect();
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 30.
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
         // SUBJECT_SPLIT_NO_RANGE skips WordFinder/GetGappedScore in the
         // masked middle chunk; append still occurs once for every frame.
         let profile = PreliminaryProfile {
@@ -7289,7 +6770,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:614-625;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-625;
     // c++/src/algo/blast/core/blast_engine.c:484-525;
     // c++/src/algo/blast/core/blast_gapalign.c:2410-2442:
     // the hard-SEG working query is shared by WordFinder and GetGappedScore;
@@ -7423,7 +6904,7 @@ mod tests {
         assert_eq!(traceback, vec![(ncbi_hsp, true)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
     // query_blk->sequence (masked) drives the traceback score, while
     // query_blk->sequence_nomask drives identities before Blast_HSPTest.
     // The retained NCBI call has a real HSP spanning masked residues 60..78.
@@ -7553,11 +7034,9 @@ mod tests {
         assert_ne!(unmasked_result[0].0.score, expected.score);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:614-638;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-638;
     // c++/src/algo/blast/core/blast_engine.c:484-525;
     // c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-    // BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
     // Soft masking excludes the same seed intervals but keeps K in every
     // WordFinder, GetGappedScore and traceback query input.
     #[test]
@@ -7703,7 +7182,7 @@ mod tests {
         assert_eq!(identities, [(138, 138)]);
     }
 
-    // NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
     // c++/src/algo/blast/core/blast_filter.c:1241-1255;
     // c++/src/algo/blast/core/blast_setup.c:614-638:
     // -lcase_masking includes query lowercase spans in the filter locations.
@@ -7868,7 +7347,7 @@ mod tests {
         assert_eq!(identities, [(120, 120)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_setup.c:614-638;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-638;
     // c++/src/algo/blast/core/blast_filter.c:1241-1255:
     // mask_at_hash leaves the lowercase query unmasked during extension and
     // traceback, while its complement still restricts lookup positions.
@@ -8023,10 +7502,8 @@ mod tests {
         assert_eq!(identities, [(120, 120)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_filter.c:1241-1255;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256;
     // c++/src/algo/blast/core/blast_setup.c:614-638:
-    // BlastSeqLocAppend(filter_out, lcase_mask_slp);
-    // BlastSeqLocCombine(filter_out, 0);
     // The SEG prefix and overlapping lowercase span combine into [0,45).
     #[test]
     fn overlapping_seg_and_lowercase_query_mask_matches_ncbi() {
@@ -8167,10 +7644,8 @@ mod tests {
         assert_eq!(identities, [(115, 115)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_filter.c:1241-1255;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256;
     // c++/src/algo/blast/core/blast_setup.c:614-638:
-    // BlastSeqLocCombine(filter_out, 0);
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
     // The overlapping SEG/lowercase intervals still restrict lookup, while
     // WordFinder, GetGappedScore and traceback use the unmasked query.
     #[test]
@@ -8316,10 +7791,10 @@ mod tests {
         assert_eq!(identities, [(120, 120)]);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
     // skip the fully masked middle chunk; retain the first chunk's list,
     // then merge the later chunk and append that frame before the next frame.
-    // NCBI c++/src/algo/blast/core/blast_hits.c:2857-3035:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035:
     // Blast_HSPListsMerge retains both nonoverlapping equal-score HSPs.
     #[test]
     fn skipped_middle_chunk_preserves_both_hsps_and_all_append_rows() {
@@ -8346,9 +7821,7 @@ mod tests {
         }
         assert_eq!(subject.len(), 30_001_262);
         subject[14_997_000..30_000_000].make_ascii_lowercase();
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 30.
         let profile = PreliminaryProfile {
             seg: None,

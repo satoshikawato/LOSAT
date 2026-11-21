@@ -25,12 +25,6 @@
 //! (`CHUNK_SIZE` 400).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
-//! ```c++
-//!     // 5. Create the lookup table
-//!     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-//!         LookupTableWrap* lut =
-//!             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-//! ```
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

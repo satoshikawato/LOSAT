@@ -11,21 +11,6 @@
 //! `c++/src/objects/general/general.asn:71-80` (`Dbtag`, `Object-id`).
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:71-130
-// ```c++
-//         eContextSpecific    = 2 << 6,
-//         ...
-//         eConstructed        = 1 << 5,
-//         ...
-//         eInteger            = 2,
-//         ...
-//         eSequence           = 16,
-//         ...
-//         eVisibleString      = 26,
-//         ...
-//         eContainterTagByte      = TByte(eConstructed) | TByte(eSequence),
-//         eIndefiniteLengthByte   = 0x80,
-//         eEndOfContentsByte      = 0,
-// ```
 const TAG_INTEGER: u8 = 2;
 const TAG_VISIBLE_STRING: u8 = 26;
 const TAG_SEQUENCE: u8 = (1 << 5) | 16;
@@ -67,40 +52,6 @@ fn close(out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-425
-// ```c++
-// void CObjectOStreamAsnBinary::WriteLongLength(size_t length)
-// {
-//     // long form
-//     size_t count;
-//     if ( length <= 0xffU )
-//         count = 1;
-//     else if ( length <= 0xffffU )
-//         count = 2;
-//     else if ( length <= 0xffffffU )
-//         count = 3;
-//     else {
-//         count = sizeof(length);
-//         if ( sizeof(length) > 4 ) {
-//             for ( size_t shift = (count-1)*8;
-//                   count > 0; --count, shift -= 8 ) {
-//                 if ( Uint1(length >> shift) != 0 )
-//                     break;
-//             }
-//         }
-//     }
-//     WriteByte(TByte(0x80 + count));
-//     WriteBytesOf(length, count);
-// }
-//
-// inline
-// void CObjectOStreamAsnBinary::WriteLength(size_t length)
-// {
-//     if ( length <= 127 )
-//         WriteShortLength(length);
-//     else
-//         WriteLongLength(length);
-// }
-// ```
 fn write_length(out: &mut Vec<u8>, length: usize) {
     if length <= 127 {
         out.push(length as u8);
@@ -113,30 +64,6 @@ fn write_length(out: &mut Vec<u8>, length: usize) {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
-// ```c++
-// void CObjectOStreamAsnBinary::WriteNumberValue(Int4 data)
-// {
-//     size_t length;
-//     if ( data >= Int4(-0x80) && data <= Int4(0x7f) ) {
-//         // one byte
-//         length = 1;
-//     }
-//     else if ( data >= Int4(-0x8000) && data <= Int4(0x7fff) ) {
-//         // two bytes
-//         length = 2;
-//     }
-//     else if ( data >= Int4(-0x800000) && data <= Int4(0x7fffff) ) {
-//         // three bytes
-//         length = 3;
-//     }
-//     else {
-//         // full length signed
-//         length = sizeof(data);
-//     }
-//     WriteShortLength(length);
-//     WriteBytesOf(data, length);
-// }
-// ```
 fn write_int4(out: &mut Vec<u8>, data: i32) {
     out.push(TAG_INTEGER);
     let length = if (-0x80..=0x7f).contains(&data) {
@@ -153,40 +80,7 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
-// ```c++
-// inline
-// bool GoodVisibleChar(char c)
-// {
-//     return c >= ' ' && c <= '~';
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
-// ```c++
-//     WriteLength(length - fixed);
-//     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
-//         size_t done = 0;
-//         for ( size_t i = 0; i < length; ++i ) {
-//             char c = str[i];
-//             if ( !GoodVisibleChar(c) ) {
-//                 ...
-//                 if ( i > done ) {
-//                     WriteBytes(str.data() + done, i - done);
-//                 }
-//                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
-//                 if (c != 0) {
-//                     WriteByte(c);
-//                 }
-//                 done = i + 1;
-//             }
-//         }
-//         if ( done < length ) {
-//             WriteBytes(str.data() + done, length - done);
-//         }
-//     }
-//     else {
-//         WriteBytes(str.data(), length);
-//     }
-// ```
 // makeblastdb runs with the default method (replace and warn) and the
 // substitute '#': every byte outside ' '..'~' is written as '#' and reported
 // with the stream position of the replacement.
@@ -207,36 +101,7 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
-// ```c++
-//     if (OID>=0) {
-//         // Re-inject the BL_ORD_ID
-//         CRef<CSeq_id> gnl_id(new CSeq_id);
-//         gnl_id->SetGeneral().SetDb("BL_ORD_ID");
-//         gnl_id->SetGeneral().SetTag().SetId(OID);
-//         CRef<CBlast_def_line_set> bdls = s_EditDeflineSet(deflines);
-//         bdls->Set().front()->SetSeqid().front() = gnl_id;
-//
-//         deflines.Reset(&* bdls);
-//     }
-//     ...
-//     if (bin_hdr.empty() || OID>=0) {
-//         // Compress the deflines to binary.
-//
-//         CNcbiOstrstream oss;
-//         oss << MSerial_AsnBinary << *deflines;
-//         bin_hdr = CNcbiOstrstreamToString(oss);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:130-136
-// ```c++
-// void
-// CTaxIdSet::FixTaxId(CRef<objects::CBlast_def_line_set> deflines)
-// {
-//     NON_CONST_ITERATE(CBlast_def_line_set::Tdata, itr, deflines->Set()) {
-//         (*itr)->SetTaxid(x_SelectBestTaxid(**itr));
-//     }
-// }
-// ```
 // Without `-taxid` the best taxid is 0 (taxid_set.cpp:84-90, 123-128: the unset global id
 // is returned as it is unless the definition line has one); with it, the global taxid
 // (`TaxIdSet::best_taxid`). `-taxid_map` requires `-parse_seqids`.
@@ -299,32 +164,6 @@ pub struct BadChar {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
-// ```c++
-// void CObjectOStreamAsnBinary::WriteNumberValue(Int8 data)
-// {
-//     size_t length;
-//     if ( data >= -Int8(0x80) && data <= Int8(0x7f) ) {
-//         // one byte
-//         length = 1;
-//     }
-//     else if ( data >= Int8(-0x8000) && data <= Int8(0x7fff) ) {
-//         // two bytes
-//         length = 2;
-//     }
-//     ...
-//     else if ( data >= NCBI_CONST_INT8(-0x80000000000000) &&
-//               data <= NCBI_CONST_INT8( 0x7fffffffffffff) ) {
-//         // four bytes
-//         length = 7;
-//     }
-//     else {
-//         // full length signed
-//         length = sizeof(data);
-//     }
-//     WriteShortLength(length);
-//     WriteBytesOf(data, length);
-// }
-// ```
 // `WriteInt8` writes the universal INTEGER tag first (objostrasnb.cpp:716-724; no
 // `m_CStyleBigInt` in makeblastdb's stream).
 fn write_int8(out: &mut Vec<u8>, data: i64) {
@@ -517,16 +356,7 @@ impl SetWriter<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
-// ```c++
-//     if (bin_hdr.empty() || OID>=0) {
-//         // Compress the deflines to binary.
-//
-//         CNcbiOstrstream oss;
-//         oss << MSerial_AsnBinary << *deflines;
-//         bin_hdr = CNcbiOstrstreamToString(oss);
-//     }
-// ```
-// The writing of blastdb.asn:32-47 (quoted in `seqid::ber`): SEQUENCE OF Blast-def-line,
+// The writing of blastdb.asn:32-47 (cited in `seqid::ber`): SEQUENCE OF Blast-def-line,
 // each a SEQUENCE of the members that are set, in order; `title` is a VisibleString,
 // `taxid` an INTEGER, the lists SEQUENCE OF INTEGER. `seqid::ber::decode_full_set` reads it
 // back.

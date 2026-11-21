@@ -487,10 +487,6 @@ fn every_psiblast_argument_is_recorded_as_ncbi_records_it() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1247 (`-in_pssm`
 // excludes `-query` and `-query_loc`)
-// ```c++
-//     arg_desc.SetDependency(kArgPSIInputChkPntFile, CArgDescriptions::eExcludes,
-//                            kArgQuery);
-// ```
 // A PSSM query's request records psiblast's options as a FASTA query's does (the handle and the
 // classes are the same; NCBI BLAST+ 2.17.0 `p9.pp.db.itdef.f6` = `p9.ps.q.db.itdef.f6`, `pp.db.cbs*`,
 // `pp.db.it*`, `pp.db.ssp.f6`): every psiblast argument again, with `-in_pssm` in the base.

@@ -7,13 +7,7 @@
 //! below the default (13). Other batches run
 //! the reference loop ("fallback: cost").
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-504
-//! ```c
-//! while (scan_range[1] <= scan_range[2]) {
-//!     /* scan the subject sequence for hits */
-//!     hits = scansub(lookup_wrap, subject,
-//!                               offset_pairs, array_size, scan_range);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-505
 //! The switch is in the strict set (on unless `LOSAT_X_PAIRPARGATE=0`). Both paths give NCBI's list
 //! of each subject (module doc of x_pair_par.rs), so the switch may not change a report. The tests
 //! compare the reports of the default (the gate on) and of `LOSAT_X_PAIRPARGATE=0`, and read

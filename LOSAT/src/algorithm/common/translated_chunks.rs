@@ -6,15 +6,9 @@
 
 use anyhow::{bail, Result};
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
-// if (backup->offset + MAX_DBSEQ_LEN < hard_ranges[hm_index].right) {
-//     subject->length = MAX_DBSEQ_LEN;
-//     backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-// } else { subject->length = hard_ranges[hm_index].right - backup->offset; }
-// NCBI c++/include/algo/blast/core/blast_gapalign.h:54:
-// #define MAX_DBSEQ_LEN 5000000
-// NCBI c++/include/algo/blast/core/blast_hits.h:192:
-// #define DBSEQ_CHUNK_OVERLAP 100
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192:
 // This schedule covers the unmasked translated frame's single hard range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TranslatedChunk {
@@ -45,8 +39,7 @@ impl TranslatedChunk {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
-// backup->offset = backup->next;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
 // while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
 pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
     use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
@@ -64,22 +57,14 @@ pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
     chunks
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
-// BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
-//                          masked_ranges.size() + 1, true, eSoftSubjMasking);
-// NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
 // apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
-// NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-// if (assume_both_strands) do_pos = do_neg = true;
-// if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
-// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
 // both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.
-// NCBI c++/src/algo/blast/core/blast_util.c:211-215:
-// tmp[0].left = 0;
-// tmp[num_seq_ranges - 1].right = seq_blk->length;
-// NCBI reference: c++/src/algo/blast/core/masksubj.inl:51-71
-// range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-// range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-215
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-59
 fn translated_scan_ranges(
     subject: &[u8],
     frame: i8,
@@ -99,9 +84,7 @@ fn translated_scan_ranges(
             while index < subject.len() && subject[index].is_ascii_lowercase() {
                 index += 1;
             }
-            // NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-            // if (assume_both_strands) do_pos = do_neg = true;
-            // if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
             for _ in 0..2 {
                 nucleotide_ranges.push((left as i32, start as i32));
                 left = index - 1;
@@ -144,11 +127,11 @@ pub(crate) fn translated_frame_ranges(
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:259-310:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:259-310:
 // unsplit subjects keep backup.soft_ranges; split soft-masked subjects
 // advance sm_index while right < chunk start, include ranges with left < end,
 // clamp only the first left and last right, and skip SUBJECT_SPLIT_NO_RANGE.
-// NCBI c++/src/algo/blast/core/blast_engine.c:261-274:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:261-274:
 // without soft masking, each chunk has one range [0, subject->length].
 pub(crate) fn translated_chunk_scan_ranges(
     subject: &[u8],
@@ -174,7 +157,8 @@ pub(crate) fn translated_chunk_scan_ranges(
     soft_chunk_scan_ranges(&frame_ranges, frame_length)
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:259-310 (quoted at `translated_chunk_scan_ranges`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:259-310 (cited at
+// `translated_chunk_scan_ranges`)
 /// The chunks of a frame of `frame_length` residues whose soft ranges are `frame_ranges`, each with
 /// the soft ranges it scans (a chunk without one, NCBI's `SUBJECT_SPLIT_NO_RANGE`, is left out).
 fn soft_chunk_scan_ranges(

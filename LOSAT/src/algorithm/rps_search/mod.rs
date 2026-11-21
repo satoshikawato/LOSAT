@@ -10,31 +10,6 @@
 //! computes NCBI's per-batch Karlin-Altschul K of the outfmt 0 footers after.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1131-1158
-//! ```c
-//!     num_db_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-//!     dbsize = BlastSeqSrcGetTotLen(seq_src) + num_db_seqs;
-//!     if (dbsize > INT4_MAX)
-//!       return -3;
-//!
-//!     /* Concatenate all of the DB sequences together, and pretend
-//!       this is a large multiplexed sequence. Note that because the
-//!       scoring is position-specific, the actual sequence data is
-//!       not needed */
-//!
-//!     memset(&concat_db, 0, sizeof(concat_db)); /* fill in SequenceBlk */
-//!     concat_db.length = (Int4) dbsize;
-//!
-//!     /* Change the table of diagonals that will be used for the
-//!       search; we need a diag table that can fit the entire
-//!       concatenated DB */
-//!     BlastExtendWordFree(aux_struct->ewp);
-//!     BlastExtendWordNew(concat_db.length, word_params, &aux_struct->ewp);
-//!
-//!     /* Run the search; the input query is what gets scanned
-//!       and the concatenated DB is the sequence associated with
-//!       the score matrix. This essentially means that 'query'
-//!       and 'subject' have opposite conventions for the search.
-//! ```
 
 pub(crate) mod engine;
 pub(crate) mod prelim;
@@ -50,19 +25,6 @@ use crate::core::blast_util::BLASTAA_SIZE;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:948, 1066-1069 and
 // c++/src/algo/blast/core/blast_aalookup.c:184-190
-// ```c
-//     n = MIN(subject->length - s_off, query_size - q_off);
-// ...
-//         total_score = s_BlastPSSMExtendRight(matrix, subject, query->length,
-//                                              s_right_off + 1, q_right_off + 1,
-// ...
-//     num_pssm_rows = lookup->rps_seq_offsets[lookup->num_profiles];
-//     lookup->rps_pssm = (Int4 **) malloc((num_pssm_rows + 1) * sizeof(Int4 *));
-//     pssm_start = profile_header->start_offsets + lookup->num_profiles + 1;
-//
-//     for (i = 0; i < num_pssm_rows + 1; i++) {
-//         lookup->rps_pssm[i] = pssm_start;
-// ```
 /// The concatenated profile rows of a volume as the ungapped extensions read them: one row per
 /// consensus position and one sentinel row after each profile (`lookup->rps_pssm`, the query of
 /// the extensions), and their `query->length`, the unit's concatenated length `Lc`
@@ -174,11 +136,6 @@ impl PssmRows for RpsRows<'_> {
 /// `BLAST_GetGappedScore` moves to the profile's start, and the context's length.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3891-3894
-/// ```c
-///       if (rpsblast_pssms)
-///          gap_align->sbp->psi_matrix->pssm->data = rpsblast_pssms +
-///              query_info->contexts[context].query_offset;
-/// ```
 #[derive(Clone, Copy)]
 pub(crate) struct ProfileSlice<'a> {
     pub(crate) rows: &'a [[i32; BLASTAA_SIZE]],
@@ -202,21 +159,11 @@ impl PssmRows for ProfileSlice<'_> {
 /// traceback.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1011
-/// ```c
-/// #define RPS_K_MULT 1.2
-/// ```
 pub(crate) const RPS_K_MULT: f64 = 1.2;
 
 /// `BLAST_Nint`: the nearest integer, halves away from zero.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
-/// ```c
-/// long BLAST_Nint(double x)
-/// {
-///    x += (x >= 0. ? 0.5 : -0.5);
-///    return (long)x;
-/// }
-/// ```
 #[inline]
 pub(crate) fn blast_nint(x: f64) -> i64 {
     let x = x + if x >= 0.0 { 0.5 } else { -0.5 };

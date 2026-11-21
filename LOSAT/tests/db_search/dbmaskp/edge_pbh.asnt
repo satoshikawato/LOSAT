@@ -1,0 +1,52 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program seg,
+  algo-options "besthit",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 173,
+          to 212,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 200,
+          to 220,
+          id local id 2
+        }
+      },
+      packed-int {
+        {
+          from 171,
+          to 203,
+          id local id 3
+        }
+      },
+      packed-int {
+        {
+          from 165,
+          to 185,
+          id local id 4
+        }
+      },
+      packed-int {
+        {
+          from 174,
+          to 193,
+          id local id 5
+        }
+      },
+      packed-int {
+        {
+          from 210,
+          to 242,
+          id local id 6
+        }
+      }
+    },
+    more FALSE
+  }
+}

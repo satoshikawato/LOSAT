@@ -153,11 +153,11 @@ impl BlastpDbMasking<'_> {
 // the preliminary E-value.
 /// The hard chunks of a sequence with masks (`masked.stored`), searched one by one into the HSPs
 /// of the sequence, and its HSP lists per query in `subject_result`. A chunk shorter than the
-/// word holds no hit of the two-hit scan (the word NCBI's scan reads at its start has no other
-/// hit on its diagonal within the window) and is skipped; the one-hit scan refuses such a chunk
-/// before the search (`HardMaskShape::ShortChunk`), as it refuses a mask that runs to the end
-/// after the chunk from the start (`HardMaskShape::TailMask`), a mask past the sequence's end
-/// (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
+/// word finds nothing in NCBI's one-hit and two-hit scans alike and is passed over
+/// (`SubjectPlan::next_searched_chunk`). The sequences that LOSAT refuses never come here: a mask
+/// that runs to the end after the chunk from the start (`HardMaskShape::TailMask`), a mask past
+/// the sequence's end (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN`
+/// (`HardMaskShape::LongRange`).
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,
@@ -172,10 +172,7 @@ fn hard_chunks(
     masked.hits.clear();
     let residues = &subject.aa_seq[1..=subject.aa_len];
     let word = usize::try_from(kernel.word_size).unwrap_or(usize::MAX);
-    while let Some(chunk) = masked.plan.next_chunk() {
-        if chunk.length < word {
-            continue;
-        }
+    while let Some(chunk) = masked.plan.next_searched_chunk(word) {
         // The chunk's letters between two sentinels, as a sequence of the database block.
         masked.letters.clear();
         masked.letters.push(0);

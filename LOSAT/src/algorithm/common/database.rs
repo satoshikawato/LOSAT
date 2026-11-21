@@ -22,34 +22,6 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
-// ```c++
-//     static const string GenerateSearchPath() {
-//         string splitter;
-//         string path;
-// #if defined(NCBI_OS_UNIX)
-//         splitter = ":";
-// #else
-//         splitter = ";";
-// #endif
-//         // Local directory first;
-//         path  = CDirEntry::NormalizePath(CDir::GetCwd(),eFollowLinks);
-//         path += splitter;
-//         // Then, BLASTDB;
-//         CNcbiEnvironment env;
-//         path += CDirEntry::NormalizePath(env.Get("BLASTDB"),eFollowLinks);
-//         path += splitter;
-//         // Finally, the config file.
-//         CNcbiApplicationAPI* app = CNcbiApplicationAPI::Instance();
-//         if (app) {
-//             const CNcbiRegistry& registry = app->GetConfig();
-//             if (registry.HasEntry("BLAST", "BLASTDB")) {
-//                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
-//                 path += splitter;
-//             }
-//         }
-//         return path;
-//     }
-// ```
 /// Opens the database `name` (the `-db` value as NCBI keeps it, `seqdb::db_argument_name`)
 /// of the sequence type `seqtype` for a search: the one function through which a search
 /// program opens a database. The name is looked for as NCBI looks for it: in the current
@@ -96,27 +68,6 @@ pub(crate) fn open_database(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-139
-// ```c++
-//         if (gi_list || neg_list || m_Aliases.NeedTotalsScan(m_VolSet)) {
-//             m_NeedTotalsScan = true;
-//             x_InitIdSet();
-//         }
-//         ...
-//         if (m_NeedTotalsScan) {
-//             ...
-//             x_ScanTotals(true, & m_NumSeqs, & m_TotalLength,
-//                                & m_MaxLength, & m_MinLength, locked);
-//
-//         } else {
-//             m_NumSeqs     = x_GetNumSeqs();
-//             m_TotalLength = x_GetTotalLength();
-//             m_MaxLength   = x_GetMaxLength();
-//             m_MinLength   = x_GetMinLength();
-//             ...
-//         }
-//         m_NumSeqsStats     = x_GetNumSeqsStats();
-//         m_TotalLengthStats = x_GetTotalLengthStats();
-// ```
 // The list is resolved in the totals scan (`x_ScanTotals`, `CSeqDBGiListSet`: its errors and
 // warnings), before the alias files' statistics keys are read.
 /// Restricts the search's database `db` (opened as `name` by `open_database`) to the taxid or
@@ -153,16 +104,7 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:292-298
-    // ```c++
-    //     else {
-    //         m_SeqDb.Reset(new CSeqDB(m_DbName, seq_type));
-    //
-    //     }
-    //
-    //     x_ValidateMaskingAlgorithm();
-    //     _ASSERT(m_SeqDb.NotEmpty());
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:290-298
     if let Some(mask) = mask {
         mask.validate_at_open(db, name, db.seqtype() == SeqType::Nucleotide, program)?;
     }
@@ -277,7 +219,7 @@ pub(crate) fn note_archive_database_filter(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516 (cited at
 // `blastinput::db_mask::ResolvedMask::archive_params`)
 /// The database masking's program options in the run's options handle, which the archive
 /// (`archive`) and the search strategy (`strategy`) share (`note_archive_database_filter`): the
@@ -297,7 +239,7 @@ pub(crate) fn note_archive_database_masking(
     options.set_database_masking(archive_params, strategy_params)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
 // `blastinput::db_mask::DbMaskOption::resolve`)
 /// The formatter's step of the database masking `option` of a search of `db` (the `-db` value
 /// `db_name`) by `program` (NCBI's upper-case name; series NP, M4b: BLASTP and BLASTX, and the
@@ -329,46 +271,13 @@ pub(crate) fn resolve_database_masking(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// ```c++
-//     catch (const CSeqDBException& e) {                                      \
-// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
-// 			string err_msg =                                                \
-//                 "Too many open files, please raise the open file limit";    \
-//         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-//             exit_code = BLAST_DATABASE_ERROR;                               \
-// 		}                                                                   \
-// 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
-// 			string err_msg = "Database memory map file error";              \
-//             if (!e.GetMsg().empty())                                        \
-//                 err_msg += " - " + e.GetMsg();                              \
-//         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-//             exit_code = BLAST_DATABASE_ERROR;                               \
-// 		}                                                                   \
-//         else {                                                              \
-//         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-//         	exit_code = BLAST_DATABASE_ERROR;                               \
-//         }                                                                   \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:153
-// ```c++
-// #define BLAST_DATABASE_ERROR                    2
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
-// ```c++
-//     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
-//         //m_Atlas.Unlock(locked);
-//
-//         string msg = string("Error: File (") + m_FileName + ") not found.";
-//
-//         NCBI_THROW(CSeqDBException, eFileErr, msg);
-//     }
-// ```
 /// The error of the first volume of `db` (in the order NCBI reads them) whose sequence file
 /// cannot be opened, as NCBI's first read of a sequence meets it. A PSSM search (psiblast's and
 /// tblastn's `-in_pssm`, `CPsiBlast`) runs its preliminary stage without `CLocalBlast`, whose catch
 /// makes such an error `Database memory map file error` for a FASTA query (local_blast.cpp:229-252,
-/// quoted at `seqdb::SeqDbError`): the reader's own text reaches the application
+/// cited at `seqdb::SeqDbError`): the reader's own text reaches the application
 /// (`database_error`: `BLAST Database error: Error: File (<path>) not found.`, exit status 2; NCBI
 /// 2.17.0, probe `y.g.ps.tk.nopsq.0` of line PS PS5c, and review 4 of line RG F1b-2 for tblastn).
 fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
@@ -378,20 +287,8 @@ fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
-// ```c++
-//     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
 // search's preliminary stage has not)
-// ```c++
-// 	catch (CSeqDBException & e) {
-// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
-// 	...
-// 		else {
-//             _TRACE(e.GetMsg());
-// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
-// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-// ```
 /// What the first read of the database of a search without `CLocalBlast` meets (psiblast, whose
 /// `CPsiBlast` searches FASTA queries too, and PSI-TBLASTN), in NCBI's order: no OID to read
 /// (`SeqDb::first_oid_read_fails`: the setup's `GetSeqLength(0)`, SeqDB's `OID not found`), else
@@ -414,17 +311,7 @@ impl PsiSearchReadFailure {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:930-934,960-961
-    // ```c
-    //           Int4 oid = 0;  /* Get length of first sequence. */
-    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
-    //               total_length = -1;
-    //               num_seqs = -1;
-    //           }
-    // ...
-    //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
-    //                                query_info, ext_params)) != 0)
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:930-961
     /// Whether NCBI meets this failure before the query batch's setup checks (`BLAST_GapAlignSetUp`:
     /// `BlastExtensionParametersNew`'s valid Karlin-Altschul block, which a PSSM query whose file's
     /// ungapped values are invalid fails, then the average subject length): the empty database in
@@ -462,12 +349,6 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
 /// [`database_error`] of an error that its owner keeps (`seqdb::NameMaskError::Table`).
 pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     if let Some(exception) = error.ncbi_exception() {
         return NativeError::exception(exception).into();
     }
@@ -531,26 +412,7 @@ pub(crate) fn check_setup_count(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
-// ```c++
-// 	catch (CSeqDBException & e) {
-// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
-//             _TRACE(e.GetMsg());
-// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_TOO_MANY_OPEN_FILES);
-// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-// 		}
-// 		else {
-//             _TRACE(e.GetMsg());
-// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
-// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-// 		}
-// 	}
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
 /// A reader error while the preliminary search reads the sequences: NCBI's search stage
 /// replaces the reader's text (`SeqDbError::ncbi_search_message`), and the application
 /// reports `BLAST engine error: <text>` with exit status 3. The error is kept apart from
@@ -575,21 +437,7 @@ pub(crate) fn search_read_error_of(error: &SeqDbError, program: &str) -> anyhow:
 const STORE_BLOCK_BYTES: u64 = 1 << 20;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
-// ```c
-//     memset((void*) &seq_arg, 0, sizeof(seq_arg));
-//
-//     /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
-//        sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
-//     seq_arg.encoding = eBlastEncodingProtein;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:771-775
-// ```c
-//         } else {
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ```
 /// Every sequence of the nucleotide database `db`, in ordinal order, as a packed subject
 /// (`PackedNucleotide::from_stored`): the stored 2-bit data, which a translated search's
 /// preliminary stage translates as NCBI does (makeblastdb's bases for the ambiguous ones),
@@ -687,19 +535,6 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XCh
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:312-322
-// ```c++
-//     int whole_bytes = int(end_offset - start_offset - 1);
-//
-//     // The last byte is partially full; the last two bits of
-//     // the last byte store the number of nucleotides in the
-//     // last byte (0 to 3).
-//
-//     char amb_char = 0;
-//     m_Seq->ReadBytes(& amb_char, end_offset - 1, end_offset);
-//
-//     int remainder = amb_char & 3;
-//     return (whole_bytes * 4) + remainder;
-// ```
 /// The length of nucleotide `ordinal` of `db`, read from the index and the last byte of its 2-bit
 /// data (`SeqDb::nucleotide_length`), as NCBI reads the length of a sequence it does not fetch:
 /// the length of the sequence's store, with the error of its read (`search_read_error`).
@@ -820,15 +655,6 @@ impl std::fmt::Display for HeaderReadError {
 impl std::error::Error for HeaderReadError {}
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
-// ```c++
-//     info.name = seqdb->GetDBNameList();
-//     info.definition = seqdb->GetTitle();
-//     if (info.definition.empty())
-//         info.definition = info.name;
-//     info.date = seqdb->GetDate();
-//     info.total_length = seqdb->GetTotalLength();
-//     info.number_seqs = seqdb->GetNumSeqs();
-// ```
 /// What the `Database:` lines of the pairwise report show of the database `db`: for each
 /// name of its `-db` list (`SeqDb::name_records`), that database's title (its name for an
 /// empty title), date and real totals, also with `-dbsize` or a list.
@@ -836,20 +662,7 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
     pairwise_database_masked(db, None)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:394-406
-// ```c++
-//     // Process the filtering algorithm IDs
-//     info.filt_algorithm_name.clear();
-//     info.filt_algorithm_options.clear();
-//     if (dbfilt_algorithm == -1) {
-//         return true;
-//     }
-//     ...
-//     seqdb->GetMaskAlgorithmDetails(dbfilt_algorithm,
-//                                    filtering_algorithm,
-//                                    info.filt_algorithm_name,
-//                                    info.filt_algorithm_options);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:393-406
 /// [`pairwise_database`] of a search masked with an algorithm whose details in each name's
 /// database are `shown` (`SeqDb::name_mask_details`, one per name record; `None` without database
 /// masking, `dbfilt_algorithm == -1`): the `Masked using:` lines of each name.
@@ -897,35 +710,10 @@ pub(crate) fn pairwise_database_masked(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-522
-// ```c++
-//         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
-//         Int8 tot_length = dbinfo->total_length;
-//
-//         for (size_t i = 1; i < dbinfo_list.size(); i++) {
-//             db_titles += "; " + dbinfo_list[i].definition;
-//             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
-//             tot_length += dbinfo_list[i].total_length;
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119 (`int
 // m_NumSequences`, `Int8 m_NumBases`) and c++/src/algo/blast/format/data4xml2format.cpp:166-169
 // (`Int8 m_NumSequences`, `Int8 m_NumBases`)
-// ```c++
-// 			m_NumSequences += i->number_seqs;
-// 			m_NumBases += i->total_length;
-// ```
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010
-// ```c++
-// void COStreamBuffer::PutInt8(Int8 v)
-//     THROWS1((CIOException, bad_alloc))
-// {
-//     const size_t BSIZE = (sizeof(v)*CHAR_BIT) / 3 + 2;
-//     char b[BSIZE];
-//     Int8 n = v;
-//     if ( n < 0 ) {
-//         n = -n;
-//     }
-// ```
 // The sums are signed overflow where they pass their type (NCBI 2.17.0 prints them wrapped,
 // probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3): LOSAT refuses these (DECISIONS D1a3-2 of
 // line RG: Q2 = A, rule 3). The serial XML writer's `-n` of INT64_MIN is signed overflow too (it
@@ -957,18 +745,6 @@ pub(crate) fn report_sum_refusal(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
-// ```c++
-//     } else if (m_FormatType == CFormattingArgs::eXml) {
-//         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-//         res->TrimSeqAlign(m_HitlistSize);
-//         m_AccumulatedResults.push_back(res);
-//         ...
-//         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
-//                                                    m_AccumulatedResults,
-//                                                    *m_Options, m_DbName, m_DbIsAA,
-//         ...
-//     	x_PrintXML2Report(results, queries);
-// ```
 // NCBI sums the counts of the pairwise prolog (outfmt 0 to 4) before it searches, those of the
 // XML and JSON documents when it formats a query's report: a search that fails before (an engine
 // error of the setup, "The average subject length is too short", probe p5_pr_sum2#6 of line RG
@@ -1100,17 +876,6 @@ pub(crate) fn source_name(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310
-// ```c++
-// CTempString
-// CSeqDBVol::x_GetHdrAsn1Binary(int oid) const
-// {
-//     TIndx hdr_start = 0;
-//     TIndx hdr_end   = 0;
-//
-//     //m_Atlas.Lock(locked);
-//
-//     if (!m_HdrFileOpened) x_OpenHdrFile();
-// ```
 // NCBI reference for the titles:
 // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
 // title of the first definition line, the others appended as ` >id title`).
@@ -1396,14 +1161,7 @@ enum RecordCopy {
     Differs,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:216-220
-// ```c++
-// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
-//                                 SSeqDBTaxInfo  & info )
-// {
-// 	static CTaxDBFileInfo t;
-//     if (t.IsMissingTaxInfo()) return false;
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:216-221
 /// What the lookups of the taxonomy database of the search path of a database write
 /// (`TaxdbRun`): the texts of opening it, once at the run's first lookup (the static
 /// `CTaxDBFileInfo`), and the offset error of its last entry at each volume's lookup of that
@@ -1479,37 +1237,7 @@ pub(crate) fn lookup_texts_differ(db: &SeqDb, choices: &[&[i32]]) -> bool {
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
-// ```c++
-// static bool
-// s_PreFetchSeqs(const blast::CSearchResultSet& results,
-// 		       blast::CFormattingArgs::EOutputFormat format_type)
-// {
-// 	{
-// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-// 		if (pre_fetch_limit_str) {
-// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-// 			if(pre_fetch_limit == 0) {
-// 				return false;
-// 			}
-// 			if(pre_fetch_limit == INT_MAX){
-// 				return true;
-// 			}
-// 			int num_of_seqs = 0;
-// 			for(unsigned int i=0; i < results.GetNumResults(); i++) {
-// 				if(results[i].HasAlignments()) {
-// 					num_of_seqs += results[i].GetSeqAlign()->Size();
-// 				}
-// 			}
-// 			if(num_of_seqs > pre_fetch_limit) {
-// 				return false;
-// 			}
-// 		}
-// 	}
-//
-// 	return s_IsPrefetchFormat(format_type);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:727-753
 /// Whether NCBI's formatters may read a batch's reported sequences one by one, not all at once
 /// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
 /// the batch's number of Seq-aligns turns NCBI's prefetch off, [`prefetch_off`]; the readers of
@@ -1531,31 +1259,14 @@ pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
     prefetch_off_at(prefetch_seqs_limit(), seq_aligns)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (cited at
 // `prefetch_stop`)
-// ```c++
-//     if(!s_PreFetchSeqs(results, format_type)){
-//     	return;
-//     }
-//     try {
-//        ...
-//        LoadSequencesToScope(ids, ranges, scope);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (cited at
 // `report::tabular::TabularSpec::subject_fetch`): where nothing was loaded before, a row reads
 // the subject's Bioseq only for the fields that need it.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813
-// ```c++
-//         if (results.HasAlignments()) {
-//     	    CSeq_align_set copy_aln_set;
-//             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1216-1217 (the pairwise
 // report's alignments; its description lines likewise, 1550-1551)
-// ```c++
-//     CSeq_align_set copy_aln_set;
-//     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
-// ```
 /// What NCBI's BLAST database data loader loaded for a query batch (`RegisterIds`; the run's
 /// record, [`TaxdbRun::note_loaded`]), as [`batch_loads`] tells it: the one answer to whether
 /// the batch's prefetch ran.
@@ -1669,9 +1380,9 @@ impl<T> Clone for LoadedBefore<'_, T> {
 impl<T> Copy for LoadedBefore<'_, T> {}
 
 impl<'a, T> LoadedBefore<'a, T> {
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted above
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (cited above
     // `batch_loads`: no prefetch, the reports load what they read)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (cited at
     // `report::query_warnings::ReadCursor::cut`: an `Iteration` that the stream cut makes no
     // `Hit`, so it loads nothing)
     /// What NCBI's BLAST database data loader loaded for each held batch, in the order of the
@@ -1733,13 +1444,6 @@ impl<'a, T> LoadedBefore<'a, T> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1417-1446
-// ```c++
-//     /* All HSPs are put in one seqalign, containing a list of
-//      * DenseDiag for same molecule search, or StdSeg for translated searches.
-//      */
-//     ...
-//     sa_vector.push_back(seqalign);
-// ```
 /// The number of Seq-aligns NCBI makes of a subject's `hsps` HSPs, which [`prefetch_off`]
 /// counts: one for each HSP of a gapped search (`BLASTHspListToSeqAlign`), one for all of them
 /// in an ungapped search (`BLASTUngappedHspListToSeqAlign`; TBLASTX's is always ungapped).
@@ -1970,24 +1674,6 @@ impl<'a> HeaderReader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1169
-    // ```c++
-    //         SSeqDBTaxInfo tnames(taxid);
-    //         bool found_taxid_in_taxonomy_blastdb = true;
-    //
-    //         if ((! have_org_desc) && provide_new_taxonomy_info) {
-    //             try {
-    //                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
-    //             } catch (CSeqDBException &) {
-    //                 found_taxid_in_taxonomy_blastdb = false;
-    //             }
-    //         }
-    //         ...
-    //                 CRef<COrg_ref> org(new COrg_ref);
-    //                 if (found_taxid_in_taxonomy_blastdb) {
-    //                     org->SetTaxname().swap(tnames.scientific_name);
-    //                     org->SetCommon().swap(tnames.common_name);
-    //                 }
-    // ```
     // The Bioseq gets one source for each positive taxid, in the order of the definition lines
     // that `x_GetTaxDefline` gives (the one that holds the Seq-align id first), and
     // `CDeflineGenerator::x_SetFlags` takes the first (create_defline.cpp:1004-1011). An empty
@@ -2030,10 +1716,6 @@ impl<'a> HeaderReader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
-    // ```c++
-    //     //get defline
-    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
-    // ```
     // The Bioseq of a sequence without parsed Seq-ids has its definition line's title and a
     // source for its taxid as one with them has (`CSeqDBVol::x_GetTaxonomy`), so NCBI makes an
     // empty title from the source too: `Homo sapiens` for a nucleotide and `unnamed protein
@@ -2086,14 +1768,6 @@ impl<'a> HeaderReader<'a> {
             return SourceTaxname::Unnamed;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
-        // ```c++
-        //                 } catch (const CException&){
-        //                     out << "Sequence with id "
-        //                         << (avRef->GetSeqId(1)).GetSeqIdString().c_str()
-        //                         <<" no longer exists in database...alignment skipped\n";
-        //                     continue;
-        //                 }
-        // ```
         // `CSeq_id::GetSeqIdString()` (Seq_id.cpp:2145-2154, `seqid::label::content`) of the
         // Seq-align's `gnl|BL_ORD_ID|n`, the OID (with a taxid list, of the ordinal id):
         // `seqdb::Oid::content_label`.
@@ -2102,24 +1776,7 @@ impl<'a> HeaderReader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
-    // ```c++
-    //             // Try to open the BLAST database even for remote searches, as if
-    //             // it is available locally, it will be better to fetch the
-    //             // sequence data for formatting from this (local) source
-    //             CRef<CSeqDB> seqdb = search_db->GetSeqDb();
-    //             db_adapter.Reset(new CLocalDbAdapter(*search_db));
-    //             dl = RegisterOMDataLoader(seqdb);
-    //             scope->AddDataLoader(dl);
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:541-551
-    // ```c++
-    //     for ( TTSE_BySeqId::const_iterator it = m_TSE_BySeqId.lower_bound(idh);
-    //           it != m_TSE_BySeqId.end() && it->first == idh; ++it ) {
-    //         if ( !tse || x_IsBetter(idh, *it->second, *tse) ) {
-    //             tse = it->second;
-    //         }
-    //     }
-    // ```
     // NCBI's scope finds the Seq-align id first among the Bioseqs it already holds, the reported
     // sequences of the batch (`CDataSource_ScopeInfo::BestResolve` and `x_GetSeqMatch`,
     // scope_info.cpp:832-850), the first one read where several hold it (`x_IsBetter`), without
@@ -2388,17 +2045,7 @@ impl<'a> HeaderReader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-135
-    // ```c++
-    //     if(seqid->IsPir() || seqid->IsPrf()) {
-    //     	SKeyValuePair kv_pir;
-    //     	kv_pir.id = seqid->AsFastaString();
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:160-163
-    // ```c++
-    //     if(seqid->GetTextseq_Id() != NULL) {
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(false);
-    // ```
     // A version 5 database keys a text Seq-id as written, in its letter case, with no key for the
     // name of an id with an accession, and a `pir` or `prf` id by its FASTA text; the scope matches
     // names without case and across the alternatives (`CSeq_id_Mapper::GetMatchingHandles`), so the
@@ -2494,17 +2141,6 @@ impl<'a> HeaderReader<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1130-1139
-    // ```c++
-    //     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
-    //         TTaxId taxid = ZERO_TAX_ID;
-    //
-    //         if ((*iter)->CanGetTaxid()) {
-    //             taxid = (*iter)->GetTaxid();
-    //         }
-    //         if (taxid <= ZERO_TAX_ID) {
-    //             continue;
-    //         }
-    // ```
     // NCBI's formatters show for the subject the sequence that its lookup or its scope gives
     // (`found_instead`): with the same definition lines and letters, they write the subject's
     // names, and the taxids of that sequence, which its volume looks up in the taxonomy database
@@ -2726,14 +2362,6 @@ fn query_with_shown_ids(program: &str) -> &'static str {
 const GENERATED_QUERY_ID: &str = "the id of a query (generated, or the PSSM's)";
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1589, 432-433, 497-498
-// ```c++
-//         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
-//         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
-//     ...
-//     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
-//     ...
-//     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
-// ```
 /// LOSAT's refusal of a database sequence that a description table shows (outfmt 0 to 4, the
 /// first `-num_descriptions` subjects) whose display id (`ParsedSubject::display_id`, the id of its
 /// description line) is, or is matched weakly by NCBI's scope to, the id of a query of the scope
@@ -2957,17 +2585,6 @@ pub(crate) fn refuse_joined_hits<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1025-1033
-// ```c++
-//         } else {
-//             subid = &((*iter)->GetSeq_id(1));
-//             if(is_first_aln || (!is_first_aln && !subid->Match(*previous_id))){
-//                 ++num_align;
-//             }
-//
-//             if(num_align > number) {
-//                  break;
-//             }
-// ```
 /// NCBI's count of a cut to `cut` subjects (`PruneSeqalign`; `TrimSeqAlign` counts so too): the
 /// number of the entries at the start of `entries` (one for each HSP list of a hit list, in its
 /// order) that the cut keeps, where an entry that follows one of the same subject
@@ -3088,14 +2705,7 @@ pub(crate) fn check_shown_parsed_subject(
             ));
         }
     }
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
-    // ```c++
-    //         line_component = (line_component.empty() ? "" : "  ") + sdl->defline;
-    //         string actual_line_component;
-    //         if(line_component.size()+line_length > m_LineLen){
-    //             actual_line_component = line_component.substr(0, m_LineLen -
-    //                                                           line_length - 3);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-917
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
     if subject.description_start().len() > 65 {
@@ -3167,34 +2777,7 @@ pub(crate) struct ParsedShown {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1773-1783
-// ```c++
-//     CInitGuard init(info.second.m_Bioseq_Info, m_MutexPool, CInitGuard::force);
-//     if ( init || info.second.m_Bioseq_Info->NeedsReResolve(m_BioseqChangeCounter) ) {
-//         if ( get_flag != CScope::eGetBioseq_Resolved ) {
-//             // Resolve only if the flag allows
-//             x_ResolveSeq_id(info, get_flag, match);
-//         }
-//         else {
-//             // outdated
-//             return null;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3289-3300
-// ```c++
-//     for ( size_t i = from; i < from + count; ++i ) {
-//         ret[i] = GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved);
-//         if ( !ret[i] ) {
-//             match_map[ids[i]];
-//         }
-//     }
-//     if ( match_map.empty() ) {
-//         return;
-//     }
-//     for (CPriority_I it(m_setDataSrc); it; ++it) {
-//         it->GetBlobs(match_map);
-//     }
-// ```
 // The prefetch (`LoadSequencesToScope`'s `GetBioseqHandles`) asks the scope only for the ids it
 // has resolved, which it gets back as they were resolved, and the data loader for the others by
 // their own ids; the data source's weak match (data_source.cpp:1439-1471) looks only among the
@@ -3272,11 +2855,6 @@ pub(crate) fn check_reported_parsed(
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40 (the fields of
 // `-outfmt 6` without a list)
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// ```
 /// The subject id of the default tabular fields (`saccver`) of each reported database sequence by
 /// rank, for BLASTN, TBLASTN and TBLASTX: the `saccver` of a sequence without parsed Seq-ids
 /// (`TabularSubjectId::accession`: the first word of the title that NCBI makes of the stored one,
@@ -3329,20 +2907,7 @@ pub(crate) fn tabular_subject_ids(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
-// ```c++
-//        		const CBioseq_Handle& subject_bh =
-//                 scope.GetBioseqHandle(align.GetSeq_id(1));
-//             if(setSubjectId) {
-//             	SetSubjectId(subject_bh);
-//             }
-//             m_SubjectLength = subject_bh.GetBioseqLength();
-// ```
 /// A reported sequence as a caller of the library reads it (`FormatObserver::database_subjects`):
 /// the id of the default tabular report (`tabular_subject_ids`) of the sequence `ordinal` with the
 /// stored title `title` and the source `source` of its Bioseq (with parsed Seq-ids: `parsed`), and
@@ -3663,30 +3228,6 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
-// ```c++
-//         string message;
-//         if (io != NULL) {
-//             message += io->GetStackTrace() + "\n";
-//         }
-//         message += "Bad char [0x" +
-//                    NStr::NumericToString((unsigned char)c,0,16)+
-//                    "] in string";
-//         if (io != NULL) {
-//             message += " at " + io->GetPosition();
-//         }
-//         if (!str.empty()) {
-//             message += "\n" + str;
-//         }
-//         switch (fix_method) {
-//         case eFNP_ReplaceAndWarn:
-// #if 0
-//             CNcbiDiag(eDiag_Error, eDPF_Default)
-//                 << ErrCode(NCBI_ERRCODE_X, 7) << message << Endm;
-// #else
-//             ERR_POST_X(7, message);
-// #endif
-//             break;
-// ```
 // NCBI BLAST+ 2.17.0 `blastp -db` on a version 4 database whose header file holds
 // the bytes 0xE9 and 0x7F in two titles (campaign dbsearch-20261012,
 // `$BUILD_ROOT/dbsearch/db3/exp_badbyte`): the report shows `#` for the byte, and
@@ -3720,18 +3261,6 @@ pub(crate) fn check_reported_title(
 // subject's list; for a sequence without parsed Seq-ids, the local id of the title's first word
 // that `GetSeqIdList` makes, or its general id, showdefline.cpp:218-242 at
 // `report::defline::database_subject_id`)
-// ```c++
-//     switch (id_type) {
-//     case CBlastTabularInfo::eFullId:
-//         id_str = CShowBlastDefline::GetSeqIdListString(id, true);
-//         break;
-//     case CBlastTabularInfo::eAccession:
-//     {
-//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
-//         break;
-//     }
-// ```
 /// The subject id of the tabular formats of a database sequence without parsed Seq-ids
 /// (`tabular_subject_id`): the first word of the title that NCBI makes of its stored title (an
 /// empty one from the name of its source), which `GetSeqIdList` puts in the place of its id, or
@@ -3887,12 +3416,6 @@ pub(crate) fn check_shown_protein_title(
 const NCBISTDAA_GAP: u8 = 0;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593
-// ```c
-//             /* skip special characters */
-//             if (i == AMINOACID_TO_NCBISTDAA['U'] ||
-//                 i == AMINOACID_TO_NCBISTDAA['O'] ||
-//                 i == AMINOACID_TO_NCBISTDAA['-'] ||
-// ```
 // A stored gap character (0, which makeblastdb writes for `-` in a protein FASTA) is a
 // residue that scores `BLAST_SCORE_MIN` against every letter (row and column 0), as LOSAT's
 // kernels score it: an ungapped extension stops at it and a gapped alignment goes round it
@@ -4240,7 +3763,7 @@ mod tests {
     }
 
     // Line DBID pfbatch: each batch's prefetch counts its own Seq-aligns against a positive
-    // `PRE_FETCH_SEQS_LIMIT` (`s_PreFetchSeqs`, quoted at `prefetch_may_be_off`).
+    // `PRE_FETCH_SEQS_LIMIT` (`s_PreFetchSeqs`, cited at `prefetch_may_be_off`).
     #[test]
     fn each_batch_prefetches_by_its_own_seq_aligns() {
         // Seq-aligns of the queries 0 to 4 of a call.
@@ -4612,7 +4135,7 @@ mod tests {
             .all(|&residue| usize::from(residue) < BLASTAA_SIZE)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (cited at
     // `check_protein_sequence`): the bytes past the matrix are what the check refuses; the gap
     // byte is a residue of the matrix. Not a port of an NCBI unit case.
     #[test]
@@ -4848,39 +4371,8 @@ struct SlotWalk {
 
 impl SlotHolds {
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1196
-    // ```c++
-    //     TValue & Lookup(int key)
-    //     {
-    //         _ASSERT(IS_POWER_OF_TWO(m_Slots.size()));
-    //
-    //         TSlot & slot = m_Slots[key & (m_Slots.size()-1)];
-    //
-    //         if (slot.first != key) {
-    //             slot.first = key;
-    //             slot.second = TValue();
-    //         }
-    //
-    //         return slot.second;
-    //     }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:84 (the
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1182 (the
     // constructor's `m_TaxCache     (256),`) and 1142-1182
-    // ```c++
-    //         if (use_taxinfo_cache && m_TaxCache.Lookup(TAX_ID_TO(int, taxid)).NotEmpty()) {
-    //             have_org_desc = true;
-    //         }
-    //
-    //         SSeqDBTaxInfo tnames(taxid);
-    //         bool found_taxid_in_taxonomy_blastdb = true;
-    //
-    //         if ((! have_org_desc) && provide_new_taxonomy_info) {
-    //             try {
-    //                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
-    //     ...
-    //                 if (use_taxinfo_cache) {
-    //                     m_TaxCache.Lookup(TAX_ID_TO(int, taxid)) = desc;
-    //                 }
-    // ```
     // A volume's cache (`CSeqDBIntCache`) keeps one taxid per slot `taxid & 255`, which a lookup
     // of another taxid of the slot clears; `x_GetTaxonomy` asks `GetTaxNames` where it misses.
     // `use_taxinfo_cache` is true on the main thread, where psiblast makes its PSSMs.
@@ -4918,18 +4410,6 @@ impl SlotHolds {
 
 impl VolumeLookups {
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:453-462
-    // ```c++
-    // CBlastDbDataLoader::GetBlobById(const TBlobId& blob_id)
-    // {
-    //     CTSE_LoadLock lock = GetDataSource()->GetTSE_LoadLock(blob_id);
-    //     if ( !lock.IsLoaded() ) {
-    //         const TBlastDbId& id =
-    //             dynamic_cast<const CBlobIdBlastDb&>(*blob_id).GetValue();
-    //         x_LoadData(id.second, id.first, lock, kSequenceSliceSize);
-    //     }
-    //     return lock;
-    // }
-    // ```
     // A sequence that no fetch of the run has loaded is loaded (`x_LoadData`, whose
     // `CCachedSequence` asks `GetBioseqNoData` and so `x_GetTaxonomy`). One loaded before may
     // still be in NCBI's scope or data source, which then gives it without a load, or have been
@@ -5129,7 +4609,7 @@ impl TaxdbRun {
         })
     }
 
-    // NCBI's 256-slot cache of a volume (quoted at `SlotHolds::walk`): a fetch of a sequence with
+    // NCBI's 256-slot cache of a volume (cited at `SlotHolds::walk`): a fetch of a sequence with
     // another taxid of the slot of `L` clears it, and the next fetch of `L` asks `GetTaxNames`
     // again, which writes the offset error again. How often it repeats in a prefetch follows the
     // order in which the object manager loads the batch's subjects, which is neither the order of
@@ -5304,7 +4784,7 @@ impl TaxdbRun {
             .offset_slot(volume, ordinal, lookups, last)
     }
 
-    // NCBI asks `GetTaxNames` where the volume's 256-slot cache misses (quoted at
+    // NCBI asks `GetTaxNames` where the volume's 256-slot cache misses (cited at
     // `SlotHolds::walk`). Of what such an ask does, only three things reach the output of a load,
     // whose names nothing writes (`GetBioseq`'s sources; a title made from one asks the names
     // itself): the texts of opening the database at the process's first ask, the offset error at
@@ -5363,12 +4843,8 @@ impl TaxdbRun {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466
-    // ```c++
-    //     list< CRef<CSeqdesc> > tax =
-    //         x_GetTaxonomy(oid, target_gi, target_seq_id);
-    // ```
     // `GetBioseq` makes the sources of a Bioseq it gives (one with definition lines and, with its
-    // data, letters) through `x_GetTaxonomy` (quoted at `SlotHolds::walk`), whose `GetTaxNames`
+    // data, letters) through `x_GetTaxonomy` (cited at `SlotHolds::walk`), whose `GetTaxNames`
     // writes its texts through `ERR_POST` where it reads them.
     /// The `ERR_POST` texts of `CSeqDB::GetBioseq` of NCBI's OID `oid` of `db` in a sequential run
     /// ([`TaxdbRun::sequential`]), whose definition lines are `set` and target `target`: the
@@ -5842,15 +5318,7 @@ pub(crate) struct SubjectTaxonomy {
     pub(crate) found: Option<bool>,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-603
-// ```c++
-// void CBlastTabularInfo::x_SetTaxInfo(const CBioseq_Handle & handle, const CRef<CBlast_def_line_set> & bdlRef)
-// {
-//     m_SubjectTaxId = ZERO_TAX_ID;
-//     ...
-//     if(m_SubjectTaxId == ZERO_TAX_ID)
-//             return;
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-606
 /// What the tabular reports `specs` of a `-subject` search of `program` (upper case) ask of the
 /// taxonomy database where NCBI makes their formatters: whether `taxdb.bti` is on the search path
 /// of `setting` (`x_CheckTaxDB`'s `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory,
@@ -5863,15 +5331,7 @@ pub(crate) struct SubjectTaxonomy {
 /// The command line and the library's searches of records call it at the same point, after the
 /// options are processed (each program's `open_search_database`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-/// ```c++
-/// void CBlastTabularInfo::x_CheckTaxDB()
-/// {
-///    	if( x_IsFieldRequested(eSubjectSciNames) ||
-///     ...
-///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-///    		if(resolved.empty())
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-134
 pub(crate) fn subject_taxonomy<'s>(
     setting: Option<&TaxdbSetting>,
     program: &str,
@@ -5915,12 +5375,6 @@ fn subject_search_path(setting: &TaxdbSetting, program: &str) -> Result<SearchPa
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
-// ```c++
-// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
-//                                 SSeqDBTaxInfo  & info  )
-// {
-// 	static CTaxDBFileInfo t;
-// ```
 /// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
 /// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
 /// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by
@@ -6017,30 +5471,7 @@ pub(crate) fn tabular_names<'t>(
 /// [`read_reported_taxonomy`].
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-772
-/// ```c++
-/// s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
-/// {
-/// 	if ((format_type == CFormattingArgs::eAsnText) ||
-/// 	    (format_type == CFormattingArgs::eAsnBinary) ||
-/// 	    (format_type == CFormattingArgs::eArchiveFormat)||
-/// 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
-/// 		return false;
-/// 	}
-/// 	return true;
-/// }
-/// ...
-///        s_ExtractSeqidsAndRanges(results, ids, ranges);
-///        _TRACE("Prefetching " << ids.size() << " sequence lengths");
-///        LoadSequencesToScope(ids, ranges, scope);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-/// ```c++
-///                 BlastFormatter_PreFetchSequenceData(*results, scope,
-///                 		                            fmt_args->GetFormattedOutputChoice());
-///                 ITERATE(CSearchResultSet, result, *results) {
-///                     formatter.PrintOneResultSet(**result, query_batch);
-///                 }
-/// ```
 pub(crate) fn prefetch_messages<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -6060,17 +5491,6 @@ pub(crate) fn prefetch_messages<'s>(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
-// ```c++
-//     bool setSubjectTaxInfoAll = (x_IsFieldRequested(eSubjectTaxIds) ||
-//     						     x_IsFieldRequested(eSubjectSciNames) ||
-//     ...
-//     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
-//        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
-//     {
-//         try {
-//        		const CBioseq_Handle& subject_bh =
-//                 scope.GetBioseqHandle(align.GetSeq_id(1));
-// ```
 /// [`prefetch_messages`] of `subjects`, each `(key, ordinal, parsed Seq-ids)`, by subject: the
 /// text that the first read of each subject writes, with the subject's `key` (the name a report
 /// writer gives it), in the order of `subjects`; a subject whose read writes nothing has no
@@ -6210,9 +5630,6 @@ fn load_read_texts<'s>(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
-// ```c++
-//             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ```
 /// The texts of the taxonomy database where psiblast's PSSM of a query whose batch reads one by
 /// one reads the sequence `blob` by a Seq-align id, the lookups of its load `lookups` (the
 /// positive taxids in `x_GetTaxonomy`'s order, [`blob_taxids`]; `ListedTitles::pssm_load_texts`),
@@ -6257,40 +5674,10 @@ pub(crate) fn pssm_load_texts(
     Ok(text.into_bytes())
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3304-3320
-// ```c++
-//     for ( size_t i = from; i < from + count; ++i ) {
-//         ret[i] = GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved);
-//         if ( !ret[i] ) {
-//             match_map[ids[i]];
-//         }
-//     }
-//     ...
-//     for (CPriority_I it(m_setDataSrc); it; ++it) {
-//         it->GetBlobs(match_map);
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3289-3299
 // NCBI reference (598d8ae6): c++/src/objmgr/data_loader.cpp:764-769
-// ```c++
-// void CDataLoader::GetBlobs(TTSE_LockSets& tse_sets)
-// {
-//     NON_CONST_ITERATE(TTSE_LockSets, tse_set, tse_sets) {
-//         tse_set->second = GetRecords(tse_set->first, eBlob);
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-208
-// ```c++
-//     bool operator<  (const CSeq_id_Handle& handle) const
-//         {
-//             // Packed (m_Packed != 0) first:
-//             // zeroes are converted to a highest unsigned value by decrement.
-//             TUintId p1 = INT_ID_TO(TUintId, m_Packed-1);
-//             TUintId p2 = INT_ID_TO(TUintId, handle.m_Packed-1);
-//             return p1 < p2 || (p1 == p2 && m_Info < handle.m_Info);
-//         }
-// ```
-// `LoadSequencesToScope` (quoted at `check_prefetched_parsed`) first loads the blob of every
+// `LoadSequencesToScope` (cited at `check_prefetched_parsed`) first loads the blob of every
 // subject of the batch (`GetBioseqHandles`), in the order of a map of Seq-id handles: the ids
 // that NCBI's Seq-id mapper packs (GIs, accessions of a prefix and digits, the text tag's
 // `gnl|BL_ORD_ID|0`) by their packed value, then the others by the address of each id's
@@ -6317,7 +5704,7 @@ pub(crate) struct PrefetchQueries<'a> {
     /// `query_batch::QueryScope` (`QueryScope::of_shown_records`). They are the input records that
     /// NCBI's reader has added for the batch (a record that `-query_loc` drops included, and the
     /// query of a PSSM), and in outfmt 5, whose scope the formatter does not reset
-    /// (`CBlastFormat::ResetScopeHistory`, quoted at [`stop_lookup_unsure`]), those of the batches
+    /// (`CBlastFormat::ResetScopeHistory`, cited at [`stop_lookup_unsure`]), those of the batches
     /// before too; never those of the batches after.
     scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     /// Whether calls before this one reported sequences of the run that the run's record does not
@@ -6408,7 +5795,7 @@ pub(crate) struct XmlReportsBefore<'a> {
     pub prefetched: &'a dyn Fn(usize) -> Option<&'a crate::report::diag_log::Posts>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (cited at
 // `report::query_warnings::ReadCursor::cut`)
 /// The outfmt 5 reports of a call's queries that NCBI's XML stream cuts before their first `Hit`
 /// (`report::blast_xml::names::iteration_cut_before_hits` of the query's record, at its
@@ -6592,17 +5979,6 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
-// ```c++
-//     catch (const CException& e) {
-// 	   if(s_IsUsingRemoteBlastDbDataLoader()) {
-//           ERR_POST(Warning << "Error fetching sequence data from BLAST databases at NCBI, "
-//                      "please try again later");
-// 	   }
-// 	   else {
-//           ERR_POST(Warning << "Error pre-fetching sequence data");
-// 	   }
-//    }
-// ```
 /// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's
 /// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
 /// producer of its text.
@@ -6618,27 +5994,10 @@ pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
-// ```c++
-// s_PreFetchSeqs(const blast::CSearchResultSet& results,
-// 		       blast::CFormattingArgs::EOutputFormat format_type)
-// {
-// 	{
-// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-// 		if (pre_fetch_limit_str) {
-// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-// 			if(pre_fetch_limit == 0) {
-// 				return false;
-// 			}
-// 			if(pre_fetch_limit == INT_MAX){
-// 				return true;
-// 			}
-// 			...
-// 	return s_IsPrefetchFormat(format_type);
-// ```
 /// Whether NCBI's prefetch of a query batch reads the batch's Seq-aligns (their subject ids and
 /// ranges, `s_ExtractSeqidsAndRanges`) for the first format `outfmt`: every format but the
 /// archive (outfmt 11, which the apps write without calling the prefetch) and, unless
-/// `PRE_FETCH_SEQS_LIMIT=2147483647`, the Seq-annots 8, 9 and 12 (`s_IsPrefetchFormat`, quoted at
+/// `PRE_FETCH_SEQS_LIMIT=2147483647`, the Seq-annots 8, 9 and 12 (`s_IsPrefetchFormat`, cited at
 /// `blastx::native::reported_batch`); a batch whose prefetch is off ([`prefetch_off`]) reads
 /// nothing. Wider than [`prefetches_subjects`], which tells where the loads write the taxonomy
 /// database's texts.
@@ -6650,16 +6009,11 @@ pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (cited at
 // `ParsedSubject::prefetched`)
-// ```c++
-//    } catch (const CSeqDBException& e) {
-//        throw;
-//    }
-// ```
 /// The stop of NCBI's prefetch of one query batch's reported subjects `subjects` for a first
 /// format that writes the taxonomy database's texts at each `Hit` (`TaxdbPrinter`: the XML2 and
-/// JSON formats, outfmt 13 to 16, which NCBI's `s_IsPrefetchFormat`, quoted at
+/// JSON formats, outfmt 13 to 16, which NCBI's `s_IsPrefetchFormat`, cited at
 /// [`prefetch_messages`], prefetches for and [`prefetches_subjects`] leaves out) and a batch whose
 /// prefetch is on (`PRE_FETCH_SEQS_LIMIT`, [`prefetch_off`]): `Err` as in [`batch_prefetch`] where
 /// a subject's lookup fails on a file with NCBI's exception, else `Ok` (the batch's other loads
@@ -6755,56 +6109,11 @@ fn stops(subjects: &[PrefetchSubject<'_>]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366
-// ```c++
-// CScope_Impl::TBioseqHandles CScope_Impl::GetBioseqHandles(const TIds& ids)
-// {
-//     CSortedSeq_ids sorted_seq_ids(ids);
-//     TIds sorted_ids;
-//     sorted_seq_ids.GetSortedIds(sorted_ids);
-//
-//     TBioseqHandles ret;
-//     size_t count = sorted_ids.size();
-//     ret.resize(count);
-//     if ( count > 200 ) {
-//         // split batch into smaller pieces to avoid problems with GC
-//         for ( size_t pos = 0; pos < count; ) {
-//             size_t cnt = count - pos;
-//             if ( cnt > 150 ) cnt = 100;
-//             x_GetBioseqHandlesSorted(sorted_ids, pos, cnt, ret);
-//             pos += cnt;
-//         }
-//     }
-//     else {
-//         x_GetBioseqHandlesSorted(sorted_ids, 0, count, ret);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2014-2026
-// ```c++
-//         ITERATE(TSeqMatchMap, match, match_map) {
-//             _ASSERT( !match->second );
-//             current_tse_sets.insert(
-//                 CDataLoader::TTSE_LockSets::value_type(
-//                 match->first, CDataLoader::TTSE_LockSet()));
-//             if ( ++current_tse_sets_size >= limit_blobs_request ) {
-//                 s_GetBlobs(m_Loader, tse_sets, current_tse_sets);
-//                 current_tse_sets_size = 0;
-//             }
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-396
-// ```c++
-//     CConstRef<CSeq_id> seqid = idh.GetSeqId();
-//
-//     int oid = -1;
-//
-//     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
-//         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
-//         return -1;
-//     }
-// ```
-// The prefetch's `GetBioseqHandles` (`LoadSequencesToScope`, quoted at `check_prefetched_parsed`)
+// The prefetch's `GetBioseqHandles` (`LoadSequencesToScope`, cited at `check_prefetched_parsed`)
 // loads the distinct Seq-align ids of a batch of at most 200 of them in one map of Seq-id handles
-// (`x_GetBioseqHandlesSorted`, scope_impl.cpp:3280-3299; `CDataLoader::GetBlobs`, quoted above
+// (`x_GetBioseqHandlesSorted`, scope_impl.cpp:3280-3299; `CDataLoader::GetBlobs`, cited above
 // `PrefetchSubject`): by `m_Packed - 1` as an unsigned number (`seqid::mask_handle`), then by the
 // address of the handle's info. Each load asks the BLAST database for the id's OID first, so the
 // first id in that order whose lookup fails with NCBI's exception ends the loads, and the loads
@@ -6827,7 +6136,7 @@ enum LoadBeforeStop {
 }
 
 /// The most distinct Seq-align ids that NCBI's prefetch loads in one map of Seq-id handles
-/// (`CScope_Impl::GetBioseqHandles`, quoted at [`load_before_stop`]).
+/// (`CScope_Impl::GetBioseqHandles`, cited at [`load_before_stop`]).
 const PREFETCH_ONE_MAP_IDS: usize = 200;
 
 /// The key of the Seq-id handle of the Seq-align id of `subject` in NCBI's map of a batch's loads:
@@ -6854,7 +6163,7 @@ fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<
 }
 
 /// [`LoadBeforeStop`] of each of `subjects` (a stopping batch's reported sequences, in any order,
-/// a sequence possibly more than once) in NCBI's order of the loads (quoted above
+/// a sequence possibly more than once) in NCBI's order of the loads (cited above
 /// [`LoadBeforeStop`]), and the order of the lookups that may stop it ([`LoadOrder`]): the
 /// subjects whose lookups stop the batch (`ParsedSubject::prefetch_stops`) load nothing; the
 /// others load by their handle's place to the stops ([`LoadOrder::before`]). Unknown besides: a
@@ -7006,55 +6315,16 @@ impl LoadOrder {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-387
-// ```c++
-// int CBlastDbDataLoader::x_GetOid(const CSeq_id_Handle& idh)
-// {
-//     {
-//         CMutexGuard guard(s_Oid_Mutex);
-//         TIdMap::iterator iter = m_Ids.find(idh);
-//         if ( iter != m_Ids.end() ) {
-//             return iter->second;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:98-110
-// ```c++
-// CCachedSequence::RegisterIds(CBlastDbDataLoader::TIdMap & idmap)
-// {
-//     ...
-//     ITERATE(CBioseq::TId, seqid, ids) {
-//         idmap[CSeq_id_Handle::GetHandle(**seqid)] = m_OID;
-//     }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297 (quoted in part at
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297 (cited at
 // `load_before_stop`): `GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved)` first, then the
 // data sources by priority, the queries' entries (`AddTopLevelSeqEntry`) before the BLAST
 // database's loader.
-// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2063-2068 and 1449-1468
-// ```c++
-//     else {
-//         NON_CONST_ITERATE(TSeqMatchMap, it, match_map) {
-//             if ( !it->second ) {
-//                 it->second = BestResolve(it->first);
-//             }
-//         }
-//     ...
-//     else if ( idh.HaveMatchingHandles() ) {
-//         // Try to find the best matching id (not exactly equal)
-//         CSeq_id_Handle::TMatches hset;
-//         idh.GetMatchingHandles(hset, eAllowWeakMatch);
-// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2032-2068 and 1449-1468
 // A data source without a loader (the queries' entries) finds a Bioseq of the id itself or, where
 // it holds none, of an id that the id matches weakly (`x_GetSeqMatch`), as the reports' reads
 // find a query (`refuse_id_of_a_query`'s keys, `QueryScopeKeys::own` and `weak`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313
-// ```c++
-//     if (m_FormatType != CFormattingArgs::eXml)
-//     {
-//         m_Scope->ResetDataAndHistory();
-//     }
-// ```
 /// Why NCBI's prefetch may never make the lookup of the Seq-align id of the stopping subject
 /// `ordinal` (`parsed`) of the batch of `queries` that fails with its exception (reviews 1 to 3 of
 /// line DBID loadord, line DBID DECISIONS 60 (5) to (10)), and what NCBI then loads instead:
@@ -7171,17 +6441,7 @@ fn stop_lookup_unsure(
         _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-396
-    // ```c++
-    //     CConstRef<CSeq_id> seqid = idh.GetSeqId();
-    //
-    //     int oid = -1;
-    //
-    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
-    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
-    //         return -1;
-    //     }
-    // ```
-    // (`SeqidToOid`, quoted at `SeqidLookup::seqid_to_oid`, gives the first OID of the lookup,
+    // (`SeqidToOid`, cited at `SeqidLookup::seqid_to_oid`, gives the first OID of the lookup,
     // which every lookup of NCBI's loads here is.)
     // A sequence of a call before whose reports LOSAT has no record of: its own Seq-align id's
     // lookup does not fail (a load of it by that id may be made).
@@ -7270,19 +6530,6 @@ struct StopUnsure {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-777
-// ```c++
-//     try {
-//        CScope::TIds ids;
-//        vector<TSeqRange> ranges;
-//        s_ExtractSeqidsAndRanges(results, ids, ranges);
-//        _TRACE("Prefetching " << ids.size() << " sequence lengths");
-//        LoadSequencesToScope(ids, ranges, scope);
-// 	}
-//     catch(const CSeqDBException & e) {
-//         _TRACE(e.GetMsg());
-//     	throw;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (quoted
 // in parts at `stop_lookup_unsure` and above `LoadBeforeStop`): `x_GetOid` of each handle of the
 // map in its order, `m_Ids.find` first, then `SeqidToOid`, whose exception ends the loads; the
@@ -7300,7 +6547,7 @@ struct StopUnsure {
 /// does not know.
 ///
 /// NCBI's loads end at the first stopping lookup that it makes, in the order of the handles
-/// (`LoadSequencesToScope` rethrows the `CSeqDBException`, quoted at `check_prefetched_parsed`):
+/// (`LoadSequencesToScope` rethrows the `CSeqDBException`, cited at `check_prefetched_parsed`):
 /// the stops are asked in that order ([`LoadOrder::stops`]) until one that NCBI surely makes
 /// ([`stop_lookup_unsure`]: `None`), with the others of its key. A stop before it that NCBI may not
 /// make (review 3 of line DBID loadord, H1) does not refuse the batch by itself: the loads from
@@ -7480,8 +6727,8 @@ fn prefetch_stop(
         }
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1440-1466
-    // (quoted at `TaxdbRun::load`)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+    // (cited at `TaxdbRun::load`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (cited at
     // `report::query_warnings::ReadCursor::cut`)
     // A BLAST XML report before the batch that NCBI's stream cuts before its hits makes none of
     // its loads, whose texts (in the model, those of its reads: the texts of opening the taxonomy
@@ -7591,27 +6838,10 @@ fn taxonomy_cache_collision(db: &SeqDb, last: i32) -> Option<(usize, i32)> {
 const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by that id though the report reads nothing of it (outfmt 8, 9 and 12 with PRE_FETCH_SEQS_LIMIT=2147483647, a tabular field list that reads nothing of the subject)";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1340-1355
-// ```c++
-//         ITERATE(TDeflines, iter, orig_deflines->Get()) {
-//             if ((seqid.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid)) ||
-//                 (seqid_lcl.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid_lcl))) {
-//                 filt_dl = *iter;
-//                 break;
-//             }
-//         }
-//
-//         if (filt_dl.Empty()) {
-//             NCBI_THROW(CSeqDBException, eArgErr,
-//                        "Error: oid headers do not contain target gi/seq_id.");
-// ```
-// The prefetch rethrows a `CSeqDBException` (`BlastFormatter_PreFetchSequenceData`, quoted at
+// The prefetch rethrows a `CSeqDBException` (`BlastFormatter_PreFetchSequenceData`, cited at
 // `ParsedSubject::prefetched`): NCBI stops with `BLAST Database error` (exit 2; probe of line DBID
 // P3, `pdb|1ABC|A` and `pdb|1abc|A` in the two databases of `ids/pshare_cd`).
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1465-1466
-// ```c++
-//     list< CRef<CSeqdesc> > tax =
-//         x_GetTaxonomy(oid, target_gi, target_seq_id);
-// ```
 // The blob that the loader reads for the Seq-align id is that of the sequence the scope gets
 // (`scope_bioseq`), whose taxids its volume looks up: another sequence's where the lookup gives
 // that one first and the loader keeps it (review 2 of line DBID pssmread, H3: `gi|777` of
@@ -7734,26 +6964,7 @@ pub(crate) fn check_prefetched_parsed(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1113-1134
-// ```c++
-// 	CScope::TBioseqHandles bhs = scope->GetBioseqHandles(ids);
-//     ...
-//     ITERATE(CScope::TBioseqHandles, it, bhs) {
-//     	CRef<CDelta_seq> seq(new CDelta_seq);
-// 	    CSeq_interval& interval = seq->SetLoc().SetInt();
-// 	    interval.SetId(*SerialClone(*it->GetAccessSeq_id_Handle().GetSeqId()));
-// 	    if (ranges[i].GetFrom() > ranges[i].GetToOpen()) {
-// 	    	TSeqPos length = it->GetBioseqLength();
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:679-687
-// ```c++
-//             CConstRef<CSeq_id> subj(&(*aln)->GetSeq_id(kSubjRow));
-//             TSeqRange subj_range((*aln)->GetSeqRange(kSubjRow));
-//             if ((*aln)->GetSeqStrand(kQueryRow) == eNa_strand_minus &&
-//                 (*aln)->GetSeqStrand(kSubjRow) == eNa_strand_plus) {
-//                 TSeqRange r(subj_range);
-//                 // flag the range as needed to be flipped once the sequence
-//                 // length is known
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:678-687
 // A Seq-align on the query's minus strand and the subject's plus strand (BLASTN's minus-strand
 // HSPs, TBLASTX's of a minus query frame and a plus subject frame: the strand of the first
 // Std-seg) asks the handle for the length; a null handle throws, which the prefetch catches with
@@ -7810,17 +7021,6 @@ fn prefetch_gets_no_bioseq(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1129-1140
-// ```c++
-//     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
-//         TTaxId taxid = ZERO_TAX_ID;
-//
-//         if ((*iter)->CanGetTaxid()) {
-//             taxid = (*iter)->GetTaxid();
-//         }
-//         if (taxid <= ZERO_TAX_ID) {
-//             continue;
-//         }
-// ```
 /// The lookups of the volume's taxonomy cache where NCBI loads the blob of the sequence `blob` for a
 /// read of the subject `ordinal` by its Seq-align id (`CSeqDBVol::x_GetTaxonomy`, of the definition
 /// lines of `x_GetTaxDefline`): their positive taxids in that order, a taxid of several lines once
@@ -7911,26 +7111,9 @@ impl ScopeBioseq {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1340-1356 and
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1340-1372 and
 // 1437-1439
-// ```c++
-//         ITERATE(TDeflines, iter, orig_deflines->Get()) {
-//             if ((seqid.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid)) ||
-//                 (seqid_lcl.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid_lcl))) {
-//                 filt_dl = *iter;
-//                 break;
-//             }
-//         }
-//
-//         if (filt_dl.Empty()) {
-//             NCBI_THROW(CSeqDBException, eArgErr,
-//                        "Error: oid headers do not contain target gi/seq_id.");
-//     ...
-//     seqids = defline->GetSeqid();
-//     ...
-//     bioseq->SetId().swap(seqids);
-// ```
-// NCBI's scope gets a Seq-align id's Bioseq from the data loader (`x_GetOid`, quoted at
+// NCBI's scope gets a Seq-align id's Bioseq from the data loader (`x_GetOid`, cited at
 // `ParsedSubject::found_instead` and [`loader_keeps`]): the blob of the first sequence the
 // lookup gives where one of its ids compares equal to the id, whose Bioseq `GetBioseqNoData`
 // builds with the ids of the first definition line that holds the id or its local form; the scope
@@ -8041,7 +7224,7 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 
 /// Whether the first format of a call is one whose batches prefetch their reported subjects
 /// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, and with
-/// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, quoted at
+/// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, cited at
 /// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
 /// the batch's messages go with, are written with the first format (the Seq-annots write only
 /// the reader's); the XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the
@@ -8467,7 +7650,7 @@ mod taxdb_prepass_tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1447-1455 (quoted
-    // at `SeqidLookup::seqid_to_oids`): without `multi`, `if (! multi) return;` at the first OID.
+    // at `SeqidLookup::seqid_to_oids`): without `multi`, the lookup returns at the first OID.
     /// Line DBID v4late (review 3 of line DBID loadord, H3): in a list of version 4 volumes whose
     /// later volume's string ISAM index does not open (mode 000), NCBI's lookup of an id that an
     /// earlier volume holds returns there (NCBI BLAST+ 2.17.0: exit status 0, probe
@@ -9672,10 +8855,10 @@ mod taxdb_prepass_tests {
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-758 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-758 (cited at
     // `report::query_warnings::write_posts_to`: a cut `Iteration` makes none of its loads)
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 and
-    // c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (quoted at `load_before_stop` and
+    // c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (cited at `load_before_stop` and
     // `prefetch_stop`: the loads in the order of the handles, up to the first stopping lookup)
     /// Line RG K4h's E2 in the programs that model a stopping batch before they write the BLAST XML
     /// reports before it (review 5 of line DBID loadord, M1): the report of query 0, which NCBI's

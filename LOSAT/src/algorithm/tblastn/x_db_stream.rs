@@ -50,14 +50,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1380-1386 (the redo fetches
 //! each match's subject)
-//! ```c
-//!         if( program_number == eBlastTypeTblastn ) {
-//!             seq_info->seq_arg.encoding = eBlastEncodingNcbi4na;
-//!         } else {
-//!             seq_info->seq_arg.encoding = eBlastEncodingProtein;
-//!         }
-//!         if (BlastSeqSrcGetSequence(seqSrc, &seq_info->seq_arg) >= 0) {
-//! ```
 //!
 //! It acts for every TBLASTN search with `-db`. The shadow mode (`LOSAT_X_TBNDBSTREAMSHADOW=1`,
 //! which compared the check and every read with the copy) went with the copy.

@@ -17,51 +17,11 @@ use crate::blastinput::value_parsers::*;
 pub const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
-// ```c++
-//     if (detailed) {
-//         x.AddDetails(arr);
-//     } else {
-//         arr.push_back(kEmptyStr);
-//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
-//     }
-// ```
 /// The text of `rpstblastn -h`: the head of `HELP` before `OPTIONAL ARGUMENTS`, then NCBI's
 /// pointer to `-help` (frozen as NCBI writes it).
 pub const USAGE: &str = include_str!("usage.txt");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110
-// ```c++
-// CRPSTBlastnAppArgs::CRPSTBlastnAppArgs()
-// {
-//     CRef<IBlastCmdLineArgs> arg;
-//     bool const kFilterByDefault = false;
-//     static const string kProgram("rpstblastn");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                "Translated Reverse Position Specific BLAST"));
-//     const bool kQueryIsProtein = false;
-//     const bool kIsRpsBlast = true;
-//     const bool kIsCBS2and3Supported = false;
-//     ...
-//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs(false, kIsRpsBlast));
-//     ...
-//     arg.Reset(new CGenericSearchArgs( !kQueryIsProtein, kIsRpsBlast ));
-//     ...
-//     arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
-//     ...
-//     arg.Reset(new CFilteringArgs( !kQueryIsProtein, kFilterByDefault));
-//     ...
-//     arg.Reset(new CWindowSizeArg);
-//     ...
-//     arg.Reset(new CGappedArgs);
-//     ...
-//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-//     ...
-//     m_FormattingArgs.Reset(new CFormattingArgs);
-//     ...
-//     m_MTArgs.Reset(new CRPSBlastMTArgs());
-//     ...
-//     arg.Reset(new CCompositionBasedStatsArgs(kIsCBS2and3Supported, kDfltArgCompBasedStatsRPS ));
-// ```
 // rpstblastn's arguments: rpsblast's, with the genetic code of the query (`-query_gencode`), the
 // query strands (`-strand`) and `-ungapped`, in the order of NCBI's `-help` (the struct is
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
@@ -86,7 +46,7 @@ pub struct RpstblastnArgs {
     pub db: Option<String>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
-    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
@@ -94,10 +54,6 @@ pub struct RpstblastnArgs {
     #[arg(long, value_parser = rpstblastn_real)]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    // ```c++
-    //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
-    //                            CArgDescriptions::eString, m_DefaultOpt);
-    // ```
     /// Read as RPS-BLAST reads it (`rpsblast::args::rps_composition_mode`).
     #[arg(long, default_value = "1")]
     pub comp_based_stats: String,
@@ -150,9 +106,6 @@ pub struct RpstblastnArgs {
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917
-    // ```c++
-    //     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
-    // ```
     /// `-ungapped`: NCBI's options error with composition-based statistics (BLASTX's
     /// `resolve`); without them NCBI BLAST+ 2.17.0 crashes after the search, which LOSAT refuses
     /// (`rps_search::translated`, DECISIONS 38 D3).
@@ -169,16 +122,11 @@ pub struct RpstblastnArgs {
     #[arg(long, value_name = "int_value", value_parser = rpsblast_mt_mode)]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
-    // ```c++
-    //     arg_desc.AddFlag(kArgUseSWTraceback,
-    //                      "Compute locally optimal Smith-Waterman alignments?",
-    //                      true);
-    // ```
     /// `-use_sw_tback`: without composition-based statistics NCBI's search does not read it
     /// (accepted); with them it is refused until item PS12c.
     #[arg(long = "use_sw_tback", default_value_t = false)]
     pub use_sw_tback: bool,
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (quoted at `USAGE`)
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (cited at `USAGE`)
     /// `-help` or `-help-full` (`full`: NCBI 2.17.0 writes one text for both) or `-h` (`short`):
     /// NCBI's reader stops at them, the words before them read first. The command line's reader sets this hidden argument there
     /// (`cli::try_parse_from_command`; no word of the user names it, `NCBI_HELP_ARG`), and the
@@ -276,15 +224,6 @@ impl RpstblastnArgs {
             export_search_strategy: self.export_search_strategy,
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
-            // ```c++
-            // CBlastRPSOptionsHandle::SetLookupTableDefaults()
-            // {
-            //     m_Opts->SetLookupTableType(eRPSLookupTable);
-            //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
-            //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
-            //     // them and therefore this value cannot be changed on an RPS-BLAST run
-            // }
-            // ```
             // The word size, the threshold, the matrix and the gap costs are the profile
             // database's (its `.aux`, which must name BLOSUM62 11/1, `rps_search`): BLASTX's
             // defaults are those values for the reports, whose threshold is 0
@@ -295,26 +234,11 @@ impl RpstblastnArgs {
             max_hsps: None,
             qcov_hsp_perc: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1465
-            // ```c
-            //    /* By default, sum statistics is used for all translated searches
-            //     * (except RPS BLAST), and for all ungapped searches.
-            //     */
-            //    if (program_number == eBlastTypeRpsTblastn) {
-            // 	   (*options)->do_sum_stats = FALSE;
-            //    } else if (!gapped_calculation ||
-            // ```
             sum_stats: Some(false),
             gap_open: None,
             gap_extend: None,
             max_intron_length: 0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpstblastn_options.cpp:60-64
-            // ```c++
-            // void
-            // CRPSTBlastnOptionsHandle::SetQueryOptionDefaults()
-            // {
-            //     m_Opts->SetQueryGeneticCode(BLAST_GENETIC_CODE);
-            // }
-            // ```
             // No SEG by default (`kFilterByDefault`); the query masks are BLASTX's, on the
             // translated frames.
             seg: self.seg.unwrap_or_else(|| "no".to_string()),
@@ -415,7 +339,7 @@ mod tests {
         parse(extra).unwrap().rps_search().unwrap()
     }
 
-    // ncbiargs.cpp:3829-3834 (quoted at `USAGE`): `-help` and `-h` write NCBI's texts, whatever
+    // ncbiargs.cpp:3829-3834 (cited at `USAGE`): `-help` and `-h` write NCBI's texts, whatever
     // follows them; the words before them are read first.
     #[test]
     fn help_and_usage_are_ncbis_texts() {
@@ -465,7 +389,7 @@ mod tests {
             .contains("-evalue"));
     }
 
-    // blast_args.cpp:839-865 (quoted at `rps_composition_mode`): RPS-BLAST's letters; every mode
+    // blast_args.cpp:839-865 (cited at `rps_composition_mode`): RPS-BLAST's letters; every mode
     // runs (item PS12b); with -ungapped BLASTX's resolve gives NCBI's error.
     #[test]
     fn composition_modes_run() {
@@ -727,7 +651,7 @@ mod tests {
         let resolved = args.resolve().unwrap();
         assert_eq!(resolved.formatting.line_length(), 70);
         assert_eq!(resolved.report_sort(), Default::default());
-        // RPS-BLAST prints no word threshold (`blast_rps_options.cpp:60-67`, quoted above).
+        // RPS-BLAST prints no word threshold (`blast_rps_options.cpp:60-67`, cited above).
         assert_eq!(resolved.threshold, 0.0);
         assert!(!resolved.sum_stats);
         assert_eq!(resolved.composition, 0);

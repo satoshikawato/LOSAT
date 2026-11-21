@@ -25,33 +25,13 @@ sys.modules[SPEC.name] = comparison
 SPEC.loader.exec_module(comparison)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ```c
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-#     if (iter != m_FieldsToShow.begin())
-#         m_Ostream << m_FieldDelimiter;
-#     x_PrintField(*iter);
-# }
-# m_Ostream << "\n";
-# ```
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 def tabular_row(qstart: int, *, pident: str = "100.000") -> str:
     qend = qstart + 10
     return f"query\tsubject\t{pident}\t11\t0\t0\t{qstart}\t{qend}\t{qstart}\t{qend}\t1e-05\t20.0\n"
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kTask("task");
-# const string kArgNumThreads("num_threads");
-# const string kArgEvalue("evalue");
-# const string kArgWordSize("word_size");
-# const string kArgDustFiltering("dust");
-# const string kArgLookupTableMaskingOnly("soft_masking");
-# const string kArgMaxHSPsPerSubject("max_hsps");
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
 def manifest_row(case_id: str = "paired.case") -> dict[str, str]:
     return {
         "case_id": case_id,
@@ -79,7 +59,7 @@ def manifest_row(case_id: str = "paired.case") -> dict[str, str]:
 
 
 class CompareBlastnParityTests(unittest.TestCase):
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
     # The final newline and every preceding byte are written directly to the
     # output stream, so a byte-only gate must independently fail on comments.
     def test_fail_on_byte_diff_controls_exit_status_independently(self) -> None:
@@ -109,13 +89,7 @@ class CompareBlastnParityTests(unittest.TestCase):
         self.assertIn("raw_bytes: DIFFER", completed.stdout)
         self.assertIn("structured_equal: True", completed.stdout)
 
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
-    # ```c
-    # ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-    #     tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
-    #     tabinfo.Print();
-    # }
-    # ```
+    # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
     def test_structured_equality_detects_row_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_dir = Path(tmp)
@@ -136,7 +110,7 @@ class CompareBlastnParityTests(unittest.TestCase):
         self.assertFalse(result["ncbi_only"])
         self.assertFalse(result["losat_only"])
 
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
+    # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
     # Each CSeq_align_set entry is printed; coordinate-key multiplicity cannot
     # be discarded even when duplicate rows have identical values.
     def test_structured_equality_detects_duplicate_multiplicity(self) -> None:
@@ -161,12 +135,7 @@ class CompareBlastnParityTests(unittest.TestCase):
         self.assertFalse(result["ncbi_only"])
         self.assertFalse(result["losat_only"])
 
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
-    # ```c++
-    #         arg_desc.AddDefaultKey(kArgStrand, "strand",
-    #                      "Query strand(s) to search against database/subject",
-    #                                CArgDescriptions::eString, kDfltArgStrand);
-    # ```
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     # NCBI gets the strand of every row; LOSAT gets a one-strand row's strand and, for `both`
     # (its default), the command it always had (frozen in the S02 baseline).
     def test_both_commands_pass_the_strand_of_the_row(self) -> None:
@@ -183,7 +152,7 @@ class CompareBlastnParityTests(unittest.TestCase):
                 self.assertEqual(losat[losat.index("-strand") + 1], strand, losat)
                 self.assertEqual(losat.count("-strand"), 1, losat)
 
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
     # The fake executable only records the already-defined NCBI CLI boundary;
     # it is not an alternate BLAST implementation or an external dependency.
     def test_fresh_paired_mode_uses_same_cwd_and_manifest_values(self) -> None:
@@ -284,11 +253,7 @@ class CompareBlastnParityTests(unittest.TestCase):
         )
         self.assertIn("raw_bytes: exact", completed.stdout)
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1275-1283,1322-1325
-    # ```c
-    # m_Ostream << "# " << num_hits << " hits found" << "\n";
-    # m_Ostream << "# BLAST processed " << num_queries << " queries\n";
-    # ```
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1275-1283,1322-1325
     def test_permanent_manifest_covers_formats_no_hit_and_multi_query(self) -> None:
         manifest = SCRIPT.with_name("blastn_parity_manifest.tsv")
         fixture = SCRIPT.with_name("fasta") / "blastn_parity_compact.fasta"

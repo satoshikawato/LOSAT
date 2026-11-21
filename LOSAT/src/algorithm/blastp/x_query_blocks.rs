@@ -225,29 +225,8 @@
 //!   messages with several formats were argued for the CLI's shape.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
-//! ```c++
-//!         if (results.HasAlignments()) {
-//!     ...
-//!             if(m_FormatType == CFormattingArgs::eAsnText)
-//!             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-368,2232-2246
-//! ```c++
-//!     // no header for some output types
-//!     if (m_FormatType >= CFormattingArgs::eXml) {
-//!     ...
-//!     } else if (m_FormatType >= CFormattingArgs::eTabular)
-//!         return;  // No footer for these.
-//!     ...
-//!         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-744
-//! ```c++
-//!     if( incremental_output && incremental_struct->m_IterationNum == 0) {
-//!     ...
-//!         if (incremental_struct)
-//!         	incremental_struct->m_IterationNum++;
-//! ```
 //!
 //! The block search also takes a
 //! `run_local` call with several outputs, the hit records or an observer (ABI v2 of the Web build
@@ -311,115 +290,16 @@
 //! block search and the preliminary stage in blocks).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
-//! ```c++
-//!         formatter.PrintProlog();
-//!     ...
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!     ...
-//!         formatter.PrintEpilog(opt);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1430,2235
-//! ```c++
-//!     m_QueriesFormatted++;
-//!     ...
-//!         tabinfo.PrintNumProcessed(m_QueriesFormatted);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-572
-//! ```c
-//!                 /* Check if the last hit hits current query. Because last_hit
-//!                    is never reset, it may contain a hit to the previous
-//!                    concatenated query */
-//!
-//!                 if (query_offset - diff <
-//!                     query_info->contexts[curr_context].query_offset) {
-//!
-//!                     /* there was no last hit for this diagnol; start a new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1575
-//! ```c
-//!     /* Initialize with BLAST_SCORE_MIN */
-//!     for (i = 0; i < sbp->alphabet_size; i++) {
-//!         for (j = 0; j < sbp->alphabet_size; j++) {
-//!             matrix[i][j] = BLAST_SCORE_MIN;
-//!     ...
-//!                 i == AMINOACID_TO_NCBISTDAA['-'] ||
-//!     ...
-//!                 continue;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:859-860
-//! ```c
-//!         if (score <= 0 || (maxscore - score) >= dropoff)
-//!             break;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-173
-//! ```c
-//!     if (ewp->diag_table) {
-//!         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//!             ewp->diag_table->offset = ewp->diag_table->window;
-//!             s_BlastDiagClear(ewp->diag_table);
-//!         } else {
-//!             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//!         }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:831-840
-//! ```c
-//!         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//!
-//!         if (cell_index == 0 ) { /* can't be empty => it's full  */
-//!
-//!             /* fetch next vacant cell */
-//!         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//!
-//!             /* shuffle the pointers */
-//!             new_cell->next = backbone_cell->payload.overflow_list.head;
-//!             backbone_cell->payload.overflow_list.head = new_cell;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-284
-//! ```c
-//!     /* prime the index */
-//!     for(s = s_first; s <= s_last; s++){
-//!         index = s_ComputeCompressedIndex(word_length - 1, s,
-//!                                          compressed_alphabet_size,
-//!                                          &skip, lookup);
-//!         if(!skip)
-//!           break;
-//!     }
-//!
-//!     next_char = ((s <= s_last)? s[word_length-1] : 0);
-//!     preshift = (Int4)((((Int8)index) * recip) >> 32);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:384-405
-//! ```c
-//!                 /* handle the rest of the list */
-//!                 if (first_cell_entries) {
-//!                    curr_cell = curr_cell->next;
-//!                 }
-//!                    while (curr_cell != NULL) {
-//!     ...
-//!              totalhits += numhits;
-//!           }
-//!           else
-//!               /* not enough space in the destination array */
-//!           {
-//!               s_range[1] = (Int4)(s - subject->sequence);
-//!               return totalhits;
-//!           }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-56
-//! ```c
-//!                 diag_array_length = 1;
-//!                 /* What power of 2 is just longer than the query? */
-//!                 while (diag_array_length < (qlen+window_size))
-//!                 {
-//!                         diag_array_length = diag_array_length << 1;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
-//! ```c
-//!     Blast_InitHitListSortByScore(init_hitlist);
-//! ```
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -495,11 +375,6 @@ pub(crate) fn x_reach_block_search(own: bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
-// ```c++
-//     if( incremental_output && incremental_struct->m_IterationNum == 0) {
-//     ...
-//         *out_stream << serial_xml_start << "\n<BlastOutput_iterations>" ;
-// ```
 // The refusals of the XML report (`write_blastp_xml`) come before its first byte; a block would
 // make them after the bytes of the blocks before. These are the writer's own checks, made for the
 // whole run before the first block (`names::xml_query_title`, `names::xml_subject_names`: a title
@@ -561,9 +436,6 @@ fn x_all_in_groups(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
 // Every format prints from the final result set of its call; a block's call numbers the HSPs of
 // its own list from 0. No NCBI counterpart for the offset: it maps a block's numbers to those of
 // the list of all queries, the blocks' lists one after the other.
@@ -608,19 +480,6 @@ impl FormatObserver for XOffsetObserver<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//             ...
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-//             ...
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-// ```
 // NCBI searches and reports one batch at a time; a block is one or more whole batches.
 /// The blocks of searched queries: consecutive batches (`batches`, of the whole input), each
 /// block closed at the first batch end where its letters (`lengths` of the searched queries)
@@ -725,14 +584,6 @@ impl Write for XBlockSink<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
-// ```c
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//            continue;
-//        }
-// ```
 // NCBI reads each subject again for each query batch; the encoded subject is a function of the
 // subject's record only, so one encoding serves every block. Reuse only.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks (attached to the search's
@@ -798,10 +649,6 @@ impl XBlockSubjects {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
-// ```c
-//                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-//                                              subject_maybe_biased);
-// ```
 // NCBI masks a subject range in each batch that reaches it. Reuse of an identical result only: an
 // entry is a function of its key where the key names the same subject in every block.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the store of SEG-masked subject ranges that the blocks' redos
@@ -874,9 +721,6 @@ pub(crate) fn x_block_subject_meta<'p>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (the contexts' Karlin
 // blocks, `x_prepare_blosum62_lookup_query_in_pool`)
-// ```c
-//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ```
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): `prepare_blosum62_lookup_query_for_word_size(query_frames,
 /// word_size, false)`, with the contexts' Karlin blocks computed on `pool`'s threads when the switch
 /// is set and the pool has more than one thread (the same values).
@@ -1023,9 +867,6 @@ pub(crate) struct XLookupFlat<'a> {
 impl<'a> XLookupFlat<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (the contexts'
     // Karlin blocks, `x_bp_lookup_query`)
-    // ```c
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // ```
     /// The values of `x_bp_lookup_query(query_frames, word_size, pool)` for BLOSUM62, and of
     /// `prepare_matrix_lookup_query_for_word_size` (the contexts' Karlin blocks on `pool` where it
     /// has more than one thread) for another search matrix `matrix` (item SC2b). For BLOSUM62, where
@@ -1106,19 +947,6 @@ impl<'a> XLookupFlat<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2781
-    // ```c
-    //       if ( !contexts[context].is_valid )
-    //           continue;
-    //
-    //       query_length = contexts[context].query_length;
-    //       context_offset = contexts[context].query_offset;
-    //       buffer = &query[context_offset];
-    //
-    //       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-    //       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-    //       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-    //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-    // ```
     // NCBI makes the lookup segments (c++/src/algo/blast/core/blast_setup.c:635) before these
     // blocks (BlastSetup_ScoreBlkInit, blast_setup.c:652); the blocks are left to the build's tasks.
     /// The lookup query without the contexts' Karlin blocks, which become the build's extra tasks.
@@ -1178,12 +1006,6 @@ impl<'a> XLookupFlat<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
-    // ```c
-    //       if ( !contexts[context].is_valid )
-    //           continue;
-    //       ...
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // ```
     /// After the build: with Karlin tasks (`lookup_query`), sets the contexts' validity and Karlin
     /// blocks that the build's tasks computed and computes the others here; the tasks do not run
     /// where the pool's build falls back to the serial builder (a backbone too large for its
@@ -1203,13 +1025,7 @@ impl<'a> XLookupFlat<'a> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
-// ```c
-//    for (context = query_info->first_context;
-//         context <= query_info->last_context; ++context) {
-//       ...
-//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2762-2803
 // NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's
 // letters, so computing them as tasks of the lookup build (on any thread, in any order) gives each
 // context the same block (`XBlosum62LookupQuery`). The table's build reads only the query, the
@@ -1240,13 +1056,6 @@ impl XExtraTasks for XKarlinTasks<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2782
-    // ```c
-    //       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-    //       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-    //       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-    //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // ```
     fn run(&self, index: usize) {
         let karlin = self.lookup_query.context_karlin(self.frames[index]);
         let stored = self.done[index].set(karlin).is_ok();
@@ -1260,11 +1069,6 @@ impl XExtraTasks for XKarlinTasks<'_> {
 ))]
 impl XKarlinTasks<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2784
-    // ```c
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    //       if (loop_status) {
-    //           contexts[context].is_valid = FALSE;
-    // ```
     /// Sets each context's validity and Karlin block from its task, or computes it here when its
     /// task has not run. Returns the number of contexts set from the tasks.
     fn fill(&self, contexts: &mut [QueryContext]) -> usize {
@@ -1290,12 +1094,6 @@ mod tests {
     use super::*;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
-    // ```c
-    //       if ( !contexts[context].is_valid )
-    //           continue;
-    //       ...
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // ```
     // The lookup query with the contexts' Karlin blocks computed on a pool of 1, 3 and 7 threads is
     // the reference's (`prepare_blosum62_lookup_query_for_word_size`): the query, the segments and
     // every context (Karlin blocks bit for bit, validity). Random queries with low-complexity runs

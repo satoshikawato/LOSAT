@@ -18,50 +18,15 @@
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-// ```c
-// /** Split subject sequences if longer than this */
-// #define MAX_DBSEQ_LEN 5000000
-// ```
 /// The longest chunk of a subject (NCBI's `MAX_DBSEQ_LEN`).
 pub const MAX_DBSEQ_LEN: usize = 5_000_000;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:190-192
-// ```c
-// /** By how much should the chunks of a subject sequence overlap if it is
-//     too long and has to be split */
-// #define DBSEQ_CHUNK_OVERLAP 100
-// ```
 /// The overlap of a subject's consecutive chunks within one range (NCBI's `DBSEQ_CHUNK_OVERLAP`).
 pub const DBSEQ_CHUNK_OVERLAP: usize = 100;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218
-// ```c
-//     } else {
-//         // CSeqDB has allocated one more space before and after seq_range
-//         seq_blk->seq_ranges_allocated = FALSE;
-//         tmp = seq_ranges;
-//     }
-//
-//     // Fill out the boundary of the sequence to compliment the masks
-//     tmp[0].left = 0;
-//     tmp[num_seq_ranges - 1].right = seq_blk->length;
-//     seq_blk->seq_ranges = tmp;
-//     seq_blk->num_seq_ranges = num_seq_ranges;
-//     seq_blk->mask_type = mask_type;
-//     return 0;
-// ```
-// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306
-// ```c++
-//         value_type& operator[](size_type i) { return (value_type &)_data[1+ 2*i]; }
-//
-//         value_type * get_data() const { return (value_type *) _data; }
-//     ...
-//         void append(const void *src, size_type num_elements) {
-//             reserve(_size + num_elements);
-//             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
-//             _size += num_elements;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:280-306
 // `get_data()` starts one `TSeqPos` before the first mask, so its `SSeqRange` pairs are
 // (the spare value, start 0), (end 0, start 1), ..., (end n-1, the spare value after the
 // last): with `tmp[0].left = 0` and the last `right` the length, the complement of the
@@ -113,40 +78,7 @@ pub struct HardChunk {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:122-143
-// ```c
-// typedef struct SubjectSplitStruct {
-//     Uint1* sequence;  /**< backup of original sequence */
-//     SSeqRange  full_range;  /**< full sequence range */
-//
-//     SSeqRange* seq_ranges; /**< backup of original sequence range */
-//     Int4 num_seq_ranges;   /**< backup of original number of items in seq_ranges */
-//     Int4 allocated;   /**< number of seq_range allocated for subject */
-//
-//     SSeqRange* hard_ranges;  /**< sequence ranges for hard masking */
-//     Int4 num_hard_ranges;    /**< number of hard masking ranges */
-//     Int4 hm_index;           /**< the current hard masking index */
-//
-//     SSeqRange* soft_ranges;  /**< sequence ranges for soft masking */
-//     Int4 num_soft_ranges;    /**< number of soft masking ranges */
-//     Int4 sm_index;           /**< the current soft masking index */
-//
-//     Int4 offset;            /**< the offset of current chunk */
-//     Int4 next;              /**< the offset of next chunk */
-//
-// } SubjectSplitStruct;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:171-179
-// ```c
-//     } else if (subject->mask_type == eHardSubjMasking) {
-//         ASSERT (backup->seq_ranges);
-//         ASSERT (backup->num_seq_ranges >= 1);
-//         backup->hard_ranges = backup->seq_ranges;
-//         backup->num_hard_ranges = backup->num_seq_ranges;
-//     }
-//
-//     backup->offset = backup->hard_ranges[0].left;
-//     backup->next = backup->offset;
-// ```
 /// `SubjectSplitStruct` of a subject with hard ranges: its full range's end, its hard ranges
 /// (the complement of its masks in the order stored, [`complement_masks`]), `hm_index` and
 /// `next`. Its soft ranges are the full range (blast_engine.c:162-164). The first hard range
@@ -185,56 +117,7 @@ impl HardSplitState {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, with
     // `mask_type == eHardSubjMasking`
-    // ```c
-    //     if (backup->next >= backup->full_range.right) return SUBJECT_SPLIT_DONE;
-    //
-    //     residual = is_nucleotide ?  backup->next % COMPRESSION_RATIO : 0;
-    //     backup->offset = backup->next - residual;
-    //     subject->sequence = backup->sequence + ((is_nucleotide) ?
-    //                         backup->offset /COMPRESSION_RATIO : backup->offset);
-    //
-    //     if (backup->offset + MAX_DBSEQ_LEN <
-    //         backup->hard_ranges[backup->hm_index].right) {
-    //
-    //         subject->length = MAX_DBSEQ_LEN;
-    //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-    //
-    //     } else {
-    //
-    //         subject->length = backup->hard_ranges[backup->hm_index].right
-    //                         - backup->offset;
-    //         backup->hm_index++;
-    //         backup->next = (backup->hm_index < backup->num_hard_ranges) ?
-    //                         backup->hard_ranges[backup->hm_index].left :
-    //                         backup->full_range.right;
-    //     }
-    //
-    //     (subject->chunk)++;
-    //
-    //     /* if no chunking is performed */
-    //     if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-    //         subject->seq_ranges = backup->soft_ranges;
-    //         subject->num_seq_ranges = backup->num_soft_ranges;
-    //         return SUBJECT_SPLIT_OK;
-    //     }
-    //
-    //     /* if soft masking is off */
-    //     if (subject->mask_type != eSoftSubjMasking) {
-    //         s_AllocateSeqRange(subject, backup, 1);
-    //         subject->seq_ranges[0].left = residual;
-    //         subject->seq_ranges[0].right = subject->length;
-    //         return SUBJECT_SPLIT_OK;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
-    // ```c
-    //         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    //         overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //                   0 : dbseq_chunk_overlap;
-    //         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-    //                      kHspNumMax, &(backup.offset), INT4_MIN,
-    //                      overlap, score_options->gapped_calculation,
-    // ```
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -
     /// next % 4` (from `next` in a protein program), of `right - offset` letters (0 for a hard
@@ -340,7 +223,7 @@ mod tests {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (quoted
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (cited
     // at `HardSplitState::next_chunk`)
     // A protein program's chunks start at their hard range's left (`residual` 0), so the overlap
     // that the merge after a chunk reads is the next range's left against that offset; the first

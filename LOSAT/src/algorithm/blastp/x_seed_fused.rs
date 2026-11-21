@@ -1557,6 +1557,7 @@ where
         "the cross-cell AVX2 batch needs AVX2 and POPCNT"
     );
     x_cross_check_bounds(lookup.query_length, table.mask);
+    x_fx_form_init();
     let mut counts = XCrossCounts::default();
     // SAFETY: the CPU has AVX2 and POPCNT, and every query offset of the lookup is below
     // `query_length`, so at most the mask (asserted above).
@@ -2835,6 +2836,22 @@ fn x_cross_part_end(coords: &[i32; X_DIAG_LANES], start: usize) -> usize {
         .unwrap_or(X_DIAG_LANES)
 }
 
+/// PROBE (exp/fx-bxload, line FX): LOSAT_X_FXFORM bit 1 = entries by broadcast + blend, bit 2 =
+/// new values reloaded from the stack. Read once per process ([`x_fx_form_init`]).
+#[cfg(target_arch = "x86_64")]
+static X_FX_FORM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// PROBE (exp/fx-bxload): sets [`X_FX_FORM`] from LOSAT_X_FXFORM (0..=3, default 3) once.
+#[cfg(target_arch = "x86_64")]
+fn x_fx_form_init() {
+    use std::sync::OnceLock;
+    static ONCE: OnceLock<u8> = OnceLock::new();
+    let v = *ONCE.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_FXFORM", 0..=3, 3).unwrap_or(0) as u8
+    });
+    X_FX_FORM.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// EXPERIMENT (LOSAT_X_BXCROSS): [`x_batch_lanes`]'s test, which returns with the candidate
 /// lanes the eight entries it read. EXPERIMENT (LOSAT_X_BXCROSSDEFER, with `MARK`): it returns
 /// `None` before any store where an entry holds [`X_CROSS_MARKER`], and its candidate lanes store
@@ -2866,7 +2883,29 @@ unsafe fn x_batch_avx2_lanes_mark<const MARK: bool>(
             .get_unchecked(lane_coords[i] as usize)
             .raw_bits() as i32
     };
-    let old = _mm256_setr_epi32(e(0), e(1), e(2), e(3), e(4), e(5), e(6), e(7));
+    let fx = X_FX_FORM.load(std::sync::atomic::Ordering::Relaxed);
+    let old = if fx & 1 != 0 {
+        // PROBE (exp/fx-bxload): the eight entries as broadcasts from memory (load port only)
+        // blended into one register (p0/p1/p5), in place of vpinsrd/vinserti128 (port 5).
+        let base = table.entries.as_ptr().cast::<u32>();
+        let bc = |i: usize| -> __m256i {
+            let v: __m256i;
+            std::arch::asm!(
+                "vpbroadcastd {v}, dword ptr [{p}]",
+                v = out(ymm_reg) v,
+                p = in(reg) base.add(lane_coords[i] as usize),
+                options(pure, readonly, nostack, preserves_flags)
+            );
+            v
+        };
+        let lo = _mm256_blend_epi32::<0b1010_1010>(bc(0), bc(1));
+        let lo = _mm256_blend_epi32::<0b1100_1100>(lo, _mm256_blend_epi32::<0b1000_1000>(bc(2), bc(3)));
+        let hi = _mm256_blend_epi32::<0b1010_1010>(bc(4), bc(5));
+        let hi = _mm256_blend_epi32::<0b1100_1100>(hi, _mm256_blend_epi32::<0b1000_1000>(bc(6), bc(7)));
+        _mm256_blend_epi32::<0b1111_0000>(lo, hi)
+    } else {
+        _mm256_setr_epi32(e(0), e(1), e(2), e(3), e(4), e(5), e(6), e(7))
+    };
     // LOSAT_X_BXCROSSDEFER: an entry of a deferred candidate (the marker) ends the batch before
     // any store; the caller makes the deferred calls and tests the eight again.
     if MARK {
@@ -2893,12 +2932,24 @@ unsafe fn x_batch_avx2_lanes_mark<const MARK: bool>(
     };
     let mut lane_new = [0u32; X_DIAG_LANES];
     _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
-    for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
-        // coord <= mask < entries.len()
-        table
-            .entries
-            .get_unchecked_mut(coord as usize)
-            .set_raw_bits(raw);
+    if fx & 2 != 0 {
+        // PROBE (exp/fx-bxload): the new values reloaded from the stack (load ports), in place
+        // of vpextrd/vextracti128 (port 5).
+        for (i, &coord) in lane_coords.iter().enumerate() {
+            let raw = std::ptr::read_volatile(lane_new.as_ptr().add(i));
+            table
+                .entries
+                .get_unchecked_mut(coord as usize)
+                .set_raw_bits(raw);
+        }
+    } else {
+        for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
+            // coord <= mask < entries.len()
+            table
+                .entries
+                .get_unchecked_mut(coord as usize)
+                .set_raw_bits(raw);
+        }
     }
     Some((
         _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32,

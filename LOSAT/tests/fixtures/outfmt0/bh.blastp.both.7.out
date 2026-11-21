@@ -1,0 +1,29 @@
+# BLASTP 2.17.0+
+# Query: BDT63074.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sbh_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+BDT63074.1	s0_halves	95.201	896	43	0	1	896	1	896	0.0	1439
+BDT63074.1	s0_halves	87.379	927	87	1	1	897	928	1854	0.0	1337
+BDT63074.1	s0_same	84.694	882	133	1	8	887	36	917	0.0	1251
+BDT63074.1	s0_indel	83.536	905	130	17	1	897	21	914	0.0	1236
+BDT63074.1	s0_nest	88.430	121	14	0	21	141	31	151	7.02e-66	220
+BDT63074.1	s0_nest	78.448	116	25	0	20	135	173	288	5.33e-51	177
+BDT63074.1	s0_edge	88.710	62	7	0	3	64	238	299	1.12e-29	111
+BDT63074.1	s0_edge	82.090	67	12	0	1	67	155	221	6.67e-29	108
+BDT63074.1	s0_edge	91.071	56	5	0	1	56	1	56	1.35e-27	105
+BDT63074.1	s0_edge	89.474	57	6	0	1	57	81	137	1.35e-27	105
+# BLASTP 2.17.0+
+# Query: BDT63075.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sbh_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+BDT63075.1	s1_halves	95.622	1142	50	0	1	1142	1	1142	0.0	2232
+BDT63075.1	s1_halves	88.225	1172	108	1	1	1142	1173	2344	0.0	2066
+BDT63075.1	s1_same	85.027	1122	168	0	11	1132	41	1162	0.0	1834
+BDT63075.1	s1_indel	85.912	1157	128	32	1	1142	21	1157	0.0	1771
+BDT63075.1	s1_edge	96.667	60	2	0	4	63	158	217	6.57e-34	124
+BDT63075.1	s1_edge	92.982	57	4	0	1	57	81	137	2.88e-28	107
+BDT63075.1	s1_edge	85.000	60	9	0	1	60	1	60	3.08e-27	104
+BDT63075.1	s1_edge	79.032	62	13	0	3	64	238	299	2.87e-25	98.6
+# BLAST processed 2 queries

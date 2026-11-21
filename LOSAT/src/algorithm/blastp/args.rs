@@ -268,6 +268,16 @@ pub struct BlastpArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions). psiblast's are its parser's
+    // (`PsiblastArgs::best_hit_overhang`); rpsblast has neither.
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     /// Return only the best HSP for each non overlapping query region
     #[arg(long)]
@@ -513,13 +523,14 @@ pub struct ResolvedBlastpArgs {
     /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
     /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
     pub sort: crate::report::hit_sort::ReportSort,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
     pub culling_limit: i32,
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
+    /// them (`BlastpArgs::best_hit`).
+    pub(crate) best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     /// Whether -subject_besthit was given.
     pub subject_besthit: bool,
     pub ungapped: bool,
@@ -663,8 +674,7 @@ impl ResolvedBlastpArgs {
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
-            )
-            .max(1) as usize,
+            ),
         }
     }
 
@@ -688,6 +698,16 @@ impl BlastpArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
     }
 
     /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
@@ -1023,12 +1043,12 @@ impl BlastpArgs {
                 BlastpApp::Blastp => self.formatting.report_sort(),
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
-            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            best_hit: self.best_hit(),
             subject_besthit: self.subject_besthit,
             ungapped: self.ungapped,
             x_drop_ungapped_bits: self

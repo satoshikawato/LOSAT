@@ -1,0 +1,140 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+           6 sequences; 736 total letters
+
+
+
+Query= qa query protein alpha
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins2 insertion at the same place                                    201     2e-56
+s_ins insertions and deletion                                         189     6e-53
+s_multi two overlapping HSPs                                          179     6e-50
+s_twice same range twice                                              144     2e-39
+s_far weak                                                            128     2e-34
+
+
+
+Query_1    1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+Subject_3  39                                           ......P.......S.....  58
+Subject_3  1         .....M...............K........I....                      35
+Subject_3  34                                                          Q.KY.  38
+Subject_2  1    ..........................V.............W                     41
+Subject_2  55                                                        .R.GFPK  61
+Subject_2  45                                          W...........K........  65
+Subject_1  81                                      ...........R...W...T.....  105
+Subject_1  2     ..............D......V......E.........................       55
+Subject_4  73     L.NSLMDA..G...G...Q..............Y.........Q.......E.A....  130
+Subject_4  1              ...............N...............G........H.......A.  50
+Subject_5  2                         .T..KI...M.....F..MH.P..GESAN....A..WC.  40
+Subject_5  80            .Y..TN..                                             87
+
+Query_1    61   FQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  120
+Subject_3  59   ...............Q....................F.......................  118
+Subject_3  39   YDIGE..                                                       45
+Subject_2  72           YN..THSSFMPG........................................  123
+Subject_2  62   .IGC................PGSET.                                    87
+Subject_2  13                                  FAQ.VP.KIIR..W..HPSLE.         34
+Subject_1  106  .N....................K.................F.......R.            155
+Subject_4  131  ..E.......                                                    140
+Subject_4  51   .DDD..S...IK.D.                                               65
+Subject_4  83                                                   ..QY.PPKQ...  94
+Subject_5  41   .GR....ML.I..S.C....F.EP..EL.P.HTMC.SW.RY...NYV.I.....M.R.D.  100
+Subject_5  76                                .S.M..                           81
+
+Query_1    121  THGTYKKRDCALNERMFCFKCESRLSLVWD  150
+Subject_2  124  ..............................  153
+Subject_4  95   .                               95
+Subject_5  101  R..RNWH..                       109
+
+
+Lambda      K        H
+   0.325    0.137    0.470 
+
+
+Effective search space used: 81482
+
+
+Query= qnone no hits
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins insertions and deletion                                         13.3    1.6  
+s_ins2 insertion at the same place                                    12.9    2.1  
+
+
+
+Query_2    12   WDRIRDYMH  20
+Subject_2  95   .S.YHAP..  103
+Subject_3  90   .S.YHFP..  98
+
+
+Lambda      K        H
+   0.315    0.135    0.456 
+
+
+Effective search space used: 16150
+
+
+Query= qc query protein c
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_c for qc                                                            155     5e-43
+s_twice same range twice                                              19.0    0.053
+s_ins insertions and deletion                                         13.4    2.5  
+s_multi two overlapping HSPs                                          13.4    2.5  
+
+
+
+Query_3    1    QHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTRPWGR  59
+Subject_6  1    .............S...V....................................G..K.  59
+Subject_6  44                                                         K..    46
+Subject_4  96                                       .H.HPS.EG..              106
+Subject_4  17    ..HPS.EG.                                                   25
+Subject_2  112               .AE..RQE.IRFTHGTY..RD.                          133
+Subject_1  105                                       .F.STQN.YFMYNYN.        120
+Subject_1  27    ..HES.EG.                                                   35
+
+
+Lambda      K        H
+   0.319    0.138    0.531 
+
+
+Effective search space used: 27262
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+    Posted date:  Unknown
+  Number of letters in database: 736
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

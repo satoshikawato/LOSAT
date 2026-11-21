@@ -34,8 +34,8 @@ class BlastnOptions(TypedDict, total=False):
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
-    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short']
-    """Task to execute: megablast, blastn, dc-megablast or blastn-short"""
+    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn']
+    """Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn"""
     template_type: str
     """Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal"""
     template_length: int
@@ -48,8 +48,10 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (a database that has one is not supported) [default:
+    """Use MegaBLAST database index (an index that would be used is not supported) [default:
     false]"""
+    index_name: str
+    """MegaBLAST database index name (deprecated; use only for old style indices)"""
     evalue: float
     """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
     perc_identity: float
@@ -77,9 +79,10 @@ class BlastnOptions(TypedDict, total=False):
     """Percent query coverage per hsp"""
     reward: int
     """Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn
-    and dc-megablast; LOSAT does not support 0)"""
+    and dc-megablast, 0 for rmblastn; 0 needs penalty 0)"""
     penalty: int
-    """Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)"""
+    """Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the
+    other tasks)"""
     gapopen: int
     """Cost to open a gap (default: 0 for megablast, 5 for the other tasks)"""
     gapextend: int
@@ -89,6 +92,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    filtering_db: str
+    """BLAST database containing filtering elements (i.e.: repeats)"""
     window_masker_taxid: int
     """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
@@ -103,6 +108,10 @@ class BlastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     ungapped: bool
     """Perform ungapped alignment only"""
     xdrop_ungap: float
@@ -143,6 +152,10 @@ class BlastpOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -187,6 +200,12 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     ungapped: bool
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
@@ -239,6 +258,10 @@ class BlastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -332,6 +355,10 @@ class TblastnOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -407,6 +434,8 @@ class TblastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     num_threads: int
     mt_mode: int
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
@@ -432,6 +461,10 @@ class TblastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -451,6 +484,9 @@ class TblastxOptions(TypedDict, total=False):
     num_threads: int
     query_gencode: int
     db_gencode: int
+    max_intron_length: int
+    """Length of the largest intron allowed in a translated nucleotide sequence when linking
+    multiple distinct alignments [default: 0]"""
     max_target_seqs: int
     """Maximum number of aligned sequences to keep (default: 500)"""
     num_descriptions: int
@@ -476,7 +512,10 @@ class TblastxOptions(TypedDict, total=False):
     """SEG: no, yes, or WINDOW LOCUT HICUT"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
+    sum_stats: bool
+    """Use sum statistics [default: true]"""
     lcase_masking: bool
+    strand: Literal['both', 'plus', 'minus']
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
@@ -485,6 +524,8 @@ class TblastxOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
@@ -550,6 +591,12 @@ class PsiblastOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     xdrop_gap: float
@@ -596,3 +643,9 @@ class PsiblastOptions(TypedDict, total=False):
     save_each_pssm: bool
     """Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm
     options)"""
+    msa_master_idx: int
+    """Ordinal number (1-based index) of the sequence to use as a master in the multiple
+    sequence alignment. If not provided, the first sequence in the multiple sequence alignment
+    will be used"""
+    ignore_msa_master: bool
+    """Ignore the master sequence when creating PSSM"""

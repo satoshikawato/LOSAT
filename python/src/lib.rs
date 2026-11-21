@@ -9,12 +9,14 @@ mod table;
 
 use losat::api::{self, Program, ValueKind};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 pyo3::create_exception!(
     pylosat,
     LosatError,
     pyo3::exceptions::PyException,
-    "A failure that LOSAT reports. The message is the command line's text for the same failure."
+    "A failure that LOSAT reports. The message is the command line's text for the same failure, \
+     with one U+FFFD per maximal ill-formed subpart of its bytes; `message_bytes` holds the bytes."
 );
 pyo3::create_exception!(
     pylosat,
@@ -35,14 +37,24 @@ pyo3::create_exception!(
     "A search that fails, with the command line's message."
 );
 
-/// The Python exception of an API error.
+/// The Python exception of an API error: its message is the error's text (`Display`: one U+FFFD
+/// per maximal ill-formed subpart), and its attribute `message_bytes` the error's bytes
+/// (`Error::message`), what the command line writes.
 pub(crate) fn exception(error: api::Error) -> PyErr {
-    match error {
-        api::Error::Argv(message) => ArgumentError::new_err(message),
-        api::Error::Input(message) => InputError::new_err(message),
-        api::Error::Search(message) => SearchError::new_err(message),
-        other => LosatError::new_err(other.to_string()),
-    }
+    let text = error.to_string();
+    let raised = match &error {
+        api::Error::Argv(_) => ArgumentError::new_err(text),
+        api::Error::Input(_) => InputError::new_err(text),
+        api::Error::Search(_) => SearchError::new_err(text),
+        _ => LosatError::new_err(text),
+    };
+    Python::attach(|py| {
+        let bytes = PyBytes::new(py, error.message());
+        match raised.value(py).setattr("message_bytes", bytes) {
+            Ok(()) => raised,
+            Err(failed) => failed,
+        }
+    })
 }
 
 /// One option of a program: flag, help, whether it takes a value, the kind of the value, the
@@ -128,6 +140,8 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(search::blastdbcmd, module)?)?;
     module.add_function(wrap_pyfunction!(search::dustmasker, module)?)?;
     module.add_function(wrap_pyfunction!(search::segmasker, module)?)?;
+    module.add_function(wrap_pyfunction!(search::windowmasker, module)?)?;
     module.add_function(wrap_pyfunction!(search::convert2blastmask, module)?)?;
+    module.add_function(wrap_pyfunction!(search::makembindex, module)?)?;
     Ok(())
 }

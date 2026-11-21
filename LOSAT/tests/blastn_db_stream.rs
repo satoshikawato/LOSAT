@@ -11,14 +11,6 @@
 //! more and not at one.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ...
-//!          /* Save the results. */
-//!          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

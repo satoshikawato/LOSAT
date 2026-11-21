@@ -66,24 +66,6 @@ use crate::writedb::mask_info::MaskPart;
 use crate::writedb::WriteDbError;
 
 // NCBI reference (598d8ae6): c++/include/objects/blastdb/defline_extra.hpp:78-93
-// ```c++
-// struct SBlastDbMaskData {
-//
-//     /// Construct and clear this object.
-//     SBlastDbMaskData() : algorithm_id((int)eBlast_filter_program_not_set) {}
-//
-//     /// Identifies the algorithm used.
-//     int algorithm_id;
-//
-//     /// Start and end offsets of the filtered area.
-//     vector< pair<TSeqPos, TSeqPos> > offsets;
-//
-//     /// Determines whether this object contains no offsets
-//     bool empty() const {
-//         return offsets.empty();
-//     }
-// };
-// ```
 /// `SBlastDbMaskData`: the masked ranges of one sequence for one algorithm,
 /// each `(start, end)` with `end` exclusive.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -93,71 +75,12 @@ pub(crate) struct MaskedRanges {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb.hpp:64-79
-// ```c++
-// class NCBI_XOBJWRITE_EXPORT CMaskedRangesVector: public vector<SBlastDbMaskData>
-// {
-// public:
-//     /// Our parent class
-//     typedef vector<SBlastDbMaskData> TParent;
-//
-//     /// Redefine empty to mean no elements or none of its elements being empty
-//     bool empty() const {
-//         ITERATE(TParent, itr, *this) {
-//             if ( !itr->empty() ) {
-//                 return false;
-//             }
-//         }
-//         return true;
-//     }
-// };
-// ```
 /// `CMaskedRangesVector::empty`: no algorithm has a range.
 pub(crate) fn ranges_are_empty(ranges: &[MaskedRanges]) -> bool {
     ranges.iter().all(|r| r.offsets.is_empty())
 }
 
-// NCBI reference (598d8ae6): c++/include/util/range.hpp:148-151,178-191,256-308,326-334,358-367
-// ```c++
-//     bool Empty(void) const
-//         {
-//             return GetToOpen() <= GetFrom();
-//         }
-//     TThisType& SetTo(position_type to)
-//         {
-//             return SetToOpen(to+1);
-//         }
-//     TThisType& Set(position_type from, position_type to)
-//         {
-//             return SetFrom(from).SetTo(to);
-//         }
-//     static position_type GetWholeFrom(void) { return GetPositionMin(); }
-//     static position_type GetWholeToOpen(void) { return GetPositionMax(); }
-//     bool IsWhole(void) const { return IsWholeFrom() && IsWholeTo(); }
-//     static position_type GetEmptyFrom(void) { return GetPositionMax(); }
-//     static position_type GetEmptyToOpen(void) { return GetPositionMax(); }
-//     TThisType IntersectionWith(const TThisType& r) const
-//         {
-//             return TThisType(max(GetFrom(), r.GetFrom()),
-//                              min(GetToOpen(), r.GetToOpen()));
-//         }
-//     bool IntersectingWith(const TThisType& r) const
-//         {
-//             return IntersectionWith(r).NotEmpty();
-//         }
-//     TThisType& CombineWith(const TThisType& r)
-//         {
-//             if ( !r.Empty() ) {
-//                 if ( !Empty() ) {
-//                     m_From = min(m_From, r.GetFrom());
-//                     m_ToOpen = max(m_ToOpen, r.GetToOpen());
-//                 }
-//                 else {
-//                     *this = r;
-//                 }
-//             }
-//             return *this;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/include/util/range.hpp:148-151,178-191,256-308,312-353,358-367
 /// NCBI's `CRange<TSeqPos>`: `from` and the open end `to_open`, in `TSeqPos` (unsigned 32-bit,
 /// wrapping) arithmetic. `GetTo()` is `to_open - 1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,49 +138,7 @@ impl Range {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4283-4298
-// ```c++
-// class CRange_Less
-// {
-// public:
-//     CRange_Less(void) {}
-//
-//     bool operator() (const TRangeWithFuzz& rg1, const TRangeWithFuzz& rg2) const
-//     {
-//         if ( rg1.IsWhole() ) {
-//             return !rg2.IsWhole();
-//         }
-//         if ( rg1.Empty() ) {
-//             return !rg2.Empty()  &&  !rg2.IsWhole();
-//         }
-//         return !rg2.IsWhole()  &&  !rg2.Empty()  &&  rg1 < rg2;
-//     }
-// };
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4301-4322
-// ```c++
-// class CRange_ReverseLess
-// {
-// public:
-//     CRange_ReverseLess(void) {}
-//
-//     bool operator() (const TRangeWithFuzz& rg1, const TRangeWithFuzz& rg2) const
-//     {
-//         if ( rg1.IsWhole() ) {
-//             return !rg2.IsWhole();
-//         }
-//         if ( rg1.Empty() ) {
-//             return !rg2.Empty()  &&  !rg2.IsWhole();
-//         }
-//         if ( rg2.IsWhole()  ||  rg2.Empty() ) {
-//             return false;
-//         }
-//         if (rg1.GetTo() != rg2.GetTo()) {
-//             return rg1.GetTo() > rg2.GetTo();
-//         }
-//         return rg1.GetFrom() < rg2.GetFrom();
-//     }
-// };
-// ```
 /// `CRange_Less` (or `CRange_ReverseLess` with `reverse`): whole ranges first, then empty ones,
 /// then the others.
 fn range_less(rg1: &Range, rg2: &Range, reverse: bool) -> bool {
@@ -282,54 +163,6 @@ fn range_less(rg1: &Range, rg2: &Range, reverse: bool) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4333-4389
-// ```c++
-// static
-// bool x_MergeRanges(TRangeWithFuzz& rg1, ENa_strand str1,
-//                    const TRangeWithFuzz& rg2, ENa_strand str2,
-//                    CSeq_loc::TOpFlags flags)
-// {
-//     if ( !x_MatchStrand(str1, str2, flags) ) {
-//         return false;
-//     }
-//     // Check contained
-//     if ( (flags & CSeq_loc::fMerge_Contained) != 0 ) {
-//         if (rg1.GetFrom() <= rg2.GetFrom()  &&  rg1.GetTo() >= rg2.GetTo()) {
-//             // rg2 already contained in rg1
-//             ...
-//             return true;
-//         }
-//         if (rg1.GetFrom() >= rg2.GetFrom()  &&  rg1.GetTo() <= rg2.GetTo()) {
-//             // rg1 contained in rg2
-//             ...
-//             rg1 = rg2;
-//             ...
-//             return true;
-//         }
-//     }
-//     // Check overlapping
-//     if ( (flags & CSeq_loc::fMerge_OverlappingOnly) != 0  &&
-//         rg1.IntersectingWith(rg2) ) {
-//         rg1 += rg2;
-//         return true;
-//     }
-//     // Check abutting
-//     if ((flags & CSeq_loc::fMerge_AbuttingOnly) != 0) {
-//         if ( !IsReverse(str1) ) {
-//             if ( rg1.GetToOpen() == rg2.GetFrom() ) {
-//                 rg1.CopyTo(rg2);
-//                 return true;
-//             }
-//         }
-//         else {
-//             if (rg1.GetFrom() == rg2.GetToOpen()) {
-//                 rg1.CopyFrom(rg2);
-//                 return true;
-//             }
-//         }
-//     }
-//     return false;
-// }
-// ```
 // `fMerge_All` sets all three merge bits; the strand of both ranges of a comparison is the default
 // strand of their group, whose reverse-ness is `reverse`. Fuzz is not kept (only the positions
 // reach the database).
@@ -360,124 +193,10 @@ fn merge_ranges(rg1: &mut Range, rg2: Range, reverse: bool) -> bool {
     false
 }
 
-// NCBI reference (598d8ae6): /usr/include/c++/8/bits/stl_algo.h (libstdc++ of GCC 8.5, which
-// built makeblastdb 2.17.0: `strings makeblastdb` = "GCC: (GNU) 8.5.0 20210514 (Red Hat 8.5.0-26)")
-// ```c++
-// enum { _S_threshold = 16 };
-// __sort(__first, __last, __comp) {
-//   if (__first != __last) {
-//     std::__introsort_loop(__first, __last, std::__lg(__last - __first) * 2, __comp);
-//     std::__final_insertion_sort(__first, __last, __comp);
-//   }
-// }
-// __introsort_loop(__first, __last, __depth_limit, __comp) {
-//   while (__last - __first > int(_S_threshold)) {
-//     if (__depth_limit == 0) {
-//       std::__partial_sort(__first, __last, __last, __comp);   // __heap_select + __sort_heap
-//       return;
-//     }
-//     --__depth_limit;
-//     _RandomAccessIterator __cut = std::__unguarded_partition_pivot(__first, __last, __comp);
-//     std::__introsort_loop(__cut, __last, __depth_limit, __comp);
-//     __last = __cut;
-//   }
-// }
-// __unguarded_partition_pivot(__first, __last, __comp) {
-//   _RandomAccessIterator __mid = __first + (__last - __first) / 2;
-//   std::__move_median_to_first(__first, __first + 1, __mid, __last - 1, __comp);
-//   return std::__unguarded_partition(__first + 1, __last, __first, __comp);
-// }
-// __move_median_to_first(__result, __a, __b, __c, __comp) {
-//   if (__comp(__a, __b)) {
-//     if (__comp(__b, __c)) std::iter_swap(__result, __b);
-//     else if (__comp(__a, __c)) std::iter_swap(__result, __c);
-//     else std::iter_swap(__result, __a);
-//   }
-//   else if (__comp(__a, __c)) std::iter_swap(__result, __a);
-//   else if (__comp(__b, __c)) std::iter_swap(__result, __c);
-//   else std::iter_swap(__result, __b);
-// }
-// __unguarded_partition(__first, __last, __pivot, __comp) {
-//   while (true) {
-//     while (__comp(__first, __pivot)) ++__first;
-//     --__last;
-//     while (__comp(__pivot, __last)) --__last;
-//     if (!(__first < __last)) return __first;
-//     std::iter_swap(__first, __last);
-//     ++__first;
-//   }
-// }
-// __final_insertion_sort(__first, __last, __comp) {
-//   if (__last - __first > int(_S_threshold)) {
-//     std::__insertion_sort(__first, __first + int(_S_threshold), __comp);
-//     std::__unguarded_insertion_sort(__first + int(_S_threshold), __last, __comp);
-//   }
-//   else std::__insertion_sort(__first, __last, __comp);
-// }
-// __insertion_sort(__first, __last, __comp) {
-//   if (__first == __last) return;
-//   for (__i = __first + 1; __i != __last; ++__i) {
-//     if (__comp(__i, __first)) {
-//       __val = *__i; move_backward(__first, __i, __i + 1); *__first = __val;
-//     }
-//     else std::__unguarded_linear_insert(__i, __comp);
-//   }
-// }
-// __unguarded_linear_insert(__last, __comp) {
-//   __val = *__last; __next = __last; --__next;
-//   while (__comp(__val, __next)) { *__last = *__next; __last = __next; --__next; }
-//   *__last = __val;
-// }
-// ```
-// NCBI reference (598d8ae6): /usr/include/c++/8/bits/stl_heap.h (__make_heap, __adjust_heap,
-// __push_heap, __pop_heap, __sort_heap), and stl_algo.h __heap_select
-// ```c++
-// __heap_select(__first, __middle, __last, __comp) {
-//   std::__make_heap(__first, __middle, __comp);
-//   for (__i = __middle; __i < __last; ++__i)
-//     if (__comp(__i, __first)) std::__pop_heap(__first, __middle, __i, __comp);
-// }
-// __make_heap(__first, __last, __comp) {
-//   if (__last - __first < 2) return;
-//   __len = __last - __first; __parent = (__len - 2) / 2;
-//   while (true) {
-//     __value = *(__first + __parent);
-//     std::__adjust_heap(__first, __parent, __len, __value, __comp);
-//     if (__parent == 0) return;
-//     __parent--;
-//   }
-// }
-// __adjust_heap(__first, __holeIndex, __len, __value, __comp) {
-//   __topIndex = __holeIndex; __secondChild = __holeIndex;
-//   while (__secondChild < (__len - 1) / 2) {
-//     __secondChild = 2 * (__secondChild + 1);
-//     if (__comp(__first + __secondChild, __first + (__secondChild - 1))) __secondChild--;
-//     *(__first + __holeIndex) = *(__first + __secondChild);
-//     __holeIndex = __secondChild;
-//   }
-//   if ((__len & 1) == 0 && __secondChild == (__len - 2) / 2) {
-//     __secondChild = 2 * (__secondChild + 1);
-//     *(__first + __holeIndex) = *(__first + (__secondChild - 1));
-//     __holeIndex = __secondChild - 1;
-//   }
-//   std::__push_heap(__first, __holeIndex, __topIndex, __value, __comp);
-// }
-// __push_heap(__first, __holeIndex, __topIndex, __value, __comp) {
-//   __parent = (__holeIndex - 1) / 2;
-//   while (__holeIndex > __topIndex && __comp(__first + __parent, __value)) {
-//     *(__first + __holeIndex) = *(__first + __parent);
-//     __holeIndex = __parent; __parent = (__holeIndex - 1) / 2;
-//   }
-//   *(__first + __holeIndex) = __value;
-// }
-// __pop_heap(__first, __last, __result, __comp) {
-//   __value = *__result; *__result = *__first;
-//   std::__adjust_heap(__first, 0, __last - __first, __value, __comp);
-// }
-// __sort_heap(__first, __last, __comp) {
-//   while (__last - __first > 1) { --__last; std::__pop_heap(__first, __last, __last, __comp); }
-// }
-// ```
+// libstdc++ (GCC 8.5): bits/stl_algo.h (GCC 8.5 built makeblastdb 2.17.0: `strings makeblastdb`
+// = "GCC: (GNU) 8.5.0 20210514 (Red Hat 8.5.0-26)")
+// libstdc++ (GCC 8.5): bits/stl_heap.h (__make_heap, __adjust_heap, __push_heap, __pop_heap,
+// __sort_heap), and bits/stl_algo.h (__heap_select)
 /// `std::sort` of libstdc++ (introsort): the same permutation as NCBI's `sort(..)`, also of
 /// elements that compare equivalent and differ (two empty ranges).
 fn stl_sort<T: Copy>(v: &mut [T], less: &impl Fn(&T, &T) -> bool) {
@@ -744,24 +463,7 @@ impl Loc {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:115-121
-// ```asn
-// Na-strand ::= ENUMERATED {          -- strand of nucleic acid
-//     unknown (0) ,
-//     plus (1) ,
-//     minus (2) ,
-//     both (3) ,                -- in forward orientation
-//     both-rev (4) ,            -- in reverse orientation
-//     other (255) }
-// ```
 // NCBI reference (598d8ae6): c++/include/objects/seqloc/Na_strand.hpp:74-79
-// ```c++
-// inline
-// bool IsReverse(ENa_strand s)
-// {
-//     // treat unknown as forward
-//     return (s == eNa_strand_minus  ||  s == eNa_strand_both_rev);
-// }
-// ```
 const NA_STRAND_MINUS: u8 = 2;
 const NA_STRAND_BOTH_REV: u8 = 4;
 
@@ -789,166 +491,11 @@ struct Group {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:5060-5084
-// ```c++
-// CRef<CSeq_loc> CSeq_loc::Add(const CSeq_loc& other,
-//                              TOpFlags        flags,
-//                              ISynonymMapper* syn_mapper) const
-// {
-//     ...
-//     CRef<CSeq_loc> ret(new CSeq_loc);
-//     CSeq_loc tmp;
-//     tmp.SetMix().AddSeqLoc(const_cast<CSeq_loc&>(*this));
-//     tmp.SetMix().AddSeqLoc(const_cast<CSeq_loc&>(other));
-//     if ( (flags & CSeq_loc::fMerge_SingleRange) != 0 ) {
-//         x_SingleRange(*ret, tmp, *syn_mapper);
-//     }
-//     else if ( (flags & CSeq_loc::fSort) == 0 ) {
-//         x_MergeNoSort(*ret, tmp, flags, *syn_mapper);
-//     }
-//     else {
-//         x_MergeAndSort(*ret, tmp, flags, *syn_mapper);
-//     }
-//     return ret;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4640-4693
-// ```c++
-// static
-// void x_MergeAndSort(CSeq_loc& dst,
-//                     const CSeq_loc& src,
-//                     CSeq_loc::TOpFlags flags,
-//                     ISynonymMapper& syn_mapper)
-// {
-//     bool use_strand = (flags & CSeq_loc::fStrand_Ignore) == 0;
-//     // Id -> range map for both strands
-//     ...
-//     // Split location by by id/strand/range
-//     for (CSeq_loc_CI it(src, CSeq_loc_CI::eEmpty_Allow); it; ++it) {
-//         CSeq_id_Handle_Wrapper idh(syn_mapper.GetBestSynonym(it.GetSeq_id()), it.GetSeq_id());
-//         ENa_strand strand = it.GetStrand();
-//         if ( IsReverse(strand) ) {
-//             id_map_minus[idh].push_back(TRangeWithFuzz(it));
-//             ...
-//         }
-//         else {
-//             id_map_plus[idh].push_back(TRangeWithFuzz(it));
-//             ...
-//         }
-//     }
-//
-//     x_RangesToSeq_loc(dst, id_map_plus, default_plus, flags);
-//     if ( use_strand ) {
-//         x_RangesToSeq_loc(dst, id_map_minus, default_minus, flags);
-//     }
-//     if (dst.Which() == CSeq_loc::e_not_set) {
-//         dst.SetNull();
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4546-4594
-// ```c++
-// static
-// void x_RangesToSeq_loc(CSeq_loc& dst,
-//                        TIdToRangeMap& id_map,
-//                        ENa_strand default_strand,
-//                        CSeq_loc::TOpFlags flags)
-// {
-//     // Iterate ids for each strand
-//     NON_CONST_ITERATE(TIdToRangeMap, id_it, id_map) {
-//         ...
-//         TRanges& ranges = id_it->second;
-//         if ( (flags & CSeq_loc::fSort) != 0 ) {
-//             if ( !IsReverse(default_strand) ) {
-//                 sort(ranges.begin(), ranges.end(), CRange_Less());
-//             }
-//             else {
-//                 sort(ranges.begin(), ranges.end(), CRange_ReverseLess());
-//             }
-//         }
-//         // Merge ranges according to the flags, add to destination
-//         TRangeWithFuzz last_rg(TRangeWithFuzz::GetEmpty());
-//         bool have_range = false;
-//         ITERATE(TRanges, rg, ranges) {
-//             if (x_MergeRanges(last_rg, default_strand,
-//                             *rg, default_strand,
-//                             flags)) {
-//                 have_range = true;
-//                 continue;
-//             }
-//             // No merging - push current range, reset last values
-//             if (have_range) {
-//                 x_PushRange(dst, id_it->first, last_rg, default_strand);
-//             }
-//             last_rg = *rg;
-//             have_range = true;
-//         }
-//         if (have_range) {
-//             x_PushRange(dst, id_it->first, last_rg, default_strand);
-//         }
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1439-1471,1500-1531
-// ```c++
-// void CSeq_loc_CI_Impl::x_ProcessLocation(const CSeq_loc& loc)
-// {
-//     switch ( loc.Which() ) {
-//     case CSeq_loc::e_not_set:
-//     case CSeq_loc::e_Null:
-//     case CSeq_loc::e_Empty:
-//         {
-//             if (m_EmptyFlag == CSeq_loc_CI::eEmpty_Allow) {
-//                 SSeq_loc_CI_RangeInfo info;
-//                 if (loc.Which() == CSeq_loc::e_Empty) {
-//                     x_SetId(info, loc.GetEmpty());
-//                 }
-//                 else {
-//                     info.m_Id.Reset(new CSeq_id);
-//                 }
-//                 info.m_Range = TRange::GetEmpty();
-//                 info.m_Loc = &loc;
-//                 m_Ranges.push_back(info);
-//             }
-//             return;
-//         }
-//     case CSeq_loc::e_Whole:
-//         {
-//             SSeq_loc_CI_RangeInfo info;
-//             x_SetId(info, loc.GetWhole());
-//             info.m_Range = TRange::GetWhole();
-//             ...
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4392-4437
-// ```c++
-// static
-// void x_PushRange(CSeq_loc& dst,
-//                  const CSeq_id_Handle_Wrapper& idh,
-//                  const TRangeWithFuzz& rg,
-//                  ENa_strand strand)
-// {
-//     ...
-//     if ( !idh ) {
-//         // NULL
-//         ... dst.SetMix().Set().push_back(Ref(new CSeq_loc(CSeq_loc::e_Null)));
-//         return;
-//     }
-//     CRef<CSeq_id> id(new CSeq_id());
-//     id->Assign(*idh.GetSeqId());
-//     if ( rg.IsWhole() ) {
-//         ... whole->SetWhole(*id);
-//     }
-//     else if ( rg.Empty() ) {
-//         ... empty->SetEmpty(*id);
-//     }
-//     else ... (a point or an interval with `strand` unless it is unknown)
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:335-338
-// ```c++
-// CSeq_id_Handle CSeq_id_not_set_Tree::FindOrCreate(const CSeq_id& /*id*/)
-// {
-//     return null;
-// }
-// ```
 // `CSeq_loc_CI` (`eEmpty_Allow`) first makes the handle of every range's Seq-id (`x_SetId`), then
 // the loop takes `GetBestSynonym` = `GetHandle` of each again; both sets of handles go when
 // `x_MergeAndSort` returns. A `null` Seq-loc has an unset Seq-id, whose handle is the null one:
@@ -1189,38 +736,7 @@ impl MaskedRangeSet {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/masked_range_set.hpp:48-53
-    // ```c++
-    //     void Insert(int              algo_id,
-    //                 const CSeq_id  & id,
-    //                 const CSeq_loc & v)
-    //     {
-    //         x_CombineLocs(x_Set(algo_id, CSeq_id_Handle::GetHandle(id)), v);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blastdb/masked_range_set.cpp:86-106
-    // ```c++
-    // void CMaskedRangeSet::x_CombineLocs(CConstRef<CSeq_loc> & L1,
-    //                                     const CSeq_loc      & L2)
-    // {
-    //     if (L1.Empty()) {
-    //         L1.Reset(& L2);
-    //     } else {
-    //         L1 = L1->Add(L2, CSeq_loc::fMerge_All | CSeq_loc::fSort, NULL);
-    //     }
-    // }
-    //
-    // CConstRef<CSeq_loc> & CMaskedRangeSet::x_Set(int algo_id, CSeq_id_Handle idh)
-    // {
-    //     if ((int)m_Values.size() <= algo_id) {
-    //         m_Values.resize(algo_id+1);
-    //     }
-    //     if (m_Values[algo_id].empty()) {
-    //         m_Ranges.resize(m_Ranges.size()+1);
-    //         m_Ranges[m_Ranges.size()-1].algorithm_id = algo_id;
-    //     }
-    //     return m_Values[algo_id][idh];
-    // }
-    // ```
     // The first Seq-loc of an (algorithm, handle) is kept as it was given: unsorted,
     // overlapping, with its ranges in the order `CSeq_loc_CI` visits them. Each later one is added
     // to the stored one with `CSeq_loc::Add`. `x_Set` makes the map element (and the algorithm's
@@ -1266,40 +782,6 @@ impl MaskedRangeSet {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/masked_range_set.cpp:38-69
-    // ```c++
-    // CMaskedRangesVector &
-    // CMaskedRangeSet::GetRanges(const list< CRef<CSeq_id> > & idlist)
-    // {
-    //     // For each algorithm for which data is provided
-    //
-    //     NON_CONST_ITERATE(CMaskedRangesVector, algo_iter, m_Ranges) {
-    //         algo_iter->offsets.resize(0);
-    //         int algo_id = algo_iter->algorithm_id;
-    //
-    //         // Combine Seq-loc ranges for all provided Seq-ids.
-    //
-    //         CConstRef<CSeq_loc> oid_ranges;
-    //
-    //         ITERATE(list< CRef<CSeq_id> >, id_iter, idlist) {
-    //             CSeq_id_Handle idh = CSeq_id_Handle::GetHandle(**id_iter);
-    //             x_FindAndCombine(oid_ranges, algo_id, idh);
-    //         }
-    //
-    //         if (oid_ranges.Empty()) {
-    //             continue;
-    //         }
-    //
-    //         for(CSeq_loc_CI ranges(*oid_ranges); ranges; ++ranges) {
-    //             CSeq_loc::TRange rng = ranges.GetRange();
-    //             pair<TSeqPos, TSeqPos> pr(rng.GetFrom(), rng.GetToOpen());
-    //
-    //             algo_iter->offsets.push_back(pr);
-    //         }
-    //     }
-    //
-    //     return m_Ranges;
-    // }
-    // ```
     /// `GetRanges`: the ranges of the sequence that has the Seq-ids `ids` (`bs->GetId()`), looked
     /// up in that order: one `MaskedRanges` for each algorithm that has any mask (in the order
     /// of its first `insert`), with no offsets where the sequence has none. A range whose end is

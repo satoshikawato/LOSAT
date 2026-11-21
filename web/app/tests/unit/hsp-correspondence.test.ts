@@ -127,8 +127,8 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const started = abi.start(argv);
   // A run with -parse_deflines reads its inputs together for its argv (line WQA's sweep, D7, 2026-11-19), as the app's runs do.
   const together = started.ok && started.start.registerInputs ? abi.registerInputs(argv, queryBytes, subjectBytes) : undefined;
-  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, queryBytes);
-  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, subjectBytes);
+  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, queryBytes);
+  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, subjectBytes);
   try {
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => parts.set(stream, [...(parts.get(stream) ?? []), bytes.slice()]));
   } finally {
@@ -203,10 +203,13 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
 /**
  * The first and last coordinates of the label's lines of one section. With -line_length 1 NCBI writes
  * the first Query line without its start (`Query       T`, the frozen bytes of the t1.*.ll1 rows); the
- * start is then undefined and only the end can be compared.
+ * start is then undefined and only the end can be compared. The section of an HSP of length 0
+ * (BLASTP `-ungapped -window_size 0`, the ungapped.blastp.len0.* rows) has its score lines and no
+ * alignment lines: undefined.
  */
-function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] {
+function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] | undefined {
   const lines = section.split('\n').filter((line) => line.startsWith(`${label} `));
+  if (lines.length === 0) return undefined;
   const parse = (line: string) => line.trim().split(/\s+/);
   const first = parse(lines[0]!);
   const last = parse(lines.at(-1)!);
@@ -222,7 +225,7 @@ function shownEnds(ends: [number | undefined, number], start: number, end: numbe
 /** The raw score, the first and last coordinates of one HSP section of outfmt 0, as a comparable text. */
 function sectionKey(section: string): string {
   const raw = /^ Score = +[\d.]+ bits \((\d+)\)/.exec(section)?.[1];
-  return JSON.stringify([Number(raw), ...alignmentEnds(section, 'Query'), ...alignmentEnds(section, 'Sbjct')]);
+  return JSON.stringify([Number(raw), ...(alignmentEnds(section, 'Query') ?? []), ...(alignmentEnds(section, 'Sbjct') ?? [])]);
 }
 
 /**
@@ -295,12 +298,16 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // -sorthits and -sorthsps sort the pairwise output only (NCBI: "Not applicable for outfmt > 4";
   // blast_format.cpp:1523-1530), so with them the sections follow that order, not the records'.
   const sortsPairwise = fixture.words.includes('-sorthits') || fixture.words.includes('-sorthsps');
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = decoder.decode(out0.subarray(0, 9)) === 'RMBLASTN ';
   let previousEnd = 0;
   const headings = new Map<string, readonly [number, number] | null>();
   let sections = 0;
   let unshown = 0;
   // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty heading, and
-  // NCBI's line stands in place of each of its alignments (showalign.cpp:1976-1981; LOSAT's
+  // NCBI's line stands in place of each of its alignments (c++/src/objtools/align_format/showalign.cpp:1976-1981; LOSAT's
   // report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
   const skippedLine = /^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/;
   const skippedHeadings = new Set<number>();
@@ -344,11 +351,19 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       headingNames.set(record.s_idx, named);
     }
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
-    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
+    if (rawScoreOnly) expect(section, `${where(record)} section raw score`).toMatch(new RegExp(`^ Score = ${record.raw_score}\n`));
+    else expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     const queryEnds = alignmentEnds(section, 'Query');
     const subjectEnds = alignmentEnds(section, 'Sbjct');
-    expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
-    expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    if (queryEnds === undefined || subjectEnds === undefined) {
+      // An HSP of length 0: no alignment lines, and the record's ranges end one before they start.
+      expect([queryEnds, subjectEnds], `${where(record)} a section without alignment lines`).toEqual([undefined, undefined]);
+      expect(section, `${where(record)} the section of an HSP of length 0`).toMatch(/^ Identities = 0\/0 \(100%\),/m);
+      expect([record.q_end - record.q_start, record.s_end - record.s_start], `${where(record)} length 0`).toEqual([-1, -1]);
+    } else {
+      expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
+      expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    }
     previousEnd = end;
   }
   const subjectsNamed = new Map<string, Set<string>>();

@@ -5,35 +5,8 @@
 //! `core::composition_adjustment::smith_waterman`'s, on the rows of the adjusted PSSM.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
-//! ```c
-//!     Boolean smithWaterman =
-//!         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
-//! ```c
-//!                     if (smithWaterman) {
-//!                         *pStatusCode =
-//!                                 Blast_RedoOneMatchSmithWaterman(
-//!                                         alignments,
-//!                                         redo_align_params,
-//!                                         incoming_aligns,
-//!                                         numAligns[frame_index],
-//!                                         kbp->Lambda,
-//!                                         kbp->logK,
-//!                                         &matchingSeq,
-//!                                         query_info,
-//!                                         numQueries,
-//!                                         matrix,
-//!                                         BLASTAA_SIZE,
-//!                                         NRrecord,
-//!                                         forbidden,
-//!                                         redoneMatches,
-//!                                         &pvalueForThisPair,
-//!                                         compositionTestIndex,
-//!                                         &LambdaRatio
-//!                                 );
-//! ```
-//! The steps after it are the X-drop redo's (blast_kappa.c:3654-3707, quoted at
+//! The steps after it are the X-drop redo's (blast_kappa.c:3654-3707, cited at
 //! `RedoMatch::redo_match`). The functions the two redos share run as this redo's instance
 //! (`compo_scale::SwRedo`), so that the X-drop redo's instance keeps one caller and psiblast's
 //! machine code (DECISIONS 11 and 63 of line PS); the evaluation is a copy (`evaluate`).
@@ -73,15 +46,6 @@ impl RedoMatch<'_> {
     /// redo of the match fails (an alignment without an edit script).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
-    /// ```c
-    /// function_level_cleanup:
-    ///     if (status != 0) {
-    ///         for (query_index = 0;  query_index < numQueries;  query_index++) {
-    ///             BlastCompo_AlignmentsFree(&alignments[query_index],
-    ///                                       callbacks->free_align_traceback);
-    ///         }
-    ///     }
-    /// ```
     // One function for the window loop and the steps after it, called by RPS-BLAST's traceback
     // per profile where `-use_sw_tback` asks for it (its X-drop redo keeps its own code).
     #[inline(never)]
@@ -107,50 +71,6 @@ impl RedoMatch<'_> {
     /// list's head first (the last one made), or `None` for NCBI's failed redo.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1366-1430
-    /// ```c
-    ///         window = windows[window_index];
-    ///         query_index = window->query_range.context;
-    ///         query_composition = &query_info[query_index].composition;
-    ///
-    ///         nearIdenticalStatus = s_preliminaryTestNearIdentical(query_info,
-    ///                                              window,
-    ///                                              window->align,
-    ///                                              params->near_identical_cutoff);
-    ///
-    ///         status =
-    ///             callbacks->get_range(matchingSeq, &window->subject_range,
-    ///                                  &subject,
-    ///                                  &query_info[query_index].seq,
-    ///                                  &window->query_range,
-    ///                                  &query,
-    ///                                  query_info[query_index].words,
-    ///                                  window->align, nearIdenticalStatus,
-    ///                                  compo_adjust_mode, TRUE,
-    ///                                  NULL);
-    ///         ...
-    ///         searchsp = query_info[query_index].eff_search_space;
-    ///
-    ///         /* For Smith-Waterman alignments, adjust the search using the
-    ///          * composition of the highest scoring alignment in window */
-    ///         if (compo_adjust_mode != eNoCompositionBasedStats) {
-    ///             Blast_AminoAcidComposition subject_composition;
-    ///             s_GetComposition(&subject_composition, alphsize,
-    ///                                     &subject, &window->subject_range,
-    ///                                     window->align, FALSE, subject_is_translated);
-    ///             adjust_search_failed =
-    ///                 Blast_AdjustScores(matrix,
-    ///                                    query_composition, query.length,
-    ///                                    &subject_composition, subject.length,
-    ///                                    scaledMatrixInfo, compo_adjust_mode,
-    ///                                    RE_pseudocounts, NRrecord,
-    ///                                    &matrix_adjust_rule, callbacks->calc_lambda,
-    ///                                    pvalueForThisPair,
-    ///                                    compositionTestIndex,
-    ///                                    LambdaRatio);
-    ///             ...
-    ///         }
-    ///         if ( !adjust_search_failed ) {
-    /// ```
     /// The subject range's last argument is `NULL`: the subject is SEG-masked unless the window's
     /// first alignment is near identical (`RedoMatch::subject_range`). The composition adjustment is the
     /// X-drop redo's (`RedoMatch::redo_one_match`, `Blast_AdjustScores` of a position-based
@@ -169,7 +89,7 @@ impl RedoMatch<'_> {
             return Ok(Some(Vec::new()));
         };
         // The window's first alignment (`window->align`), scaled as the X-drop redo's incoming
-        // alignments (blast_kappa.c:788-797, quoted at `RedoMatch::redo_one_match`).
+        // alignments (blast_kappa.c:788-797, cited at `RedoMatch::redo_one_match`).
         let window_align = Align {
             score: (first.raw_score as f64 * SCALING_FACTOR) as i32,
             rule: EMatrixAdjustRule::DontAdjustMatrix,
@@ -196,29 +116,8 @@ impl RedoMatch<'_> {
             near_identical,
             &mut subject_maybe_biased,
         );
-        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1442
-        // ```c
-        //     if (query_composition->numTrueAminoAcids == 0 ||
-        //         subject_composition->numTrueAminoAcids == 0) {
-        //         /* Either the query or subject contains only ambiguity
-        //            characters, most likely because the entire subject has been
-        //            SEGed.  Compositional adjustment is meaningless. */
-        //         return 1;
-        //     }
-        // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1484-1529
-        // ```c
-        //     if (matrixInfo->positionBased ||
-        //         composition_adjust_mode == eCompositionBasedStats) {
-        //         /* Use old-style composition-based statistics unconditionally. */
-        //         *matrix_adjust_rule =  eCompoScaleOldMatrix;
-        //     ...
-        //     return Blast_CompositionBasedStats(matrix, ratioToPassBack, matrixInfo,
-        //                                        query_composition->prob,
-        //                                        subject_composition->prob,
-        //                                        calc_lambda,
-        //                                        (compositionTestIndex > 0));
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1444
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1484-1530
         let subject_composition = read_aa_composition(&subject_data);
         if run.query_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0 {
             return Ok(Some(Vec::new()));
@@ -255,12 +154,6 @@ impl RedoMatch<'_> {
         subject_buffer.push(0);
         let rows = &run.matrix.rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
-        // ```c
-        //         if(smithWaterman) {
-        // 	   forbidden_tld[i] = calloc(1,sizeof(Blast_ForbiddenRanges));
-        //            status_code =
-        //                Blast_ForbiddenRangesInitialize(forbidden_tld[i], queryInfo->max_length);
-        // ```
         // The round loop (`smith_waterman_redo_window`, redo_alignment.c:1438-1529): `searchsp` is the
         // query's `eff_search_space`, `Lambda` and `logK` the redo's scaled block (`kbp_gap` of NCBI's
         // copy), `cutoff_e` the `-evalue` (blast_kappa.c:2458). RPS-BLAST refuses `-sum_stats true`

@@ -133,7 +133,7 @@ pub(super) fn run_case_with(
         let warn_ref: Warn<'_> = &mut warn;
         let mut db = BuildDatabase::new(
             out_base,
-            &case.title,
+            case.title.as_bytes(),
             case.protein,
             &mut log,
             &time_of(index_date),
@@ -1170,7 +1170,7 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         },
         "line 3: \"masks\" expected",
     );
-    let text = format!("Error: {}", thrown.what());
+    let text = format!("Error: {}", String::from_utf8(thrown.what()).unwrap());
     // NCBI's `Error: NCBI C++ Exception:` report in LOSAT's words (`crate::wording`): its message.
     assert_eq!(
         text.lines().next(),
@@ -1265,7 +1265,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     let tmp = TempDir::new("mask-destructor");
     let mut db = BuildDatabase::new(
         &tmp.base("db"),
-        "t",
+        b"t",
         true,
         &mut log,
         &time_of("Oct 12, 2026  3:22 PM"),

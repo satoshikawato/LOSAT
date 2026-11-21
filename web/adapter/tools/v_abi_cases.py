@@ -39,7 +39,9 @@ joined with `,`).
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
 reduces in the wasm-threads-only path, the BLASTN `-window_masker_db` and `-window_masker_taxid`
 searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`),
-and the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`).
+the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`), and the
+inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
+`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
 `--group fasta_input` writes that group of the full suite alone.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
@@ -161,10 +163,6 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         # too), with outfmt 0 failing alone (`"fails_alone"`, web/adapter/tests/v_abi.js).
         fails_alone = "-parse_deflines" in argv and row["fixture_id"].startswith("pd.self.") \
             and not row["fixture_id"].endswith(".0")
-        # `register` refuses a `>?` gap line (maintainer decision 3, as in fasta_input): a row
-        # whose input has one is a CLI case.
-        if any(b">?" in (run_oracle.ENGINE / row[side]).read_bytes() for side in ("query", "subject")):
-            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         # A row of another format, or of 6 or 7 with fields, is a search of its own, which writes
         # that output besides.
@@ -211,8 +209,8 @@ FIRST_BATCH_FAILURE = "@/rec_empty_all.q.{}"
 def fasta_input() -> list[dict]:
     """SF fixture inputs through the ABI (gate NOTES open item 3): the rows of
     LOSAT/tests/fasta_input_fixtures.py that NCBI runs on files (no standard input, no
-    environment, one thread) and completes in every format of the search, whose inputs
-    `register` accepts (no `>?` gap line: maintainer decision 3). One search per program,
+    environment, one thread) and completes in every format of the search (a `>?` gap line too since
+    line WQA's D13, 2026-11-20, which lifted maintainer decision 3's refusal). One search per program,
     task, inputs and options, with NCBI's frozen hash of each fixture's format; per program
     FASTA_INPUT_SEARCHES of them, taken in turn from each family of inputs (the variant
     name's first word, and the BLASTN task), and the first-batch failure."""
@@ -228,7 +226,7 @@ def fasta_input() -> list[dict]:
     failures, families = [], {}
     for (program, task, query, subject, args), rows in sorted(grouped.items()):
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
-        if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
+        if not all(path.is_file() for path in paths):
             continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []
@@ -379,14 +377,15 @@ def own_search() -> list[dict]:
     Runs of two searches (`-num_descriptions`, `-num_alignments`; abi_v2.md §7) that fail:
     `-num_alignments 0` with `-outfmt 6` in every program (NCBI's `No hits are being saved` after
     the formatting handler's warning, where the CLI's outfmt 0 completes), also with `-evalue 0`,
-    whose error the CLI gives after the hit list's (`validate` too); BLASTN's `-num_descriptions
-    2147483647` without `-outfmt` (LOSAT's error for format 0, whose N + 50 overflows, where the
-    CLI's outfmt 6 and 7 complete); and two searches that both fail, with and without `-outfmt 6`,
-    whose error and stream 3 are those of the argv's own `-outfmt` (BLASTN's overflow with
-    `-num_alignments 0`, BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that
-    complete where the other search fails, whose formats are empty and whose warnings and error
-    stream 3 adds after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every
-    program, BLASTN's overflow with `-outfmt 6`.
+    whose error the CLI gives after the hit list's (`validate` too); and two searches that both
+    fail, with and without `-outfmt 6`, whose error and stream 3 are those of the argv's own
+    `-outfmt` (BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that complete where
+    the other search fails, whose formats are empty and whose warnings and error stream 3 adds
+    after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every program, also
+    with BLASTN's `-num_descriptions 2147483647`, whose format 0 keeps every hit (LOSAT computes the
+    preliminary hit list size without NCBI's 32-bit overflow, PD-LOSAT-NCBI-DEFECTS); BLASTN's
+    `-num_descriptions 2147483647` with `-outfmt 6` fails as the argv's `-num_alignments 0`, and
+    without `-num_alignments 0` completes with every format, with and without `-outfmt 6`.
 
     The formatting handler's warnings of the formats that the argv does not ask for (review r2
     M1): runs that fail with `-line_length`, `-sorthits`, `-sorthsps` or equal `-num_descriptions`
@@ -399,8 +398,16 @@ def own_search() -> list[dict]:
     The application start's error without a line end (review r2 L2): `-conffile` of a file that is
     not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`).
 
+    Runs whose own `-outfmt` is structured (5, 8, 11, 13; BLASTN's 17), with a query whose first
+    record has no residues (review r3 M2): the CLI's run of the structured format does not write
+    the query's `Sequence contains no data` warning, which those of outfmt 0, 6 and 7 write, so
+    stream 3 adds it after the argv's standard error; once, also in a run of two searches
+    (`-outfmt 5 -num_descriptions 5`), whose outfmt 0 writes it in the other search (review of
+    line WQA-LW, r2 L3, 2026-11-20).
+
     TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
-    stream 3 is empty, as the CLI's standard error for every format."""
+    stream 3 is empty, as the CLI's standard error for every format, also where the other formats
+    would add a query's warning to it (`-outfmt 5`, the query with an empty first record)."""
     inputs = {
         "blastp": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
                    "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
@@ -440,11 +447,11 @@ def own_search() -> list[dict]:
         add(f"own_search.{program}.na0.outfmt6", program, ["-num_alignments", "0"], "6")
         add(f"own_search.{program}.na0", program, ["-num_alignments", "0"], failure=False)
     overflow = ["-num_descriptions", "2147483647"]
-    add("own_search.blastn.nd_overflow", "blastn", overflow, prolog=False)
+    add("own_search.blastn.nd_overflow", "blastn", overflow, failure=False)
     add("own_search.blastn.nd_overflow.outfmt6", "blastn", overflow, "6", failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt0", "blastn", [*overflow, "-num_alignments", "0"], failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt6", "blastn", [*overflow, "-num_alignments", "0"], "6")
     for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6")):
-        add(f"own_search.blastn.nd_overflow.na0.{name}", "blastn", [*overflow, "-num_alignments", "0"], outfmt,
-            prolog=False)
         for program in ("blastx", "blastp", "tblastn", "tblastx"):
             add(f"own_search.{program}.na0.evalue0.{name}", program, ["-num_alignments", "0", "-evalue", "0"],
                 outfmt, prolog=False)
@@ -467,10 +474,124 @@ def own_search() -> list[dict]:
             add(f"handler.{program}.line_length.sorthsps.warned{'.outfmt' + outfmt if outfmt else ''}", program,
                 [*handler["line_length"], *handler["sorthsps"]], outfmt, failure=False, given=warned)
     add("start.blastp.conffile_missing", "blastp", ["-conffile", "x.ini"], prolog=False)
+    arch = "tests/fasta/outfmt11"
+    empty_first = {
+        "blastn": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "tblastx": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "blastp": ["-query", f"{arch}/arch_bp_emptyfirst.faa", "-subject", f"{arch}/arch_bp_s.faa"],
+        "tblastn": ["-query", f"{arch}/arch_tbn_emptyfirst.faa", "-subject", f"{arch}/arch_tbn_s.fna"],
+        "blastx": ["-query", f"{arch}/arch_bx_emptyfirst.fna", "-subject", f"{arch}/arch_bx_s.faa"],
+    }
+    for program in FORMATS:
+        for outfmt in ("5", "8", "11", "13", *(("17",) if program == "blastn" else ())):
+            add(f"query_warnings.{program}.outfmt{outfmt}", program, [], outfmt, failure=False, given=empty_first)
+            searches[-1].update({"files": True} if outfmt == "13" else {"sam": True} if outfmt == "17" else {})
+        # A run of two searches (review r2 of 2026-11-20, L3): outfmt 6 and 7 of the argv's search
+        # add the warning, and outfmt 0's search, which writes it too, does not add it again.
+        add(f"query_warnings.{program}.outfmt5.nd5", program, ["-num_descriptions", "5"], "5", failure=False,
+            given=empty_first)
+    for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
+        add(f"query_warnings.tblastx.outfmt5.logfile.{name}", "tblastx", ["-logfile", logfile], "5", failure=False,
+            given=empty_first)
     for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
         add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
         add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],
             failure=False, given=warned)
+    return searches
+
+
+# Line WQA's D13 and D16 (2026-11-20): rows of the SF fixtures that NCBI ran (its frozen hashes), by program, query
+# and subject: `>?` gap lines (a), which LOSAT Web refused where the CLI reads them, and lines that NCBI's line reader
+# joins (b), which LOSAT Web read alike; BLASTX has no such row and runs against the native CLI alone.
+SCAN_FIXTURES = [
+    ("blastn", "gap_100.q.nuc.fa", "base.s.nuc.fa"), ("blastn", "base.q.nuc.fa", "gap_mods_bad.s.nuc.fa"),
+    ("blastn", "eol_mixed_lf_crlf_cr.q.nuc.fa", "base.s.nuc.fa"), ("blastn", "base.q.nuc.fa", "eol_mixed_cr_lf.s.nuc.fa"),
+    ("blastp", "gap_100.q.prot.faa", "base.s.prot.faa"), ("blastp", "base.q.prot.faa", "gap_unk100.s.prot.faa"),
+    ("blastp", "eol_lfcr.q.prot.faa", "base.s.prot.faa"), ("blastp", "base.q.prot.faa", "eol_mixed_lf_crlf_cr.s.prot.faa"),
+    ("tblastx", "gap_unk100.q.nuc.fa", "base.s.nuc.fa"), ("tblastx", "base.q.nuc.fa", "eol_lfcr.s.nuc.fa"),
+    ("tblastn", "base.q.prot.faa", "gap_100.s.nuc.fa"), ("tblastn", "eol_mixed_lf_crlf_cr.q.prot.faa", "base.s.nuc.fa"),
+]
+# NCBI BLAST+ 2.17.0's outfmt 6 of the D16 search (-conffile nol.ini), run by line WQA's survey of D12 on 2026-11-20
+# (/home/kawato/losat-baselines/web-qa-20261119/survey-d12/probe2.sh, `sid.pdb`, output o/sid.pdb.n).
+D16_NCBI_OUTFMT6 = "64a3b01939bf72e8d0b9a3dbc3f4b6ad6630a3bb898bcfad241848c414554df5"
+
+
+def scan_d13() -> list[dict]:
+    """The inputs of line WQA's D13 and D16 (2026-11-20), each compared with the native CLI: the SCAN_FIXTURES with
+    NCBI's frozen hashes, a BLASTX gap line on both sides; a first line that may be a Seq-id, which the CLI refuses
+    with the data loaders on (c), in the query and in the subject (`"expect": "failure"`: the CLI's error, no output);
+    a record whose CR line end NCBI's line reader joins to a `!` line in a file of LF line ends (b; LOSAT Web refused
+    it: web/adapter/tests/fixtures/d13/joined.nuc.fa, made from base.q.nuc.fa), as the query and as the subject;
+    and the D16 search, whose `-conffile nol.ini` (`[BLAST] DATA_LOADERS=none`, web/adapter/tests/fixtures/d16)
+    turns the data loaders off, so that the reader reads the query's first line `2HHB` as data, as the CLI and NCBI
+    do, and the same search without it, which the CLI refuses."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import fasta_input_fixtures as fixtures  # noqa: E402  (the row definitions and frozen hashes)
+    rows: dict[tuple, list] = {}
+    for row in fixtures.read_manifest():
+        # BLASTN's rows of its default task (megablast), which the argv leaves out.
+        if row.kind == "ncbi" and not row.stdin and not row.env and row.threads == "1" and not row.args \
+                and row.task in ("", "megablast"):
+            key = (row.program, row.query.removeprefix("@/"), row.subject.removeprefix("@/"))
+            rows.setdefault(key, []).append(row)
+    searches = []
+    for program, query, subject in SCAN_FIXTURES:
+        found = rows[(program, query, subject)]
+        assert {row.rc for row in found} == {"0"}, (program, query, subject)
+        searches.append({"program": program, "cwd": str(fixtures.ENGINE), "group": "d13_scan",
+                         "argv": [program, "-query", fixtures.rp(f"@/{query}"), "-subject", fixtures.rp(f"@/{subject}")],
+                         "cases": [row.row_id for row in found],
+                         "frozen": {row.outfmt: row.stdout_sha256 for row in found if row.outfmt in ("0", "6", "7")}})
+    fasta = "tests/fixtures/fasta_input"
+    native = {"cwd": str(REPO / "LOSAT"), "frozen": {}, "group": "d13_scan"}
+    searches.append({**native, "program": "blastx", "cases": ["d13.blastx.gap"],
+                     "argv": ["blastx", "-query", f"{fasta}/gap_100.q.nuc.fa", "-subject", f"{fasta}/gap_unk100.s.prot.faa"]})
+    searches.append({**native, "program": "blastn", "cases": ["d13.blastn.seqid_query"], "expect": "failure",
+                     "argv": ["blastn", "-query", f"{fasta}/seqid0.q.nuc.fa", "-subject", f"{fasta}/base.s.nuc.fa"]})
+    searches.append({**native, "program": "blastp", "cases": ["d13.blastp.seqid_subject"], "expect": "failure",
+                     "argv": ["blastp", "-query", f"{fasta}/base.q.prot.faa", "-subject", f"{fasta}/seqid1.s.prot.faa"]})
+    joined = str(REPO / "web/adapter/tests/fixtures/d13/joined.nuc.fa")
+    searches.append({**native, "program": "blastn", "cases": ["d13.blastn.joined_query"],
+                     "argv": ["blastn", "-query", joined, "-subject", f"{fasta}/base.s.nuc.fa"]})
+    searches.append({**native, "program": "blastn", "cases": ["d13.blastn.joined_subject"],
+                     "argv": ["blastn", "-query", f"{fasta}/base.q.nuc.fa", "-subject", joined]})
+    d16 = {"program": "blastp", "cwd": str(REPO / "web/adapter/tests/fixtures/d16"), "group": "d13_scan"}
+    searches.append({**d16, "cases": ["d16.blastp.conffile_no_loaders"], "frozen": {"6": D16_NCBI_OUTFMT6},
+                     "argv": ["blastp", "-conffile", "nol.ini", "-query", "sid.q.faa", "-subject", "sid.s.faa"]})
+    searches.append({**d16, "cases": ["d16.blastp.loaders_on"], "frozen": {}, "expect": "failure",
+                     "argv": ["blastp", "-query", "sid.q.faa", "-subject", "sid.s.faa"]})
+    return searches
+
+
+def failed_outputs() -> list[dict]:
+    """Runs that fail after the CLI wrote part of its output (line WQA's sweep, D15, 2026-11-20): the
+    run sends what the output of the argv's own `-outfmt` held, so that it is the CLI's file byte for
+    byte, and drops the other outputs (abi_v2.md §5). BLASTP with a query of two batches whose second
+    has no residues (`tests/fixtures/failed_outputs`): the CLI writes the first batch's hits, then
+    NCBI's `Sequence contains no data` ends the run, in outfmt 0, 6, 7, and 5 and `6 qseqid sseqid`
+    (the output of the argv's own, stream 4); and BLASTN with `-parse_deflines` on a record that is
+    both a query and a subject and has masks, whose outfmt 0 LOSAT refuses after its prolog, where the
+    CLI's outfmt 6 and 7 complete (their streams are dropped with the failed run's)."""
+    batch = "web/adapter/tests/fixtures/failed_outputs"
+    searches = []
+    # The archives of outfmt 13 and 14: the CLI leaves `results` empty (no side file, the first batch's report
+    # is not written before the error), and the run's archive holds that master file as an empty entry.
+    for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6"), ("7", "outfmt7"), ("5", "outfmt5"),
+                         ("6 qseqid sseqid", "outfmt6_fields"), ("13", "outfmt13"), ("14", "outfmt14")):
+        searches.append({"program": "blastp",
+                         "argv": ["blastp", "-query", f"{batch}/later_batch.q.faa", "-subject", f"{batch}/later_batch.s.faa"],
+                         "cwd": str(REPO), "cases": [f"failed_outputs.blastp.later_batch.{name}"], "frozen": {},
+                         "expect": "failure", **({"outfmt": outfmt} if outfmt else {}),
+                         **({"files": True} if outfmt in ("13", "14") else {})})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", f"{batch}/later_batch.q.fna", "-subject", f"{batch}/later_batch.s.fna"],
+                     "cwd": str(REPO), "cases": ["failed_outputs.blastn.later_batch.outfmt13"], "frozen": {},
+                     "expect": "failure", "outfmt": "13", "files": True})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", "tests/fasta/outfmt0/pd_self_n.fna", "-subject", "tests/fasta/outfmt0/pd_self_n.fna",
+                              "-parse_deflines", "-dust", "yes"],
+                     "cwd": str(REPO / "LOSAT"), "cases": ["failed_outputs.blastn.pd_self.outfmt0"], "frozen": {},
+                     "expect": "failure"})
     return searches
 
 
@@ -550,6 +671,8 @@ def main() -> int:
         searches.append(direct_tblastx())
         searches += window_masker()
         searches += own_search()
+        searches += scan_d13()
+        searches += failed_outputs()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

@@ -81,6 +81,7 @@ KE = f"-query {I}/kaempty_query.fa -subject {I}/s60k.fa"
 KEB = f"-query {I}/kaempty_batch_query.fa -subject {I}/s60k.fa"
 WMC = "tests/winmask/counts/mg1655_u9.obinary"
 WMB = "tests/winmask/counts/dm2L_u9.binary"
+RPT = "tests/db_search/rpt_d4"
 AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
      " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
 # O4a (blastn -ungapped): the inputs of generate_ungapped_inputs (the t2 pair, rep, B and A are the ones above).
@@ -507,6 +508,18 @@ _CASES = [
     ("wm.hard_fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 5", ""),
     ("wm.hard_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 11", ""),
     ("wm.hard_fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 15", ""),
+    # Line RG item D4 (blastn -filtering_db: the database of repeats tests/db_search/rpt_d4 and the queries
+    # rpt_*.fa, written by tests/db_search/make_rpt_d4.py): the query ranges of the repeat hits mask the
+    # queries (with -soft_masking false the hits stop at them, outfmt 0 shows them in lower case), joined to
+    # the masks of DUST and of the lower case within 4 letters; each query chunk searches its own letters
+    # for repeats again; the archive names the database (RepeatFilteringDB) and its LCaseMask holds the
+    # joined masks. The -db rows are db.rpt.* (tests/db_search_manifest/blastn.rpt.tsv).
+    ("rpt.megablast", f"{WM} -filtering_db {RPT} -soft_masking false -outfmt 6", ""),
+    ("rpt.blastn_fmt0", f"{WM3} -task blastn -filtering_db {RPT} -max_hsps 2 -outfmt 0", ""),
+    ("rpt.lc", f"-query {I}/rpt_query_lc.fa -subject {I}/s60k.fa -task blastn -filtering_db {RPT} -lcase_masking"
+               " -soft_masking false -outfmt 6", ""),
+    ("rpt.split_c600", f"{WM} -task blastn -filtering_db {RPT} -soft_masking false -outfmt 6", "", "CHUNK_SIZE=600"),
+    ("rpt.fmt11", f"{WM3} -filtering_db {RPT} -outfmt 11", ""),
     # Line NP, series SM: in the Karlin-Altschul table error of a batch, a query without letters keeps its
     # set-up warning after the error ("Error: ... Warning: Sequence contains no data "), first, in the middle
     # and last; in a first batch and in a later one (BATCH_SIZE=1 gives the query of N only its own batch).
@@ -588,6 +601,22 @@ def _ungapped_cases():
 
 
 _CASES += _ungapped_cases()
+# Line RG X6 (2026-11-20): BLASTN's matrix-only scoring, reward 0 and penalty 0 (-task rmblastn is
+# blastn's defaults with them, blast_options_handle.cpp:365-370; blast_setup.c:352-367): the option
+# checks that NCBI answers with an error (exit 1 or 3), -qcov_hsp_perc, and query batches.
+_RMW = f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -task rmblastn -word_size 7 -evalue 1000"
+_CASES += [
+    ("rm_reward1", f"{P} -task rmblastn -reward 1 -outfmt 6", ""),
+    ("rm_gaps3_1", f"{P} -task rmblastn -gapopen 3 -gapextend 1 -outfmt 6", ""),
+    ("rm_gaps0_0", f"{P} -task rmblastn -gapopen 0 -gapextend 0 -outfmt 6", ""),
+    ("rm_template", f"{P} -task rmblastn -template_type coding -template_length 16 -outfmt 6", ""),
+    ("rm_offdiag", f"{P} -task rmblastn -off_diagonal_range 10 -outfmt 6", ""),
+    ("rm_multi", f"{_RMW} -outfmt 6", ""),
+    ("rm_qcov30", f"{_RMW} -qcov_hsp_perc 30 -outfmt 6", ""),
+    ("rm_batches", f"{B} -task rmblastn -outfmt 6", ""),
+    ("rm_batches_fmt0", f"{B} -task rmblastn -outfmt 0", ""),
+    ("rm_batches_threads4", f"{B} -task rmblastn -outfmt 6", "-num_threads 4"),
+]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument (see above).
 ORACLE_ARGV = {
@@ -889,7 +918,8 @@ def command_freeze(args) -> int:
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
                      "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env,
                      "oracle_env": oracle_env})
-        print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
+        line_count = result.stdout.count(b"\n")
+        print(f"{case_id}\texit {result.returncode}\t{line_count} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen BLASTN outputs of {version} (comparison oracle only; see blastn_regression_fixtures.py).\n")
         handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: losat blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")

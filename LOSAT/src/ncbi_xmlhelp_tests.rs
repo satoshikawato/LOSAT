@@ -183,7 +183,6 @@ fn the_filter_leaves_whole_elements() {
             "{program}"
         );
     }
-    assert_eq!(print("windowmasker", |_| false), None);
 }
 
 // One refused name: its element and the dependencies naming it go, the rest stays (NCBI blastn:
@@ -206,8 +205,9 @@ fn a_refused_name_takes_its_dependencies() {
     );
 }
 
-// The library API and the Web engine refuse `-xmlhelp` by name where the reader takes it as a flag
-// (the Web engine's ABI v2 runs an application start, but it does not write NCBI's XML); as a value it is a value, and after `-h` it is not read.
+// The library API and the Web engine's ABI v1 refuse `-xmlhelp` by name where the reader takes it as
+// a flag; as a value it is a value, and after `-h` it is not read. The Web engine's ABI v2 prints the
+// XML (`the_web_engine_prints_the_command_lines_help`).
 #[test]
 fn the_library_refuses_xmlhelp() {
     for program in CLAP_PROGRAMS {
@@ -236,11 +236,13 @@ fn the_library_refuses_xmlhelp() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 4] = [
+    let readers: [(&str, RunWith); 6] = [
         ("BLASTDBCMD", crate::blastdbcmd::run_with),
         ("DUSTMASKER", crate::dustmasker::run_with),
         ("SEGMASKER", crate::segmasker::run_with),
+        ("WINDOWMASKER", crate::windowmasker::run_with),
         ("CONVERT2BLASTMASK", crate::convert2blastmask::run_with),
+        ("MAKEMBINDEX", crate::makembindex::run_with),
     ];
     for (shown, run_with) in readers {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -259,9 +261,10 @@ fn the_library_refuses_xmlhelp() {
     }
 }
 
-// The readers of blastdbcmd, dustmasker, segmasker and convert2blastmask (`ncbi_app`) read every
-// argument of NCBI's XML (none is refused by name, so their XML is NCBI's whole): the argument
-// with a value `1` for a key, then `-h`, writes the usage or an error of the value, never NCBI's
+// The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask and
+// makembindex (`ncbi_app`) read every argument of NCBI's XML (none is refused by name, so their
+// XML is NCBI's whole): the argument with a value `1` for a key, then `-h`, writes the usage or an
+// error of the value, never NCBI's
 // `Unknown argument` or a refusal.
 #[test]
 fn the_ncbi_readers_read_every_argument_of_the_xml() {
@@ -271,11 +274,13 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 4] = [
+    let readers: [(&str, RunWith); 6] = [
         ("blastdbcmd", crate::blastdbcmd::run_with),
         ("dustmasker", crate::dustmasker::run_with),
         ("segmasker", crate::segmasker::run_with),
+        ("windowmasker", crate::windowmasker::run_with),
         ("convert2blastmask", crate::convert2blastmask::run_with),
+        ("makembindex", crate::makembindex::run_with),
     ];
     for (program, run_with) in readers {
         for (name, flag) in ncbi_argument_names(program) {
@@ -295,5 +300,40 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
                 "{program} -{name}: {err}"
             );
         }
+    }
+}
+
+// Line WQA's D14 (2026-11-20): the reader of LOSAT Web's ABI v2 stops at the help words as the
+// command line's does, `-xmlhelp` included, and the run prints the text that the command line's
+// entry prints for them (`printed_text`, which `cli::main_entry` writes): the parser's help, and
+// the XML of `-xmlhelp`. The words before them are read first.
+#[test]
+fn the_web_engine_prints_the_command_lines_help() {
+    use crate::cli::{printed_text, try_parse_with_printing_start, WEB_V2_PROGRAMS};
+    for program in WEB_V2_PROGRAMS {
+        let web = |words: &[&str]| {
+            let argv = ["losat", program].into_iter().chain(words.iter().copied());
+            try_parse_with_printing_start::<Cli, _, _>(argv).map(|_| ())
+        };
+        let xml = web(&["-evalue", "1", "-xmlhelp", "-bogus"]).unwrap_err();
+        assert_eq!(
+            printed_text(&xml, false),
+            Some(xml_help_text(program).unwrap()),
+            "{program}"
+        );
+        for word in ["-h", "-help", "-help-full", "--help"] {
+            let help = web(&["-dryrun", word]).unwrap_err();
+            let command_line = try_parse_from::<Cli, _, _>(["losat", program, word]).unwrap_err();
+            assert_eq!(
+                printed_text(&help, false),
+                Some(crate::cli::command_line_message(&command_line, false)),
+                "{program} {word}"
+            );
+        }
+        let refused = web(&["-evalue", "x", "-xmlhelp"]).unwrap_err();
+        assert_eq!(printed_text(&refused, false), None, "{program}");
+        // The library refuses `-xmlhelp`, naming the places that print it.
+        assert!(xml_help_refusal(&program.to_ascii_uppercase())
+            .contains("runs on the command line and in LOSAT Web of LOSAT's"));
     }
 }

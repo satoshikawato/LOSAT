@@ -1,46 +1,17 @@
-//! SAM (outfmt 17) of the gapped Seq-aligns of a nucleotide search: NCBI's `CBlast_SAM_Formatter`
+//! SAM (outfmt 17) of the Seq-aligns of a nucleotide search: NCBI's `CBlast_SAM_Formatter`
 //! (`CSAM_Formatter`, `CSAM_CIGAR_Formatter`, `CCIGAR_Formatter`), which keeps every record until
 //! the formatter is destroyed and writes the header last. One [`SamDocument`] holds a run's
 //! records as rendered bytes, its `@SQ` lines and the references it has listed; [`SamDocument::finish`]
 //! writes the document.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316, :405-442
-//! ```c++
-//! CSAM_Formatter::~CSAM_Formatter(void)
-//! {
-//!     Flush();
-//! }
-//! ...
-//! void CSAM_Formatter::Flush(void)
-//! {
-//!     if ( !m_Out ) return;
-//!     // Headers
-//!     bool have_data = !m_Header.m_Data.empty() || !m_Body.empty();
-//!     if (have_data) {
-//!         *m_Out << "@HD\tVN:1.2";
-//!         x_PrintSOTag();
-//!         x_PrintGOTag();
-//!         *m_Out << '\n';
-//!     }
-//!     ITERATE(CSAM_Headers::TData, it, m_Header.m_Data) {
-//!         *m_Out << it->second << '\n';
-//!     }
-//!     if (have_data  &&  !m_ProgramInfo.m_Id.empty()) {
-//!         *m_Out << "@PG\tID:" << m_ProgramInfo.m_Id;
-//!         ...
-//!     }
-//!     // Alignments
-//!     ITERATE(TLines, it, m_Body) {
-//!         *m_Out << *it << '\n';
-//!     }
-//!     m_Header.m_Data.clear();
-//!     m_Body.clear();
-//! }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316,405-441, :405-442
 //!
-//! The record of an HSP is the one NCBI's `CSAM_CIGAR_Formatter::AddRow` makes from the HSP's
-//! Dense-seg (`CCIGAR_Formatter::x_FormatLine` for the CIGAR); the Dense-seg is the one that
-//! outfmt 8 and 12 write (`report::serial::seqalign::gapped_segments`).
+//! The record of a Seq-align is the one NCBI's `CSAM_CIGAR_Formatter::AddRow` makes from its
+//! Dense-seg (`CCIGAR_Formatter::x_FormatLine` for the CIGAR). A gapped search has a Seq-align per
+//! HSP, whose Dense-seg is the one that outfmt 8 and 12 write
+//! (`report::serial::seqalign::gapped_segments`); an ungapped search has a Seq-align per subject,
+//! whose Dense-diags (one per HSP) the formatter joins into one Dense-seg
+//! (`report::serial::seqalign::ungapped_segments`), so a subject has one record.
 
 use std::collections::HashSet;
 use std::io::{self, Write};
@@ -48,34 +19,14 @@ use std::io::{self, Write};
 use anyhow::Result;
 
 use super::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use super::serial::seqalign::{gapped_segments, seqalign_evalue, Segments, Strand, GAP_VALUE};
+use super::serial::seqalign::{
+    gapped_segments, seq_align_hsps, seqalign_evalue, ungapped_segments, Segments, Strand,
+    GAP_VALUE,
+};
 
 /// The words of the custom specification of outfmt 17 that NCBI reads.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:84-104
-/// ```c++
-/// void CBlast_SAM_Formatter::x_ProcessCustomSpec(const string & custom_spec,
-///                                                const CSAM_Formatter::SProgramInfo & info)
-/// {
-///     vector<string> format_tokens;
-///     NStr::Split(custom_spec, " ", format_tokens);
-///     CSAM_Formatter::SetProgram(info);
-///     m_refRow = 1;
-///     ITERATE (vector<string>, iter, format_tokens) {
-///          if("SR" == *iter) {
-///             m_refRow = 0;
-///          }
-///          if ("SQ" == *iter) {
-///             CSAM_Formatter::SetFlag(CSAM_Formatter::fSAM_SeqData);
-///         }
-///     }
-///
-///     if(m_refRow == 1) {
-///         CSAM_Formatter::SetGroupOrder(eGO_Reference);
-///         CSAM_Formatter::SetSortOrder(eSO_Coordinate);
-///     }
-/// }
-/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SamSpec {
     /// `SR`: the subject is the reference and the query the target (`m_refRow` 0).
@@ -192,8 +143,8 @@ impl ChunkedBytes {
 
 /// A rendered record of one query, before the sort of the default mode.
 struct Rendered {
-    /// `min(GetSeqStart(0), GetSeqStop(0))` of the query row, then the e-value
-    /// (`SortHspByMasterStartAscending`).
+    /// `min(GetSeqStart(0), GetSeqStop(0))` of the query row, then the Seq-align's e-value: its
+    /// last HSP's (`SortHspByMasterStartAscending`).
     start: i32,
     evalue: f64,
     /// The bytes of the record in `Scratch::buf`.
@@ -210,7 +161,8 @@ struct Scratch {
     buf: Vec<u8>,
     letters: Vec<u8>,
     name: Vec<u8>,
-    ops: Vec<(u8, i64)>,
+    /// The CIGAR's operations and counts (`TSeqPos`).
+    ops: Vec<(u8, u32)>,
 }
 
 /// The document of a run.
@@ -233,10 +185,6 @@ impl SamDocument {
     /// CL tag; an empty line is the same).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2460-2466
-    /// ```c++
-    ///     CSAM_Formatter::SProgramInfo info("0", CBlastVersion().Print(), m_Cmdline);
-    ///     info.m_Name = m_Program;
-    /// ```
     pub fn new(spec: SamSpec, version: &str, command_line: Option<Vec<u8>>) -> Self {
         Self {
             spec,
@@ -251,23 +199,10 @@ impl SamDocument {
 
     /// Adds the records of one query's final hit list: `hsps`, grouped by subject in the
     /// Seq-align order, `subjects` indexed by `HspRecord::subject`. `run` says whether the
-    /// subjects are remapped (`-subject`).
+    /// subjects are remapped (`-subject`) and whether the search is gapped (a Seq-align and a
+    /// record per HSP) or ungapped (a Seq-align and a record per subject: its run of HSPs).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:50-61
-    /// ```c++
-    /// void CBlast_SAM_Formatter::x_Print(const CSeq_align_set & aln)
-    /// {
-    ///     if(m_refRow == 1) {
-    ///         CSeq_align_set sorted;
-    ///         sorted.Set() = aln.Get();
-    ///         sorted.Set().sort(align_format::CAlignFormatUtil::SortHspByMasterStartAscending);
-    ///         CSAM_Formatter::Print(sorted, m_refRow);
-    ///     }
-    ///     else {
-    ///         CSAM_Formatter::Print(aln, m_refRow);
-    ///     }
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:54-82
     pub fn query(
         &mut self,
         run: &RunRecord<'_>,
@@ -283,10 +218,10 @@ impl SamDocument {
         scratch.rows.clear();
         scratch.buf.clear();
         let result = (|| -> Result<()> {
-            for hsp in hsps {
-                let subject = &subjects[hsp.subject as usize];
-                self.render(run, query, subject, hsp, letters, &mut scratch)?;
-                scratch.rows.last_mut().expect("a row was rendered").subject = hsp.subject as usize;
+            for align in seq_align_hsps(run, hsps) {
+                let subject = align[0].subject as usize;
+                self.render(run, query, &subjects[subject], align, letters, &mut scratch)?;
+                scratch.rows.last_mut().expect("a row was rendered").subject = subject;
             }
             if !self.spec.subject_as_reference {
                 // `list::sort` is stable.
@@ -332,15 +267,6 @@ impl SamDocument {
     /// Lists `reference` in `@SQ` the first time it is seen.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:181-187, :445-452
-    /// ```c++
-    ///     CBioseq_Handle refseq = GetScope()->GetBioseqHandle(GetRefId());
-    ///     if (m_KnownRefSeqs.find(refseq) == m_KnownRefSeqs.end()) {
-    ///         m_Head.AddSequence(CSeq_id_Handle::GetHandle(GetRefId()),
-    ///             "@SQ\tSN:" + x_GetRefIdString() +
-    ///             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
-    ///         m_KnownRefSeqs.insert(refseq);
-    ///     }
-    /// ```
     fn list_reference(&mut self, reference: &SamSequence<'_>, name: &mut Vec<u8>) {
         if !self.seen.insert(reference.key) {
             return;
@@ -354,14 +280,15 @@ impl SamDocument {
         self.sq.push(b'\n');
     }
 
-    /// Renders the record of one HSP into `scratch` (`CSAM_CIGAR_Formatter::AddRow` after
-    /// `CCIGAR_Formatter::x_FormatLine`).
+    /// Renders the record of one Seq-align into `scratch` (`CSAM_CIGAR_Formatter::AddRow` after
+    /// `CCIGAR_Formatter::x_FormatLine`): `align` is a gapped search's HSP, or an ungapped
+    /// search's HSPs of one subject in the Seq-align's order.
     fn render(
         &self,
         run: &RunRecord<'_>,
         query: &SamSequence<'_>,
         subject: &SamSequence<'_>,
-        hsp: &HspRecord<'_>,
+        align: &[HspRecord<'_>],
         letters: &mut dyn SamLetters,
         scratch: &mut Scratch,
     ) -> Result<()> {
@@ -370,13 +297,25 @@ impl SamDocument {
         else {
             unreachable!("the first row is the query and the second the subject")
         };
-        gapped_segments(
-            run,
-            query_record,
-            subject_record,
-            hsp,
-            &mut scratch.segments,
-        );
+        if run.gapped {
+            debug_assert_eq!(align.len(), 1, "a gapped search's Seq-align holds one HSP");
+            gapped_segments(
+                run,
+                query_record,
+                subject_record,
+                &align[0],
+                &mut scratch.segments,
+            );
+        } else {
+            ungapped_segments(query_record, subject_record, align, &mut scratch.segments);
+        }
+        // The tags read the first of each score of the Seq-align (`AddRow`): its first HSP's. For
+        // an ungapped search `CreateDensegFromDendiag` joins the HSPs' score lists into the
+        // Dense-seg's scores and `Print` swaps them into the Seq-align's, each list with a score,
+        // an e-value, a bit score and a number of identities (a BLASTN HSP has no sum statistics).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:71-74
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:247-279
+        let hsp = &align[0];
         let segments = &scratch.segments;
         let starts = segments.starts();
         let lens = segments.lens();
@@ -398,15 +337,21 @@ impl SamDocument {
         let ref_minus = strands[ref_row] == Strand::Minus;
         let numseg = lens.len();
         // The CIGAR (`CCIGAR_Formatter::x_FormatLine`, widths 1), merging neighbours of the
-        // same type; the ranges of the rows are the unions of their segments.
+        // same type; the ranges of the rows are the unions of their segments. The counts and the
+        // aligned length (`GetAlignLength(false)`, the lengths of the segments without a gap) are
+        // `TSeqPos` sums, which wrap at 2^32: an ungapped subject's record adds up all its HSPs,
+        // whose diagonals may cover the same letters many times (a long tandem repeat).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/cigar_formatter.cpp:164, :324-346
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1867-1892
         let ops = &mut scratch.ops;
         ops.clear();
         let mut ref_range = (i64::MAX, i64::MIN);
         let mut tgt_range = (i64::MAX, i64::MIN);
-        let mut aligned: i64 = 0;
+        let mut aligned: u32 = 0;
         for idx in 0..numseg {
             let seg = if ref_minus { numseg - idx - 1 } else { idx };
             let len = i64::from(lens[seg]);
+            let count = lens[seg] as u32;
             let ref_start = start_of(seg, ref_row);
             let tgt_start = start_of(seg, tgt_row);
             let ref_seq = ref_start != GAP_VALUE;
@@ -416,7 +361,7 @@ impl SamDocument {
             } else if !tgt_seq && ref_seq {
                 b'D'
             } else if tgt_seq && ref_seq {
-                aligned += len;
+                aligned = aligned.wrapping_add(count);
                 b'M'
             } else {
                 continue;
@@ -430,15 +375,16 @@ impl SamDocument {
                 tgt_range.1 = tgt_range.1.max(i64::from(tgt_start) + len);
             }
             match ops.last_mut() {
-                Some((last, count)) if *last == kind => *count += len,
-                _ => ops.push((kind, len)),
+                Some((last, sum)) if *last == kind => *sum = sum.wrapping_add(count),
+                _ => ops.push((kind, count)),
             }
         }
-        let num_dif: i64 = ops
+        // NM: `int m_NumDif` adds the count of each operation other than M (`AddSegment`).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:150-157
+        let num_dif = ops
             .iter()
             .filter(|(kind, _)| *kind != b'M')
-            .map(|(_, count)| *count)
-            .sum();
+            .fold(0i32, |sum, &(_, count)| sum.wrapping_add(count as i32));
         // The target's clips (`AddRow`).
         let (target, reference) = if subject_ref {
             (query, subject)
@@ -498,7 +444,7 @@ impl SamDocument {
             buf.push(b'H');
         }
         for &(kind, count) in ops.iter() {
-            push_int(buf, count);
+            push_int(buf, i64::from(count));
             buf.push(kind);
         }
         if let Some(back) = clip_back {
@@ -516,24 +462,31 @@ impl SamDocument {
         buf.extend_from_slice(b"\tAS:i:");
         push_int(buf, i64::from(hsp.score));
         buf.extend_from_slice(b"\tEV:f:");
-        let evalue = seqalign_evalue(hsp.evalue);
-        push_g(buf, evalue);
+        push_g(buf, seqalign_evalue(hsp.evalue));
         buf.extend_from_slice(b"\tNM:i:");
-        push_int(buf, num_dif);
+        push_int(buf, i64::from(num_dif));
         buf.extend_from_slice(b"\tPI:f:");
-        let identity = if i64::from(hsp.num_ident) == aligned {
+        // `int len = aln.GetAlignLength(false)`: from 2^31 on the length is negative, and so is PI
+        // (NCBI BLAST+ 2.17.0 writes `PI:f:-0.01` for a subject whose HSPs add up to 2152959968).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276
+        let len = aligned as i32;
+        let identity = if hsp.num_ident == len {
             100.0
         } else {
-            f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / aligned as f64)
+            f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / f64::from(len))
         };
         push_fixed2(buf, identity);
         buf.extend_from_slice(b"\tBS:f:");
         push_g(buf, hsp.bit_score);
         buf.push(b'\n');
         let end = buf.len();
+        // The sort reads the last e-value of the Seq-align's scores (`GetAlnScores`).
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:229-270
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
+        let last = align.last().expect("a Seq-align holds an HSP");
         scratch.rows.push(Rendered {
-            start: query_row_start(starts, offsets[0]),
-            evalue,
+            start: query_row_start(segments, offsets[0]),
+            evalue: seqalign_evalue(last.evalue),
             bytes: begin..end,
             subject: 0,
         });
@@ -571,16 +524,31 @@ impl SamDocument {
     }
 }
 
-/// The lowest coordinate of the query row in record coordinates:
-/// `min(GetSeqStart(0), GetSeqStop(0))` of the Seq-align (the minimum over the segments that
-/// are not gaps).
-fn query_row_start(starts: &[i32], offset: i32) -> i32 {
-    starts
-        .chunks_exact(2)
-        .map(|segment| segment[0])
-        .filter(|&start| start >= 0)
-        .min()
-        .map_or(0, |start| start + offset)
+/// `min(GetSeqStart(0), GetSeqStop(0))` of the Seq-align's query row, in record coordinates
+/// (`offset` added to the starts). Both read the row's strand in the first segment: on the plus
+/// strand the start is the first segment's that is not a gap and the stop the end of the last
+/// one, on the minus strand the other way round. A gapped HSP's row runs one way, so this is its
+/// lowest coordinate; an ungapped search's segments are its subject's HSPs in e-value order, and
+/// a lower HSP between the first and the last one is not read. The positions are `TSeqPos`
+/// (unsigned).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:165-238
+fn query_row_start(segments: &Segments, offset: i32) -> i32 {
+    let starts = segments.starts();
+    let lens = segments.lens();
+    let mut rows = (0..lens.len()).filter(|&seg| starts[2 * seg] >= 0);
+    let Some(first) = rows.next() else {
+        return 0;
+    };
+    let last = rows.next_back().unwrap_or(first);
+    let (start_seg, stop_seg) = if segments.strands()[0] == Strand::Minus {
+        (last, first)
+    } else {
+        (first, last)
+    };
+    let start = (starts[2 * start_seg] + offset) as u32;
+    let stop = ((starts[2 * stop_seg] + offset + lens[stop_seg]) as u32).wrapping_sub(1);
+    start.min(stop) as i32
 }
 
 /// Appends the decimal digits of `value`.
@@ -619,24 +587,6 @@ fn push_fixed2(out: &mut Vec<u8>, value: f64) {
 /// C's `%g` (precision 6), which `NStr::DoubleToString(value)` prints.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2340
-/// ```c++
-/// void NStr::DoubleToString(string& out_str, double value,
-///                           int precision, TNumToStringFlags flags)
-/// {
-///     ...
-///     if (precision >= 0 || ...) {
-///         ...
-///     } else {
-///         const char* format;
-///         switch (flags & fDoubleGeneral) {
-///             ...
-///             case fDoubleGeneral: // default
-///             default:
-///                 format = "%g";
-///                 break;
-///         }
-///         n = ::snprintf(buffer, kMaxDoubleStringSize, format, value);
-/// ```
 pub fn push_g(out: &mut Vec<u8>, value: f64) {
     if value.is_nan() {
         out.extend_from_slice(if value.is_sign_negative() {
@@ -689,391 +639,5 @@ pub fn push_g(out: &mut Vec<u8>, value: f64) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::common::GapEditOp;
-    use crate::report::seqid::SeqId;
-
-    fn g(value: f64) -> String {
-        let mut out = Vec::new();
-        push_g(&mut out, value);
-        String::from_utf8(out).unwrap()
-    }
-
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2340 (`%g`).
-    #[test]
-    fn g_prints_six_significant_digits_as_c_does() {
-        assert_eq!(g(0.0), "0");
-        assert_eq!(g(1e-180), "1e-180");
-        assert_eq!(g(2.60916e-178), "2.60916e-178");
-        assert_eq!(g(0.8216932), "0.821693");
-        assert_eq!(g(608.6682), "608.668");
-        assert_eq!(g(55395.12), "55395.1");
-        assert_eq!(g(100000.0), "100000");
-        assert_eq!(g(999999.5), "1e+06");
-        assert_eq!(g(1e6), "1e+06");
-        assert_eq!(g(123456789.0), "1.23457e+08");
-        assert_eq!(g(0.0001), "0.0001");
-        assert_eq!(g(0.00001), "1e-05");
-        assert_eq!(g(0.5), "0.5");
-        assert_eq!(g(2.0), "2");
-        assert_eq!(g(1.5e-5), "1.5e-05");
-        assert_eq!(g(-0.25), "-0.25");
-        assert_eq!(g(f64::INFINITY), "inf");
-    }
-
-    #[test]
-    fn the_specification_words_are_exact() {
-        let parse = SamSpec::parse;
-        assert_eq!(parse(""), SamSpec::default());
-        assert_eq!(
-            parse("SQ"),
-            SamSpec {
-                subject_as_reference: false,
-                sequence: true
-            }
-        );
-        assert_eq!(
-            parse("SR SQ"),
-            SamSpec {
-                subject_as_reference: true,
-                sequence: true
-            }
-        );
-        for plain in ["sq", "foo SQ,SR", "std", "SQSR", "S R"] {
-            assert_eq!(parse(plain), SamSpec::default(), "{plain}");
-        }
-        assert!(parse("foo SQ").sequence);
-        assert!(!parse("SQ  SQ").subject_as_reference);
-    }
-
-    #[test]
-    fn a_reverse_complement_keeps_the_ambiguity_codes() {
-        let mut letters = b"ACGTRYKMBVDHNSW".to_vec();
-        reverse_complement(&mut letters);
-        assert_eq!(letters, b"WSNDHBVKMRYACGT");
-    }
-
-    /// A document of one query with the given HSP over a subject of length 100; the query
-    /// has 60 letters.
-    fn document(
-        spec: SamSpec,
-        cl: Option<&[u8]>,
-        hsp: HspRecord<'_>,
-        letters: &mut dyn SamLetters,
-    ) -> String {
-        let run = RunRecord {
-            program: crate::blastinput::app::Program::Blastn,
-            db_title: None,
-            gapped: true,
-        };
-        let query = SamSequence {
-            record: SamId::Query(QueryRecord {
-                id: SeqId::Local("Query_1"),
-                searched_length: 60,
-                offset: 0,
-            }),
-            key: 0,
-            index: 0,
-            length: 60,
-        };
-        let subject = SamSequence {
-            record: SamId::Subject(SubjectRecord {
-                id: SeqId::Local("Subject_1"),
-                searched_length: 100,
-                offset: 0,
-                use_this_seqid: &[],
-            }),
-            key: 0,
-            index: 0,
-            length: 100,
-        };
-        let mut document = SamDocument::new(spec, "2.17.0+", cl.map(<[u8]>::to_vec));
-        document
-            .query(&run, &query, &[subject], &[hsp], letters)
-            .unwrap();
-        let mut out = Vec::new();
-        document.finish(&mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
-    fn hsp(
-        q: (i32, i32),
-        s: (i32, i32),
-        frame: i8,
-        ident: i32,
-        ops: &[GapEditOp],
-    ) -> HspRecord<'_> {
-        HspRecord {
-            subject: 0,
-            q_offset: q.0,
-            q_end: q.1,
-            s_offset: s.0,
-            s_end: s.1,
-            q_frame: frame,
-            s_frame: 1,
-            score: 40,
-            num: 0,
-            evalue: 2.5e-7,
-            bit_score: 75.8,
-            num_ident: ident,
-            num_positives: 0,
-            comp_adjust: 0,
-            ops,
-        }
-    }
-
-    struct Fixed;
-
-    impl SamLetters for Fixed {
-        fn letters(
-            &mut self,
-            row: SamRow,
-            _: usize,
-            from: usize,
-            to: usize,
-            out: &mut Vec<u8>,
-        ) -> Result<()> {
-            let alphabet: &[u8] = if row == SamRow::Query {
-                b"AACCGGTTAC"
-            } else {
-                b"ACGTRYACGT"
-            };
-            out.extend((from..to).map(|at| alphabet[at % alphabet.len()]));
-            Ok(())
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:179-298 (AddRow) and
-    // cigar_formatter.cpp:157-352 (x_FormatLine): the target is the subject, the reference the
-    // query; a plus-strand HSP with a gap of 3 in the subject (D) and one of 2 in the query (I).
-    #[test]
-    fn a_plus_hsp_has_the_subject_as_target_and_clips_it() {
-        let ops = [
-            GapEditOp::Sub(10),
-            GapEditOp::Ins(3),
-            GapEditOp::Sub(20),
-            GapEditOp::Del(2),
-            GapEditOp::Sub(5),
-        ];
-        // The query consumes 10 + 3 + 20 + 5 = 38 letters, the subject 10 + 20 + 2 + 5 = 37.
-        let hsp = hsp((4, 42), (20, 57), 1, 30, &ops);
-        let text = document(SamSpec::default(), Some(b"blastn -x "), hsp, &mut NoLetters);
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], "@HD\tVN:1.2\tSO:coordinate\tGO:reference");
-        assert_eq!(lines[1], "@SQ\tSN:Query_1\tLN:60");
-        assert_eq!(lines[2], "@PG\tID:0\tVN:2.17.0+\tCL:blastn -x \tPN:blastn");
-        let fields: Vec<&str> = lines[3].split('\t').collect();
-        assert_eq!(fields[0], "Subject_1");
-        assert_eq!(fields[1], "0");
-        assert_eq!(fields[2], "Query_1");
-        assert_eq!(fields[3], "5");
-        assert_eq!(fields[4], "255");
-        // The clips come from the subject range [20, 57) of a length of 100.
-        assert_eq!(fields[5], "20H10M3D20M2I5M43H");
-        assert_eq!(fields[9], "*");
-        assert_eq!(fields[11], "AS:i:40");
-        assert_eq!(fields[12], "EV:f:2.5e-07");
-        assert_eq!(fields[13], "NM:i:5");
-        assert_eq!(fields[14], "PI:f:85.71");
-        assert_eq!(fields[15], "BS:f:75.8");
-        assert_eq!(lines.len(), 4);
-    }
-
-    #[test]
-    fn sq_writes_the_target_letters_and_sr_swaps_the_roles() {
-        let ops = [GapEditOp::Sub(10), GapEditOp::Ins(3), GapEditOp::Sub(10)];
-        let spec = SamSpec::parse("SQ SR");
-        let hsp = hsp((4, 27), (20, 40), 1, 20, &ops);
-        let text = document(spec, None, hsp, &mut Fixed);
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], "@HD\tVN:1.2\tGO:query");
-        assert_eq!(lines[1], "@SQ\tSN:Subject_1\tLN:100");
-        // No CL tag without a command line.
-        assert_eq!(lines[2], "@PG\tID:0\tVN:2.17.0+\tPN:blastn");
-        let fields: Vec<&str> = lines[3].split('\t').collect();
-        assert_eq!(fields[0], "Query_1");
-        assert_eq!(fields[2], "Subject_1");
-        assert_eq!(fields[3], "21");
-        // The target is the query: its three letters have no subject letters (I).
-        assert_eq!(fields[5], "4H10M3I10M33H");
-        let expected: String = (4..27).map(|at| b"AACCGGTTAC"[at % 10] as char).collect();
-        assert_eq!(fields[9], expected);
-    }
-
-    #[test]
-    fn a_minus_hsp_is_reversed_and_complemented() {
-        let ops = [GapEditOp::Sub(12)];
-        // Query row on the minus strand: the HSP covers the query context offsets 8..20 of 60,
-        // so the plus-strand range is 40..52.
-        let hsp = hsp((8, 20), (30, 42), -1, 12, &ops);
-        let text = document(SamSpec::parse("SQ"), None, hsp, &mut Fixed);
-        let lines: Vec<&str> = text.lines().collect();
-        let fields: Vec<&str> = lines[3].split('\t').collect();
-        assert_eq!(fields[1], "16");
-        assert_eq!(fields[3], "41");
-        // Subject range [30, 42): reverse clip at the back (30H) and the front (58H).
-        assert_eq!(fields[5], "58H12M30H");
-        assert_eq!(fields[13], "NM:i:0");
-        assert_eq!(fields[14], "PI:f:100.00");
-        assert_eq!(fields[9].len(), 12);
-    }
-
-    fn query_seq(index: usize, id: &'static str) -> SamSequence<'static> {
-        SamSequence {
-            record: SamId::Query(QueryRecord {
-                id: SeqId::Local(id),
-                searched_length: 60,
-                offset: 0,
-            }),
-            key: index as u64,
-            index,
-            length: 60,
-        }
-    }
-
-    fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
-        SamSequence {
-            record: SamId::Subject(SubjectRecord {
-                id: SeqId::Local(id),
-                searched_length: 100,
-                offset: 0,
-                use_this_seqid: &[],
-            }),
-            key: index as u64,
-            index,
-            length: 100,
-        }
-    }
-
-    fn run_record() -> RunRecord<'static> {
-        RunRecord {
-            program: crate::blastinput::app::Program::Blastn,
-            db_title: None,
-            gapped: true,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1401-1430
-    // (`SortHspByMasterStartAscending`): the lowest query coordinate, then the e-value; `list::sort`
-    // is stable, so HSPs equal in both keep the order of the Seq-align.
-    #[test]
-    fn the_default_mode_sorts_a_querys_records_stably_by_start_then_evalue() {
-        let ops = [GapEditOp::Sub(10)];
-        let mut hsps = Vec::new();
-        // (query start, e-value, score): input order 0..4
-        for (start, evalue, score) in [
-            (30, 1e-5, 11),
-            (10, 1e-3, 12),
-            (10, 1e-9, 13),
-            (30, 1e-5, 14),
-            (5, 1.0, 15),
-        ] {
-            hsps.push(HspRecord {
-                evalue,
-                score,
-                ..hsp((start, start + 10), (0, 10), 1, 10, &ops)
-            });
-        }
-        let mut document = SamDocument::new(SamSpec::default(), "2.17.0+", None);
-        document
-            .query(
-                &run_record(),
-                &query_seq(0, "Query_1"),
-                &[subject_seq(0, "Subject_1")],
-                &hsps,
-                &mut NoLetters,
-            )
-            .unwrap();
-        let mut out = Vec::new();
-        document.finish(&mut out).unwrap();
-        let text = String::from_utf8(out).unwrap();
-        let scores: Vec<&str> = text
-            .lines()
-            .filter(|line| !line.starts_with('@'))
-            .map(|line| line.split('\t').nth(11).unwrap())
-            .collect();
-        assert_eq!(
-            scores,
-            ["AS:i:15", "AS:i:13", "AS:i:12", "AS:i:11", "AS:i:14"]
-        );
-        // `SR` keeps the Seq-align order.
-        let mut document = SamDocument::new(SamSpec::parse("SR"), "2.17.0+", None);
-        document
-            .query(
-                &run_record(),
-                &query_seq(0, "Query_1"),
-                &[subject_seq(0, "Subject_1")],
-                &hsps,
-                &mut NoLetters,
-            )
-            .unwrap();
-        let mut out = Vec::new();
-        document.finish(&mut out).unwrap();
-        let text = String::from_utf8(out).unwrap();
-        let scores: Vec<&str> = text
-            .lines()
-            .filter(|line| !line.starts_with('@'))
-            .map(|line| line.split('\t').nth(11).unwrap())
-            .collect();
-        assert_eq!(
-            scores,
-            ["AS:i:11", "AS:i:12", "AS:i:13", "AS:i:14", "AS:i:15"]
-        );
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:445-452
-    // (`AddSequence` drops a reference it has): one `@SQ` per reference of the whole run, in order of
-    // first appearance, whichever call adds it.
-    #[test]
-    fn the_sq_lines_list_each_reference_once_across_calls() {
-        let ops = [GapEditOp::Sub(10)];
-        let hsps = [
-            hsp((0, 10), (0, 10), 1, 10, &ops),
-            HspRecord {
-                subject: 1,
-                ..hsp((20, 30), (5, 15), 1, 10, &ops)
-            },
-        ];
-        let subjects = [subject_seq(0, "Subject_1"), subject_seq(1, "Subject_2")];
-        for (spec, expected) in [
-            (
-                SamSpec::default(),
-                vec!["@SQ\tSN:Query_1\tLN:60", "@SQ\tSN:Query_2\tLN:60"],
-            ),
-            (
-                SamSpec::parse("SR"),
-                vec!["@SQ\tSN:Subject_1\tLN:100", "@SQ\tSN:Subject_2\tLN:100"],
-            ),
-        ] {
-            let mut document = SamDocument::new(spec, "2.17.0+", None);
-            for (index, id) in [(0, "Query_1"), (1, "Query_2"), (2, "Query_1")] {
-                // the third call names the first query's reference key again
-                let mut query = query_seq(index, id);
-                query.key = if index == 2 { 0 } else { index as u64 };
-                document
-                    .query(&run_record(), &query, &subjects, &hsps, &mut NoLetters)
-                    .unwrap();
-            }
-            let mut out = Vec::new();
-            document.finish(&mut out).unwrap();
-            let text = String::from_utf8(out).unwrap();
-            let sq: Vec<&str> = text.lines().filter(|l| l.starts_with("@SQ")).collect();
-            assert_eq!(sq, expected);
-            assert_eq!(text.lines().filter(|l| !l.starts_with('@')).count(), 6);
-            // a second finish writes nothing
-            let mut again = Vec::new();
-            document.finish(&mut again).unwrap();
-            assert!(again.is_empty());
-        }
-    }
-
-    #[test]
-    fn an_empty_document_writes_nothing_and_finish_empties_it() {
-        let mut document = SamDocument::new(SamSpec::default(), "2.17.0+", None);
-        let mut out = Vec::new();
-        document.finish(&mut out).unwrap();
-        assert!(out.is_empty());
-        assert!(!document.has_records());
-    }
-}
+#[path = "sam_tests.rs"]
+mod tests;

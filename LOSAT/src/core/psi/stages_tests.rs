@@ -46,9 +46,6 @@ const GI_129296: [u8; 388] = [
 
 /// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268
-// ```c
-//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
-// ```
 const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
     lambda: 0.267,
     k: 0.041,
@@ -112,13 +109,6 @@ fn non_identical_high_scoring_residue(res: u8) -> u8 {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:762-772 testPurgeSelfHit
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:762-772
-// ```c++
-//         int rv = _PSIPurgeBiasedSegments(msa.get());
-//         BOOST_REQUIRE_EQUAL(PSI_SUCCESS, rv);
-//         const Uint4 kSelfHitIndex = 1;
-// 		BOOST_REQUIRE_EQUAL(true, !!msa->use_sequence[kQueryIndex]);
-// 		BOOST_REQUIRE_EQUAL(false, !!msa->use_sequence[kSelfHitIndex]);
-// ```
 #[test]
 fn purge_removes_a_self_hit() {
     let msa = aligned_msa(&[&PURGE_TEST_QUERY, &PURGE_TEST_QUERY]);
@@ -130,12 +120,6 @@ fn purge_removes_a_self_hit() {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:774-785 testPurgeDuplicateHit
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:781-784
-// ```c++
-//         const Uint4 kDuplicateHitIndex = 2;
-//         BOOST_REQUIRE_EQUAL(false, !!msa->use_sequence[kDuplicateHitIndex]);
-//         BOOST_REQUIRE_EQUAL(true, !!msa->use_sequence[kQueryIndex]);
-//         BOOST_REQUIRE_EQUAL(true, !!msa->use_sequence[kQueryIndex + 1]);
-// ```
 #[test]
 fn purge_removes_a_duplicate_hit() {
     let mut packed = PackedMsa::new(&duplicate_hit_msa());
@@ -147,17 +131,6 @@ fn purge_removes_a_duplicate_hit() {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:787-799 testPurgeNearIdenticalHits
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:533-545
-// ```c++
-//         SetupDuplicateHit();
-//
-//         const Uint4 kHitIndex = 2;  // index of the near identical hit
-//         const Uint4 kNumIdenticalResidues = (Uint4) (GetQueryLength() *
-//             (kPSINearIdentical + 0.01));
-//
-//         for (Uint4 i = kNumIdenticalResidues; i < GetQueryLength(); i++) {
-//             Uint1& residue = m_msa->data[kHitIndex][i].letter;
-//             residue = (residue + 1) % BLASTAA_SIZE;
-// ```
 #[test]
 fn purge_removes_a_near_identical_hit() {
     let mut msa = duplicate_hit_msa();
@@ -185,18 +158,6 @@ fn exceptional_residue(j: u8) -> bool {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:801-865 testQueryAlignedWithInternalGaps
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:401-436
-// ```c++
-//         string query_seq("MFKVYGYDSNIHKCGPCDNAKRLLTVKKQPFEFINIM");
-//         query_seq += string("PEKGVFDDEKIAELLTKLGRDTQIGLTMPQVFAPDGSHIGGFD");
-//         query_seq += string("QLREYFK");
-//         ...
-//         TAlignedSequence region(make_pair(make_pair(0U, 8U),
-//                                           string("KVVVFIKP")));
-//         ...
-//             // align the second sequence to gaps
-//             m_msa->data[1][i].letter = kGapResidue;
-//             m_msa->data[1][i].is_aligned = true;
-// ```
 #[test]
 fn a_query_aligned_with_internal_gaps_keeps_the_matrix_scores_at_the_gaps() {
     let letters = |text: &str| -> Vec<u8> {
@@ -244,17 +205,6 @@ fn a_query_aligned_with_internal_gaps_keeps_the_matrix_scores_at_the_gaps() {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:867-1061 testMultiSeqAlignmentHasRegionsUnalignedToQuery
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:367-385
-// ```c++
-//         const TAlignedSegment kFirstAlignment(0, 100);
-//         for (unsigned int i = kFirstAlignment.first;
-//              i < kFirstAlignment.second; i++) {
-//             m_msa->data[1][i].letter =
-//                 FindNonIdenticalHighScoringResidue(kQuery[i], score_matrix);
-//             m_msa->data[1][i].is_aligned = true;
-//         }
-//         ...
-//         const TAlignedSegment kSecondAlignment(200, kQueryLength);
-// ```
 #[test]
 fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
     let length = PURGE_TEST_QUERY_LENGTH;
@@ -313,7 +263,7 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
     }
 
     let mut seq_weights = SequenceWeights::new(msa.num_seqs, length);
-    compute_sequence_weights(&msa, &aligned_blocks, &mut seq_weights).unwrap();
+    compute_sequence_weights(&msa, &aligned_blocks, false, &mut seq_weights).unwrap();
     let column_weight = |pos: usize| -> f64 {
         (0..BLASTAA_SIZE)
             .filter(|&res| res != ncbistdaa::X as usize)
@@ -337,8 +287,10 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
         &sbp,
         &aligned_blocks,
         0,
+        false,
         &mut internal,
-    );
+    )
+    .unwrap();
     convert_freq_ratios_to_pssm(&mut internal, &msa.query, &sbp, &seq_weights.std_prob);
     scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, &sbp).unwrap();
     assert_eq!(msa.num_seqs, 3);
@@ -366,16 +318,6 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1066-1110 testQueryIsOnlyAlignedSequenceInMsa
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1097-1104
-// ```c++
-//         for (size_t i = 0; i < pssm_input->GetQueryLength(); i++) {
-//             BOOST_REQUIRE_EQUAL((int)-1,
-//                                  (int)aligned_blocks->pos_extnt[i].left);
-//             BOOST_REQUIRE_EQUAL((int)pssm_input->GetQueryLength(),
-//                                  (int)aligned_blocks->pos_extnt[i].right);
-//             BOOST_REQUIRE_EQUAL((int)pssm_input->GetQueryLength() + 2,
-//                                  (int)aligned_blocks->size[i]);
-//         }
-// ```
 // The rest of the case computes the weights in the structure group compatibility mode, which
 // psiblast does not use and `stages.rs` does not port.
 #[test]
@@ -399,17 +341,6 @@ fn the_query_alone_has_no_aligned_blocks() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:108-131
-// ```c++
-//         const unsigned int  kQuerySize = 10;
-//         const unsigned int  kNumSeqs = 2;
-//         const unsigned char kQuery[] = { 3, 9, 14, 20, 6, 23, 1, 7, 16, 5 };
-//         ...
-//         // Add the flanking gaps
-//         m_msa->data[1][0].letter =
-//             m_msa->data[2][0].letter =
-//             m_msa->data[2][m_dim.query_length-1].letter =
-//             AMINOACID_TO_NCBISTDAA[(int)'-'];
-// ```
 const FLANKING_GAPS_QUERY: [u8; 10] = [3, 9, 14, 20, 6, 23, 1, 7, 16, 5];
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1196-1200 testRejectFlankingGaps
@@ -424,13 +355,6 @@ fn flanking_gaps_are_rejected() {
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1202-1206 testRejectGapInQuery
 // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:178-182
-// ```c++
-//         // Randomly assign a position in the query to contain a gap
-//         CRandom r((CRandom::TValue)time(0));
-//         int gap_position = r.GetRand(0, GetQueryLength() - 1);
-//         m_query[gap_position] = AMINOACID_TO_NCBISTDAA[(int)'-'];
-//         m_msa->data[0][gap_position].letter = m_query[gap_position];
-// ```
 // Every position in turn instead of a random one.
 #[test]
 fn a_gap_in_the_query_is_rejected() {

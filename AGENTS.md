@@ -132,12 +132,31 @@ authoritative, current guidance for agent behavior in LOSAT.
      process-wide id table can print the type of another id of the same prefix,
      digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
      with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
+     Approved difference: `losat rpsbproc` sorts with Rust's standard sort, so hits equal in
+     E-value and bit score, and data rows of one key, keep their input order, where NCBI's
+     `std::sort` leaves an order of its own (Owner, 2026-11-20, PD-LOSAT-NCBI-DEFECTS 1.67); a
+     NaN E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20).
 
-4. NCBI code comments are mandatory for modifications.
-   - Every code change must include NCBI C/C++ reference comments with file path
-     and line numbers.
-   - Include the relevant NCBI snippet immediately above the Rust code.
-   - If you cannot add the NCBI reference comments, do not write the code.
+4. NCBI references are mandatory for modifications.
+   - Every code change must cite the NCBI C/C++ source it follows, by path and line numbers
+     in the pinned tree, immediately above the Rust code:
+     `// NCBI reference (598d8ae6): c++/<path>:<first>-<last>` (rpsbproc:
+     `// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/<path>:<lines>`).
+   - Do not copy source text into comments, NCBI's included: cite the lines and say in your
+     own words what the Rust code follows (maintainer, 2026-11-20).
+     `scripts/ncbi_ref.py <file>[:<line>]` prints the cited lines from `$NCBI_SRC`.
+   - Cite the code of any other project by `<project> <version>: <path>:<lines>`: GPL and
+     LGPL code (libstdc++, glibc), Microsoft's sources, permissively licensed code (LMDB,
+     Boost, BitMagic, Rust crates), and the copies of such code in NCBI's tree
+     (`LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/...`; never "NCBI reference" for
+     them). Use no GPL-mixed code: none taken from GPL or LGPL sources (libstdc++, glibc) or
+     from Microsoft source whose license does not allow redistribution (maintainer,
+     2026-11-20).
+   - `LOSAT/tests/check_foreign_quotes.py` (CI `rust lint`) fails on source text in a
+     comment, on an NCBI citation that does not name the pinned tree, and on a cited path or
+     line range that is not in it (`LOSAT/tests/ncbi_source_lines.tsv`); it holds the one
+     list of what in NCBI's tree is not NCBI's.
+   - If you cannot add the NCBI reference, do not write the code.
 
 5. No unauthorized features.
    - Never introduce functionality that does not exist in NCBI.
@@ -411,11 +430,14 @@ cd LOSAT && cargo fmt
   runs; `web/AGENTS.md` governs checks for application commits.
 - Add unit tests for NCBI-ported functions, including edge cases and boundaries.
 - Reference NCBI unit tests when available:
-  `ncbi-blast/c++/src/algo/blast/unit_tests/`.
+  `c++/src/algo/blast/unit_tests/`.
 - Port the NCBI unit-test cases of a ported function one case at a time, inside the parity
   sweep of the module that owns it (rule 10). The test lives next to the implementation, in
-  its `#[cfg(test)]` module or a sibling `<name>_tests.rs` declared with
-  `#[cfg(test)] mod <name>_tests;`, with the line
+  a sibling `<stem>_tests.rs` declared with
+  `#[cfg(test)] #[path = "<stem>_tests.rs"] mod tests;` (no inline `#[cfg(test)] mod tests { ... }`
+  in a `LOSAT/src` file: the published crate would carry it, and crates.io takes 10 MiB;
+  `python3 LOSAT/tests/check_inline_test_modules.py --root . [--fix]` checks it and moves
+  such a module, `--fix` after merging a dev that has one), with the line
   `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
   above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).

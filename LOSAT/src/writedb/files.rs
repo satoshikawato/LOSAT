@@ -15,7 +15,7 @@ pub(crate) struct WriteDbFile {
     /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
     stream: OfStream,
     base_name: String,
-    extension: &'static str,
+    extension: String,
     index: u32,
     use_index: bool,
     fname: String,
@@ -28,31 +28,6 @@ pub(crate) struct WriteDbFile {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:235-257
-// ```c++
-// string CWriteDB_File::MakeShortName(const string & base, int index)
-// {
-//     ostringstream fns;
-//
-//     fns << base;
-//     fns << ".";
-//     fns << (index / 10);
-//     fns << (index % 10);
-//
-//     return fns.str();
-// }
-//
-// void CWriteDB_File::x_MakeFileName()
-// {
-//     if (m_UseIndex) {
-//         m_Fname = MakeShortName(m_BaseName, m_Index);
-//     } else {
-//         m_Fname = m_BaseName;
-//     }
-//
-//     m_Fname += ".";
-//     m_Fname += m_Extension;
-// }
-// ```
 /// `CWriteDB_File::MakeShortName`: `base.NN` (two digits, more from volume
 /// 100 on).
 pub(crate) fn make_short_name(base: &str, index: u32) -> String {
@@ -61,45 +36,11 @@ pub(crate) fn make_short_name(base: &str, index: u32) -> String {
 
 impl WriteDbFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:178-202
-    // ```c++
-    //     if (m_MaxFileSize == 0) {
-    //         m_MaxFileSize = x_DefaultByteLimit();
-    //     } else {
-    // #ifdef _DEBUG
-    //         _ASSERT(max_file_size <= MAX_FILE_SIZE);
-    // #endif
-    //     }
-    //
-    //     m_Nul.resize(1);
-    //     m_Nul[0] = (char) 0;
-    //
-    //     m_UseIndex = (index >= 0);
-    //     x_MakeFileName();
-    //
-    //     if (always_create) {
-    //         Create();
-    //     }
-    // }
-    //
-    // void CWriteDB_File::Create()
-    // {
-    //     _ASSERT(! m_Created);
-    //     m_Created = true;
-    //     m_RealFile.open(m_Fname.c_str(), ios::out | ios::binary);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:174-178
-    // ```c++
-    //     Uint8 x_DefaultByteLimit()
-    //     {
-    //         // 1 gb (marketing version) - 1; about a billion
-    //         return 1000*1000*1000 - 1;
-    //     }
-    // ```
     // NCBI does not test the stream: a file that cannot be opened (a directory of its name
     // that the removal of the old database could not delete) is written to nowhere and the
     // build goes on, as makeblastdb's (`super::ofstream`).
-    fn create(base_name: &str, extension: &'static str, index: u32, max_file_size: u64) -> Self {
+    fn create(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
         file.create_now();
         file
@@ -107,16 +48,11 @@ impl WriteDbFile {
 
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
-    pub(crate) fn lazy(
-        base_name: &str,
-        extension: &'static str,
-        index: u32,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),
-            extension,
+            extension: extension.to_string(),
             index,
             use_index: true,
             fname: format!("{}.{extension}", make_short_name(base_name, index)),
@@ -148,12 +84,6 @@ impl WriteDbFile {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:218-221
-    // ```c++
-    //     m_RealFile.write(data.data(), data.length());
-    //
-    //     m_Offset += data.length();
-    //     return m_Offset;
-    // ```
     // `m_Offset` is an `unsigned int`: past 4 GiB it wraps and the offsets of
     // the index no longer name the data. makeblastdb limits `-max_file_sz`
     // below 4 GiB, but a volume takes its first sequence whatever its size;
@@ -174,29 +104,12 @@ impl WriteDbFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:103-108
-    // ```c++
-    //     unsigned int WriteInt4(int data)
-    //     {
-    //         s_WriteInt4(m_RealFile, data);
-    //         m_Offset += 4;
-    //         return m_Offset;
-    //     }
-    // ```
     /// `WriteInt4`: a big-endian `Int4`.
     pub(crate) fn write_int4(&mut self, value: i32) -> Result<u32, WriteDbError> {
         self.write(&value.to_be_bytes())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:259-265
-    // ```c++
-    // void CWriteDB_File::Close()
-    // {
-    //     x_Flush();
-    //     if (m_Created) {
-    //         m_RealFile.close();
-    //     }
-    // }
-    // ```
     /// The end of `Close` (after the file's own `x_Flush`): the stream is closed.
     pub(crate) fn close(&mut self) {
         if self.created {
@@ -221,53 +134,12 @@ impl WriteDbFile {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:267-277
-    // ```c++
-    // void CWriteDB_File::RenameSingle()
-    // {
-    //     _ASSERT(m_UseIndex == true);
-    //
-    //     string nm1 = m_Fname;
-    //     m_UseIndex = false;
-    //     x_MakeFileName();
-    //
-    //     CDirEntry fn1(nm1);
-    //     fn1.Rename(m_Fname, CDirEntry::fRF_Overwrite);
-    // }
-    // ```
     pub(crate) fn rename_single(&mut self) {
         self.use_index = false;
         self.rename_to(format!("{}.{}", self.base_name, self.extension));
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:279-304
-    // ```c++
-    // void CWriteDB_File::RenameFileIndex(unsigned int num_digits)
-    // {
-    // 	_ASSERT(num_digits > 2);
-    // 	unsigned int orig_num_digits = log10(m_Index) +1;
-    // 	if(orig_num_digits == num_digits) {
-    // 		return;
-    // 	}
-    //
-    //     string orig_fname = m_Fname;
-    //     ostringstream fns;
-    //
-    //     fns << m_BaseName;
-    //     fns << ".";
-    //     for (unsigned int i=2; i< num_digits; i++){
-    //     	fns << "0";
-    //     }
-    //     fns << (m_Index / 10);
-    //     fns << (m_Index % 10);
-    //     fns << ".";
-    //     fns << m_Extension;
-    //
-    //     m_Fname = fns.str();
-    //
-    //     CDirEntry fn(orig_fname);
-    //     fn.Rename(m_Fname, CDirEntry::fRF_Overwrite);
-    // }
-    // ```
     // `num_digits - 2` zeros go in front of the name `MakeShortName` gives,
     // whatever the number of digits of the index: with four digits volume 5
     // becomes `0005` and volume 123 becomes `00123`. For index 0 the
@@ -373,22 +245,6 @@ pub(crate) struct IndexFile {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:346-360
-// ```c++
-// int CWriteDB_IndexFile::x_Overhead(const string & T,
-//                                    const string & lmdbName,
-//                                    const string & D)
-// {
-//     return 5 * sizeof(int) + sizeof(long)
-//             + 3 * sizeof(int) + T.size() + lmdbName.size() + D.size();
-// }
-//
-// int CWriteDB_IndexFile::x_Overhead(const string & T,
-//                                    const string & D)
-// {
-//     return 4 * sizeof(int) + sizeof(long)
-//             + 2 * sizeof(int) + T.size() + D.size();
-// }
-// ```
 // `sizeof(int)` is 4 and `sizeof(long)` the platform's (`Platform::sizeof_long`):
 // 8 on Linux and macOS (LP64), 4 on Windows (LLP64), so the padding of the
 // date and the room the header takes from `-max_file_sz` follow the platform
@@ -410,19 +266,6 @@ fn overhead(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:438-448
-// ```c++
-// /// Form name of lmdb database file.
-// const string CWriteDB_IndexFile::x_MakeLmdbName()
-// {
-//     string suffix = (m_Protein ? ".pdb" : ".ndb");
-//     size_t last_slash = m_BaseName.find_last_of(CFile::GetPathSeparator());
-//     if (last_slash == m_BaseName.npos) {
-//         return m_BaseName + suffix;
-//     } else {
-//         return m_BaseName.substr(last_slash + 1) + suffix;
-//     }
-// }
-// ```
 // `m_BaseName` is the database name without the number of the volume, and
 // `CFile::GetPathSeparator()` is the separator of the platform ('/', or '\\'
 // on Windows).
@@ -439,24 +282,6 @@ pub(crate) fn make_lmdb_name(base_name: &str, protein: bool) -> String {
 
 impl IndexFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:329-344
-    // ```c++
-    //     m_Overhead = x_Overhead(title, date);
-    //     if (dbver == eBDB_Version5) {
-    //         m_Overhead = x_Overhead(title, x_MakeLmdbName(), date);
-    //     } else {
-    //         m_Overhead = x_Overhead(title, date);
-    //     }
-    //     m_Overhead = s_RoundUp(m_Overhead, 8);
-    //     m_DataSize = m_Overhead;
-    //
-    //     // The '1' added to the sequence offset array refers to the fact
-    //     // that sequence files contain an initial NUL byte.  This seems to
-    //     // be for the benefit of the protein database scanning code, but
-    //     // it is also done for nucleotide databases.
-    //
-    //     m_Hdr.push_back(0);
-    //     m_Seq.push_back(1);
-    // ```
     // `m_DataSize` starts at the header's size, so the LMDB name of version 5
     // takes room from the limit of `-max_file_sz` (`can_fit`).
     /// `arrays` are those of the previous volume (`take_offset_arrays`), or
@@ -512,23 +337,7 @@ impl IndexFile {
         }
     }
 
-    /// `m_Letters`: the residues or bases of the volume.
-    pub(crate) fn letters(&self) -> u64 {
-        self.letters
-    }
-
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:228-236
-    // ```c++
-    //     bool CanFit()
-    //     {
-    //         _ASSERT(m_MaxFileSize > 1024UL);
-    //
-    //         if (m_OIDs == 0)
-    //             return true;
-    //
-    //         return m_DataSize < (m_MaxFileSize - 12UL);
-    //     }
-    // ```
     // The subtraction is unsigned: a limit under 12 bytes wraps and always
     // fits.
     pub(crate) fn can_fit(&self) -> bool {
@@ -539,21 +348,6 @@ impl IndexFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:246-258
-    // ```c++
-    //     void AddSequence(int length, unsigned int hdr, unsigned int seq)
-    //     {
-    //         if (length > m_MaxLength) {
-    //             m_MaxLength = length;
-    //         }
-    //
-    //         m_OIDs++;
-    //         m_Letters += length;
-    //         m_DataSize += 8;
-    //
-    //         m_Hdr.push_back(hdr);
-    //         m_Seq.push_back(seq);
-    //     }
-    // ```
     /// Adds a protein: its length and the ends of its header and sequence.
     pub(crate) fn add_protein(&mut self, length: u32, hdr: u32, seq: u32) {
         self.max_length = self.max_length.max(length);
@@ -565,22 +359,6 @@ impl IndexFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:269-282
-    // ```c++
-    //     void AddSequence(int length, unsigned int hdr, unsigned int seq, unsigned int amb)
-    //     {
-    //         if (length > m_MaxLength) {
-    //             m_MaxLength = length;
-    //         }
-    //
-    //         m_OIDs++;
-    //         m_Letters += length;
-    //
-    //         m_DataSize += 12;
-    //         m_Hdr.push_back(hdr);
-    //         m_Seq.push_back(amb); // Not a bug.
-    //         m_Amb.push_back(seq); // Also not a bug.
-    //     }
-    // ```
     /// Adds a nucleotide sequence: `seq` is the end of its 2-bit data (where
     /// its ambiguity data start) and `amb` the end of its ambiguity data
     /// (where the next sequence starts).
@@ -595,58 +373,6 @@ impl IndexFile {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:373-430
-    // ```c++
-    //     string pad_date = m_Date;
-    //     int count = 0;
-    //     const string lmdb_name = use_lmdb ? x_MakeLmdbName() : "";
-    //     int overhead = use_lmdb
-    //             ? x_Overhead(m_Title, lmdb_name, pad_date)
-    //             : x_Overhead(m_Title, pad_date);
-    //     while (overhead & 0x7) {
-    //         pad_date.append(m_Nul);
-    //         if (count != -1) {
-    //             _ASSERT(count++ < 8);
-    //         }
-    //         overhead = use_lmdb
-    //                 ? x_Overhead(m_Title, lmdb_name, pad_date)
-    //                 : x_Overhead(m_Title, pad_date);
-    //     }
-    //
-    //     // Write header
-    //
-    //     ostream & F = m_RealFile;
-    //
-    //     s_WriteInt4  (F, format_version);
-    //     s_WriteInt4  (F, seq_type);
-    //     if (!lmdb_name.empty()) {
-    //         s_WriteInt4  (F, m_Index);
-    //         s_WriteString(F, m_Title);
-    //         s_WriteString(F, lmdb_name);
-    //     } else {
-    //         s_WriteString(F, m_Title);
-    //     }
-    //     s_WriteString(F, pad_date);
-    //     s_WriteInt4  (F, m_OIDs);
-    //     s_WriteInt8LE(F, m_Letters);
-    //     s_WriteInt4  (F, m_MaxLength);
-    //
-    //     for(unsigned i = 0; i < m_Hdr.size(); i++) {
-    //         s_WriteInt4(F, m_Hdr[i]);
-    //     }
-    //
-    //     for(unsigned i = 0; i < m_Seq.size(); i++) {
-    //         s_WriteInt4(F, m_Seq[i]);
-    //     }
-    //
-    //     // Should loop m_OID times, or not at all.
-    //     for(unsigned i = 0; i < m_Amb.size(); i++) {
-    //         s_WriteInt4(F, m_Amb[i]);
-    //     }
-    //     ...
-    //     if (m_Amb.size()) {
-    //         s_WriteInt4(F, m_Seq.back());
-    //     }
-    // ```
     /// `x_Flush` and `Close`.
     // NCBI writes the offsets one by one to the file's stream. They go out
     // here through a buffer of a fixed size: a copy of the whole index next
@@ -706,12 +432,6 @@ impl IndexFile {
             self.file.write(&last.to_be_bytes())?;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:432-435
-        // ```c++
-        //     vector<unsigned int> tmp1, tmp2, tmp3;
-        //     m_Hdr.swap(tmp1);
-        //     m_Seq.swap(tmp2);
-        //     m_Amb.swap(tmp3);
-        // ```
         // NCBI frees the arrays here; LOSAT empties them and keeps their
         // memory for the next volume's index file (`OffsetArrays`).
         self.hdr.clear();
@@ -758,26 +478,6 @@ impl HeaderFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:365-382
-    // ```c++
-    //     bool CanFit(int size)
-    //     {
-    //         _ASSERT(size >= 0);
-    //
-    //         if (m_DataSize == 0UL) {
-    //             return true;
-    //         }
-    //
-    //         return (m_DataSize + (Uint8) size) < m_MaxFileSize;
-    //     }
-    //
-    //     /// Add binary header data to this file.
-    //     /// @param binhdr Binary ASN.1 version of header data. [in]
-    //     /// @param offset Offset of end of header data. [out]
-    //     void AddSequence(const string & binhdr, unsigned int & offset)
-    //     {
-    //         m_DataSize = offset = Write(binhdr);
-    //     }
-    // ```
     pub(crate) fn can_fit(&self, size: usize) -> bool {
         if self.data_size == 0 {
             return true;
@@ -813,15 +513,6 @@ pub(crate) struct SequenceFile {
 
 impl SequenceFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:481-487
-    // ```c++
-    //     // Only protein sequences need the inter-sequence NUL bytes.
-    //     // The first null written here is for nucleotide sequences.
-    //     // It doesn't seem necessary, but formatdb provides it, so I
-    //     // will too.
-    //
-    //     WriteWithNull(string());
-    // }
-    // ```
     pub(crate) fn create(
         dbname: &str,
         protein: bool,
@@ -839,24 +530,6 @@ impl SequenceFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:419-434
-    // ```c++
-    //     bool CanFit(int size, int letters)
-    //     {
-    //         _ASSERT(size >= 0);
-    //         _ASSERT(letters >= 0);
-    //
-    //         if (m_Offset <= 1) {
-    //             return true;
-    //         }
-    //
-    //         if ((m_BaseLimit != 0)  &&
-    //             ((m_Letters + (Uint8) letters) > m_BaseLimit)) {
-    //             return false;
-    //         }
-    //
-    //         return ((Uint8)(m_Offset + size) < m_MaxFileSize);
-    //     }
-    // ```
     // makeblastdb sets no limit on the letters of a volume (`m_BaseLimit` is
     // 0). `m_Offset + size` is a 32-bit unsigned sum, as in NCBI.
     pub(crate) fn can_fit(&self, size: usize) -> bool {
@@ -867,18 +540,6 @@ impl SequenceFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:443-452
-    // ```c++
-    //     void AddSequence(const string & sequence,
-    //                      unsigned int & offset,
-    //                      int            length)
-    //     {
-    // #ifdef _DEBUG
-    //         _ASSERT(m_Protein);
-    // #endif
-    //         offset = WriteWithNull(sequence);
-    //         m_Letters += length;
-    //     }
-    // ```
     /// Writes a protein and the NUL after it; returns the offset after the
     /// NUL.
     pub(crate) fn add_protein(&mut self, sequence: &[u8]) -> Result<u32, WriteDbError> {
@@ -887,21 +548,6 @@ impl SequenceFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:463-475
-    // ```c++
-    //     void AddSequence(const string & sequence,
-    //                      const string & ambig,
-    //                      unsigned int & off_seq,
-    //                      unsigned int & off_amb,
-    //                      int          length)
-    //     {
-    // #ifdef _DEBUG
-    //         _ASSERT(! m_Protein);
-    // #endif
-    //         off_seq = Write(sequence);
-    //         off_amb = Write(ambig);
-    //         m_Letters += length;
-    //     }
-    // ```
     /// Writes a nucleotide sequence and its ambiguity data; returns the
     /// offsets after each.
     pub(crate) fn add_nucleotide(

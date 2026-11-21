@@ -39,17 +39,7 @@ impl Default for ProteinScoringSpec {
 /// The nine built-in protein matrices of NCBI BLAST+ (`util/tables/sm_*.c`, each with a
 /// Karlin-Altschul table in `blast_stat.c`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992
-/// ```c
-///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
-/// ...
-///    if (!standard_only) {
-///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
-///                                    prot_identity_prefs,
-///                                    PROT_IDENTITY_VALUES_MAX);
-///        ListNodeAddPointer(&retval, 0, matrix_info);
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2958-2992
 /// (BLOSUM62_20 is compiled only under `BLOSUM62_20_ENABLE`, which the 2.17.0 build does
 /// not define.)
 /// `Identity` is the last variant so that the others keep their discriminants.
@@ -113,14 +103,7 @@ impl std::str::FromStr for ScoringMatrix {
     /// The matrix whose table name equals `s` ignoring the case, as NCBI finds a matrix's
     /// table.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3593-3605
-    /// ```c
-    ///    vnp = head = BlastLoadMatrixValues(standard_only);
-    ///    while (vnp)
-    ///    {
-    ///       matrix_info = vnp->ptr;
-    ///       if (strcasecmp(matrix_info->name, matrix_name) == 0)
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3593-3605
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ScoringMatrix::ALL
             .into_iter()

@@ -1,6 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, MessagePlace, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
+import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
 
 export type RunStatus =
@@ -84,6 +84,11 @@ export interface RunSnapshot {
   readonly conffile?: ConffileSnapshot;
   /** The argv has `-dryrun` (the engine's start says so): the run reads the arguments and the settings and searches nothing. */
   readonly dryRun?: true;
+  /**
+   * The run prints the command line's help or version in place of a search (the engine's start says so; line WQA's D14,
+   * 2026-11-20): it reads no input (its query and subject are empty) and its text is `RunRecord.printed`.
+   */
+  readonly prints?: PrintedKind;
   readonly queuedAt: number;
   /**
    * The group of runs queued together as separate searches (plan §5.2, Separate): one
@@ -131,6 +136,8 @@ export interface RunRecord {
    * them: kept for a completed run and for a failed one (TBLASTX's file then holds NCBI's error).
    */
   readonly runFiles?: readonly RunFile[];
+  /** The text that the run printed in place of a search (`RunSnapshot.prints`), as the engine wrote it. */
+  readonly printed?: Uint8Array;
   readonly startedAt?: number;
   /** When each engine phase started. */
   readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };

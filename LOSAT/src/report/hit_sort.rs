@@ -3,32 +3,16 @@
 //! BLASTP, BLASTX, TBLASTN and TBLASTX, and the values that the description table's columns of
 //! `-sorthits` read.
 //!
-//! NCBI sorts `std::list`s with comparators of which some are not strict weak orders (`>=`) and
-//! some sort the HSP lists of both hits they compare as a side effect, so the order is the one
-//! that libstdc++'s merge sort gives with that comparator: `list_sort` is that algorithm, call
-//! for call, and the comparators keep their side effects on the hits' HSP orders.
+//! NCBI sorts `std::list`s with comparators of which some are not strict weak orders (`>=`, and
+//! the percent-identity comparators on a list with an HSP without identities) and some sort the
+//! HSP lists of both hits they compare as a side effect, so the order is the one that the C++
+//! library's list sort gives with that comparator: `list_sort` hands the comparator the same
+//! elements in the same order (as observed with g++ 13), and the comparators keep their side
+//! effects on the hits' HSP orders.
 
 use super::pairwise::PairwiseHit;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2938-2946,2979-2988
-// ```c++
-//     if(m_OutputFormat <= eFlatQueryAnchoredNoIdentities) {
-//     	...
-//     	if (args[kArgLineLength]) {
-//     	    m_LineLength = args[kArgLineLength].AsInteger();
-//     	}
-//     	if(args.Exist(kArgSortHits) && args[kArgSortHits])
-//     	{
-//     		m_HitsSortOption = args[kArgSortHits].AsInteger();
-//     	}
-//     ...
-//     if(args.Exist(kArgSortHSPs) && args[kArgSortHSPs])
-//     {
-//         int hspsSortOption = args[kArgSortHSPs].AsInteger();
-//         if(m_OutputFormat == ePairwise) {
-//        	    m_HspsSortOption = hspsSortOption;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2988
 /// `-sorthits` and `-sorthsps` as the pairwise report reads them (NCBI's `m_HitsSortOption` and
 /// `m_HspsSortOption`; `None` is NCBI's -1, the option not given). psiblast and rpsblast keep the
 /// default: their applications do not hand the options to the formatter
@@ -43,11 +27,6 @@ pub struct ReportSort {
 
 impl ReportSort {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
-    // ```c++
-    //     //invoke sorting only for m_HitsSortOption > CAlignFormatUtil::eEvalue or m_HspsSortOption > CAlignFormatUtil::eHspEvalue
-    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
-    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
-    // ```
     /// Whether the report sorts each query's hits (`m_HitsSortOption > 0 || m_HspsSortOption >
     /// 0`): a value of 0 (by E-value, the order of the search's results) sorts nothing.
     pub fn sorts(&self) -> bool {
@@ -55,13 +34,6 @@ impl ReportSort {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:518-522
-    // ```c++
-    //     if(m_HitsSortOption >= 0) {
-    //         flags |= CShowBlastDefline::eShowPercentIdent;
-    //         flags |= CShowBlastDefline::eShowTotalScore;
-    //         flags |= CShowBlastDefline::eShowQueryCoverage;
-    //     }
-    // ```
     /// Whether the description table shows the total score, query cover and identity columns:
     /// `-sorthits` is given, at any value (0 too).
     pub fn shows_columns(&self) -> bool {
@@ -69,13 +41,6 @@ impl ReportSort {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:518-522,1522-1530
-    // ```c++
-    //     if(m_HitsSortOption >= 0) {
-    //         flags |= CShowBlastDefline::eShowPercentIdent;
-    //     ...
-    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
-    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
-    // ```
     /// Whether the report reads the HSPs' `HspScores` (the Seq-aligns' identities,
     /// `PairwiseHit::seqalign_num_ident`): it sorts (`sorts`) or shows the columns
     /// (`shows_columns`). Without either the report reads none of them, and TBLASTX does not
@@ -86,31 +51,7 @@ impl ReportSort {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:813-848
-// ```c++
-//     bool hasScore = false;
-//     score = -1;
-//     bits = -1;
-//     evalue = -1;
-//     sum_n = -1;
-//     num_ident = -1;
-//     ...
-//     //look for scores at seqalign level first
-//     hasScore = s_GetBlastScore(aln.GetScore(), score, bits, evalue,
-//                                sum_n, num_ident, use_this_gi, comp_adj_method);
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:252-264
-// ```c++
-// TSeqPos CSeq_align::GetSeqStart(TDim row) const
-// {
-//     switch (GetSegs().Which()) {
-//     case C_Segs::e_Denseg:
-//         return GetSegs().GetDenseg().GetSeqStart(row);
-//     ...
-//     case C_Segs::e_Dendiag:
-//     case C_Segs::e_Std:
-//     case C_Segs::e_Disc:
-//         return GetSeqRange(row).GetFrom();
-// ```
 /// The values of one HSP that the sorts and the description table's columns read: its scores
 /// (`GetAlnScores`: the bit score, the E-value, `e_value` or the linked set's `sum_e`, which the
 /// report shows, and the Seq-align's `num_ident`, the engine's identities, which every HSP's
@@ -167,14 +108,6 @@ impl HspScores {
         Self {
             bits,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
-            // ```c++
-            //     // Set the E-Value
-            //     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-            //     if (evalue >= 0.0) {
-            //         string score_type = (hsp->num <= 1) ? "e_value" : "sum_e";
-            //         scores.push_back(s_MakeScore(score_type, evalue, 0, false));
-            //     }
-            // ```
             // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
             // two HSPs below it tie.
             evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
@@ -187,27 +120,6 @@ impl HspScores {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1462-1489
-    // ```c++
-    // int CAlignFormatUtil::GetAlignmentLength(const CSeq_align& aln, bool do_translation)
-    // {
-    //     ...
-    //     if (aln.GetSegs().IsStd()) {
-    //         CRef<CSeq_align> denseg_aln = aln.CreateDensegFromStdseg();
-    //         // When both query and subject are translated, i.e. tblastx, convert
-    //         // to a special type of Dense-seg.
-    //         if (do_translation) {
-    //             final_aln = denseg_aln->CreateTranslatedDensegFromNADenseg();
-    //         } else {
-    //             final_aln = denseg_aln;
-    //
-    //         }
-    //     } else if (aln.GetSegs().IsDendiag()) {
-    //         final_aln = CreateDensegFromDendiag(aln);
-    //     }
-    //     ...
-    //     CAlnMap alnmap(ds);
-    //     return alnmap.GetAlnStop() + 1;
-    // ```
     /// `GetAlignmentLength(aln, translation)`: the HSP's columns, except TBLASTX's (`tblastx`),
     /// whose Std-seg of two nucleotide rows becomes a Dense-seg of nucleotide lengths, three per
     /// amino acid, unless `translation` (`CreateTranslatedDensegFromNADenseg`, the lengths in
@@ -221,162 +133,99 @@ impl HspScores {
     }
 }
 
-// libstdc++ (GCC 13, the C++ library of NCBI BLAST+'s Linux builds): bits/list.tcc:614-662
-// ```c++
-//       sort(_StrictWeakOrdering __comp)
-//       {
-// 	// Do nothing if the list has length 0 or 1.
-// 	if (this->_M_impl._M_node._M_next != &this->_M_impl._M_node
-// 	    && this->_M_impl._M_node._M_next->_M_next != &this->_M_impl._M_node)
-// 	{
-// 	  using __detail::_Scratch_list;
-// 	  _Scratch_list __carry;
-// 	  _Scratch_list __tmp[64];
-// 	  _Scratch_list* __fill = __tmp;
-// 	  _Scratch_list* __counter;
-// 	  ...
-// 	      do
-// 		{
-// 		  __carry._M_take_one(begin()._M_node);
-//
-// 		  for(__counter = __tmp;
-// 		      __counter != __fill && !__counter->empty();
-// 		      ++__counter)
-// 		    {
-//
-// 		      __counter->merge(__carry, __ptr_comp);
-// 		      __carry.swap(*__counter);
-// 		    }
-// 		  __carry.swap(*__counter);
-// 		  if (__counter == __fill)
-// 		    ++__fill;
-// 		}
-// 	      while ( !empty() );
-//
-// 	      for (__counter = __tmp + 1; __counter != __fill; ++__counter)
-// 		__counter->merge(__counter[-1], __ptr_comp);
-// 	      __fill[-1].swap(this->_M_impl._M_node);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3072-3075
-// ```c++
-//     HspListToHitList(seqalign_hit_list, source);
-//
-//     if (hit_sort == eTotalScore) {
-//         seqalign_hit_list.sort(SortHitByTotalScoreDescending);
-// ```
-/// libstdc++'s `std::list::sort(comp)` of `list`: the bottom-up merge sort of 64 buckets, with
-/// `comp(a, b)` (whether `a` goes before `b`) called on the same elements in the same order as
-/// libstdc++ calls it (`comp` may change state that later calls read). A list of 0 or 1
-/// elements is left as it is without a call. The Vec stands for the list: `merge` builds the
-/// merged list as libstdc++ splices it.
-pub(crate) fn list_sort<T>(list: &mut Vec<T>, mut comp: impl FnMut(&T, &T) -> bool) {
-    if list.len() < 2 {
+/// `list.sort(less)` of a C++ `std::list` holding the elements of `list` (NCBI's sorts of hits and
+/// HSPs): `less` is called with the same elements, in the same argument order and in the same
+/// sequence as the list sort of the C++ library that NCBI's BLAST+ 2.17.0 is built with (GCC 13),
+/// and the elements end in the order that the answers give. The steps were written from what
+/// g++ 13's `std::list::sort` did with comparators that recorded each call and answered from a
+/// script or at random (every answer sequence for lists of up to 9 elements, and random answers
+/// for lists of up to 20,000 elements); the fixture of the test `list_sort_calls_as_observed`
+/// (`tests/unit/list_sort_observed`) keeps a part of those records.
+///
+/// A list of fewer than two elements is left as it is, without a call. Otherwise the sort reads
+/// the elements from the front, one at a time, and keeps those read as runs: stretches of
+/// consecutive elements, merged in order, whose lengths are distinct powers of two, the longer
+/// runs nearer the front. Each element read is a new run of one at the back; then, while the run
+/// before the last one has the same length as the last one, the two are merged into one. When all
+/// the elements are read, the runs are merged from the back: the last run with the one before it,
+/// then that run with the one before it, up to the first run.
+///
+/// Two neighbouring runs are merged by taking their elements from the front: while both have
+/// elements left, `less(later, earlier)` is asked with the first element left of the run behind
+/// (`later`) and the first one left of the run in front (`earlier`); the answer true takes the
+/// element of the run behind, false the one of the run in front. When one run is used up, the rest
+/// of the other follows without a call. With a strict weak order `less` this is a stable sort
+/// (elements that compare equal keep their order); with any other comparator the order is still
+/// the one that the same answers give in NCBI's sort.
+fn list_sort(list: &mut [usize], mut less: impl FnMut(&usize, &usize) -> bool) {
+    let len = list.len();
+    if len < 2 {
         return;
     }
-    let mut tmp: Vec<Vec<T>> = (0..64).map(|_| Vec::new()).collect();
-    let mut fill = 0usize;
-    for item in std::mem::take(list) {
-        let mut carry = vec![item];
-        let mut counter = 0usize;
-        while counter != fill && !tmp[counter].is_empty() {
-            merge(&mut tmp[counter], &mut carry, &mut comp);
-            std::mem::swap(&mut carry, &mut tmp[counter]);
-            counter += 1;
-        }
-        std::mem::swap(&mut carry, &mut tmp[counter]);
-        if counter == fill {
-            fill += 1;
+    let mut front_run = Vec::with_capacity(len);
+    for read in 1..=len {
+        // The runs are the binary digits of `read - 1` before this element is read.
+        let mut size = 1;
+        while (read - 1) & size != 0 {
+            merge_runs(
+                list,
+                read - 2 * size,
+                read - size,
+                read,
+                &mut front_run,
+                &mut less,
+            );
+            size *= 2;
         }
     }
-    // `__counter->merge(__counter[-1])`: bucket `counter` holds the older elements (`this`),
-    // bucket `counter - 1` the newer ones (`x`).
-    for counter in 1..fill {
-        let (newer, older) = tmp.split_at_mut(counter);
-        merge(&mut older[0], &mut newer[counter - 1], &mut comp);
+    // The runs in front of `start` have the lengths of the binary digits of `start`, the shortest
+    // last; the merged back part runs from `start` to the end.
+    let mut start = len;
+    while start != 0 {
+        let size = start & start.wrapping_neg();
+        merge_runs(list, start - size, start, len, &mut front_run, &mut less);
+        start -= size;
     }
-    *list = std::mem::take(&mut tmp[fill - 1]);
 }
 
-// libstdc++ (GCC 13): bits/stl_list.h:194-214
-// ```c++
-// 	merge(_List_node_base& __x, _Cmp __comp)
-// 	{
-// 	  _List_node_base* __first1 = _M_next;
-// 	  _List_node_base* const __last1 = this;
-// 	  _List_node_base* __first2 = __x._M_next;
-// 	  _List_node_base* const __last2 = std::__addressof(__x);
-//
-// 	  while (__first1 != __last1 && __first2 != __last2)
-// 	    {
-// 	      if (__comp(__first2, __first1))
-// 		{
-// 		  _List_node_base* __next = __first2->_M_next;
-// 		  __first1->_M_transfer(__first2, __next);
-// 		  __first2 = __next;
-// 		}
-// 	      else
-// 		__first1 = __first1->_M_next;
-// 	    }
-// 	  if (__first2 != __last2)
-// 	    this->_M_transfer(__first2, __last2);
-// 	}
-// ```
-/// `this.merge(x, comp)`: an element of `x` goes before the element of `this` it is compared
-/// with only when `comp(x's, this's)`; the rest of `x` goes after `this`. `x` is left empty.
-fn merge<T>(this: &mut Vec<T>, x: &mut Vec<T>, comp: &mut impl FnMut(&T, &T) -> bool) {
-    if x.is_empty() {
+/// Merges the run `list[start..middle]` with the run `list[middle..end]` behind it, as
+/// `list_sort` describes; `front_run` is scratch space for the run in front.
+fn merge_runs(
+    list: &mut [usize],
+    start: usize,
+    middle: usize,
+    end: usize,
+    front_run: &mut Vec<usize>,
+    less: &mut impl FnMut(&usize, &usize) -> bool,
+) {
+    if start == middle || middle == end {
         return;
     }
-    let mut merged = Vec::with_capacity(this.len() + x.len());
-    let mut first1 = std::mem::take(this).into_iter().peekable();
-    let mut first2 = std::mem::take(x).into_iter().peekable();
-    while let (Some(older), Some(newer)) = (first1.peek(), first2.peek()) {
-        if comp(newer, older) {
-            merged.extend(first2.next());
+    front_run.clear();
+    front_run.extend_from_slice(&list[start..middle]);
+    let (mut front, mut behind, mut next) = (0, middle, start);
+    while front < front_run.len() && behind < end {
+        if less(&list[behind], &front_run[front]) {
+            list[next] = list[behind];
+            behind += 1;
         } else {
-            merged.extend(first1.next());
+            list[next] = front_run[front];
+            front += 1;
         }
+        next += 1;
     }
-    merged.extend(first1);
-    merged.extend(first2);
-    *this = merged;
+    // The rest of the run behind is in place already; the rest of the run in front fills the gap.
+    let rest = &front_run[front..];
+    list[next..next + rest.len()].copy_from_slice(rest);
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1383-1400
-// ```c++
-// bool CAlignFormatUtil::
-// SortHspByScoreDescending(const CRef<CSeq_align>& info1,
-//                          const CRef<CSeq_align>& info2)
-// {
-//     ...
-//     GetAlnScores(*info1, score1,  bits1, evalue1, sum_n1, num_ident1, use_this_gi1);
-//     GetAlnScores(*info2, score2,  bits2, evalue2, sum_n2, num_ident2, use_this_gi2);
-//     return bits1 > bits2;
-//
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1382-1400
 /// `SortHspByScoreDescending`.
 pub(crate) fn hsp_by_score_descending(info1: &HspScores, info2: &HspScores) -> bool {
     info1.bits > info2.bits
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1403-1431
-// ```c++
-//     start1 = min(info1->GetSeqStart(0), info1->GetSeqStop(0));
-//     start2 = min(info2->GetSeqStart(0), info2->GetSeqStop(0)) ;
-//
-//     if (start1 == start2) {
-//         //same start then arrange by bits score
-//         ...
-//         GetAlnScores(*info1, score1,  bits1, evalue1, sum_n1, num_ident1, use_this_gi1);
-//         GetAlnScores(*info2, score2,  bits2, evalue2, sum_n2, num_ident2, use_this_gi2);
-//         return evalue1 < evalue2;
-//
-//     } else {
-//
-//         return start1 < start2;
-//     }
-// ```
 /// `SortHspByMasterStartAscending`.
 pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores) -> bool {
     if info1.query_from == info2.query_from {
@@ -387,19 +236,6 @@ pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1433-1458
-// ```c++
-//     start1 = min(info1->GetSeqStart(1), info1->GetSeqStop(1));
-//     start2 = min(info2->GetSeqStart(1), info2->GetSeqStop(1)) ;
-//
-//     if (start1 == start2) {
-//         ...
-//         return evalue1 < evalue2;
-//
-//     } else {
-//
-//         return start1 < start2;
-//     }
-// ```
 /// `SortHspBySubjectStartAscending`.
 pub(crate) fn hsp_by_subject_start_ascending(info1: &HspScores, info2: &HspScores) -> bool {
     if info1.subject_from == info2.subject_from {
@@ -410,26 +246,6 @@ pub(crate) fn hsp_by_subject_start_ascending(info1: &HspScores, info2: &HspScore
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1261-1296
-// ```c++
-//     int length1 = GetAlignmentLength(*info1, kTranslation);
-//     int length2 = GetAlignmentLength(*info2, kTranslation);
-//     bool retval = false;
-//
-//
-//     if(length1 > 0 && length2 > 0 && num_ident1 > 0 &&num_ident2 > 0 ) {
-//         if (((double)num_ident1)/length1 == ((double)num_ident2)/length2) {
-//
-//             retval = evalue1 < evalue2;
-//
-//         } else {
-//             retval = ((double)num_ident1)/length1 >= ((double)num_ident2)/length2;
-//
-//         }
-//     } else {
-//         retval = evalue1 < evalue2;
-//     }
-//     return retval;
-// ```
 /// `SortHspByPercentIdentityDescending` with NCBI's `kTranslation` (`translation`; the lengths
 /// of `HspScores::alignment_length`).
 pub(crate) fn hsp_by_percent_identity_descending(
@@ -454,17 +270,6 @@ pub(crate) fn hsp_by_percent_identity_descending(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3163-3171
-// ```c++
-// double CAlignFormatUtil::GetPercentIdentity(int numerator, int denominator)
-// {
-//      if (numerator == denominator)
-//         return 100;
-//      else {
-//        double retval =100*(double)numerator/(double)denominator;
-//        return retval;
-//      }
-// }
-// ```
 /// `GetPercentIdentity(numerator, denominator)`.
 pub(crate) fn percent_identity(numerator: i64, denominator: i64) -> f64 {
     if numerator == denominator {
@@ -475,35 +280,6 @@ pub(crate) fn percent_identity(numerator: i64, denominator: i64) -> f64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4317-4356
-// ```c++
-// double CAlignFormatUtil::GetSeqAlignSetCalcPercentIdent(const CSeq_align_set& aln, bool do_translation)
-// {
-//     ...
-//     if(aln.Get().empty())
-//       return -1;
-//
-//     double highest_bits = 0;
-//     int highest_length = 1;
-//     int highest_ident = 0;
-//     ...
-//     ITERATE(CSeq_align_set::Tdata, iter, aln.Get()) {
-//         int align_length = CAlignFormatUtil::GetAlignmentLength(**iter, do_translation);
-//
-//         CAlignFormatUtil::GetAlnScores(**iter, score, bits, evalue, sum_n,
-//                                    num_ident, use_this_gi);
-//         ...
-//         if (bits > highest_bits) {  // this is the replacement condition (WB-1175)
-//             highest_length = align_length;
-//             highest_ident = num_ident;
-// ///         highest_identity = 100*num_ident/align_length;
-//             highest_bits = bits;
-//         }
-//     }
-//
-//     double percent_identity = CAlignFormatUtil::GetPercentIdentity(highest_ident, highest_length);
-//     return percent_identity;
-// }
-// ```
 /// `GetSeqAlignSetCalcPercentIdent` of the HSPs `order` of `hsps`.
 fn set_percent_identity(
     hsps: &[HspScores],
@@ -527,60 +303,7 @@ fn set_percent_identity(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2992
-// ```c++
-// int CAlignFormatUtil::GetMasterCoverage(const CSeq_align_set& alnset)
-// {
-//
-//     list<CRange<TSeqPos> > merge_list;
-//
-//     list<CRange<TSeqPos> > temp;
-//     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()) {
-//         CRange<TSeqPos> seq_range = (*iter)->GetSeqRange(0);
-//         //for minus strand
-//         if(seq_range.GetFrom() > seq_range.GetTo()){
-//             seq_range.Set(seq_range.GetTo(), seq_range.GetFrom());
-//         }
-//         temp.push_back(seq_range);
-//     }
-//
-//     temp.sort(FromRangeAscendingSort);
-//
-//     merge_list = s_MergeRangeList(temp);
-//
-//     int master_covered_lenghth = 0;
-//     ITERATE(list<CRange<TSeqPos> >, iter, merge_list) {
-//         master_covered_lenghth += iter->GetLength();
-//     }
-//     return master_covered_lenghth;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2940-2963
-// ```c++
-// static list<CRange<TSeqPos> > s_MergeRangeList(list<CRange<TSeqPos> > &source)
-// {
-//     ...
-//     ITERATE(list<CRange<TSeqPos> >, iter, source) {
-//
-//         if (is_first) {
-//             merge_list.push_back(*iter);
-//             is_first= false;
-//             prev_range = *iter;
-//         } else {
-//             if (prev_range.IntersectingWith(*iter)) {
-//                 merge_list.pop_back();
-//                 CRange<TSeqPos> temp_range = prev_range.CombinationWith(*iter);
-//                 merge_list.push_back(temp_range);
-//                 prev_range = temp_range;
-//             } else {
-//                 merge_list.push_back(*iter);
-//                 prev_range = *iter;
-//             }
-//         }
-//
-//     }
-//     return merge_list;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2940-2966
 /// `GetMasterCoverage` (and the `master_covered_length` of `GetSeqAlignCoverageParams`, which
 /// merges the same ranges, align_format_util.cpp:2997-3010): the number of query positions in
 /// the union of the HSPs' query ranges. The ranges sorted by their start and merged where they
@@ -618,71 +341,9 @@ pub(crate) struct SortedHits {
     pub(crate) hsps: Vec<Vec<usize>>,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3103-3118
-// ```c++
-// CRef<CSeq_align_set>
-// CAlignFormatUtil::SortSeqalignForSortableFormat(CSeq_align_set& aln_set,
-//                                              bool nuc_to_nuc_translation,
-//                                              int hit_sort,
-//                                              int hsp_sort) {
-//
-//     if (hit_sort <= eEvalue && hsp_sort <= eHspEvalue) {
-//        return (CRef<CSeq_align_set>) &aln_set;
-//     }
-//
-// //  seqalign_vec[0] = const_cast<CSeq_align_set*>(&aln_set);
-//     list< CRef<CSeq_align_set> > seqalign_hit_total_list = SortOneSeqalignForSortableFormat(aln_set,
-//                                                             nuc_to_nuc_translation,
-//                                                             hit_sort,
-//                                                             hsp_sort);
-//     return HitListToHspList(seqalign_hit_total_list);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3102-3118
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3065-3100
-// ```c++
-//     list< CRef<CSeq_align_set> > seqalign_hit_total_list;
-//     list< CRef<CSeq_align_set> > seqalign_hit_list;
-//     HspListToHitList(seqalign_hit_list, source);
-//
-//     if (hit_sort == eTotalScore) {
-//         seqalign_hit_list.sort(SortHitByTotalScoreDescending);
-//     } else if (hit_sort == eHighestScore) {
-//         seqalign_hit_list.sort(CAlignFormatUtil::SortHitByScoreDescending);
-//     } else if (hit_sort == ePercentIdentity) {
-//         SortHitByPercentIdentityDescending(seqalign_hit_list,
-//                                                nuc_to_nuc_translation);
-//     } else if (hit_sort == eQueryCoverage) {
-//         seqalign_hit_list.sort(SortHitByMasterCoverageDescending);
-//     }
-//
-//     ITERATE(list< CRef<CSeq_align_set> >, iter2, seqalign_hit_list) {
-//         CRef<CSeq_align_set> temp(*iter2);
-//         if (hsp_sort == eQueryStart) {
-//             temp->Set().sort(SortHspByMasterStartAscending);
-//         } else if (hsp_sort == eHspPercentIdentity) {
-//             temp->Set().sort(SortHspByPercentIdentityDescending);
-//         } else if (hsp_sort == eScore) {
-//             temp->Set().sort(SortHspByScoreDescending);
-//         } else if (hsp_sort == eSubjectStart) {
-//             temp->Set().sort(SortHspBySubjectStartAscending);
-//
-//         }
-//         seqalign_hit_total_list.push_back(temp);
-//     }
-//     return seqalign_hit_total_list;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1249-1257
-// ```c++
-// SortHitByPercentIdentityDescending(list< CRef<CSeq_align_set> >&
-//                                    seqalign_hit_list,
-//                                    bool do_translation
-//                                    )
-// {
-//
-//     kTranslation = do_translation;
-//     seqalign_hit_list.sort(SortHitByPercentIdentityDescendingEx);
-// }
-// ```
 /// `SortSeqalignForSortableFormat(aln_set, tblastx, hit_sort, hsp_sort)` of one query whose
 /// hits (`HspListToHitList`: one per subject, as the report groups them) are `hits`, each with its
 /// HSPs in the report's order; `None` when `sort` sorts nothing (no work, the order stays).
@@ -740,39 +401,13 @@ pub(crate) fn sort_query_hits(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1597-1622
-// ```c++
-//     double total_bits1 = 0, total_bits2 = 0;
-//
-//     ITERATE(CSeq_align_set::Tdata, iter, info1->Get()) {
-//         CAlignFormatUtil::GetAlnScores(**iter, score1, bits, evalue,
-//                                        sum_n, num_ident, use_this_gi);
-//         total_bits1 += bits;
-//     }
-//     ...
-//     return total_bits1 >= total_bits2;
-// ```
 /// The sum of the bit scores of the HSPs `order` of `hsps`, added in that order from 0
 /// (`SortHitByTotalScoreDescending` compares two with `>=`).
 pub(crate) fn total_score(hsps: &[HspScores], order: &[usize]) -> f64 {
     order.iter().fold(0.0, |total, &k| total + hsps[k].bits)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1298-1316
-// ```c++
-// bool CAlignFormatUtil::
-// SortHitByScoreDescending(const CRef<CSeq_align_set>& info1,
-//                          const CRef<CSeq_align_set>& info2)
-// {
-//     CRef<CSeq_align_set> i1(info1), i2(info2);
-//
-//     i1->Set().sort(SortHspByScoreDescending);
-//     i2->Set().sort(SortHspByScoreDescending);
-//     ...
-//     GetAlnScores(*(info1->Get().front()), score1,  bits1, evalue1, sum_n1, num_ident1, use_this_gi1);
-//     GetAlnScores(*(info2->Get().front()), score2,  bits2, evalue2, sum_n2, num_ident2, use_this_gi2);
-//     return bits1 > bits2;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1297-1317
 /// `SortHitByScoreDescending` of hits `a` and `b`: sorts both hits' HSPs by score (kept: the
 /// order of their HSPs afterwards), then compares their first HSPs' bit scores.
 fn hit_by_score_descending(
@@ -791,59 +426,7 @@ fn hit_by_score_descending(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1543-1595
-// ```c++
-// static void s_CalcAlnPercentIdent(const CRef<CSeq_align_set>& info1,
-//                                const CRef<CSeq_align_set>& info2,
-//                                double &percentIdent1,
-//                                double &percentIdent2)
-// {
-//
-//     CRef<CSeq_align_set> i1(info1), i2(info2);
-//     percentIdent1 = -1;
-//     percentIdent2 = -1;
-//
-//     i1->Set().sort(CAlignFormatUtil::SortHspByPercentIdentityDescending);
-//     i2->Set().sort(CAlignFormatUtil::SortHspByPercentIdentityDescending);
-//
-//     percentIdent1 = CAlignFormatUtil::GetSeqAlignSetCalcPercentIdent(*info1, kTranslation);
-//     percentIdent2 = CAlignFormatUtil::GetSeqAlignSetCalcPercentIdent(*info2, kTranslation);
-//     return;
-// }
-// ...
-//     unique_ptr<CAlignFormatUtil::SSeqAlignSetCalcParams> seqSetInfo1( CAlignFormatUtil::GetSeqAlignSetCalcParamsFromASN(*info1));
-//     unique_ptr<CAlignFormatUtil::SSeqAlignSetCalcParams> seqSetInfo2( CAlignFormatUtil::GetSeqAlignSetCalcParamsFromASN(*info2));
-//     double evalue1 = seqSetInfo1->evalue;
-//     double evalue2 = seqSetInfo2->evalue;
-//     double percentIdent1 = seqSetInfo1->percent_identity;
-//     double  percentIdent2 = seqSetInfo2->percent_identity;
-//
-//     bool retval = false;
-//     if(percentIdent1 < 0 || percentIdent2 < 0) {
-//         s_CalcAlnPercentIdent(info1, info2,percentIdent1,percentIdent2);
-//     }
-//     if(percentIdent1 > 0 &&percentIdent2 > 0) {
-//         if (percentIdent1 == percentIdent2) {
-//             retval = evalue1 < evalue2;
-//
-//         } else {
-//             retval = percentIdent1 >= percentIdent2;
-//         }
-//     } else {
-//         retval = evalue1 < evalue2;
-//     }
-//     return retval;
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4474-4485
-// ```c++
-//     bool hasScore = false;
-//     double evalue = -1;
-//     double bitScore = -1;
-//     double totalBitScore = -1;
-//     int percentCoverage = -1;
-//     double percentIdent = -1;
-//     ...
-//     hasScore = s_GetBlastScore(aln.GetScore(),evalue,bitScore, totalBitScore,percentCoverage,percentIdent,hspNum,totalLen,rawScore,sum_n,use_this_gi);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4473-4488
 /// `SortHitByPercentIdentityDescendingEx` of hits `a` and `b`. The Seq-aligns of a BLAST+ search
 /// carry none of the "seq_*" scores that `GetSeqAlignSetCalcParamsFromASN` reads, so both
 /// E-values and percentages start at -1: the comparison sorts both hits' HSPs by percent
@@ -878,22 +461,6 @@ fn hit_by_percent_identity_descending(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1318-1344
-// ```c++
-//     int cov1 = GetMasterCoverage(*info1);
-//     int cov2 = GetMasterCoverage(*info2);
-//     bool retval = false;
-//
-//     if (cov1 > cov2) {
-//         retval = cov1 > cov2;
-//     } else if (cov1 == cov2) {
-//         ...
-//         GetAlnScores(*(info1->Get().front()), score1,  bits1, evalue1, sum_n1, num_ident1, use_this_gi1);
-//         GetAlnScores(*(info2->Get().front()), score2,  bits2, evalue2, sum_n2, num_ident2, use_this_gi2);
-//         retval = evalue1 < evalue2;
-//     }
-//
-//     return retval;
-// ```
 /// `SortHitByMasterCoverageDescending` of hits `a` and `b` (their first HSPs in their current
 /// orders).
 fn hit_by_query_coverage_descending(

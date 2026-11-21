@@ -4,19 +4,6 @@ use super::*;
 /// (`s_DoTestReference`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/version_reference_unit_test.cpp:61-71
-/// ```c++
-/// static
-/// void s_DoTestReference(const string& kKeyword, const string& kPubmedId,
-///                        blast::CReference::EPublication kPublication) {
-///     using blast::CReference;
-///
-///     string kReference(CReference::GetString(kPublication));
-///     BOOST_REQUIRE(kReference.find(kKeyword) != NPOS);
-///
-///     string kUrl(CReference::GetPubmedUrl(kPublication));
-///     BOOST_REQUIRE(kUrl.find(kPubmedId) != NPOS);
-/// }
-/// ```
 fn do_test_reference(keyword: &str, pubmed_id: &str, publication: Publication) {
     assert!(publication.string().contains(keyword), "{publication:?}");
     assert!(

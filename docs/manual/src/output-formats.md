@@ -115,7 +115,7 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 
 ## SAM (17)
 
-`blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. The document is NCBI's byte for byte except the `CL:` tag of the `@PG` line, which holds LOSAT's own command line. Like NCBI, LOSAT writes the document when the search ends.
+`blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. With `-ungapped`, each subject has one line that joins all of its alignments with the query, as in NCBI: the CIGAR is the summed length of the alignments as one `M`, the position and clipping span all of them, `AS`, `EV` and `BS` are the best alignment's, and `PI` divides the best alignment's identities by the summed length. The document is NCBI's byte for byte except the `CL:` tag of the `@PG` line, which holds LOSAT's own command line. Like NCBI, LOSAT writes the document when the search ends.
 
 ## Organism report (18)
 

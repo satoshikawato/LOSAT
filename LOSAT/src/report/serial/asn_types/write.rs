@@ -16,7 +16,7 @@
 //! reads any depth), so it is written from a list on the heap, never by a recursion as deep as
 //! the nest.
 
-use super::{type_info, Kind, Member, Storage, StringKind, Value};
+use super::{resolved, type_info, Kind, Member, Storage, StringKind, Value};
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, Traced};
 
@@ -202,6 +202,26 @@ fn write_elements<'a, E: Encoder>(
             for &number in numbers {
                 enc.element();
                 write_number(enc, element, Number::Real(number));
+            }
+        }
+        Value::Texts(runs) => {
+            // The elements are Seq-ids (a CHOICE) or strings; each is made, written and dropped.
+            let seq_ids = matches!(resolved(element).kind, Kind::Choice(_));
+            for run in runs {
+                run.for_each(&mut |text| {
+                    enc.element();
+                    if seq_ids {
+                        let id = crate::seqid::parse::seq_id_from_text(
+                            text,
+                            crate::seqid::accguide::parse_flags::ANY_RAW,
+                            &mut |_| {},
+                        )
+                        .expect("a text that the modifier checked when it made the list");
+                        write_value(enc, element, &Value::SeqId(Box::new(id)));
+                    } else {
+                        write_value(enc, element, &Value::Str(text.to_vec()));
+                    }
+                });
             }
         }
         _ => unreachable!("a SEQUENCE OF or SET OF value is a list"),

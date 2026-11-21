@@ -82,6 +82,10 @@ fn registry_and_argument_rules_of_parse_seqids() {
     }
     let error = check_registry_settings(&parsed, Err("the registry file x sets ...")).unwrap_err();
     assert!(error.starts_with("the registry file x sets ..."), "{error}");
+    // The FASTA reader is the only reader of the entry.
+    let mut copied = parsed.clone();
+    copied.input_type = "blastdb".to_string();
+    assert_eq!(check_registry_settings(&copied, Ok(Some("100"))), Ok(()));
     let mut map = parse(&["--dbtype", "prot"]);
     map.taxid_map = Some("m.txt".to_string());
     let error = check_arguments(&map).unwrap_err();
@@ -117,13 +121,22 @@ fn the_variable_that_changes_stored_titles_is_refused() {
     let with = |name: &'static str, value: &'static str| {
         move |asked: &str| (asked == name).then(|| std::ffi::OsString::from(value))
     };
-    assert!(check_environment(&|_: &str| None).is_ok());
-    let error = check_environment(&with(DONT_SCAN, "1")).unwrap_err();
+    let fasta = crate::writedb::tests::parse_makedb_words(&["-dbtype".into(), "nucl".into()]);
+    assert!(check_environment(&fasta, &|_: &str| None).is_ok());
+    let error = check_environment(&fasta, &with(DONT_SCAN, "1")).unwrap_err();
     assert!(error.contains(DONT_SCAN), "{error}");
     // An empty value is no value for makeblastdb.
-    assert!(check_environment(&with(DONT_SCAN, "")).is_ok());
+    assert!(check_environment(&fasta, &with(DONT_SCAN, "")).is_ok());
     // Read by the source of ASN.1 input only.
-    assert!(check_environment(&with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")).is_ok());
+    assert!(check_environment(
+        &fasta,
+        &with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")
+    )
+    .is_ok());
+    // The sequences of a database are copied as stored: the variable changes nothing there.
+    let mut blastdb = fasta.clone();
+    blastdb.input_type = "blastdb".to_string();
+    assert!(check_environment(&blastdb, &with(DONT_SCAN, "1")).is_ok());
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at

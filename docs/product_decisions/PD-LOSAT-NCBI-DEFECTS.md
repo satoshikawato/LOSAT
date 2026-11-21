@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.63
+- Version: 1.65
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -267,7 +267,17 @@
   range outside the bit array of the ranges below it, where NCBI clears bits outside that array
   (before it a crash, SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1; past it writes over
   NCBI's heap, probes RB9 of review B), rule 3; Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07)
+  restated 2026-10-07);
+  1.64 2026-11-21 (approved exception 18, the numbers of a `secondary-accession` modifier past
+  `int` in psiblast `-in_msa`, line PS item PS6b, PR #1440; proposed under the standing instruction
+  2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」
+  and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
+  PR #1440 ready for review, as the PR asked; numbered after 1.63);
+  1.65 2026-11-21 (`losat blastn -use_index true`, line RG item D5b-1: the explicit rejections,
+  rule 3, of an empty first MegaBLAST index volume, whose header NCBI reads through a null
+  pointer, of a new-style index volume whose sequence count NCBI reads from words its stream never
+  set, and of an `-index_name` range of volumes whose loop NCBI never ends; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2132,6 +2142,25 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
+- `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
+  D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
+  loader of the MegaBLAST database index meets one of these. LOSAT refuses each (exit 1) before
+  the search:
+  - The first index volume (`<name>.NN.idx`, new or old style) is a file of 0 bytes. NCBI maps it
+    as no memory and reads its header through a null pointer when it checks the word size
+    (SIGSEGV, exit status 139, also without read access; fixture row `used_old_empty` of
+    `tests/blastn_mb_index`). A first volume that is not a regular file, does not open or has a
+    word size field above 15 gives NCBI's warning and its search without the index (rows
+    `failread_*`); one shorter than its header reads zeros past its end, as NCBI's mapping does.
+  - A new-style index volume of 36 to 39 bytes, or one NCBI cannot open: NCBI's count of its
+    sequences reads a word that its stream never set, an uninitialized value (row
+    `undefined_idx38`, where NCBI printed 42,008,582). Shorter volumes give NCBI's exception
+    (`at start oid`, `at end oid`), reproduced.
+  - An `-index_name` range whose last volume converts to the largest `unsigned long` (a last
+    volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
+    is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
+    negative ones too, end and are reproduced.
+
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
 `CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
@@ -2202,6 +2231,29 @@ moves only that list (line RG `DECISIONS.md` D1a4-13).
     (probe minus0 of D1a-4's fix round 2: the nine commands that LOSAT refused, each NCBI's output
     with that one value written as its digits). The writers' unit tests hold the value, as for
     `INT_MIN` (no fixture row kind holds NCBI's bytes with one value written otherwise).
+
+## Approved exception (psiblast `-in_msa`, a `secondary-accession` number past `int`, line PS item PS6b, version 1.64)
+
+Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), under the Owner's rules
+of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
+accepted by the maintainer on 2026-11-21 by marking PR #1440 ready for review, as the PR asked.
+
+18. **A number of a `secondary-accession` value that does not fit `int`.** `SSeqIdRange`
+    (`objects/seqloc/Seq_id.cpp:3600-3640`; `int start; int stop;` in `Seq_id.hpp`) reads the digits
+    with `start = start * 10 + digit`, a signed overflow from the tenth digit on (undefined behavior
+    in C++). NCBI BLAST+ 2.17.0's build wraps: `AB9999999999` gives the accession `AB1410065407` in the
+    GB-block's `extra-accessions` and `hist.replaces` (rc 0), and `AB2147483648` or a range that
+    crosses 2^31 gives a negative number that `CSeq_id` refuses, `Malformatted ID AB-2147483648`
+    (rc 255; probes `M.secondary_num_big`, `M.secondary_num_over`, `M.secondary_range_over` of
+    the PS6b review). LOSAT reads the numbers in 64 bits and writes each accession with the digits as
+    written, zero-padded to the first number's width as NCBI pads every number that fits (NCBI 2.17.0
+    `AB1000000000-AB1000000002`, `AB0999999999-AB1000000001` and `AB1000000000`: the same bytes as
+    LOSAT's, probes `S.a`, `S.b`, `S.c` of the fix round); the accession then goes through the same
+    Seq-id parse as every other, which decides by its own rule whether the run goes on. A
+    number of more than 18 digits (past 64 bits) and a range that runs backwards (NCBI's loop does not
+    end) stay refused (rule 3). The range's size has no limit: NCBI expands any range into as many
+    Seq-ids, finishes up to the memory it has (2e7 ids in 115 s and 6.9 GB), and LOSAT writes the ids
+    as it expands them, in less memory than NCBI.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

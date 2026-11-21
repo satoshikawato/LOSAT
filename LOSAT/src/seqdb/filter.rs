@@ -170,7 +170,8 @@ impl OidFilter {
         self
     }
 
-    /// The iteration range `(begin, end)`.
+    /// The iteration range `(begin, end)` (of `SeqDb::included_length`).
+    #[cfg(any(test, feature = "parallel"))]
     pub(crate) fn range(&self) -> (u32, u32) {
         (self.begin, self.end)
     }

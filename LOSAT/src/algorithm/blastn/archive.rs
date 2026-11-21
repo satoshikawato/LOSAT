@@ -153,7 +153,8 @@ pub(crate) struct CallBatches<'a> {
     /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
     /// With `-filtering_db`, the repeat hits of the call's queries (0-based, inclusive, in the
-    /// searched letters; `repeat_filter::RepeatFilter::hits`), empty for a query without one.
+    /// searched letters) that their batch's set-up found
+    /// (`repeat_filter::RepeatFilter::add_masks`), empty for a query without one.
     /// Only the archive reads them (empty without it or without the option).
     pub repeat_hits: &'a [Vec<(usize, usize)>],
     pub unsearched: &'a [bool],

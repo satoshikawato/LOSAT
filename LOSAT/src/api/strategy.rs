@@ -282,6 +282,7 @@ impl Search {
             self.program(),
             &applied.command,
             None,
+            true,
             &applied.queries,
             &applied.subjects,
         )?;

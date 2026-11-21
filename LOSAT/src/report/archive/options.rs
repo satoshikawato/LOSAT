@@ -771,7 +771,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 // (`SetRepeatFilteringDB`: the name as given, an empty one too; the handler sets
                 // no `RepeatFiltering` boolean.)
                 if let Some(database) = &inputs.filtering_db {
-                    list.set("RepeatFilteringDB", Str(database.clone()));
+                    list.set(fields::REPEAT_FILTERING_DB, Str(database.clone()));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads

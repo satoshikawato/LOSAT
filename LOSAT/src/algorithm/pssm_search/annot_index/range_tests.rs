@@ -646,8 +646,8 @@ fn giim_handles_follow_ncbis_inverted_tree() {
     assert_eq!(m.map.len(), 2);
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (F-LH: probes of
-// `F/lh/ncbi/`, rows `db.ps.inpssm.d3.om.flh.*`)
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (F-LH: rows `db.flh.ps.*`
+// and `db.flh.tbn.*`, NCBI's "duplicate Bioseq id" message of a PSSM query)
 #[test]
 fn an_accession_is_written_by_the_seq_id_that_made_the_info_of_its_packed_key() {
     use crate::seqid::model::TextseqId;
@@ -688,4 +688,34 @@ fn an_accession_is_written_by_the_seq_id_that_made_the_info_of_its_packed_key() 
             "gb|AAA00001.1|"
         );
     }
+    // More than 6 digits: the leading zeros move into the prefix, so `AAA0000012` and `AAA0000111`
+    // share the prefix `AAA0` and the digit count; `AAA1000012` has 7 real digits (prefix `AAA`).
+    assert_eq!(
+        written(
+            &[embl("AAA0000012", Some(1))],
+            &genbank("AAA0000111", Some(1))
+        ),
+        "emb|AAA0000111.1|"
+    );
+    assert_eq!(
+        written(
+            &[embl("AAA1000012", Some(1))],
+            &genbank("AAA0000111", Some(1))
+        ),
+        "gb|AAA0000111.1|"
+    );
+    // Version 0 is a version: it shares the info with version 0 (written without a version), and
+    // is another info than no version, on either side.
+    assert_eq!(
+        written(&[embl("AAA00002", Some(0))], &genbank("AAA00001", Some(0))),
+        "emb|AAA00001|"
+    );
+    assert_eq!(
+        written(&[embl("AAA00002", None)], &genbank("AAA00001", Some(0))),
+        "gb|AAA00001|"
+    );
+    assert_eq!(
+        written(&[embl("AAA00002", Some(0))], &genbank("AAA00001", None)),
+        "gb|AAA00001|"
+    );
 }

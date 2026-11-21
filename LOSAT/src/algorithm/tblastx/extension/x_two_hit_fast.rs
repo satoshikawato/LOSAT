@@ -110,10 +110,12 @@
 //! * Keys. The walks are the key walks of blastp and BLASTX (algorithm/common/x_key_walk.rs, item
 //!   SC2e: score and step in one `i64`, so that one comparison keeps the best and its length), and
 //!   the word loop runs on the same keys: a step adds `(t << 32) - 1` for the score `t` of the two
-//!   bytes, read at `q << 5 | s` (`WalkKeys`: BLOSUM62's from the cells of `build_table`, another
+//!   bytes, read at `q << 5 | s` (`KeyTable`: BLOSUM62's from the cells of `build_table`, another
 //!   matrix's beside its `MatrixWalkTable`). The keys hold the byte tables' scores of the bytes
 //!   below `MATRIX_LETTERS`: the letters (NCBISTDAA 0..=27) and the sentinel 0, the only bytes a
-//!   frame or a context holds (`translation.rs`), as `MatrixWalkTable` takes them. A walk takes
+//!   frame or a context holds (`translation.rs`), as `MatrixWalkTable` takes them; a context or a
+//!   frame takes the path only if every byte of its buffer is below it (`letters` in
+//!   `sent_contexts` and `sent_subject`), so every step reads a key of the table. A walk takes
 //!   fewer than `MAX_SENT_LEN` steps, inside the keys' step part (`2^32 - 1`), and the scores stay
 //!   as in the item above.
 //! * Other matrices and word lengths (`TbxScore::sent_two_hit`, `two_hit_sent_in::<W>`): the same
@@ -127,7 +129,7 @@
 use super::get_score;
 #[cfg(test)]
 use super::two_hit::extend_hit_two_hit_reference;
-use crate::algorithm::common::x_key_walk::{best_of, walk};
+use crate::algorithm::common::x_key_walk::{best_of, walk, KeyTable, KEY_TABLE_LEN};
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::BLAST_SCORE_MIN;
 use std::cell::UnsafeCell;
@@ -158,6 +160,7 @@ const _: () = assert!((MAX_MATRIX_WORD as i32 - 1) * MAX_MATRIX_SCORE <= 128);
 /// The bytes another matrix's table holds the scores of (`MatrixWalkTable`): the frames' letters
 /// (NCBISTDAA 0..=27) are below it.
 const MATRIX_LETTERS: usize = 32;
+const _: () = assert!(MATRIX_LETTERS * MATRIX_LETTERS == KEY_TABLE_LEN);
 /// `q << 5 | s` for every two bytes (`MatrixWalkTable`).
 const MATRIX_TABLE_LEN: usize = 256 * MATRIX_LETTERS;
 #[expect(
@@ -191,7 +194,7 @@ struct State {
     table: Option<&'static Table>,
     /// LOSAT_X_TBXUNGAPSENT: the keys of `table`'s letters for the sentinel walks (`fill_keys`);
     /// `None` when the path is off.
-    keys: Option<Box<WalkKeys>>,
+    keys: Option<Box<KeyTable>>,
 }
 
 /// `tab[i]`. wasm32 reads `FIXED_TABLE` (where `tab` points) at its static address.
@@ -232,20 +235,18 @@ impl WalkTable for Table {
 /// The byte table of a matrix other than BLOSUM62 (`two_hit_in`): the score of `q` against `s` at
 /// `q << 5 | s` for the bytes below `MATRIX_LETTERS`. A byte of 32 or more, which no frame holds,
 /// reads a cell that is not its score. Page-aligned: the cells of the letters (the first 1 KiB),
-/// the only ones written (`fill_matrix_table`), take one page of memory.
+/// the only ones written (`fill_matrix_table`), take one page of memory. Beside it, the keys of
+/// the sentinel walks (LOSAT_X_TBXUNGAPSENT, `fill_keys`; 8 KiB).
 #[repr(align(4096))]
-pub(crate) struct MatrixWalkTable([i8; MATRIX_TABLE_LEN], WalkKeys);
+pub(crate) struct MatrixWalkTable([i8; MATRIX_TABLE_LEN], KeyTable);
 
-/// LOSAT_X_TBXUNGAPSENT: the keys of the sentinel walks (algorithm/common/x_key_walk.rs, item
-/// SC2e) at `q << 5 | s` for every two bytes: `(t << 32) - 1` for the score `t` of two bytes below
-/// `MATRIX_LETTERS` (the only cells written, 8 KiB); a byte of 32 or more, which no frame holds,
-/// reads a key that is not its score (module comment).
-pub(crate) type WalkKeys = [i64; MATRIX_TABLE_LEN];
-
-/// Writes into `k` the keys of the letters' cells of a byte table `t` read at `q << SHIFT | s`
-/// (BLOSUM62's `Table`: 8; a `MatrixWalkTable`: 5).
+/// LOSAT_X_TBXUNGAPSENT: writes into `k` the keys of the sentinel walks (algorithm/common/
+/// x_key_walk.rs, item SC2e) for the letters of a byte table `t` read at `q << SHIFT | s`
+/// (BLOSUM62's `Table`: 8; a `MatrixWalkTable`: 5): `(t << 32) - 1` at `q << 5 | s` for the score
+/// `t` of every two bytes below `MATRIX_LETTERS`, the only bytes of a buffer that takes the walks
+/// (`letters`).
 // No NCBI counterpart: the scores the reference walks add, in the form of the key walks.
-fn fill_keys<const SHIFT: u32>(k: &mut WalkKeys, t: &[i8]) {
+fn fill_keys<const SHIFT: u32>(k: &mut KeyTable, t: &[i8]) {
     for q in 0..MATRIX_LETTERS {
         for s in 0..MATRIX_LETTERS {
             k[q << 5 | s] = ((t[q << SHIFT | s] as i64) << 32) - 1;
@@ -360,12 +361,8 @@ static MATRIX_SLOTS: [MatrixTableSlot; ScoringMatrix::ALL.len()] = [const {
     }
 }; ScoringMatrix::ALL.len()];
 static MATRIX_TABLES: MatrixTables = MatrixTables(
-    [const {
-        UnsafeCell::new(MatrixWalkTable(
-            [0; MATRIX_TABLE_LEN],
-            [0; MATRIX_TABLE_LEN],
-        ))
-    }; ScoringMatrix::ALL.len()],
+    [const { UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN], [0; KEY_TABLE_LEN])) };
+        ScoringMatrix::ALL.len()],
 );
 
 /// The byte table of `matrix`, a matrix other than BLOSUM62 whose scores are `score(q, s)`: a
@@ -411,10 +408,7 @@ fn state() -> &'static State {
             && cfg!(not(target_arch = "wasm32"))
             && crate::utils::xswitch::on("LOSAT_X_TBXUNGAPSENT");
         let keys = table.as_ref().filter(|_| sent).map(|t| {
-            let mut k: Box<WalkKeys> = vec![0i64; MATRIX_TABLE_LEN]
-                .into_boxed_slice()
-                .try_into()
-                .expect("MATRIX_TABLE_LEN keys");
+            let mut k = Box::new([0i64; KEY_TABLE_LEN]);
             fill_keys::<8>(&mut k, &t[..]);
             k
         });
@@ -798,7 +792,7 @@ const _: () = assert!(MAX_MATRIX_SCORE as i64 * (MAX_SENT_LEN as i64 + 3) < i32:
 
 /// LOSAT_X_TBXUNGAPSENT: whether a batch whose query contexts have the buffers `contexts` may take
 /// the sentinel walks: the switch is on and every buffer is `[0, residues.., 0]` with every byte
-/// below `MATRIX_LETTERS` (the bytes of the walks' keys, `WalkKeys`).
+/// below `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) -> bool {
     if !state().sent {
@@ -815,7 +809,7 @@ pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) ->
 /// `frame[1..frame.len() - 1]` (`frame`: a subject frame's buffer, `[0, residues.., 0]`) take the
 /// sentinel walks: the batch does (`batch`, from [`sent_contexts`]), the chunk is the whole frame
 /// and the buffer has its sentinels, at most `MAX_SENT_LEN` bytes and every byte below
-/// `MATRIX_LETTERS` (the bytes of the walks' keys, `WalkKeys`). Otherwise they take [`two_hit`].
+/// `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`). Otherwise they take [`two_hit`].
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
 pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize) -> bool {
@@ -914,7 +908,7 @@ pub(crate) unsafe fn two_hit_sent_in<const W: usize>(
 }
 
 /// `two_hit_sent` on the keys that `keys` gives (read after the calls the path does not cover
-/// have returned; `WalkKeys`, read at `q << 5 | s`), with words of `W` letters (`WORD` for
+/// have returned; `KeyTable`, read at `q << 5 | s`), with words of `W` letters (`WORD` for
 /// BLOSUM62's keys) and the key walks (`x_key_walk::walk`).
 ///
 /// SAFETY: those of `two_hit_sent` and `x_key_walk::walk` (module comment, LOSAT_X_TBXUNGAPSENT).

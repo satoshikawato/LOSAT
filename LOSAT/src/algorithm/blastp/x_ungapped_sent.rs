@@ -61,14 +61,12 @@ use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::Table;
 // The key walks (`walk`, `best_of`) and the query codes they read (`XQueryCode`) are in
 // algorithm/common (`x_key_walk.rs`), where TBLASTX's sentinel walks take them too.
-pub(crate) use crate::algorithm::common::x_key_walk::XQueryCode;
-use crate::algorithm::common::x_key_walk::{best_of, walk};
+use crate::algorithm::common::x_key_walk::{best_of, walk, KEY_TABLE_LEN};
+pub(crate) use crate::algorithm::common::x_key_walk::{KeyTable, XQueryCode};
 use std::sync::OnceLock;
 
-/// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
-/// byte table's score (-128 for the sentinel). The walks add it (module comment).
-pub(crate) type KeyTable = [i64; KEY_TABLE_LEN];
-const KEY_TABLE_LEN: usize = (CODES as usize) * (CODES as usize);
+// The keys (`KeyTable`, in algorithm/common) cover the codes below `CODES`.
+const _: () = assert!(KEY_TABLE_LEN == (CODES as usize) * (CODES as usize));
 
 /// The keys of the byte table `table` (its first 32 x 32 codes).
 // No NCBI counterpart: the reference's scores in LOSAT's form (module comment).

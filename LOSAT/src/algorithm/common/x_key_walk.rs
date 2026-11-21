@@ -20,6 +20,14 @@
 //! of the best beside the key. The walks have no bound test: the callers' buffers end in sentinels
 //! whose keys stop them (each caller's module comment gives the argument for its buffers).
 
+/// The codes below 32: a step reads the key of query code `q` against subject code `s` at
+/// `q << 5 | s`.
+pub(crate) const KEY_TABLE_LEN: usize = 32 * 32;
+
+/// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
+/// score of the two codes (-128 for a sentinel). The walks add it (module comment).
+pub(crate) type KeyTable = [i64; KEY_TABLE_LEN];
+
 /// The score and the length of a best key (module comment).
 // No NCBI counterpart: decodes the key of the module comment.
 #[inline(always)]

@@ -6797,10 +6797,10 @@ Scheduling (each value computed by one thread with the original function; order 
   `walk_right`, 30.6 % of the cycles in `perf record`) and 38 fewer with the switch (from the cycle
   totals), about 197; what is left is the latency of the first query loads and the mispredicted
   exits of the walks (as in TBXUNGAP).
-  From DT1-9 (2026-11-18) the walks are the key walks of BLASTP and BLASTX (item SC2e, #940), shared in
+  From DT1-10 (2026-11-21) the walks are the key walks of BLASTP and BLASTX (item SC2e, #940), shared in
   `algorithm/common/x_key_walk.rs`: the score and the step are one `i64` (`score << 32 - (i + 1)`
   after step `i`), so one comparison keeps the best and its length, and the word loop adds the same
-  keys (`WalkKeys`, `(t << 32) - 1` at `q << 5 | s`, beside BLOSUM62's table and each
+  keys (`KeyTable`, `(t << 32) - 1` at `q << 5 | s`, beside BLOSUM62's table and each
   `MatrixWalkTable`). The keys hold the scores of the bytes below 32, so a batch or a frame takes the
   path only if every byte of its buffers is below 32 (`letters` in `sent_contexts` and
   `sent_subject`); a frame's letters (NCBISTDAA 0..=27) and the sentinel always are.

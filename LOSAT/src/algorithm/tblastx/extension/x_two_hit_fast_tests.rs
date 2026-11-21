@@ -540,10 +540,7 @@ fn bound_cells(rng: &mut Rng) -> &'static [[i32; MATRIX_LETTERS]; MATRIX_LETTERS
 /// `check_walks` of the made-up matrix with words of `W` letters.
 fn bound_walks_equal_the_reference<const W: usize>(rng: &mut Rng) {
     let cells = bound_cells(rng);
-    let mut t = Box::new(MatrixWalkTable(
-        [0; MATRIX_TABLE_LEN],
-        [0; MATRIX_TABLE_LEN],
-    ));
+    let mut t = Box::new(MatrixWalkTable([0; MATRIX_TABLE_LEN], [0; KEY_TABLE_LEN]));
     assert!(fill_matrix_table(&mut t.0, |a, b| cells[a as usize][b as usize]));
     let t0 = t.0;
     fill_keys::<5>(&mut t.1, &t0);

@@ -1,0 +1,61 @@
+# name<TAB>setup<TAB>blastn arguments[<TAB>refusal] (line RG item D5b-1). Each row runs in a copy of in/: the setup steps
+# (" ; "-separated: makembindex ARGS with LOSAT's makembindex, put FILE OFFSET VALUE, cut FILE SIZE, cp FROM TO, rm FILE),
+# then blastn. ncbi/<name>.{out,err,rc}: NCBI BLAST+ 2.17.0 (the official Linux x64 release, local oracle), 2026-11-21,
+# ad-RG-D5-4, frozen by remaining-gaps-20261112/D/d5/fixture/freeze_d5b1.py with NCBI's makembindex for the setup.
+# A row with a refusal is one where NCBI searches with an index (or reads one in an undefined way, or crashes): LOSAT refuses with
+# "-use_index true with <refusal> is not supported by LOSAT's BLASTN"; NCBI's output stays for line D5b-2.
+noidx	-	-query q.fa -outfmt 6 -use_index true -db v1
+noidx_al	-	-query q.fa -outfmt 6 -use_index true -db al
+noidx_archive	-	-query q.fa -outfmt 11 -use_index true -db v1
+noidx_al_space	-	-query q.fa -outfmt 6 -use_index true -db 'al '
+noidx_al_twice	-	-query q.fa -outfmt 6 -use_index true -db 'al  al'
+noidx_mv	-	-query q.fa -outfmt 6 -use_index true -db mv
+oldmiss	-	-query q.fa -outfmt 6 -use_index true -db v1 -index_name nosuch
+oldrange	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,1,3
+oldneg	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,-1
+oldempty	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name ''
+oldnouse	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -db v1 -index_name oidx
+oldnouse_archive	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 11 -db v1 -index_name oidx
+ws_legacy	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -word_size 7
+ws_al	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db al -word_size 7
+ws_new	makembindex -input v1 -nmer 8 -legacy false -stride 3	-query q.fa -outfmt 6 -use_index true -db v1 -word_size 9
+ws_new_archive	makembindex -input v1 -nmer 8 -legacy false -stride 3	-query q.fa -outfmt 11 -use_index true -db v1 -word_size 9
+ws_mv	makembindex -input mv -nmer 8	-query q.fa -outfmt 6 -use_index true -db mv -word_size 7
+ws_mv_mixed	makembindex -input mv -nmer 8 ; put mv.01.shd 8 99	-query q.fa -outfmt 6 -use_index true -db mv -word_size 7
+old_gap_ws	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cp oidx.00.idx oidx.02.idx	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx -word_size 7
+old_gap_archive	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cp oidx.00.idx oidx.02.idx	-query q.fa -outfmt 11 -use_index true -db v1 -index_name oidx -word_size 7
+old_list_ws	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name 'zz oidx,,0,0' -word_size 7
+old_lead_ws	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name ' oidx,,0,0' -word_size 7
+old_atoi_ws	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cp oidx.00.idx oidx.02.idx	-query q.fa -outfmt 6 -use_index true -db v1 -index_name 'oidx,x,1x,+2' -word_size 7
+old_short_ws	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cp oidx.00.idx s.00.idx ; cut s.00.idx 20	-query q.fa -outfmt 6 -use_index true -db v1 -index_name s -word_size 6
+task_blastn	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -task blastn
+task_dc	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -task dc-megablast
+subject	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -subject db.fa
+template	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -template_type coding -template_length 16 -word_size 11
+badshd_al	makembindex -input v1 -nmer 8 ; put v1.shd 8 7	-query q.fa -outfmt 6 -use_index true -db al
+badshd_al_archive	makembindex -input v1 -nmer 8 ; put v1.shd 8 7	-query q.fa -outfmt 11 -use_index true -db al
+shd_vol2_al	makembindex -input v1 -nmer 8 ; put v1.shd 12 2	-query q.fa -outfmt 6 -use_index true -db al
+idx_noseq_al	makembindex -input v1 -nmer 8 ; put v1.00.idx 36 0	-query q.fa -outfmt 6 -use_index true -db al
+idx_total_al	makembindex -input v1 -nmer 8 ; put v1.00.idx 36 3	-query q.fa -outfmt 6 -use_index true -db al
+idx_short10_al	makembindex -input v1 -nmer 8 ; cut v1.00.idx 10	-query q.fa -outfmt 6 -use_index true -db al
+idx_short30_al	makembindex -input v1 -nmer 8 ; cut v1.00.idx 30	-query q.fa -outfmt 6 -use_index true -db al
+shd_short_al	makembindex -input v1 -nmer 8 ; cut v1.shd 8	-query q.fa -outfmt 6 -use_index true -db al
+shd_version_al	makembindex -input v1 -nmer 8 ; put v1.shd 4 2	-query q.fa -outfmt 6 -use_index true -db al
+mv_badshd	makembindex -input mv -nmer 8 ; put mv.00.shd 8 99 ; put mv.01.shd 8 99 ; put mv.02.shd 8 99	-query q.fa -outfmt 6 -use_index true -db mv
+failread_mv_firstvol	makembindex -input mv -nmer 8 ; rm mv.00.shd	-query q.fa -outfmt 6 -use_index true -db mv
+failread_old_nmer	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; put oidx.00.idx 16 16	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx
+failread_new_nmer	makembindex -input v1 -nmer 8 ; put v1.00.idx 16 16	-query q.fa -outfmt 0 -use_index true -db v1
+oldempty_archive	-	-query q.fa -outfmt 11 -use_index true -db v1 -index_name ''
+db_vt	-	-query q.fa -outfmt 6 -use_index true -db "v1"
+used_new	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_new_ws8	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -word_size 8	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_al	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_new_s3	makembindex -input v1 -nmer 8 -legacy false -stride 3	-query q.fa -outfmt 6 -use_index true -db v1 -word_size 10	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_old	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx	a MegaBLAST database index (@CWD@/oidx.00.idx)
+used_noshd	makembindex -input v1 -nmer 8 ; rm v1.shd	-query q.fa -outfmt 6 -use_index true -db v1	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_badshd	makembindex -input v1 -nmer 8 ; put v1.shd 8 7	-query q.fa -outfmt 6 -use_index true -db v1	a MegaBLAST database index (@CWD@/v1.00.idx)
+used_mv	makembindex -input mv -nmer 8	-query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index (@CWD@/mv.00.00.idx)
+used_mv_mixed	makembindex -input mv -nmer 8 ; rm mv.01.shd	-query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index (@CWD@/mv.00.00.idx)
+used_old_empty	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8 ; cut oidx.00.idx 0	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx	an empty MegaBLAST index volume (@CWD@/oidx.00.idx)
+undefined_idx38	makembindex -input v1 -nmer 8 ; cut v1.00.idx 38	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST index volume whose header NCBI does not read whole (@CWD@/v1.00.idx)
+old_endless	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,0,-1	an -index_name range of volumes that NCBI's loader does not finish ('oidx,,0,-1')

@@ -285,7 +285,9 @@ fn the_full_versions_come_before_the_configuration() {
 /// The library's tools (`api::run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`,
 /// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`) run NCBI's
 /// application start as the command line does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
-/// programs of the library return reports, and refuse the words (`cli::version_word_refusal`).
+/// programs of the library return reports, and refuse the words (`cli::version_word_refusal`), which
+/// name the Web engine's ABI v2 among the places that print them where it runs the program (line
+/// WQA's D14, 2026-11-20).
 /// The library runs are `examples/library_command_line`, in the command line's environment.
 #[test]
 fn the_library_s_tools_print_the_versions_as_the_command_line() {
@@ -349,13 +351,12 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
-                    assert!(
-                        stderr.contains(&format!(
-                            "the option {word} runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's version text",
-                            program.to_ascii_uppercase()
-                        )),
-                        "{program} {words:?}: {stderr}"
-                    );
+                    let upper = program.to_ascii_uppercase();
+                    let refusal = match matches!(program, "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx") {
+                        true => format!("the option {word} runs on the command line and in LOSAT Web of LOSAT's {upper} only: the library API does not write NCBI's version text"),
+                        false => format!("the option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"),
+                    };
+                    assert!(stderr.contains(&refusal), "{program} {words:?}: {stderr}");
                 }
             }
         }

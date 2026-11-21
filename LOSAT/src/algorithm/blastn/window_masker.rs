@@ -10,6 +10,7 @@
 //! and query chunk (`s_BuildSeqMasker`); LOSAT reads it once, when the filtering options are
 //! read (`BlastnArgs::resolve_window_masker`), and keeps the result for the run.
 
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 use std::fmt;
 use std::sync::Arc;
 
@@ -83,7 +84,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             return Err(NativeError {
                 exit: 1,
                 message: format!(
-                    "BLAST query/options error: Only optimized binary windowmasker stat files are supported\n{}\n",
+                    "{QUERY_OPTIONS_ERROR} Only optimized binary windowmasker stat files are supported\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
                 ).into(),
             });
@@ -285,7 +286,7 @@ pub(crate) fn batch_error(
     };
     // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:171-174
     let mut warnings = Posts::new();
-    let mut message = b"BLAST engine error: ".to_vec();
+    let mut message = format!("{ENGINE_ERROR} ").into_bytes();
     for query in 0..queries {
         warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
@@ -381,7 +382,7 @@ mod tests {
             assert_eq!(directory.exit, 1);
             assert_eq!(
                 directory.message,
-                b"BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
+                b"LOSAT query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
             );
         } else {
             assert_eq!(directory.exit, 255);
@@ -535,7 +536,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             bad_index.message,
-            b"BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
+            b"LOSAT engine error: Warning: bad index at key 8764 : 14779 \n"
         );
         assert!(
             batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none()

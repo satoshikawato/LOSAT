@@ -748,7 +748,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: crate::NCBI_BLAST_VERSION.to_string(),
+            version: crate::wording::REPORT_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label).into(),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,

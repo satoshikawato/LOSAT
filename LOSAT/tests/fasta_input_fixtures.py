@@ -1524,16 +1524,15 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     if row.stdout_sha256 == "pending":
         return row, "pending", re.sub(r"[\t\r\n]+", " ", f"rc {result['rc']}: {first_err}")
     # The manifest holds the hashes of NCBI's streams, which LOSAT writes in LOSAT's words
-    # (`losat_wording`, AGENTS.md rule 8): LOSAT's footer is read as NCBI's for the hash; a stream
-    # whose NCBI bytes are in NCBI_STREAMS (an exception report) is compared with those bytes in
-    # LOSAT's words, after their hash is checked against the manifest.
-    ncbi_footer = losat_wording.NCBI_USER_MANUAL_FOOTER
-    losat_footer = losat_wording.USER_MANUAL_FOOTER
+    # (`losat_wording`, AGENTS.md rule 8): LOSAT's footer, version statement and error prefixes are
+    # read as NCBI's for the hash (`ncbi_hash_form`); a stream whose NCBI bytes are in NCBI_STREAMS
+    # (an exception report) is compared with those bytes in LOSAT's words, after their hash is
+    # checked against the manifest.
     if row.kind == "ncbi":
         for stream_name in ("stdout", "stderr", "combined"):
-            if ncbi_footer in result[stream_name]:
-                return row, "differs", f"{stream_name} still names the BLAST+ user manual"
-    norm = (lambda b: b.replace(losat_footer, ncbi_footer)) if row.kind == "ncbi" else (lambda b: b)
+            if (found := losat_wording.names_ncbi(result[stream_name])) is not None:
+                return row, "differs", f"{stream_name} still writes NCBI's {found.decode()!r}"
+    norm = losat_wording.ncbi_hash_form if row.kind == "ncbi" else (lambda b: b)
     actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(norm(result["stdout"])),
               "stderr_sha256": sha256(norm(result["stderr"])), "combined_sha256": sha256(norm(result["combined"]))}
     for field, name, ext in (("stdout_sha256", "stdout", "out"), ("stderr_sha256", "stderr", "err"),

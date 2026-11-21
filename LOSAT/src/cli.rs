@@ -1,5 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
+use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
@@ -983,15 +984,9 @@ where
     match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
         crate::blastinput::ncbi_environment::Preparsed::Version(request) => {
             // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
-            // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
-            // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
-            // 2026-11-11).
-            let version = if name == "rpsbproc" {
-                crate::rpsbproc::VERSION
-            } else {
-                crate::NCBI_BLAST_VERSION
-            };
-            Some(crate::ncbi_version::print(request, name, version))
+            // Every program prints LOSAT's version (NCBI's rpsbproc its own 0.5.1, the BLAST+
+            // programs 2.17.0+; the Owner 2026-11-21 「Q1=B」).
+            Some(crate::ncbi_version::print(request, name))
         }
         _ => None,
     }
@@ -1369,7 +1364,7 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
+                message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
@@ -1894,7 +1889,7 @@ pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
         return message;
     }
-    if message.starts_with(b"BLAST query/options error: ")
+    if message.starts_with(QUERY_OPTIONS_ERROR.as_bytes())
         && message
             .strip_suffix(b"\n")
             .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))
@@ -1989,7 +1984,7 @@ mod tests {
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            b"BLAST Database error: DB contains no accession info.\n"
+            b"LOSAT database error: DB contains no accession info.\n"
         );
         let other = NcbiException::new(
             ThrowSite {
@@ -2239,7 +2234,7 @@ mod tests {
     // No unit test calls `post_errors_in_run`.
     #[test]
     fn a_run_outside_main_posts_no_error_text() {
-        let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
+        let text = "LOSAT query error: Could not construct seq-id from 'gi|abc'\n";
         let error: anyhow::Error = NativeError {
             exit: 1,
             message: text.to_string().into(),

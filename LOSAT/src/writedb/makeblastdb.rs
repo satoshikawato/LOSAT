@@ -2,6 +2,7 @@
 //! (`c++/src/app/blastdb/makeblastdb.cpp`, `CMakeBlastDBApp`) for FASTA
 //! input and a database of format version 5 or 4 without parsed Seq-ids.
 
+use crate::wording::DATABASE_ERROR;
 use std::io::{BufRead, Read, Write};
 
 use clap::Args;
@@ -169,14 +170,15 @@ impl MakedbError {
         match self {
             MakedbError::Build(error) => error.message(),
             MakedbError::Database(SeqDbError::NotFound(message)) => {
-                [b"BLAST Database error: ".as_slice(), message].concat()
+                [DATABASE_ERROR.as_bytes(), b" ", message].concat()
             }
             MakedbError::Database(SeqDbError::Ncbi(exception)) => [
-                b"BLAST Database error: ".as_slice(),
+                DATABASE_ERROR.as_bytes(),
+                b" ",
                 exception.what().trim_ascii_end(),
             ]
             .concat(),
-            MakedbError::Database(error) => format!("BLAST Database error: {error}").into_bytes(),
+            MakedbError::Database(error) => format!("{DATABASE_ERROR} {error}").into_bytes(),
             MakedbError::Unsupported(message) => format!("losat makeblastdb: {message}").into(),
             MakedbError::Output(message) => {
                 format!("BLAST failed to write output: {message}").into()
@@ -1259,17 +1261,17 @@ mod tests {
             (
                 MakedbError::Build(WriteDbError::Options("o".into())),
                 1,
-                "BLAST options error: o",
+                "LOSAT options error: o",
             ),
             (
                 MakedbError::Build(WriteDbError::Creation("c".into())),
                 1,
-                "BLAST Database creation error: c",
+                "LOSAT database creation error: c",
             ),
             (
                 MakedbError::Database(SeqDbError::NotFound("d".into())),
                 2,
-                "BLAST Database error: d",
+                "LOSAT database error: d",
             ),
             (
                 MakedbError::Build(WriteDbError::OutOfMemory),

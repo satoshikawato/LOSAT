@@ -19,7 +19,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 mod temp_support;
-use temp_support::{home_and_worker_log, Finished, RunFiles};
+use temp_support::{
+    expected_losat_bytes, expected_losat_text, home_and_worker_log, Finished, RunFiles,
+};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
@@ -105,7 +107,7 @@ fn args<'a>(query: &'a str, mode: &str, threads: &'a str, format: &'a str) -> Ve
 }
 
 fn frozen(name: &str) -> String {
-    String::from_utf8(fs::read(fixtures().join(name)).unwrap()).unwrap()
+    expected_losat_text(String::from_utf8(fs::read(fixtures().join(name)).unwrap()).unwrap())
 }
 
 /// What NCBI BLAST+ 2.17.0 wrote for `tblastx -query QUERY (-subject snucl.fna | -db db/snucl)
@@ -117,7 +119,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let name = format!("{stem}_{mode}_{format}");
-            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let out = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
             // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
             let err = losat::wording::losat_output_bytes(
                 &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
@@ -163,7 +165,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 assert_eq!(output.status.code(), Some(1), "{mode} {format}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST query error: CFastaReader: Near line 13"),
+                    stderr.starts_with("LOSAT query error: CFastaReader: Near line 13"),
                     "{mode} {format}: {stderr}"
                 );
                 assert_eq!(
@@ -232,7 +234,9 @@ fn a_query_of_an_unsearched_batch_has_no_hits_member_masks_and_the_no_hits_suffi
         &[("BATCH_SIZE", "100")],
         0,
     );
-    let out = fs::read_to_string(fixtures().join("unsearched_tblastx_db_16.out")).unwrap();
+    let out = expected_losat_text(
+        fs::read_to_string(fixtures().join("unsearched_tblastx_db_16.out")).unwrap(),
+    );
     assert_eq!(
         out.matches("No hits found &#xa;No hits found").count(),
         2,
@@ -420,12 +424,14 @@ fn a_file_sink_holds_the_document_of_standard_output() {
     let query = tests.join("fasta/outfmt0/e2d_x_q.fa");
     let subject = tests.join("fasta/outfmt0/e2d_t_ts.fa");
     for format in ["15", "16"] {
-        let expected = fs::read(
-            tests
-                .join("fixtures/outfmt0")
-                .join(format!("sa.x16.tblastx.both.{format}.out")),
-        )
-        .unwrap();
+        let expected = expected_losat_bytes(
+            fs::read(
+                tests
+                    .join("fixtures/outfmt0")
+                    .join(format!("sa.x16.tblastx.both.{format}.out")),
+            )
+            .unwrap(),
+        );
         for threads in ["1", "4", "8", "16"] {
             let scratch = temp_dir("file_sink");
             let out = scratch.join("report.out");
@@ -517,7 +523,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
                 continue;
             }
             let frozen = engine.join("tests/fixtures/db_search");
-            let out = fs::read(frozen.join(format!("{id}.out"))).unwrap();
+            let out = expected_losat_bytes(fs::read(frozen.join(format!("{id}.out"))).unwrap());
             // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
             let err = losat::wording::losat_output_bytes(
                 &fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default(),

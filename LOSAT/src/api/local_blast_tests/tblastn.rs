@@ -186,9 +186,11 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
         for (index, outfmt) in SAVED_FORMATS.iter().enumerate() {
             let expected = std::fs::read(repository(&format!("{stem}.fmt{outfmt}{suffix}")))
                 .expect("saved NCBI output");
+            // The saved bytes are NCBI's; LOSAT writes them in its own words.
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             assert!(
                 together.outputs[index] == expected,
-                "{stem} outfmt {outfmt} differs from the saved NCBI bytes"
+                "{stem} outfmt {outfmt} differs from the saved NCBI bytes in LOSAT's words"
             );
         }
         let expected_stderr = stderr_suffix.map_or_else(Vec::new, |stderr_suffix| {

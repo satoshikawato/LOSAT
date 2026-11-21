@@ -55,6 +55,7 @@ import audit_tblastx_v010  # noqa: E402
 import certify_platform_native_v010 as certify  # noqa: E402
 import compare_blastn_parity  # noqa: E402
 import frozen_paths  # noqa: E402
+import losat_wording  # noqa: E402  (LOSAT's words read back as NCBI's for the frozen hashes, AGENTS.md rule 8)
 
 PROGRAMS = ("blastn", "blastp", "tblastx", "tblastn", "blastx")
 FIELDS = [
@@ -208,14 +209,22 @@ def run_case(case: Case, losat: Path, out_dir: Path) -> dict[str, str]:
             output.write_bytes(data)
     if not uses_file:
         output.write_bytes(data)
-    digest = sha256_bytes(data)
+    # The baseline and the frozen hashes are of NCBI's words (LOSAT wrote NCBI's version line until
+    # the Owner's 2026-11-21 decision): LOSAT's words are read back as NCBI's before hashing
+    # (`losat_wording.ncbi_hash_form`), and an output that still writes NCBI's words cannot match.
+    def hashed(stream: bytes) -> str:
+        if losat_wording.names_ncbi(stream) is not None:
+            return "names-ncbi:" + sha256_bytes(stream)
+        return sha256_bytes(losat_wording.ncbi_hash_form(stream))
+
+    digest = hashed(data)
     return {
         "program": case.program,
         "case_id": case.case_id,
         "command": json.dumps(case.command),
         "exit": str(result.returncode),
         "output_sha256": digest,
-        "stderr_sha256": sha256_bytes(stderr),
+        "stderr_sha256": hashed(stderr),
         "expected_sha256": case.expected_sha256,
         "expected_source": case.expected_source,
         "matches_expected": "" if not case.expected_sha256 else str(digest == case.expected_sha256).lower(),

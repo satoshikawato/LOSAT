@@ -422,7 +422,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             format!("{err:#}"),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         assert!(report_counts(6, None, None, Some(0)).validate().is_err());
         assert!(report_counts(0, None, Some(0), None).validate().is_ok());

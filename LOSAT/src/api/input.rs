@@ -384,7 +384,7 @@ mod tests {
             Err(error @ Error::Input(_)) => {
                 let message = error.to_string();
                 assert!(
-                    message.starts_with("BLAST query error: CFastaReader: Near line 1"),
+                    message.starts_with("LOSAT query error: CFastaReader: Near line 1"),
                     "{message}"
                 );
                 assert!(!message.ends_with('\n'));

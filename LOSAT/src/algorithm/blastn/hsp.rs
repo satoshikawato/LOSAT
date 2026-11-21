@@ -234,7 +234,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# BLASTN {}", crate::NCBI_BLAST_VERSION)?;
+    writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
@@ -1461,7 +1461,11 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+            concat!(
+                "# BLASTN (LOSAT ",
+                env!("CARGO_PKG_VERSION"),
+                ")\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+            )
         );
         // A query of a batch that NCBI did not search has no count.
         let mut output = Vec::new();

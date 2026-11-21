@@ -2103,7 +2103,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     batch_skipped: bool,
     iteration: Option<u32>,
 ) -> std::io::Result<()> {
-    let version_str = crate::NCBI_BLAST_VERSION;
+    let version_str = crate::wording::REPORT_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -7076,7 +7076,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
-                crate::NCBI_BLAST_VERSION,
+                crate::wording::REPORT_VERSION,
                 args.app.ncbi_name(),
                 blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
@@ -7180,7 +7180,7 @@ fn write_reports_without_queries(
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
-                    version: crate::NCBI_BLAST_VERSION.to_string(),
+                    version: crate::wording::REPORT_VERSION.to_string(),
                     database_name: blastp_database_name(args, subject_label).into(),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,

@@ -8,6 +8,7 @@
 //! `-gilist` and `-negative_gilist` stay refused; NCBI's exclusions with them are therefore
 //! not declared here.
 
+use crate::wording::DATABASE_ERROR;
 use std::collections::BTreeSet;
 use std::io::Write;
 
@@ -283,7 +284,7 @@ impl DbFilterArgs {
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {text}\n").into(),
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
         })?;
         for line in cerr {
             warnings.write_all(line.as_bytes())?;

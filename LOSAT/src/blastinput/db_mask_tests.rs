@@ -130,7 +130,7 @@ fn an_id_above_0_must_be_the_database_s() {
             native(soft(text).validate_at_open(&a5, "db/a5", true, "BLASTN")),
             (
                 1,
-                format!("BLAST options error: Masking algorithm ID {id} is not supported in nucleotide 'db/a5' BLAST database\n")
+                format!("LOSAT options error: Masking algorithm ID {id} is not supported in nucleotide 'db/a5' BLAST database\n")
             )
         );
     }
@@ -139,7 +139,7 @@ fn an_id_above_0_must_be_the_database_s() {
         native(soft("11").validate_at_open(&nm5, "db/nm5", true, "BLASTN")),
         (
             1,
-            "BLAST options error: Masking algorithm ID 11 is not supported in nucleotide 'db/nm5' BLAST database\n"
+            "LOSAT options error: Masking algorithm ID 11 is not supported in nucleotide 'db/nm5' BLAST database\n"
                 .to_string()
         )
     );
@@ -237,7 +237,7 @@ fn ids_0_and_below_minus_1_are_the_formatter_s_database_error() {
         assert_eq!(warning, "");
         assert_eq!(
             native(resolved),
-            (2, format!("BLAST Database error: Filtering algorithm ID {id} is not supported.\n{table}\n"))
+            (2, format!("LOSAT database error: Filtering algorithm ID {id} is not supported.\n{table}\n"))
         );
     }
 }
@@ -253,7 +253,7 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
             native(resolved),
             (
                 2,
-                "BLAST Database error: Filtering algorithm ID 11 is not supported.\n\n".to_string()
+                "LOSAT database error: Filtering algorithm ID 11 is not supported.\n\n".to_string()
             )
         );
     }
@@ -261,7 +261,7 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
     let (resolved, _) = resolve(&soft("12"), &db, &name);
     assert_eq!(
         native(resolved).1,
-        "BLAST Database error: Filtering algorithm ID 12 is not supported.\n\n\
+        "LOSAT database error: Filtering algorithm ID 12 is not supported.\n\n\
          Available filtering algorithms applied to database sequences:\n\n\
          Algorithm ID Algorithm name                          Algorithm options                       \n\
          11           dust                                    window=32; level=40; linker=1           \n\n"

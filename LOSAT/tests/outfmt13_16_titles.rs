@@ -221,7 +221,7 @@ fn refused(what: &str, run: &Run) {
     );
 }
 
-const READER_ERROR: &str = "BLAST query error: CFastaReader: Near line";
+const READER_ERROR: &str = "LOSAT query error: CFastaReader: Near line";
 
 #[test]
 fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused() {
@@ -457,7 +457,7 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
     }
 }
 
-const NO_DATA: &str = "BLAST engine error: Warning: Sequence contains no data";
+const NO_DATA: &str = "LOSAT engine error: Warning: Sequence contains no data";
 
 #[test]
 fn the_title_before_a_last_batch_without_letters_is_not_refused() {

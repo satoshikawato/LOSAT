@@ -2905,7 +2905,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
             read_inputs(&search, clean_query.as_bytes(), bad_subject.as_bytes()).unwrap_err();
         assert_eq!(
             message(error),
-            "BLAST query/options error: Query input doesn't start with a defline or comment, \
+            "LOSAT query/options error: Query input doesn't start with a defline or comment, \
              line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
@@ -2913,7 +2913,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         let error = read_inputs(&search, bad_query.as_bytes(), bad_subject.as_bytes()).unwrap_err();
         assert_eq!(
             message(error),
-            "BLAST query/options error: Query input doesn't start with a defline or comment, \
+            "LOSAT query/options error: Query input doesn't start with a defline or comment, \
              line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
@@ -2921,7 +2921,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
             read_inputs(&search, bad_query.as_bytes(), clean_subject.as_bytes()).unwrap_err();
         assert_eq!(
             message(error),
-            "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+            "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment \
              around line 3",
             "{program:?}"
         );

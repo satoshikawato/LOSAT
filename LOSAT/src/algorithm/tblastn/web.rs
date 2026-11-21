@@ -76,7 +76,8 @@ pub(crate) fn run_pair(
 }
 
 /// The shared vector of ABI v1's TBLASTN (`tests/fixtures/web_v1_tblastn/cases.tsv`): the bytes
-/// `losat tblastn` writes for each case (`tests/web_v1_tblastn.rs` checks them against the CLI),
+/// `losat tblastn` writes for each case (`tests/web_v1_tblastn.rs` checks them against the CLI;
+/// the files hold NCBI's bytes, which `cases` gives in LOSAT's words),
 /// which `run_pair` (the tests below) and the ABI's exports (`web_api.rs`) must return.
 #[cfg(test)]
 pub(crate) mod vector {
@@ -114,7 +115,10 @@ pub(crate) mod vector {
                 else {
                     panic!("seven columns: {line:?}");
                 };
+                // The files are NCBI's bytes (the vector was frozen identical to NCBI's); LOSAT
+                // writes them in its own words (`crate::wording::losat_output_bytes`).
                 let expected = read(&format!("{name}.{kind}"));
+                let expected = crate::wording::losat_output_bytes(&expected).into_owned();
                 Case {
                     name: name.to_string(),
                     query: query.to_string(),

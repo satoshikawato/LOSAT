@@ -6,6 +6,7 @@
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -4945,7 +4946,7 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
             matrix_only: report.matrix_only,
@@ -6322,7 +6323,7 @@ fn read_cli_subjects(
         return Err(crate::cli::NativeError {
             exit: 1,
             message: format!(
-                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ).into(),
         }
@@ -6712,7 +6713,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -8020,7 +8021,7 @@ fn run_in_pool(
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -8229,7 +8230,7 @@ fn run_in_pool(
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
         }
@@ -8404,7 +8405,7 @@ fn run_in_pool(
                 before(outputs)?;
             }
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for _ in start..end {
                 message.push_str("Warning: ");
                 message.push_str(NO_DATA_MESSAGE);
@@ -9319,7 +9320,7 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
-            crate::NCBI_BLAST_VERSION,
+            crate::wording::REPORT_VERSION,
             intro,
             shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
@@ -12061,7 +12062,7 @@ mod tests {
             (
                 1,
                 format!(
-                    "BLAST query/options error: {text}\n{}\n",
+                    "LOSAT query/options error: {text}\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
                 ),
             )

@@ -1,5 +1,4 @@
 //! Native serial caller, tested through the internal probe before public dispatch.
-#[cfg(feature = "parallel")]
 use super::reader_batch::{
     attach, prepare_lone_unit, prepare_reader_batch, prepare_unit, ReaderBatchShape, UnitPrep,
 };
@@ -26,6 +25,8 @@ use crate::algorithm::common::database::{
     prefetches_subjects, HeaderReadError, PreliminaryReadError,
 };
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
+#[cfg(feature = "parallel")]
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 use std::{
     fmt,
@@ -46,7 +47,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n").into(),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -131,8 +132,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with(b"Command line argument error"))
             || (e.exit == 6 && e.message == b"BLAST failed to write output\n")
-            || (e.exit == 3 && e.message.starts_with(b"BLAST engine error: "))
-            || (e.exit == 2 && e.message.starts_with(b"BLAST Database error: "))
+            || (e.exit == 3 && e.message.starts_with(ENGINE_ERROR.as_bytes()))
+            || (e.exit == 2 && e.message.starts_with(DATABASE_ERROR.as_bytes()))
             || e.exit == 255
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
@@ -2688,7 +2689,7 @@ mod archive_error_tests {
             (native.exit, native.message.as_slice()),
             (
                 1,
-                b"BLAST query/options error: Query input doesn't start with a defline or comment, \
+                b"LOSAT query/options error: Query input doesn't start with a defline or comment, \
                   line 4\0\nPlease refer to the LOSAT user manual.\n"
                     .as_slice()
             )
@@ -2703,7 +2704,7 @@ mod archive_error_tests {
         assert_eq!(
             texts(&subject),
             [
-                b"BLAST query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
+                b"LOSAT query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
                 b"Please refer to the LOSAT user manual.".to_vec(),
             ]
         );
@@ -2713,7 +2714,7 @@ mod archive_error_tests {
             (native.exit, native.message.as_slice()),
             (
                 1,
-                b"BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                b"LOSAT query error: CFastaReader: Input doesn't start with a defline or comment \
                   around line 4\n"
                     .as_slice()
             )
@@ -2722,7 +2723,7 @@ mod archive_error_tests {
         let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
         assert_eq!(
             other.downcast_ref::<NativeError>().unwrap().message,
-            b"BLAST query error: CFastaReader: x\n"
+            b"LOSAT query error: CFastaReader: x\n"
         );
     }
 
@@ -2856,7 +2857,7 @@ mod archive_error_tests {
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            b"BLAST Database error: DB contains no accession info.\n"
+            b"LOSAT database error: DB contains no accession info.\n"
         );
     }
 }

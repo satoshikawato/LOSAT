@@ -6,6 +6,7 @@
 //! itself is `core::psi`. The blastp engine reaches this module only when a PSSM is requested
 //! (`blast_engine.rs` `psiblast_pssms`).
 
+use crate::wording::OPTIONS_ERROR;
 use std::io::Write as _;
 
 use anyhow::Result;
@@ -225,7 +226,7 @@ impl std::error::Error for PssmStop {}
 pub(crate) fn blast_options_error(message: &str) -> anyhow::Error {
     crate::cli::NativeError {
         exit: 1,
-        message: format!("BLAST options error: {message}\n").into(),
+        message: format!("{OPTIONS_ERROR} {message}\n").into(),
     }
     .into()
 }

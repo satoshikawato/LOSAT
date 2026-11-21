@@ -2,6 +2,7 @@
 //! descendants (`x_InitBlastDB_TaxIdList`), whose sequences `retrieve` writes, and
 //! `-tax_info`, the taxids of the database (`x_PrintBlastDatabaseTaxInformation`).
 
+use crate::wording::QUERY_OPTIONS_ERROR;
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
@@ -275,7 +276,9 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
     let fmt = args.value("outfmt").unwrap_or("%f");
     let Ok(fields) = TaxFields::parse(fmt.as_bytes()) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
-        diag.post("BLAST query/options error: Invalid format options for tax_info.");
+        diag.post(&format!(
+            "{QUERY_OPTIONS_ERROR} Invalid format options for tax_info."
+        ));
         // Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12).
         diag.post(crate::wording::USER_MANUAL_FOOTER);
         return 1;

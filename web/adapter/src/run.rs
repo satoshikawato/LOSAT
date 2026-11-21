@@ -3789,7 +3789,7 @@ mod tests {
     /// rule of the SAM rows: the CLI writes its own command line there).
     fn without_cl(document: &[u8]) -> Vec<u8> {
         let text = String::from_utf8(document.to_vec()).unwrap();
-        let head = "\n@PG\tID:0\tVN:2.17.0+";
+        let head = format!("\n@PG\tID:0\tVN:{}", losat::wording::LOSAT_VERSION);
         let Some(at) = text.find(&format!("{head}\tCL:")) else {
             return document.to_vec();
         };

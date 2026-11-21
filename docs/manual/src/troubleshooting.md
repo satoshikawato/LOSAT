@@ -35,17 +35,17 @@ Links made by an earlier LOSAT are replaced without a message, so you can run th
 
 ## `blastn: command not found`, or the wrong `blastn` answers
 
-The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's second line starts with `Package: LOSAT`.
+The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's first line is `blastn: LOSAT 0.2.0` and its second line starts with `Package: LOSAT`.
 
 If you moved or replaced `losat` after making the links, run `losat --install-shims DIR` again.
 
 ## The database is not found
 
 ```text
-BLAST Database error: No alias or index file found for protein database [nodb] in search path [...]
+LOSAT database error: No alias or index file found for protein database [nodb] in search path [...]
 ```
 
-This is NCBI's message. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
+The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT starts it with `LOSAT database error:`. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 

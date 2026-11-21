@@ -81,12 +81,15 @@ function sha256(bytes) {
 }
 
 // A SAM document without the CL tag of its @PG line (LOSAT/tests/db_search_fixtures.py
-// `strip_sam_cl`: from the `\tCL:` after `\n@PG\tID:0\tVN:2.17.0+` up to the next `\tPN:blastn\n`).
+// `strip_sam_cl`: from the `\tCL:` after the version of `\n@PG\tID:0\tVN:<version>` up to the
+// next `\tPN:blastn\n`).
 function withoutCl(document) {
-  const head = Buffer.from("\n@PG\tID:0\tVN:2.17.0+\tCL:");
+  const head = Buffer.from("\n@PG\tID:0\tVN:");
   const at = document.indexOf(head);
   if (at < 0) return document;
-  const start = at + head.length - "\tCL:".length;
+  const tab = document.indexOf(Buffer.from("\t"), at + head.length);
+  if (tab < 0 || !document.subarray(tab, tab + 4).equals(Buffer.from("\tCL:"))) return document;
+  const start = tab;
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
   if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);

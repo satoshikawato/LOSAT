@@ -133,7 +133,7 @@ Databases with parsed ids (the error names the sequence). No comparison with NCB
 
 Strategy files:
 
-- `-export_search_strategy` is written as NCBI writes it for the five programs, `psiblast` (with a FASTA query or `-in_pssm`), `rpsblast`, `rpstblastn` and `tblastn -in_pssm`. For `tblastn -in_pssm` NCBI's request is a PSI-BLAST request that holds the PSSM as read, with `-db`. With `-subject` NCBI gives its error after the prolog.
+- `-export_search_strategy` is written as NCBI writes it for the five programs, `psiblast` (with a FASTA query or `-in_pssm`), `rpsblast`, `rpstblastn` and `tblastn -in_pssm`, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). For `tblastn -in_pssm` NCBI's request is a PSI-BLAST request that holds the PSSM as read, with `-db`. With `-subject` NCBI gives its error after the prolog.
 - `rpsblast` and `rpstblastn` write the file of NCBI's `-num_threads 1` at every `-num_threads` and `-mt_mode`. With `-mt_mode 1` and more than one thread, NCBI's threads write their requests into the file at the same time, and for a database of several volumes they leave out the search space of the batch before.
 
 </details>
@@ -212,7 +212,7 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 - A query batch whose search fails after a first batch that NCBI does not search (its queries give no Karlin-Altschul parameters) is refused in some cases. `-searchsp` or `OLD_FSC` with subjects of fewer letters than sequences, a database without sequences, and a database whose sequence file cannot be read, are examples.
 - For `-outfmt` 0 to 4, 6, 7 and 10, `blastp` writes NCBI's report of that first batch and then the error. With the other formats it refuses before the first byte.
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, or a small query and database) can reach it.
-- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT. A later match of a database sequence that `-negative_seqidlist` keeps without any of its definition lines (NCBI skips its alignment) clears that failure, as in NCBI, unless by then every query of the batch already holds `-max_target_seqs` alignments with e-values of 0.002 or less and the match's preliminary e-value is above 0.01.
+- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`. A later match of a database sequence that `-negative_seqidlist` keeps without any of its definition lines (NCBI skips its alignment) clears that failure, as in NCBI, unless by then every query of the batch already holds `-max_target_seqs` alignments with e-values of 0.002 or less and the match's preliminary e-value is above 0.01.
 - For both, LOSAT writes the results of the query batches before and then stops with the error.
 
 </details>
@@ -412,7 +412,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
-| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI's XML takes the query for the entry (the query's title in `Hit_def`). `-outfmt 11` writes NCBI's bytes. |
+| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI's XML takes the query for the entry (the query's title in `Hit_def`). `-outfmt 11` writes NCBI's bytes, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
@@ -445,7 +445,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
-| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception after half a document. `-outfmt 11` writes NCBI's bytes. |
+| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception after half a document. `-outfmt 11` writes NCBI's bytes, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | `-query_gencode 32` | Refused (exit status 2). |
 | `rpstblastn` in the library API and the Web engine | Refused. |
 | The database refusals of `rpsblast` above, with its alias-file cases | Refused. |

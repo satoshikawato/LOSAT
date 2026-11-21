@@ -480,7 +480,7 @@ mod tests {
         ] {
             assert_eq!(
                 message(parse(text).unwrap_err()),
-                "BLAST engine error: Invalid specification of query location (Format: start-stop)\n",
+                "LOSAT engine error: Invalid specification of query location (Format: start-stop)\n",
                 "{text:?}"
             );
         }
@@ -538,7 +538,7 @@ mod tests {
         }
         assert!(
             message(parse_sequence_range("5-3", RangeRole::Subject).unwrap_err())
-                .starts_with("BLAST engine error: Invalid specification of subject location")
+                .starts_with("LOSAT engine error: Invalid specification of subject location")
         );
     }
 

@@ -655,7 +655,7 @@ mod tests {
         };
         let lines = error_lines(
             &native(
-                "BLAST query/options error: bad  option\nPlease refer to the LOSAT user manual.\n",
+                "LOSAT query/options error: bad  option\nPlease refer to the LOSAT user manual.\n",
             ),
             false,
         )
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                (ERROR, b"BLAST query/options error: bad option".to_vec()),
+                (ERROR, b"LOSAT query/options error: bad option".to_vec()),
                 (ERROR, b"Please refer to the LOSAT user manual.".to_vec()),
             ]
         );

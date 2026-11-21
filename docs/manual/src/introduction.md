@@ -28,7 +28,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
 
-On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byte for byte. The few places where it differs, on purpose, are listed in [Differences from NCBI BLAST+](differences.md). Options LOSAT does not implement are refused with an error, never ignored; see [What LOSAT refuses](refusals.md).
+On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byte for byte, apart from the line that names the program's version (`BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`) and the prefix of an error message (`LOSAT engine error:` where NCBI writes `BLAST engine error:`). The few other places where it differs, on purpose, are listed in [Differences from NCBI BLAST+](differences.md). Options LOSAT does not implement are refused with an error, never ignored; see [What LOSAT refuses](refusals.md).
 
 ## Where to get it
 

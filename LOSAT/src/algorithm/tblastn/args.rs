@@ -834,7 +834,7 @@ mod tests {
         assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
         assert_eq!(
             error(&["-num_descriptions", "0", "-num_alignments", "0"]),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
     }
 
@@ -1211,7 +1211,7 @@ mod tests {
         for size in ["5", "6", "7", "8"] {
             assert_eq!(
                 error(&["-word_size", size]),
-                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
+                "LOSAT query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
                 "{size}"
             );
         }
@@ -1220,7 +1220,7 @@ mod tests {
         let identity = error(&["-matrix", "IDENTITY"]);
         assert!(
             identity.starts_with(
-                "BLAST query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
+                "LOSAT query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
             ),
             "{identity}"
         );

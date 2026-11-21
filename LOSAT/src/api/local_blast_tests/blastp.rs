@@ -239,7 +239,10 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
         let args = blastp_args(&inputs.query, &inputs.subject, &[]);
         run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
         drop(outputs);
-        assert!(report.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
+        assert!(
+            report.starts_with(format!("BLASTP (LOSAT {})", env!("CARGO_PKG_VERSION")).as_bytes()),
+            "{outfmt:?}"
+        );
     }
 }
 
@@ -388,12 +391,13 @@ fn a_batch_of_queries_without_residues_stops() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTP 2.17.0+\n") && prolog.ends_with(" total letters\n\n"),
+        prolog.starts_with(&format!("BLASTP (LOSAT {})\n", env!("CARGO_PKG_VERSION")))
+            && prolog.ends_with(" total letters\n\n"),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());

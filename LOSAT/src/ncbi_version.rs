@@ -2,8 +2,10 @@
 //! `-version-full-xml` and `-version-full-json` (`CVersionAPI::Print`, `PrintXml`, `PrintJson`),
 //! the words that its application start reads before the arguments (`ncbi_environment::preparse`).
 //!
-//! The forms are NCBI's; the values are LOSAT's (line RG DECISIONS E3-1). The first line (the
-//! program and its version, `blastn: 2.17.0+`) is NCBI's. NCBI's package is the BLAST+ build,
+//! The forms are NCBI's; the values are LOSAT's (line RG DECISIONS E3-1). The first line names the
+//! program and LOSAT's version (`blastn: LOSAT 0.2.0`, `wording::LOSAT_VERSION`; NCBI's
+//! `blastn: 2.17.0+`, the Owner 2026-11-21 「Q1=B」), as do the XML and JSON version of the
+//! program. NCBI's package is the BLAST+ build,
 //! LOSAT's is LOSAT: the text's `Package:` line names LOSAT and the BLAST+ release its output
 //! follows, and the XML and JSON name LOSAT and its version. What NCBI's build writes about
 //! itself (`Package-Config`'s configure line, `Build-Signature`, the build dates, `Revision`,
@@ -53,15 +55,16 @@ impl VersionRequest {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-1000
-/// The text that `request` prints for the program `appname` whose version prints as `version`
-/// (`CVersionInfo::Print`: `2.17.0+` for the BLAST+ programs, whose `CBlastVersion::Print` adds
-/// the `+`, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
-pub fn print(request: VersionRequest, appname: &str, version: &str) -> String {
+/// The text that `request` prints for the program `appname`: LOSAT's version
+/// (`wording::LOSAT_VERSION`) where NCBI's `CVersionInfo::Print` writes the program's own
+/// (`2.17.0+` for the BLAST+ programs, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
+pub fn print(request: VersionRequest, appname: &str) -> String {
+    let version = crate::wording::LOSAT_VERSION;
     match request {
         VersionRequest::Version => format!("{appname}: {version}\n{}", package_line()),
         VersionRequest::Full => print_text(appname, version),
-        VersionRequest::FullXml => print_xml(appname, version),
-        VersionRequest::FullJson => print_json(appname, version),
+        VersionRequest::FullXml => print_xml(appname),
+        VersionRequest::FullJson => print_json(appname),
     }
 }
 
@@ -89,13 +92,13 @@ fn print_text(appname: &str, version: &str) -> String {
     )
 }
 
-/// `CVersionAPI::PrintXml(appname, fPrintAll)` with LOSAT's values (`print_text`): the package
-/// is LOSAT, with its version, an empty build information and an empty `config`.
+/// `CVersionAPI::PrintXml(appname, fPrintAll)` with LOSAT's values (`print_text`): the program's
+/// version and the package's are LOSAT's, with an empty build information and an empty `config`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:778-820
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:567-579 (`SBuildInfo::PrintXml`,
 /// without a date, tag or other value)
-fn print_xml(appname: &str, version: &str) -> String {
+fn print_xml(appname: &str) -> String {
     format!(
         "<?xml version=\"1.0\"?>\n\
          <ncbi_version xmlns=\"ncbi:version\"\n  \
@@ -112,7 +115,7 @@ fn print_xml(appname: &str, version: &str) -> String {
          <build_info>\n\
          </build_info>\n\
          </ncbi_version>\n",
-        version_info_xml(&VersionNumbers::of_print(version)),
+        version_info_xml(&VersionNumbers::losat()),
         version_info_xml(&VersionNumbers::losat()),
     )
 }
@@ -121,7 +124,7 @@ fn print_xml(appname: &str, version: &str) -> String {
 /// list of components, as NCBI's BLAST+ programs write.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:829-884
-fn print_json(appname: &str, version: &str) -> String {
+fn print_json(appname: &str) -> String {
     format!(
         "{{\n  \"ncbi_version\": {{\n    \
          \"appname\": \"{appname}\",\n    \
@@ -133,7 +136,7 @@ fn print_json(appname: &str, version: &str) -> String {
          \"build_info\": {{}},\n      \
          \"config\": \"\"}},\n    \
          \"build_info\": {{}}\n  }}\n}}\n",
-        version_info_json(&VersionNumbers::of_print(version)),
+        version_info_json(&VersionNumbers::losat()),
         version_info_json(&VersionNumbers::losat()),
     )
 }
@@ -147,22 +150,8 @@ struct VersionNumbers<'a> {
     name: &'a str,
 }
 
-impl<'a> VersionNumbers<'a> {
-    /// The numbers of `version` as `CVersionInfo::Print` writes it (`2.17.0+`: `CBlastVersion`
-    /// adds the `+` to the text, not to the numbers).
-    fn of_print(version: &'a str) -> Self {
-        let numbers = version.strip_suffix('+').unwrap_or(version);
-        let mut parts = numbers.splitn(3, '.');
-        let mut next = || parts.next().unwrap_or("0");
-        Self {
-            major: next(),
-            minor: next(),
-            patch: next(),
-            name: "",
-        }
-    }
-
-    /// LOSAT's version, the package's.
+impl VersionNumbers<'_> {
+    /// LOSAT's version, the program's and the package's.
     fn losat() -> VersionNumbers<'static> {
         VersionNumbers {
             major: env!("CARGO_PKG_VERSION_MAJOR"),
@@ -227,21 +216,22 @@ mod tests {
         }
     }
 
-    // NCBI BLAST+ 2.17.0 (the x64-linux release) `blastn -version-full`, with LOSAT's package and
-    // without the lines of NCBI's build (line RG item E3, `E/e1/ncbi/blastn.vfull.out`).
+    // NCBI BLAST+ 2.17.0 (the x64-linux release) `blastn -version-full`, with LOSAT's version and
+    // package and without the lines of NCBI's build (line RG item E3, `E/e1/ncbi/blastn.vfull.out`).
     #[test]
     fn the_full_version_is_ncbi_s_form_with_losat_s_values() {
         let package = format!(
             " Package: LOSAT {}, output compatible with blast 2.17.0\n",
             env!("CARGO_PKG_VERSION")
         );
+        let losat = format!("LOSAT {}", env!("CARGO_PKG_VERSION"));
         assert_eq!(
-            print(VersionRequest::Version, "blastn", "2.17.0+"),
-            format!("blastn: 2.17.0+\n{package}")
+            print(VersionRequest::Version, "blastn"),
+            format!("blastn: {losat}\n{package}")
         );
         assert_eq!(
-            print(VersionRequest::Full, "blastn", "2.17.0+"),
-            format!("blastn: 2.17.0+\n{package} Package-Config:  \n GI-64bit:  TRUE\n")
+            print(VersionRequest::Full, "blastn"),
+            format!("blastn: {losat}\n{package} Package-Config:  \n GI-64bit:  TRUE\n")
         );
         let pre = env!("CARGO_PKG_VERSION_PRE");
         let (xml_name, json_name) = if pre.is_empty() {
@@ -255,14 +245,14 @@ mod tests {
             env!("CARGO_PKG_VERSION_PATCH"),
         );
         assert_eq!(
-            print(VersionRequest::FullXml, "rpsbproc", "0.5.1"),
+            print(VersionRequest::FullXml, "rpsbproc"),
             format!(
                 "<?xml version=\"1.0\"?>
 <ncbi_version xmlns=\"ncbi:version\"
   xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"
   xs:schemaLocation=\"ncbi:version ncbi_version.xsd\">
 <appname>rpsbproc</appname>
-<version_info major=\"0\" minor=\"5\" patch_level=\"1\"/>
+<version_info major=\"{major}\" minor=\"{minor}\" patch_level=\"{patch}\"{xml_name}/>
 <package name=\"LOSAT\">
 <version_info major=\"{major}\" minor=\"{minor}\" patch_level=\"{patch}\"{xml_name}/>
 <build_info>
@@ -276,12 +266,12 @@ mod tests {
             )
         );
         assert_eq!(
-            print(VersionRequest::FullJson, "dustmasker", "1.0.0"),
+            print(VersionRequest::FullJson, "dustmasker"),
             format!(
                 "{{
   \"ncbi_version\": {{
     \"appname\": \"dustmasker\",
-    \"version_info\": {{\"major\": 1, \"minor\": 0, \"patch_level\": 0}},
+    \"version_info\": {{\"major\": {major}, \"minor\": {minor}, \"patch_level\": {patch}{json_name}}},
     \"component\": [],
     \"package\": {{
       \"name\": \"LOSAT\",
@@ -294,21 +284,5 @@ mod tests {
 "
             )
         );
-    }
-
-    // The BLAST+ programs' version has the `+` of `CBlastVersion::Print` in the text only.
-    #[test]
-    fn the_numbers_leave_out_the_plus() {
-        let numbers = VersionNumbers::of_print(crate::NCBI_BLAST_VERSION);
-        assert_eq!(
-            (numbers.major, numbers.minor, numbers.patch),
-            ("2", "17", "0")
-        );
-        assert!(print(
-            VersionRequest::FullXml,
-            "makeblastdb",
-            crate::NCBI_BLAST_VERSION
-        )
-        .contains("<version_info major=\"2\" minor=\"17\" patch_level=\"0\"/>\n<package"));
     }
 }

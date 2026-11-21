@@ -1131,7 +1131,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
     database: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# TBLASTX {}", crate::NCBI_BLAST_VERSION)?;
+    writeln!(writer, "# TBLASTX {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
@@ -2213,7 +2213,11 @@ mod tests {
         };
         assert_eq!(
             header(None),
-            "# TBLASTX 2.17.0+\n# Query: q1 title\n# Database: db\n"
+            concat!(
+                "# TBLASTX (LOSAT ",
+                env!("CARGO_PKG_VERSION"),
+                ")\n# Query: q1 title\n# Database: db\n"
+            )
         );
         assert!(header(Some(0)).ends_with("# Database: db\n# 0 hits found\n"));
         assert!(header(Some(2)).contains("# Fields: query acc.ver, subject acc.ver"));

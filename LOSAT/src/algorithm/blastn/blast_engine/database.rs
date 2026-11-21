@@ -2557,7 +2557,7 @@ mod tests {
             native(error),
             (
                 2,
-                "BLAST Database error: Database name is required.\n".to_string()
+                "LOSAT database error: Database name is required.\n".to_string()
             )
         );
         // A protein database is not found as a nucleotide one.
@@ -2569,7 +2569,7 @@ mod tests {
             assert_eq!(exit, 2);
             assert!(
                 message.starts_with(
-                    "BLAST Database error: No alias or index file found for nucleotide database ["
+                    "LOSAT database error: No alias or index file found for nucleotide database ["
                 ),
                 "{message}"
             );
@@ -2592,7 +2592,7 @@ mod tests {
         .expect("NCBI's error of the search stage");
         assert_eq!(
             read.to_string(),
-            "BLAST engine error: Database memory map file error"
+            "LOSAT engine error: Database memory map file error"
         );
     }
 
@@ -2933,7 +2933,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(native.message.clone()).unwrap(),
             format!(
-                "BLAST Database error: Error: File ({}) not found.\n",
+                "LOSAT database error: Error: File ({}) not found.\n",
                 dir.canonicalize().unwrap().join(&missing[1]).display()
             )
         );

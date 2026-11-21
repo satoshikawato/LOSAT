@@ -2129,7 +2129,7 @@ mod tests {
             ));
             assert!(stop.after_request() && stop.after_round_files());
             assert!(stop.error().to_string().starts_with(
-                "BLAST engine error: Warning: Invalid residues found at positions 26 "
+                "LOSAT engine error: Warning: Invalid residues found at positions 26 "
             ));
         }
         let all = rnd_with_query(|letters, _| SeqData::Iupacaa(vec![b'#'; letters.len()])).unwrap();

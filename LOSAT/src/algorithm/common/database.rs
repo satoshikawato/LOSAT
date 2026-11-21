@@ -12,6 +12,7 @@
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
 //! refusals.
 
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -297,7 +298,7 @@ impl PsiSearchReadFailure {
         match self {
             PsiSearchReadFailure::EmptyDatabase => NativeError {
                 exit: 2,
-                message: "BLAST Database error: OID not found\n".into(),
+                message: format!("{DATABASE_ERROR} OID not found\n").into(),
             }
             .into(),
             PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
@@ -324,7 +325,7 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,
-            message: [b"BLAST Database error: ".as_slice(), &text, b"\n"].concat(),
+            message: [DATABASE_ERROR.as_bytes(), b" ", &text, b"\n"].concat(),
         }
         .into(),
         None => refusal(&error.to_string(), program),
@@ -589,7 +590,7 @@ pub(crate) struct PreliminaryReadError(pub(crate) &'static str);
 
 impl std::fmt::Display for PreliminaryReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", self.0)
     }
 }
 
@@ -6829,7 +6830,14 @@ fn prefetch_stop(
         query: queries.error_query,
         error: NativeError {
             exit: 2,
-            message: [text.as_slice(), b"BLAST Database error: ", message, b"\n"].concat(),
+            message: [
+                text.as_slice(),
+                DATABASE_ERROR.as_bytes(),
+                b" ",
+                message,
+                b"\n",
+            ]
+            .concat(),
         }
         .into(),
     })
@@ -8753,7 +8761,7 @@ mod taxdb_prepass_tests {
             assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
             refusal.to_string()
         };
-        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
         // 1. The first stop in NCBI's order is one that it makes: `ref|NP_000002.1|` before
         // `lcl|Query_1`, which the scope holds (kit `R.q1`), in either order of the batch.
         let db = open(&["lda", "ldp", "ldq"], None);
@@ -8971,7 +8979,7 @@ mod taxdb_prepass_tests {
             assert_eq!(native.exit, 2);
             (failure.query, String::from_utf8(native.message).unwrap())
         };
-        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
         // The model of the cut report of query 0 in `run`: its reads of `read` (each sequence's
         // first load in the run; the first writes the texts of opening).
         let cut_report = |db: &SeqDb, run: &TaxdbRun, read: &[u32]| {
@@ -9244,7 +9252,7 @@ mod taxdb_prepass_tests {
             )
             .collect()
         };
-        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
         // The stop of query 1's batch (`ref|NP_000002.1|`) after the record `loaded`.
         let stop = |loaded: &[u32], queries: &PrefetchQueries<'_>| {
             batch_prefetch(
@@ -9383,7 +9391,7 @@ mod taxdb_prepass_tests {
             assert_eq!(native.exit, 2);
             (failure.query, String::from_utf8(native.message).unwrap())
         };
-        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
         let names = [
             "db_search/multidb/na",
             "db_search/multidb/nnp",

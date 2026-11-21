@@ -4,6 +4,7 @@
 //! `-comp_based_stats` strings that NCBI reads in its option handlers, after the input and
 //! output files are opened.
 
+use crate::wording::{ENGINE_ERROR, QUERY_ERROR, QUERY_OPTIONS_ERROR};
 use std::path::Path;
 
 use crate::blastinput::value_parsers::SegSpec;
@@ -26,7 +27,8 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     NativeError {
         exit: 1,
         message: [
-            b"BLAST query/options error: ".as_slice(),
+            QUERY_OPTIONS_ERROR.as_bytes(),
+            b" ",
             message,
             format!("\n{USER_MANUAL_FOOTER}\n").as_bytes(),
         ]
@@ -42,7 +44,7 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
 pub fn engine_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n").into(),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -55,7 +57,7 @@ pub fn engine_error(message: &str) -> anyhow::Error {
 pub fn query_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!("BLAST query error: {message}\n").into(),
+        message: format!("{QUERY_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -912,7 +914,7 @@ mod tests {
             .contains("Delimiter format is invalid"));
         assert_eq!(
             message(parse_formatting_string("abc").unwrap_err()),
-            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+            "1 LOSAT query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(
             message(parse_formatting_string("22").unwrap_err()),
@@ -1090,7 +1092,7 @@ mod tests {
             delimiter: String::new(),
         };
         let options =
-            |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
+            |text: &str| format!("1 LOSAT query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
         for program in PROGRAMS {
             let sam = formatting_handler_check(&choice(SAM), program);
             if program.is_sam() {

@@ -53,7 +53,6 @@ const DESCS: &[Desc] = &[
 static TOOL: Tool = Tool {
     program: "convert2blastmask",
     refusal_name: PROGRAM,
-    version: crate::NCBI_BLAST_VERSION,
     help: HELP,
     descs: DESCS,
     dependencies: no_dependencies,

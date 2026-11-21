@@ -770,7 +770,8 @@ fn the_librarys_start_refuses_what_the_command_line_refuses() {
 /// an entry that LOSAT refuses (`[BLAST] LONG_SEQID`) ends a search of records with the command
 /// line's refusal, and a file that NCBI cannot read (the one byte 0xEF) gets the start's message
 /// before the run, in the library's call as on the command line (line LIB E1, fix 3: the library
-/// ran the start of a search of records only for `-logfile`, `-conffile` and `-dryrun`).
+/// ran the start of a search of records only for `-logfile`, `-conffile` and `-dryrun`), to
+/// standard output (`run`) and with `-out` (`run_to_file`), whose file is the command line's.
 #[test]
 fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
     for (name, ncbirc) in [
@@ -779,11 +780,20 @@ fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
     ] {
         let dir = scratch(name);
         fs::write(dir.join(".ncbirc"), ncbirc).unwrap();
-        for (program, search) in SEARCHES {
+        let out = dir.join("out.txt");
+        for ((program, search), to_file) in SEARCHES
+            .into_iter()
+            .flat_map(|search| [(search, false), (search, true)])
+        {
             let mut words = vec![program];
             words.extend(search);
             words.extend(["-outfmt", "6"]);
+            if to_file {
+                words.extend(["-out", "out.txt"]);
+            }
+            let _ = fs::remove_file(&out);
             let cli = run_in(&dir, &words, &[]);
+            let cli_out = fs::read(&out).ok();
             let refused = name == "ncbircrefused";
             assert_eq!(
                 cli.status.code(),
@@ -799,6 +809,11 @@ fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
             } else {
                 assert!(stderr.contains("Error reading the registry"), "{stderr}");
             }
+            assert!(
+                cli_out.is_some() || !to_file || refused,
+                "{words:?}: {cli:?}"
+            );
+            let _ = fs::remove_file(&out);
             let library = library_in(&dir, &words, &[]);
             let library_stderr = if refused {
                 format!("Error: {}", text(&library.stderr))
@@ -806,8 +821,13 @@ fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
                 text(&library.stderr)
             };
             assert_eq!(
-                (library.status.code(), library_stderr, text(&library.stdout)),
-                (cli.status.code(), stderr, text(&cli.stdout)),
+                (
+                    library.status.code(),
+                    library_stderr,
+                    text(&library.stdout),
+                    fs::read(&out).ok()
+                ),
+                (cli.status.code(), stderr, text(&cli.stdout), cli_out),
                 "{words:?}: the library"
             );
         }

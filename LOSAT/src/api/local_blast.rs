@@ -155,10 +155,13 @@ impl OutFile {
                 Ok(file) => {
                     let tax_report =
                         self.format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
+                    // No strategy file holds the report: the library refuses
+                    // `-export_search_strategy` (`search::file_options`).
                     self.state = OutState::Made {
                         stream: crate::cli::ReportStream::of_cli(
                             Some(BufWriter::new(file)),
                             tax_report,
+                            None,
                         ),
                     };
                     Ok(())

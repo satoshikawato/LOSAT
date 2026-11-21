@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.24 (pending: the Owner's review of exceptions 12 and 13, line NW's pull request)
+- Version: 1.25 (pending: the Owner's review of exceptions 12 and 13, line NW's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -47,7 +47,10 @@
   exception 13: the SAM `@PG CL:` tag, recording `docs/decisions/OWNER_DECISIONS.md` entry 7 of
   2026-10-19, Owner-delegated, which said the difference goes into a product decision; found by
   line MAN's review); 1.24 2026-11-21 (`losat windowmasker` in the scope and in exception 10; line
-  NP, item M5a; Owner-delegated, the same standing instruction)
+  NP, item M5a; Owner-delegated, the same standing instruction); 1.25 2026-11-21 (every search or
+  tool call of the library API runs the application start at its beginning, as the command line
+  runs it in every run; line LIB item E1; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -356,8 +359,9 @@ BLAST+.
   file comes back as a file of the run, and a `-dryrun` run reads no record and writes no output (a
   `-logfile` name with a directory, refused until line WQA's sweep D11 of 2026-11-20, is read as the command line on Linux reads it where the name's directories exist). Since version 1.21 the library API (and
   pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
-  E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
-  application start; the `-logfile` file gets what the command line writes there, the registry
+  E1w-2): every search or tool call runs the application start at its beginning (since version
+  1.25, line LIB item E1; until then a search call ran it when its arguments had one of them or
+  where it read NCBI's settings); the `-logfile` file gets what the command line writes there, the registry
   and environment settings that the command line refuses are the call's error, and a `-dryrun`
   call reads no record and searches nothing (an empty report per format, no `-out` file). The
   library's tools print the versions to their output. Since version 1.15 `losat rpsbproc` runs the three on the command

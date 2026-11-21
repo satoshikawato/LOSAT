@@ -137,11 +137,11 @@ fn every_search_call_starts_at_its_beginning() {
     assert!(call.log.is_none());
     assert!(!call.dry_run());
     assert!(diagnostics.is_empty());
-    // tblastx's run messages follow the start's target (`run_messages_follow_log`): `cerr`, the
-    // call's diagnostics, without `-logfile`.
+    // tblastx's run messages follow the start's target (`run_messages_follow_log`): `cerr`
+    // without `-logfile`, which is the call's diagnostics, as for the other programs.
     let search = validate(Program::Tblastx, &["-evalue", "1"]).unwrap();
     let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
-    assert!(matches!(call.log, Some(DiagTarget::Stderr)));
+    assert!(call.log.is_none());
     assert!(diagnostics.is_empty());
     // With `-conffile` the start loads the file, and its settings are kept for the call.
     let dir = scratch("everycall");

@@ -22,20 +22,24 @@ use super::id::DebugBytes;
 /// standard error for the same failure, as bytes (also a byte that is not UTF-8, one that a tool's
 /// diagnostics quote), by these rules:
 ///
-/// - A message of NCBI's (the command line's text for a failure that NCBI BLAST+ reports, such as
-///   `BLAST engine error: ...` or `BLAST failed to write output`) is its bytes, with its trailing
-///   newline or newlines.
+/// - A message of NCBI's that a search reports (the command line's text for a failure of the
+///   search that NCBI BLAST+ reports, such as `BLAST engine error: ...` or `BLAST failed to write
+///   output`, an [`Error::Search`]; and NCBI's text for an `-outfmt` value that its reading
+///   refuses, an [`Error::Argv`]) is its bytes, with its trailing newline or newlines.
 /// - LOSAT's own refusals, and the other errors that the command line writes after `Error: `, are
 ///   the text without that `Error: ` and without the newline after it. An error with causes, which
 ///   the command line writes under `Caused by:`, is the error and its causes joined by `: `
 ///   (anyhow's alternate form).
 /// - [`Error::Argv`] from the parser is the parser's text; the command line adds a newline where
-///   the text has none.
-/// - [`Error::Input`] is the command line's text without its last newlines.
-/// - The error of a tool ([`run_makeblastdb`](super::run_makeblastdb) and the others) is what the
-///   tool wrote to its standard error, which the call's `diagnostics` hold too, without the last
-///   newlines; that of NCBI's application start that ends the program (a `-conffile` that does
-///   not open or does not parse) is the start's text without its last newline.
+///   the text has none. Its `Usage:` line follows the argv that the call parses, which in the
+///   library has no `-outfmt` (the formats are an argument of the call), so it does not name
+///   `-outfmt <SPEC>` where the command line's does.
+/// - The other messages, NCBI's too, are the command line's text without its last newlines:
+///   [`Error::Input`] (the reader's, such as `BLAST query/options error: ...`); the error of a
+///   tool ([`run_makeblastdb`](super::run_makeblastdb) and the others), which is what the tool
+///   wrote to its standard error, held by the call's `diagnostics` too; and that of NCBI's
+///   application start that ends the program (`Critical: ...`: a `-conffile` that does not open
+///   or does not parse), which a search call's `diagnostics` do not hold and a tool's do.
 ///
 /// Text that a search writes to its standard error before the failure (warnings, notices) is not
 /// in the message. It is in the diagnostics where the call returns them: [`run`](super::run()) and
@@ -67,9 +71,10 @@ pub enum Error {
     /// query/options error: Query input doesn't start with a defline or comment, line N`, a NUL,
     /// a newline and `Please refer to the LOSAT user manual.` (`read_inputs`).
     Input(Vec<u8>),
-    /// The search, its reports, the start or a tool: NCBI's message with its trailing newlines,
-    /// LOSAT's refusal without `Error: ` and the newline, or what a tool (or a start that ends the
-    /// program) wrote to its diagnostics without the last newlines (the rules of [`Error`]).
+    /// The search, its reports, the start or a tool: a search's NCBI message with its trailing
+    /// newlines, LOSAT's refusal without `Error: ` and the newline, or the text of a tool's
+    /// failure or of a start that ends the program without its last newlines (the rules of
+    /// [`Error`]).
     Search(Vec<u8>),
 }
 

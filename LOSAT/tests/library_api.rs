@@ -125,16 +125,15 @@ fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
-/// A command of this crate's binaries without the environment that changes LOSAT's behavior
-/// (`LOSAT_BLASTX_WORKER_LOG`, which the `blastx-worker-probe` feature requires, stays).
+/// A command of this crate's binaries without LOSAT's own variables, which change LOSAT's behavior
+/// (`LOSAT_BLASTX_WORKER_LOG`, which the `blastx-worker-probe` feature requires, stays). NCBI's
+/// variables (`NCBI_*`, `BLASTDB`, ...) stay: the library's calls in this process read them at
+/// their start, as the command line does, so that both see the same environment.
 fn command(binary: &str) -> Command {
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text == "LOSAT_BLASTX_WORKER_LOG" {
-            continue;
-        }
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLASTDB") {
+        if text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(&name);
         }
     }
@@ -3328,6 +3327,62 @@ fn a_report_that_cannot_be_written_fails_as_the_command_lines_out() {
     }
 }
 
+/// An organism report (outfmt 18) longer than the `-out` file's buffer, which writes at the
+/// insertion that reaches its 8,191st byte (`cli::NcbiReportBuffer`; here the query's title of
+/// 9,600 bytes), fails where that write fails, as the command line's `-out`: NCBI's `BLAST failed
+/// to write output` and its newline, exit status 6 there (line LIB E1, review N5). A short report,
+/// held to the end, passes on both sides
+/// (`a_report_that_cannot_be_written_fails_as_the_command_lines_out`).
+#[test]
+fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out() {
+    if !Path::new("/dev/full").exists() {
+        return;
+    }
+    let directory = TempPath::new(temp_path("full18"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let full = directory.join("full");
+    std::os::unix::fs::symlink("/dev/full", &full).unwrap();
+    let (query, subject) = small_inputs(Program::Blastp);
+    let records = std::fs::read_to_string(&query).unwrap();
+    let titled = directory.join("titled.faa");
+    let title = format!(" {}\n", "abcdefg ".repeat(1200).trim_end());
+    std::fs::write(&titled, records.replacen('\n', &title, 1)).unwrap();
+    let (query_name, subject_name) = (titled.to_str().unwrap(), subject.to_str().unwrap());
+    let cli = cli_output(
+        "blastp",
+        &[
+            "-query",
+            query_name,
+            "-subject",
+            subject_name,
+            "-outfmt",
+            "18",
+            "-out",
+            full.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(cli.status.code(), Some(6), "{cli:?}");
+    assert!(
+        cli.stderr.ends_with(b"BLAST failed to write output\n"),
+        "{cli:?}"
+    );
+    let search = validate(Program::Blastp, &[]).unwrap();
+    let query_bytes = std::fs::read(&titled).unwrap();
+    let subject_bytes = std::fs::read(&subject).unwrap();
+    let (queries, subjects) = read_inputs(&search, &query_bytes, &subject_bytes).unwrap();
+    let inputs = Inputs::new(&queries, &subjects).named(query_name, subject_name);
+    let mut diagnostics = Vec::new();
+    let error = run_to_file(&search, inputs, "18", &full, &mut diagnostics).unwrap_err();
+    assert_eq!(
+        (
+            error.message(),
+            failure_rule(&cli.stderr, &diagnostics, &error)
+        ),
+        (&b"BLAST failed to write output\n"[..], Some("ncbi")),
+        "{error:?}"
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 /// A directory named as the query or the subject is read as the command line reads it (line LIB
 /// E1, fix 2): it opens and its first read fails, which ends the input, so it holds no record
@@ -3397,9 +3452,22 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
 
 /// `run_makeblastdb`'s argv that its parser refuses is a tool's error of the parser's kind (line
 /// LIB E1, fix 4): the command line's standard error goes to the diagnostics, and the message is
-/// that text without its last newlines.
+/// that text without its last newlines, also where the caller's diagnostics writer fails.
+/// `examples/library_command_line` writes that text once, as the command line does (its status is
+/// 1 for every failure).
 #[test]
 fn makeblastdbs_refused_argv_is_a_tools_error() {
+    /// A diagnostics writer that takes nothing.
+    struct Failing;
+    impl std::io::Write for Failing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("closed"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let example = example_binary("library_command_line");
     for words in [
         &["-nosuch"][..],
         &["-dbtype", "foo", "-in", "x"],
@@ -3422,6 +3490,24 @@ fn makeblastdbs_refused_argv_is_a_tools_error() {
             error.message(),
             without_last_newlines(&cli.stderr),
             "{words:?}"
+        );
+        let failing = run_makeblastdb(
+            words,
+            &mut std::io::empty(),
+            &mut std::io::sink(),
+            &mut Failing,
+        )
+        .unwrap_err();
+        assert_eq!(failing, error, "{words:?}: a failing writer");
+        let library = command(example.to_str().unwrap())
+            .arg("makeblastdb")
+            .args(words)
+            .output()
+            .expect("run the example");
+        assert_eq!(
+            (library.status.code(), library.stdout, library.stderr),
+            (Some(1), cli.stdout, cli.stderr),
+            "{words:?}: the example"
         );
     }
 }

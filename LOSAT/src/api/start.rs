@@ -120,7 +120,9 @@ pub(crate) struct CallStart {
     /// The start's settings (`ApplicationStart::settings`), which LOSAT does not refuse.
     settings: ApplicationSettings,
     /// The `-logfile` target of a program whose run's messages go there
-    /// (`run_messages_follow_log`: tblastx).
+    /// (`run_messages_follow_log`: tblastx), where it is not `cerr`: the file of `-logfile`, or
+    /// nowhere. With `cerr` the call's diagnostics take the run's messages, as every other
+    /// program's.
     log: Option<DiagTarget>,
     /// Whether the argv has `-dryrun`.
     dry_run: bool,
@@ -162,7 +164,9 @@ impl CallStart {
             .map_err(|reason| Error::Search(reason.into()))?;
         Ok(CallStart {
             settings,
-            log: run_messages_follow_log(program).then_some(started.target),
+            log: run_messages_follow_log(program)
+                .then_some(started.target)
+                .filter(|target| !matches!(target, DiagTarget::Stderr)),
             dry_run: search.dry_run(),
             diag,
         })

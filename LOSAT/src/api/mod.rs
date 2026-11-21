@@ -73,8 +73,9 @@
 //! - A search writes nothing to the process's standard output or error and never ends the
 //!   process; the command line's warnings come back as `Outcome::diagnostics`, its errors as
 //!   [`Error`], whose message is made from the command line's text for the same failure by the
-//!   rules that [`Error`] states (NCBI's messages keep their newlines; LOSAT's own refusals have
-//!   no `Error: `; text that a search writes before the failure is not in it).
+//!   rules that [`Error`] states (a search's NCBI message keeps its newlines, and an input's, a
+//!   tool's and that of a start that ends the program lose their last ones; LOSAT's own refusals
+//!   have no `Error: `; text that a search writes before the failure is not in it).
 //! - `-num_threads` is an option like any other, checked as on the command line. A search of
 //!   two or more threads builds its own thread pool for the call and cannot start from inside
 //!   a Rayon worker; one of one thread can. Searches may run on several threads of a process at
@@ -83,13 +84,13 @@
 //!   which change no output; the diagnostic variables of `docs/agents/diagnostics.md`) are read
 //!   here too. Each search call runs NCBI's application start at its beginning, as the command
 //!   line runs it at its own: it reads the registry files (`.ncbirc`, the program's `.ini` or the
-//!   file of `-conffile`) and NCBI's environment settings. A database search reads with them what
-//!   the command line reads to find a database (`BLASTDB`) and the query batch and archive
-//!   settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...); a search of records reads them where NCBI's
-//!   library looks one up itself: blastn's `-window_masker_taxid`, the taxonomy database of the
-//!   organism report of outfmt 18 and of the plural taxonomy names (`sscinames`, `scomnames`,
-//!   `sblastnames`, `sskingdoms`), and the file of a `-matrix` that NCBI's tables do not have
-//!   (tblastx, blastx `-ungapped`).
+//!   file of `-conffile`) and NCBI's environment settings, which the search reads where the
+//!   command line reads them: to find a database (`BLASTDB`), and where NCBI's library looks one
+//!   up itself (blastn's `-window_masker_taxid`, the taxonomy database of the organism report of
+//!   outfmt 18 and of the plural taxonomy names (`sscinames`, `scomnames`, `sblastnames`,
+//!   `sskingdoms`), and the file of a `-matrix` that NCBI's tables do not have: tblastx, blastx
+//!   `-ungapped`). Every search reads the query batch and archive settings (`BATCH_SIZE`,
+//!   `ARCHIVE_FORMAT`, ...) as the command line does, of a database or of records.
 //! - The start's messages about the registry files go where the command line writes them (the
 //!   call's diagnostics stand for its standard error), `-logfile`'s file gets what the command line
 //!   writes there (with tblastx, the messages and the errors of its run too), and a start that ends

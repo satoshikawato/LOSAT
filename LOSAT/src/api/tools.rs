@@ -26,18 +26,28 @@ use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
 use crate::writedb::Platform;
 
-/// The caller's stream of a tool's diagnostics, which keeps what it passes on: a tool writes its
-/// failure there, and that text without its last newlines is the error's message.
+/// The caller's stream of a tool's diagnostics, which keeps what the tool writes there: a tool
+/// writes its failure there, and that text without its last newlines is the error's message, also
+/// where the caller's writer fails.
 struct Recorded<'a> {
     writer: &'a mut dyn Write,
     bytes: Vec<u8>,
 }
 
 impl Write for Recorded<'_> {
+    /// Keeps the bytes that the caller's writer takes, and the whole `buffer` where it takes none
+    /// (an error, or nothing written): the command line's standard error would hold them, and
+    /// `write_all` gives them up there. An interrupted write keeps nothing, as `write_all` writes
+    /// the buffer again.
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let written = self.writer.write(buffer)?;
-        self.bytes.extend_from_slice(&buffer[..written]);
-        Ok(written)
+        let result = self.writer.write(buffer);
+        let kept = match &result {
+            Ok(written) if *written > 0 => &buffer[..*written],
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => &[],
+            _ => buffer,
+        };
+        self.bytes.extend_from_slice(kept);
+        result
     }
 
     fn flush(&mut self) -> io::Result<()> {

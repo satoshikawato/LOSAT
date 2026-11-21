@@ -39,11 +39,32 @@ fn main() -> ExitCode {
     }
 }
 
-/// A tool has written the failure to standard error, so `main` adds nothing; an error of its
-/// argv is the parser's.
-fn reported(result: Result<(), Error>) -> Result<(), Error> {
+/// A tool's standard error, which notes whether the tool wrote to it.
+struct Noted {
+    stderr: std::io::Stderr,
+    wrote: bool,
+}
+
+impl Write for Noted {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.stderr.write(buffer)?;
+        self.wrote |= written > 0;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stderr.flush()
+    }
+}
+
+/// A tool has written its failure to standard error, so `main` adds nothing: the error of its
+/// run, and the parser's refusal of makeblastdb's argv, which the tool writes as the command line
+/// does (`wrote`). The parser's help (`-h`, `-help`), which the tool does not write, is the
+/// error's text, which `main` writes.
+fn reported(result: Result<(), Error>, wrote: bool) -> Result<(), Error> {
     match result {
         Err(Error::Search(_)) => Err(Error::Search(Vec::new())),
+        Err(Error::Argv(_)) if wrote => Err(Error::Argv(Vec::new())),
         other => other,
     }
 }
@@ -67,11 +88,14 @@ fn search() -> Result<(), Error> {
         "makembindex" => run_makembindex,
         _ => return search_program(program, words),
     };
-    let (mut stdin, mut stdout, mut stderr) =
-        (std::io::stdin(), std::io::stdout(), std::io::stderr());
+    let (mut stdin, mut stdout) = (std::io::stdin(), std::io::stdout());
+    let mut stderr = Noted {
+        stderr: std::io::stderr(),
+        wrote: false,
+    };
     let result = tool(&words_of_tool, &mut stdin, &mut stdout, &mut stderr);
     let _ = stdout.flush();
-    reported(result)
+    reported(result, stderr.wrote)
 }
 
 /// A search of `program` with the command line's words.

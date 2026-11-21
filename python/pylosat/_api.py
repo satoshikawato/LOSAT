@@ -607,8 +607,9 @@ def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:
     """Runs `makeblastdb` with the command line's words, which writes the database's files.
 
     `input` is what the command line reads as standard input (`-in -`, and without `-in`), so a
-    database can be built from FASTA in memory. A failure raises `SearchError` with what the
-    command line writes to its standard error. The GIL is released.
+    database can be built from FASTA in memory. A failure raises `SearchError` (`ArgumentError`
+    for an argument that the parser refuses) with what the command line writes to its standard
+    error. The GIL is released.
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.makeblastdb(list(words), data))

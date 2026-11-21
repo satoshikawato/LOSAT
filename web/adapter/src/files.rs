@@ -301,7 +301,7 @@ impl RegisteredCounts {
             .get(name)
             .map(|file| &**file)
             .ok_or_else(|| WinMaskError::Open {
-                name: name.to_string(),
+                name: name.as_bytes().to_vec(),
             })
     }
 }
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(
             source.discover("never.registered"),
             Err(WinMaskError::Open {
-                name: "never.registered".to_string()
+                name: b"never.registered".to_vec()
             })
         );
     }

@@ -6,36 +6,6 @@
 //! (`report::seqid::SeqId::Db`), whose model the reader's hook stored (`Value::SeqId`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:687-714
-//! ```c++
-//! void CObjectOStreamAsn::WriteClass(const CClassTypeInfo* classType,
-//!                                    TConstObjectPtr classPtr)
-//! {
-//!     BEGIN_OBJECT_FRAME2(eFrameClass, classType);
-//!     StartBlock();
-//!
-//!     for ( CClassTypeInfo::CIterator i(classType); i.Valid(); ++i ) {
-//!         classType->GetMemberInfo(*i)->WriteMember(*this, classPtr);
-//!     }
-//!
-//!     EndBlock();
-//!     END_OBJECT_FRAME();
-//! }
-//!
-//! void CObjectOStreamAsn::WriteClassMember(const CMemberId& memberId,
-//!                                          TTypeInfo memberType,
-//!                                          TConstObjectPtr memberPtr)
-//! {
-//!     NextElement();
-//!
-//!     BEGIN_OBJECT_FRAME2(eFrameClassMember, memberId);
-//!
-//!     WriteMemberId(memberId);
-//!
-//!     WriteObject(memberPtr, memberType);
-//!
-//!     END_OBJECT_FRAME();
-//! }
-//! ```
 //! A member is written when it is set (`WriteMember` skips an OPTIONAL member that is not set,
 //! and a DEFAULT member only when it was not set: a DEFAULT member that was read is written,
 //! whatever its value, member.cpp:973-1013), so the members of a SEQUENCE value are those that
@@ -141,7 +111,7 @@ pub(crate) fn failed_stream_text(ty: u16, value: &Value) -> Vec<u8> {
 /// calls).
 fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<Step<'a>>) {
     let info = type_info(ty);
-    // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733 (quoted at
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733 (cited at
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
     // without its type.
     if let Value::Delayed(text) = value {
@@ -288,32 +258,7 @@ fn write_leaf<E: Encoder>(enc: &mut E, kind: &Kind, value: &Value) {
     match (kind, value) {
         (Kind::Integer(storage), Value::Int(number)) => write_int(enc, *storage, *number),
         // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:113-131
-        // ```c++
-        // void CObjectOStreamAsn::WriteEnum(
-        //     const CEnumeratedTypeValues& values,
-        //     TEnumValueType value, const string& valueName)
-        // {
-        //     if (valueName.empty() || (m_WriteNamedIntegersByValue && values.IsInteger())) {
-        //         m_Output.PutInt4(value);
-        //     } else {
-        //         ...
-        //         m_Output.PutChar((char)tolower((unsigned char)valueName[0]));
-        //         m_Output.PutString(valueName.data()+1, valueName.size()-1);
-        //     }
-        // }
-        //
-        // void CObjectOStreamAsn::WriteEnum(const CEnumeratedTypeValues& values,
-        //                                   TEnumValueType value)
-        // {
-        //     WriteEnum(values,value,values.FindNameEx(value, values.IsInteger()));
-        // }
-        // ```
         // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:235-237 (`ValueToName`)
-        // ```c++
-        //             ITERATE ( TValues, i, m_Values ) {
-        //                 (*m)[i->second] = &i->first;
-        //             }
-        // ```
         // `FindNameEx` takes the last name of the value in module order (each insert replaces
         // the one before); the reader takes an ENUMERATED number only when it has a name.
         (Kind::Enumerated { integer, values }, Value::Enum(number)) => {

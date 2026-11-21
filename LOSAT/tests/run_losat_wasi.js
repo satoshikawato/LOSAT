@@ -7,8 +7,8 @@ const { WASI } = require("wasi");
 const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
-// NCBI reference:
-// ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+// NCBI reference (598d8ae6):
+// c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 // The command-Wasm certification passes the same query, subject, output,
 // genetic-code, and thread arguments as native LOSAT. This runner only supplies
 // WASI preview1; it does not rewrite output or implement BLAST behavior.
@@ -21,18 +21,11 @@ if (!wasmPath) {
 const args = [wasmPath, ...process.argv.slice(3)];
 const wasi = new WASI({
   version: "preview1",
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-  // CATCH_ALL(status)
-  // return status;
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   returnOnExit: true,
   args,
   env: { ...process.env, PWD: process.cwd() },
   // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
-// ```c++
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-// ```
 // Preserve lexical filenames at the recorded host cwd.
 // Root preopen permits absolute paths; PWD initializes the guest cwd for
 // relative filenames through std::env::set_current_dir, without rewriting argv.
@@ -41,8 +34,7 @@ const wasi = new WASI({
 
 (async () => {
   const bytes = fs.readFileSync(wasmPath);
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-  // CATCH_ALL(status); return status;
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   // Module reuse is host preparation only; preserve validation and exit status.
   const { module } = prepareArtifact(bytes, "serial-command");
   // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729 (see createWasi above)
@@ -52,7 +44,7 @@ const wasi = new WASI({
   // exports its memory, so the table reads it through the instance.
   let memory = null;
   const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
-  // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+  // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
   // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
   // The output to standard output and error waits for a full pipe as the native write blocks
   // (blockingStdioWrite, wasi_artifact.js): require("wasi") above prints Node's ExperimentalWarning
@@ -70,9 +62,7 @@ const wasi = new WASI({
       `${wasmPath} does not export _start; use the LOSAT command-Wasm artifact.`,
     );
   }
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-  // CATCH_ALL(status)
-  // return status;
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   process.exitCode = wasi.start(instance);
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));

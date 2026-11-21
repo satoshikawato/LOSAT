@@ -25,100 +25,11 @@ use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
-// ```c++
-//     arg_desc->SetCurrentGroup("Input options");
-//     arg_desc->AddDefaultKey(kInput, "input_file",
-//                             "Input file/database name",
-//                             CArgDescriptions::eInputFile, "-");
-//     arg_desc->AddDefaultKey("input_type", "type",
-//                              "Type of the data specified in input_file",
-//                              CArgDescriptions::eString, "fasta");
-//     arg_desc->SetConstraint("input_type", &(*new CArgAllow_Strings,
-//                                             "fasta", "blastdb",
-//                                             "asn1_bin",
-//                                             "asn1_txt"));
-//
-//     arg_desc->AddKey(kArgDbType, "molecule_type",
-//                      "Molecule type of target db", CArgDescriptions::eString);
-//     arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings,
-//                                         "nucl", "prot"));
-//
-//     arg_desc->SetCurrentGroup("Configuration options");
-//     arg_desc->AddOptionalKey(kArgDbTitle, "database_title",
-//                              "Title for BLAST database\n" + dflt,
-//                              CArgDescriptions::eString);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:292-306
-// ```c++
-//     arg_desc->SetCurrentGroup("Output options");
-//     arg_desc->AddOptionalKey(kOutput, "database_name",
-//                              "Name of BLAST database to be created\n" + dflt +
-//                              "Required if multiple file(s)/database(s) are "
-//                              "provided as input",
-//                              CArgDescriptions::eString);
-//     arg_desc->AddDefaultKey("blastdb_version", "version",
-//                              "Version of BLAST database to be created",
-//                              CArgDescriptions::eInteger,
-//                              NStr::NumericToString(static_cast<int>(eBDB_Version5)));
-//     arg_desc->SetConstraint("blastdb_version",
-//                             new CArgAllow_Integers(eBDB_Version4, eBDB_Version5));
-//     arg_desc->AddDefaultKey("max_file_sz", "number_of_bytes",
-//                             "Maximum file size for BLAST database files",
-//                             CArgDescriptions::eString, "3GB");
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:309-312
-// ```c++
-//     arg_desc->AddOptionalKey("logfile", "File_Name",
-//                              "File to which the program log should be redirected",
-//                              CArgDescriptions::eOutputFile,
-//                              CArgDescriptions::fAppend);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-251
-// ```c++
-//     arg_desc->AddFlag("parse_seqids",
-//                       "Option to parse seqid for FASTA input if set, for all other input types seqids are parsed automatically", true);
-//
-//     arg_desc->AddFlag("hash_index",
-//                       "Create index of sequence hash values.",
-//                       true);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:319-329
-// ```c++
-//     arg_desc->AddOptionalKey("taxid", "TaxID",
-//                              "Taxonomy ID to assign to all sequences",
-//                              CArgDescriptions::eInteger);
-//     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
-//     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
-//
-//     arg_desc->AddOptionalKey("taxid_map", "TaxIDMapFile",
-//              "Text file mapping sequence IDs to taxonomy IDs.\n"
-//              "Format:<SequenceId> <TaxonomyId><newline>",
-//              CArgDescriptions::eInputFile);
-//     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-277
-// ```c++
-//     arg_desc->SetCurrentGroup("Sequence masking options");
-//     arg_desc->AddOptionalKey("mask_data", "mask_data_files",
-//                              "Comma-separated list of input files containing "
-//                              "masking data as produced by NCBI masking "
-//                              "applications (e.g. dustmasker, segmasker, "
-//                              "windowmasker)",
-//                              CArgDescriptions::eString);
-//
-//     arg_desc->AddOptionalKey("mask_id", "mask_algo_ids",
-//                              "Comma-separated list of strings to uniquely "
-//                              "identify the masking algorithm",
-//                              CArgDescriptions::eString);
-//
-//     arg_desc->AddOptionalKey("mask_desc", "mask_algo_descriptions",
-//                              "Comma-separated list of free form strings to "
-//                              "describe the masking algorithm details",
-//                              CArgDescriptions::eString);
-//
-//     arg_desc->SetDependency("mask_id", CArgDescriptions::eRequires, "mask_data");
-//     arg_desc->SetDependency("mask_desc", CArgDescriptions::eRequires, "mask_id");
-// ```
 // LOSAT's parser checks the range of `-taxid`, the exclusion and the requirements (`-taxid_map`
 // needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`); its errors
 // are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's argument
@@ -220,76 +131,13 @@ pub enum MakedbError {
 
 impl MakedbError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:149-163
-    // ```c++
-    // #define BLAST_EXIT_SUCCESS          0
-    // /// Command line binary exit code: error in input query/options
-    // #define BLAST_INPUT_ERROR           1
-    // /// Command line binary exit code: error in database/subject
-    // #define BLAST_DATABASE_ERROR        2
-    // /// Command line binary exit code: error in BLAST engine
-    // #define BLAST_ENGINE_ERROR          3
-    // /// Command line binary exit code: BLAST run out of memory
-    // #define BLAST_OUT_OF_MEMORY         4
-    // /// Command line binary exit code: Network error encountered
-    // #define BLAST_NETWORK_ERROR         5
-    // /// Command line binary exit code: error when writing output
-    // #define BLAST_OUTPUT_ERROR          6
-    // /// Command line binary exit code: unknown error
-    // #define BLAST_UNKNOWN_ERROR         255
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-171
-    // ```c++
-    // #define CATCH_ALL(exit_code)                                                \
-    //     catch (const CInvalidDataException& e) {                                \
-    //         LOG_POST(Error << "BLAST options error: " << e.GetMsg());           \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-203
-    // ```c++
-    //         else {                                                              \
-    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-    //         	exit_code = BLAST_DATABASE_ERROR;                               \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-    // ```c++
-    //     catch (const CArgException& e) {                                        \
-    //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:212-215
-    // ```c++
-    //     catch (const CWriteDBException& e) {                                    \
-    //         LOG_POST(Error << "BLAST Database creation error: " << e.GetMsg()); \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
-    // ```c++
-    //     catch (const std::bad_alloc&) {                                         \
-    //         LOG_POST(Error << "BLAST ran out of memory");                       \
-    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // ```c++
-    //     catch (const CIOException& e) {                                         \
-    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     /// The exit code: 1 (`BLAST_INPUT_ERROR`) for an error of the options or
     /// of the database creation, 2 (`BLAST_DATABASE_ERROR`) when the new
     /// database cannot be opened, 4 (`BLAST_OUT_OF_MEMORY`) for a failed
@@ -318,28 +166,44 @@ impl MakedbError {
     }
 }
 
-impl std::fmt::Display for MakedbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl MakedbError {
+    /// The message makeblastdb prints for the error (without the line feed that ends it), as
+    /// bytes ([`WriteDbError::message`]).
+    pub fn message(&self) -> Vec<u8> {
         match self {
-            MakedbError::Build(error) => error.fmt(f),
+            MakedbError::Build(error) => error.message(),
+            // LOSAT's refusal of a database where NCBI crashes or reads memory outside its
+            // mapping, in LOSAT's words.
+            MakedbError::Database(error) if is_refusal(error) => {
+                format!("losat makeblastdb: {error}").into_bytes()
+            }
+            MakedbError::Database(SeqDbError::Ncbi(exception)) => [
+                b"BLAST Database error: ".as_slice(),
+                exception.what().trim_ascii_end(),
+            ]
+            .concat(),
             // NCBI prints `e.GetMsg()` of the `CSeqDBException`; the text of an error that is
             // NCBI's own is what `SeqDbError::ncbi_message` gives (the file's path is not part
-            // of it), and any other is LOSAT's refusal in its own words.
-            MakedbError::Database(error) if is_refusal(error) => {
-                write!(f, "losat makeblastdb: {error}")
-            }
+            // of it; `SeqDbError::NotFound` is bytes), and any other is LOSAT's error in its
+            // own words.
             MakedbError::Database(error) => match error.ncbi_message() {
-                Some(text) => write!(
-                    f,
-                    "BLAST Database error: {}",
-                    String::from_utf8_lossy(&text)
-                ),
-                None => write!(f, "BLAST Database error: {error}"),
+                Some(text) => [b"BLAST Database error: ".as_slice(), &text].concat(),
+                None => format!("BLAST Database error: {error}").into_bytes(),
             },
-            MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
-            MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
-            MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
+            MakedbError::Unsupported(message) => format!("losat makeblastdb: {message}").into(),
+            MakedbError::Output(message) => {
+                format!("BLAST failed to write output: {message}").into()
+            }
+            MakedbError::Argument(message) => {
+                format!("Command line argument error: {message}").into()
+            }
         }
+    }
+}
+
+impl std::fmt::Display for MakedbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8_lossy(&self.message()))
     }
 }
 
@@ -368,54 +232,6 @@ fn unsupported(message: impl Into<String>) -> MakedbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807
-// ```c++
-// void SeqDB_SplitQuoted(const string             & dbname,
-//                        vector<CSeqDB_Substring> & dbs,
-//                        bool keep_quote)
-// {
-//     // split names
-//
-//     const char * sp = dbname.data();
-//
-//     bool quoted = false;
-//     unsigned begin = 0;
-//
-//     for(unsigned i = 0; i < dbname.size(); i++) {
-//         char ch = dbname[i];
-//
-//         if (quoted) {
-//             // Quoted mode sees '"' as the only actionable token.
-//             if (ch == '"') {
-//                 if (begin < i) {
-//                 	if(keep_quote) i++;
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = i + 1;
-//                 quoted = false;
-//             }
-//         } else {
-//             // Non-quote mode: Space or quote starts the next string.
-//
-//             if (ch == ' ') {
-//                 if (begin < i) {
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = i + 1;
-//             } else if (ch == '"') {
-//                 if (begin < i) {
-//                     dbs.push_back(CSeqDB_Substring(sp + begin, sp + i));
-//                 }
-//                 begin = keep_quote ? i : i + 1;
-//                 quoted = true;
-//             }
-//         }
-//     }
-//
-//     if (begin < dbname.size()) {
-//         dbs.push_back(CSeqDB_Substring(sp + begin, sp + dbname.size()));
-//     }
-// }
-// ```
 // makeblastdb splits `-in` without keeping the quotes (`keep_quote` false).
 /// `SeqDB_SplitQuoted`: the input names of `-in` (spaces separate names,
 /// double quotes keep a name with spaces together).
@@ -447,38 +263,8 @@ fn split_quoted(names: &str) -> Vec<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1128-1136
-// ```c++
-// void CMakeBlastDBApp::x_BuildDatabase()
-// {
-//     const string env_skip =
-//             GetEnvironment().Get("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS");
-//     m_SkipUnver = (env_skip.empty() == false);
-//
-//     const string dont_scan_bioseq =
-//         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
-//     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:562-566
-// ```c++
-// 	try {
-//         while(!data.eof())
-//         {
-//             CSeqEntrySource src(data, fmt, m_SkipUnver);
-//             found = found || m_DB->AddSequences(src);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1733-1738,1764-1766
-// ```c++
-//     string fasta;
-//
-//     // Scan the CBioseq for the CFastaReader user object.
-//
-//     if (scan_bioseq_4_cfastareader_usrobj) {
-//         ITERATE(list< CRef< CSeqdesc > >, iter, bioseq.GetDescr().Get()) {
-// ...
-//
-//     }
-//     if (fasta.empty())
-// ```
 // makeblastdb reads two variables of its own. LOSAT reproduces makeblastdb
 // with both unset (or empty, which `Get` cannot tell from unset).
 //
@@ -506,52 +292,9 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747
-// ```c++
-//     CNcbiApplication* app = CNcbiApplication::Instance();
-//     if (app) {
-//         const CNcbiRegistry& registry = app->GetConfig();
-//         const string& value = registry.Get("BLAST", "MAX_SEQID_LENGTH");
-//         if (!value.empty()) {
-//             try { m_FastaReader->SetMaxIDLength(NStr::StringToUInt(value)); }
-//             catch (const exception&) {}  // Ignore errors
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1211-1216
-// ```c++
-//     bool long_seqids = false;
-//     CNcbiApplication* app = CNcbiApplication::Instance();
-//     if (app) {
-//         const CNcbiRegistry& registry = app->GetConfig();
-//         long_seqids = (registry.Get("BLAST", "LONG_SEQID") == "1");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:485-491,647-653
-// ```c++
-// void CFastaReader::SetMaxIDLength(Uint4 max_len)
-// {
-//     CFastaDeflineReader::s_MaxLocalIDLength =
-//     CFastaDeflineReader::s_MaxGeneralTagLength =
-//     CFastaDeflineReader::s_MaxAccessionLength = m_MaxIDLength = max_len;
-//     m_bModifiedMaxIdLength=true;
-// }
-// ...
-// void CFastaReader::x_SetDeflineParseInfo(SDefLineParseInfo& info)
-// {
-//     info.fBaseFlags = m_iFlags;
-//     info.fFastaFlags = GetFlags();
-//     info.maxIdLength = m_bModifiedMaxIdLength ?
-//                        m_MaxIDLength :
-//                        0;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:430-434
-// ```c++
-//     if (info.maxIdLength) {
-//         s_IdValidate.SetMaxLocalIDLength(info.maxIdLength);
-//         s_IdValidate.SetMaxGeneralTagLength(info.maxIdLength);
-//         s_IdValidate.SetMaxAccessionLength(info.maxIdLength);
-//     }
-// ```
 // The registry's limit of a Seq-id's length changes which FASTA ids makeblastdb parses with
 // `-parse_seqids` when `NStr::StringToUInt` converts the value and the value is not 0 (0 is
 // the reader's "not set"; the static `s_Max*` copies are read nowhere). A value it cannot
@@ -599,10 +342,6 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
         )));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1218-1219
-    // ```c++
-    //     const EBlastDbVersion dbver =
-    //         static_cast<EBlastDbVersion>(args["blastdb_version"].AsInteger());
-    // ```
     // The parser allows 4 and 5 only (`CArgAllow_Integers(eBDB_Version4, eBDB_Version5)`).
     let Some(version) = DbVersion::from_number(args.blastdb_version) else {
         return Err(unsupported(format!(
@@ -611,20 +350,10 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
         )));
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:322-329
-    // ```c++
-    //     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
-    //     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
-    //
-    //     arg_desc->AddOptionalKey("taxid_map", "TaxIDMapFile",
-    //              "Text file mapping sequence IDs to taxonomy IDs.\n"
-    //              "Format:<SequenceId> <TaxonomyId><newline>",
-    //              CArgDescriptions::eInputFile);
-    //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
-    // ```
     // The parser checks these on the command line (`-taxid` has its range there); a caller of
     // the library that sets the fields is checked here with the parser's sentences.
     // The same for the masking options: `-mask_id` requires `-mask_data`, `-mask_desc` requires
-    // `-mask_id` (makeblastdb.cpp:276-277, quoted at `MakedbArgs`).
+    // `-mask_id` (makeblastdb.cpp:276-277, cited at `MakedbArgs`).
     for (name, given, needed, needed_given) in [
         (
             "mask_id",
@@ -664,18 +393,6 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1278-1287
-// ```c++
-//     if (args["taxid"].HasValue()) {
-//         _ASSERT( !args["taxid_map"].HasValue() );
-//         CRef<CTaxIdSet> taxids(new CTaxIdSet(TAX_ID_FROM(int, args["taxid"].AsInteger())));
-//         m_DB->SetTaxids(*taxids);
-//     } else if (args["taxid_map"].HasValue()) {
-//         _ASSERT( !args["taxid"].HasValue() );
-//         CRef<CTaxIdSet> taxids(new CTaxIdSet());
-//         taxids->SetMappingFromFile(args["taxid_map"].AsInputFile());
-//         m_DB->SetTaxids(*taxids);
-//     }
-// ```
 // `AsInputFile` opens the file here: one that cannot be opened is the parser's error
 // "File is not accessible" (makeblastdb 2.17.0: "Command line argument error: Argument
 // "taxid_map". File is not accessible:  `<name>'", exit status 1, after the head of the
@@ -683,44 +400,7 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
 // (`CATCH_ALL`, "Error: ", exit status 255; the build tree in its path is the official
 // release's, makedb-v5 DECISIONS 29).
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-737
-// ```c++
-//     if (AsString() == "-") {
-// #if defined(NCBI_OS_MSWIN)
-//         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-// #endif
-//         m_Ios  = &cin;
-//     } else if ( !AsString().empty() ) {
-//         if (!fstrm) {
-//             fstrm = new CNcbiIfstream;
-//         }
-//         if (fstrm) {
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-//                 fstrm = NULL;
-//             } else {
-//                 m_DeleteFlag = true;
-//             }
-//         }
-//         m_Ios = fstrm;
-//     }
-//     CArg_Ios::x_Open(flags);
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-621,95-99
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     if ( !m_Ios ) {
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//             "File is not accessible",AsString()));
-//     }
-// }
-// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
-// {
-//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
-//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
-// }
-// ```
 // `-` is the standard input: the map is read before the FASTA input, so with `-in -` as well
 // the map takes all of it and the FASTA reader finds none ("No volumes were created.", as
 // makeblastdb). The empty name opens nothing and its message has no name part.
@@ -781,14 +461,6 @@ fn read_taxids(
 /// line "Maximum file size".
 fn max_file_size(args: &MakedbArgs) -> Result<u64, MakedbError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1267-1272
-    // ```c++
-    //     Uint8 bytes = NStr::StringToUInt8_DataSize(args["max_file_sz"].AsString());
-    //     static const Uint8 MAX_VOL_FILE_SIZE = 0x100000000;
-    //     if (bytes >= MAX_VOL_FILE_SIZE) {
-    //         NCBI_THROW(CInvalidDataException, eInvalidInput,
-    //                 "max_file_sz must be < 4 GiB");
-    //     }
-    // ```
     // A value NCBI cannot convert throws a `CStringException`, which `CATCH_ALL` reports
     // through its `CException` clause (`MakedbError::exit_code`): "Error: " and the
     // exception's report, exit status 255.
@@ -817,18 +489,6 @@ fn warn_to(err: &mut dyn Write) -> impl FnMut(&[u8]) + '_ {
 /// the build can name it (`fault`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
-/// ```c++
-/// 		if( (is_gz  = NStr::EndsWith( seq_file, ".gz", NStr::eNocase)) ||
-/// 		    (is_bz2 = NStr::EndsWith( seq_file, ".bz2",NStr::eNocase)) ||
-/// 		    (is_zst = NStr::EndsWith( seq_file, ".zst",NStr::eNocase))
-/// 		  )
-/// 		{
-/// 		    if( is_bz2  ) method = CDecompressIStream::eBZip2;
-/// 		    if( is_zst  ) method = CDecompressIStream::eZstd;
-/// 		    comp_seq_istream.reset(new CDecompressIStream(f , method ));
-/// 		    data_in =  comp_seq_istream.get();
-/// 		}
-/// ```
 struct CompressedInput<'a> {
     inflater: Box<dyn Read + 'a>,
     /// Set by `ReadWatch` when a read of the file itself failed.
@@ -898,40 +558,6 @@ fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
-// ```c++
-// void
-// CMakeBlastDBApp::x_VerifyInputFilesType(const vector<CTempString>& filenames,
-//                                    CMakeBlastDBApp::ESupportedInputFormats input_type)
-// {
-//     //Let other part of the program deal with blastdb input
-//     if(eBlastDb == input_type)
-//         return;
-//
-//     // Guess the input data type
-//     for (size_t i = 0; i < filenames.size(); i++) {
-//         string seq_file = filenames[i];
-//
-//         CFile input_file(seq_file);
-//         if ( !input_file.Exists() ) {
-//             string error_msg = "File " + seq_file + " does not exist";
-//             NCBI_THROW(CInvalidDataException, eInvalidInput, error_msg);
-//         }
-//         if (input_file.GetLength() == 0) {
-//             string error_msg = "File " + seq_file + " is empty";
-//             NCBI_THROW(CInvalidDataException, eInvalidInput, error_msg);
-//         }
-//
-//         CNcbiIfstream f(seq_file.c_str(), ios::binary);
-//         ...
-//         if(input_type == eFasta && x_ConvertToSupportedType(x_GuessFileType( *data_in ) ) != eFasta) {
-//             string msg = "\nInput file " + seq_file + " does NOT appear to be FASTA (processing anyway).\n" \
-//                  + "Advise validating database with 'blastdbcheck -dbtype [prot|nucl] -db ${DBNAME}'\n";
-//             ERR_POST(Warning << msg);
-//         }
-//     }
-//     return;
-// }
-// ```
 // Every file is checked, in the order of `-in`, before the first one is read.
 // `CFile::Exists` is true for a regular file, also through a link; anything
 // else "does not exist". The test of the format opens the file again, so the
@@ -968,44 +594,8 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1146-1201
-// ```c++
-//     string dbname = (args[kOutput].HasValue()
-//                      ? args[kOutput]
-//                      : args[kInput]).AsString();
-//     ...
-//     vector<string> input_files;
-//     NStr::Split(dbname, kInputSeparators, input_files);
-//     if (dbname == "-" || input_files.size() > 1) {
-//         NCBI_THROW(CInvalidDataException, eInvalidInput,
-//             "Please provide a database name using -" + kOutput);
-//     }
-//     ...
-//     string title = (args[kArgDbTitle].HasValue()
-//                     ? args[kArgDbTitle]
-//                     : args[kInput]).AsString();
-//     ...
-//     if (title == "-") {
-//         NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                          "Please provide a title using -title");
-//     }
-//
-//     m_LogFile = & (args["logfile"].HasValue()
-//                    ? args["logfile"].AsOutputFile()
-//                    : cout);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1273-1276
-// ```c++
-//     *m_LogFile << "Maximum file size: "
-//                << Uint8ToString_DataSize(bytes) << endl;
-//
-//     m_DB->SetMaxFileSize(bytes);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1294-1296
-// ```c++
-//     x_ProcessInputData(args[kInput].AsString(), is_protein);
-//
-//     bool success = m_DB->EndBuild();
-// ```
 // The title defaults to the whole value of `-in`, several names included. After a
 // successful build makeblastdb opens the new database with its reader and writes
 // the JSON metadata file (`open_new_database`); an error of that open ends
@@ -1038,41 +628,6 @@ fn build_database_with_log(
 
     let dbname = args.out.as_deref().unwrap_or(&args.input);
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
-    // ```c++
-    //     void Do(TContainer&     target,
-    //             TPosContainer&  token_pos,
-    //             const TString&  empty_str = TString())
-    //     {
-    //         auto target_initial_size = target.size();
-    //
-    //         // Special cases
-    //         if (m_Str.empty()) {
-    //             return;
-    //         } else if (m_Delim.empty()) {
-    //             target.push_back(m_Str);
-    //             token_pos.push_back(0);
-    // ...
-    //
-    //         CTempStringList part_collector(m_Storage);
-    //         SIZE_TYPE prev_pos;
-    //         SIZE_TYPE delim_pos = NPOS;
-    //         m_Pos = 0;
-    //         do {
-    //             Advance(&part_collector, &prev_pos, &delim_pos);
-    //             target.push_back(empty_str); // reserve space for value added next line
-    //             part_collector.Join(&target.back());
-    //             part_collector.Clear();
-    //             token_pos.push_back(prev_pos);
-    //         } while ( !AtEnd() );
-    //
-    //         if ( (m_Flags & NStr::fSplit_Truncate_End) == 0 ) {
-    //             // account training delimiter
-    //             if (delim_pos != NPOS) {
-    //                 // add empty token after last delimiter
-    //                 target.push_back(empty_str);
-    //                 token_pos.push_back(delim_pos + 1);
-    //             }
-    // ```
     // `NStr::Split(dbname, " ", input_files)` runs with no flag
     // (ncbistr.hpp:2551-2555): adjacent delimiters are not merged and none is
     // truncated, so every space ends a token, an empty one included ("db "
@@ -1090,36 +645,12 @@ fn build_database_with_log(
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1016-1028
-    // ```c++
-    // void CMakeBlastDBApp::x_ProcessInputData(const string & paths,
-    //                                          bool           is_protein)
-    // {
-    //     vector<CTempString> names;
-    //     SeqDB_SplitQuoted(paths, names);
-    //     ...
-    //     if(eBlastDb != input_fmt) {
-    //         if (names[0] == "-") {
-    //             x_AddSequenceData(cin, build_fmt);
-    //         }
-    // ```
     // A first name `-` reads the standard input and nothing else. With no name at
     // all (`-in ""`) NCBI reads `names[0]` of an empty vector (makeblastdb 2.17.0: a
     // segmentation fault after the log line "Maximum file size"); LOSAT refuses that where
     // NCBI reads it, after `-max_file_sz` and `-taxid_map`, whose errors come first.
     let names = split_quoted(&args.input);
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
-    // ```c++
-    // 		if( (is_gz  = NStr::EndsWith( seq_file, ".gz", NStr::eNocase)) ||
-    // 		    (is_bz2 = NStr::EndsWith( seq_file, ".bz2",NStr::eNocase)) ||
-    // 		    (is_zst = NStr::EndsWith( seq_file, ".zst",NStr::eNocase))
-    // 		  )
-    // 		{
-    // 		    if( is_bz2  ) method = CDecompressIStream::eBZip2;
-    // 		    if( is_zst  ) method = CDecompressIStream::eZstd;
-    // 		    comp_seq_istream.reset(new CDecompressIStream(f , method ));
-    // 		    data_in =  comp_seq_istream.get();
-    // 		}
-    // ```
     // A name ending in `.gz`, `.bz2` or `.zst` is read through its decoder (`CompressedInput`).
 
     let Some(now) = now else {
@@ -1152,10 +683,6 @@ fn build_database_with_log(
         db.set_taxids(taxids);
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1288-1294
-    // ```c++
-    //     x_ProcessMaskData();
-    //     x_ProcessInputData(args[kInput].AsString(), is_protein);
-    // ```
     // The mask files are read before the input is looked at. A failure ends the run at once
     // (`CATCH_ALL`), and the destructor's messages follow it (`end_messages`).
     let mask_options = MaskDataOptions {
@@ -1227,49 +754,8 @@ fn add_input_and_close(
 ) -> Result<(), MakedbError> {
     if let Some(stdin_map) = from_stdin {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1420
-        // ```c++
-        // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
-        // {
-        //     // Add any fasta sequences as well.
-        //     bool success = true;
-        //
-        //     if (fasta_file) {
-        //         CFastaBioseqSource fbs(fasta_file,
-        // ...
-        //     }
-        //     return success;
-        // }
-        // ```
         // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:619-636
-        // ```c++
-        // bool CBufferedLineReader::x_ReadBuffer()
-        // {
-        //     _ASSERT(m_Reader);
-        //
-        //     if ( m_Eof ) {
-        //         return false;
-        //     }
-        //
-        //     m_InputPos += CT_OFF_TYPE(m_End - m_Buffer.get());
-        //     m_Pos = m_End = m_Buffer.get();
-        //     for (bool flag = true; flag; ) {
-        //         size_t size;
-        //         ERW_Result result =
-        //             m_Reader->Read(m_Buffer.get(), m_BufferSize, &size);
-        //         switch (result) {
-        //         case eRW_NotImplemented:
-        //         case eRW_Error:
-        //             NCBI_THROW(CIOException, eRead, "Read error");
-        // ```
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-        // ```c++
-        //     catch (const CIOException& e) {                                         \
-        //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-        //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-        //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-        //         }                                                                   \
-        //     }                                                                       \
-        // ```
         // After `-taxid_map -` has read the standard input to its end (a read that found
         // nothing) or to an error, `cin` has failed: makeblastdb adds nothing from it and
         // reports no error ("No volumes were created.", exit status 0). A map whose last
@@ -1287,17 +773,6 @@ fn add_input_and_close(
     } else {
         verify_input_files(names, err)?;
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1030-1054
-        // ```c++
-        //              x_VerifyInputFilesType(names, input_fmt);
-        //             for (size_t i = 0; i < names.size(); i++) {
-        //                 string seq_file = names[i];
-        //                 CNcbiIfstream f(seq_file.c_str(), ios::binary);
-        // 		CNcbiIstream *data_in = &f;  // uncompressed by default
-        //         ...
-        // 		// common part
-        // 		x_AddSequenceData( *data_in , build_fmt);
-        //             }
-        // ```
         // Each file goes to its own `AddFasta` (`x_AddSequenceData` ->
         // `x_AddFasta`): its own FASTA reader (line numbers and local ids start
         // again), its own "Adding sequences" line, and "No sequences added" for a
@@ -1310,19 +785,6 @@ fn add_input_and_close(
             // volumes were created." and exit status 0 (makeblastdb 2.17.0, a compressed name
             // too). A deterministic NCBI result, reproduced.
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
-            // ```c++
-            // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
-            // {
-            //     // Add any fasta sequences as well.
-            //     bool success = true;
-            //
-            //     if (fasta_file) {
-            //         CFastaBioseqSource fbs(fasta_file,
-            //                                m_IsProtein,
-            //                                m_ParseIDs,
-            //                                m_LongIDs);
-            //
-            // ```
             let Ok(mut file) = std::fs::File::open(name) else {
                 continue;
             };
@@ -1354,25 +816,6 @@ fn add_input_and_close(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1296-1328
-// ```c++
-//     bool success = m_DB->EndBuild();
-//     if(success) {
-//     	string new_db = m_DB->GetOutputDbName();
-//     	CSeqDB::ESeqType t = is_protein? CSeqDB::eProtein: CSeqDB::eNucleotide;
-//     	CSeqDB sdb(new_db, t);
-//         string output_prefix = args["metadata_output_prefix"]
-//                 ? args["metadata_output_prefix"].AsString()
-//                 : kEmptyStr;
-//         ...
-//     	CRef<CBlast_db_metadata> m = sdb.GetDBMetaData(output_prefix);
-//     	string extn (kEmptyStr);
-//     	SeqDB_GetMetadataFileExtension(is_protein, extn);
-//     	string metadata_filename = new_db + "." + extn;
-//         ofstream out(metadata_filename.c_str());
-//         ...
-//         out << NcbiEndl;
-//     }
-// ```
 // `CSeqDB sdb(new_db, t)` throws a `CSeqDBException` when the reader cannot
 // open what was written; the usual causes are an alias file of an earlier
 // database of the same name that `DeleteBlastDb` could not resolve and
@@ -1432,75 +875,13 @@ fn open_new_database(
         Err(error) => return Err(MakedbError::Database(error)),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1649-1656
-    // ```c++
-    //     case CSeqDB::eFilteredAll:
-    //         if (oid_count) {
-    //             *oid_count = GetNumSeqs();
-    //         }
-    //         if (total_length) {
-    //             *total_length = GetTotalLength();
-    //         }
-    //         break;
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1638-1644,1662-1668
-    // ```c++
-    // Int8 CSeqDBAliasNode::GetNumSeqs(const CSeqDBVolSet & vols) const
-    // {
-    //     CSeqDB_NSeqsWalker walk;
-    //     WalkNodes(& walk, vols);
-    //
-    //     return walk.GetNum();
-    // }
-    // ...
-    // Uint8 CSeqDBAliasNode::GetTotalLength(const CSeqDBVolSet & volset) const
-    // {
-    //     CSeqDB_TotalLengthWalker walk;
-    //     WalkNodes(& walk, volset);
-    //
-    //     return walk.GetLength();
-    // }
-    // ```
     // The totals are those of the volumes `CSeqDB` opened: the ones the alias file names (a
     // cut alias file names fewer than the writer made), or the one volume. Each volume's
     // count and length are the ones its index file holds in its header
     // (`LocatedDatabase::volume_totals`); no volume is opened.
     let totals = &located.volume_totals;
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
-    // ```c++
-    // 	GetTotals(CSeqDB::eFilteredAll, &num_seqs, &total_length, true);
-    // 	vector<string> dblist;
-    //     NStr::Split(GetDBNameList(), " ", dblist, NStr::fSplit_Tokenize);
-    //     NON_CONST_ITERATE(vector<string>, itr, dblist) {
-    //         size_t off = (*itr).find_last_of(CFile::GetPathSeparator());
-    //         if (off != string::npos ) {
-    //         	(*itr).erase(0, off+1);
-    //         }
-    //     }
-    //
-    // 	string dbnames = NStr::Join(dblist, " ");
-    // 	m->SetDbname(dbnames);
-    //
-    //     m->SetDbtype(GetSequenceType() == CSeqDB::eProtein ? "Protein" : "Nucleotide" );
-    // 	m->SetDb_version(GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5?5:4);
-    // 	m->SetDescription(GetTitle());
-    // 	m->SetNumber_of_letters(total_length);
-    // 	m->SetNumber_of_sequences(num_seqs);
-    //     ...
-    // 	Int8 disk_bytes(0), cached_bytes(0);
-    // 	x_GetDBFilesMetaData(disk_bytes, cached_bytes, m->SetFiles(), user_path);
-    // 	m->SetBytes_total(disk_bytes);
-    // 	m->SetBytes_to_cache(cached_bytes);
-    //
-    // 	m->SetNumber_of_volumes(m_Impl->GetNumOfVols());
-    //
-    // 	if (GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5) {
-    // 		set<TTaxId> tax_ids;
-    // 		GetDBTaxIds(tax_ids);
-    // 		if((tax_ids.size() > 1) || ((tax_ids.size() == 1) && (0 != *tax_ids.begin()))){
-    // 			m->SetNumber_of_taxids(static_cast<int>(tax_ids.size()));
-    // 		}
-    // 	}
-    // ```
     // Without `-taxid` and `-taxid_map` every OID has tax id 0, so
     // `number-of-taxids` is not set. `GetDBTaxIds` reads the taxids of the tax id files,
     // which are the ones the writer gave them (`WriteDb::db_tax_ids`).
@@ -1536,11 +917,7 @@ fn open_new_database(
         description: located.title,
         number_of_letters: totals.iter().map(|(_, letters)| letters).sum(),
         // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.def:11-12
-        // ```
-        // number-of-letters._type = Uint8
-        // number-of-sequences._type = Int8
-        // ```
-        // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
+        // NCBI's `GetDBMetaData` counts in an `int num_seqs` (c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1707), which a
         // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
         number_of_sequences: totals.iter().map(|(oids, _)| i64::from(*oids)).sum(),
         last_updated,
@@ -1573,13 +950,6 @@ fn add_fasta(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
-// ```c++
-//     m_LogFile << "\n\nBuilding a new DB, current time: "
-//               << CTime(CTime::eCurrent).AsString() << endl;
-//
-//     m_LogFile << "New DB name:   " << output_dbname << endl;
-//     m_LogFile << "New DB title:  " << title << endl;
-// ```
 // Every line of the log ends with `endl`, which flushes the stream, so the
 // log and the messages of the standard error stream reach a common
 // destination (`2>&1`) in the order of the events. The standard output of
@@ -1613,70 +983,9 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-871
-// ```c++
-//     // Check if logfile is set in the args.
-//     m_LogFile = 0;
-//     if (!m_DisableArgDesc && argc > 1  &&  argv  &&  diag != eDS_User) {
-//         for (int i = 1;  i < argc;  i++) {
-//             ...
-//             if ( NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 m_LogFile = argv[i];
-//             } else if (NStr::StartsWith(argv[i], s_ArgLogFile)) {
-//                 const char *a = argv[i] + strlen(s_ArgLogFile);
-//                 if (*a == '=') {
-//                     m_LogFile = ++a;
-//                 }
-//             }
-//         }
-//     }
-//
-//     // Setup logging as soon as possible.
-//     // Setup for diagnostics
-//     try {
-//         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-620
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     ...
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//                    "File is not accessible", m_Path));
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7593-7601 (SetLogFile)
-// ```c++
-//         // Check special filenames
-//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
-//             // no output
-//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
-//         }
-//         else if (file_name == "-") {
-//             // output to stderr
-//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:776-792 (CArg_OutputFile::x_Open)
-// ```c++
-//     if (AsString() == "-") {
-// #if defined(NCBI_OS_MSWIN)
-//         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-// #endif
-//         m_Ios = &cout;
-//     } else if ( !AsString().empty() ) {
-//         if (!fstrm) {
-//             fstrm = new CNcbiOfstream;
-//         }
-//         if (fstrm) {
-//             if (x_CreatePath(m_CurrentFlags)) {
-//                 fstrm->open(AsString().c_str(),IOS_BASE::out | mode);
-//             }
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-//                 fstrm = NULL;
-// ```
 // With `-logfile F` makeblastdb sends its diagnostics (warnings, errors and the
 // final error message) to F from the start, and its log to F as well
 // (`AsOutputFile` with `fAppend`, makeblastdb.cpp:1199-1201): both append, in the
@@ -1727,11 +1036,6 @@ pub(crate) fn run_with(
         Some(name) => name,
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-    // ```c++
-    //     m_LogFile = & (args["logfile"].HasValue()
-    //                    ? args["logfile"].AsOutputFile()
-    //                    : cout);
-    // ```
     // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
     // owns the special names), and the log to `AsOutputFile` of the same name (`log_of`).
     let target = diag_target(Some(std::ffi::OsStr::new(name)));
@@ -1777,11 +1081,6 @@ pub(crate) fn run_with(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-// ```c++
-//     m_LogFile = & (args["logfile"].HasValue()
-//                    ? args["logfile"].AsOutputFile()
-//                    : cout);
-// ```
 /// The log of `-logfile name` (`AsOutputFile`, append) beside its diagnostics' `target`
 /// (`diag_target` of the same name): the target's open file itself; for a name whose
 /// diagnostics go nowhere (`/dev/null`), that file, opened into `opened`; none for the empty name
@@ -1815,14 +1114,8 @@ fn log_of<'a>(
 fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
-        Err(MakedbError::Build(WriteDbError::CreationBytes(message))) => {
-            let _ = err.write_all(b"BLAST Database creation error: ");
-            let _ = err.write_all(&message);
-            let _ = err.write_all(b"\n");
-            1
-        }
         Err(error) => {
-            let _ = writeln!(err, "{error}");
+            let _ = err.write_all(&[error.message().as_slice(), b"\n"].concat());
             error.exit_code()
         }
     };
@@ -1867,8 +1160,8 @@ mod tests {
     }
 
     // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
-    // (build_db.cpp:739-747, quoted at `check_registry_settings`), the library's argument
-    // rules are makeblastdb's (makeblastdb.cpp:322-329, quoted at `check_arguments`).
+    // (build_db.cpp:739-747, cited at `check_registry_settings`), the library's argument
+    // rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `check_arguments`).
     #[test]
     fn registry_and_argument_rules_of_parse_seqids() {
         use clap::Parser;
@@ -1962,7 +1255,7 @@ mod tests {
         assert!(check_environment(&with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")).is_ok());
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (quoted at
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at
     // `log_of`): the log appends to the `-logfile` file, where the diagnostics append too.
     /// The log of `-logfile F` is the diagnostics' open file itself, not a second handle of it
     /// (which the WASI targets cannot make): the two streams, both open at once, land in F in the

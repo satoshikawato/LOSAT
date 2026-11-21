@@ -136,6 +136,19 @@ fn masked(text: &str, d: &str) -> String {
     out
 }
 
+/// A time zone in which the hour of the date that the writer puts into the alias file is one
+/// digit ("5:07 AM"): the rows were frozen from NCBI at such an hour, and a cut at a fixed
+/// number of bytes lands one byte earlier in the file when the hour has two digits.
+fn one_digit_hour_zone() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let utc_hour = (now / 3600) % 24;
+    // POSIX `TZ` counts the offset west of Greenwich: `UTC-k` is k hours ahead of UTC.
+    let ahead = (5 + 12 - utc_hour % 12) % 12;
+    format!("UTC-{ahead}")
+}
+
 /// The date string that did not parse, in the message of `CTime` ("Time string '...' is too
 /// short"), masked: it holds the month's name of the day the fixture was frozen.
 fn mask_date(text: &str) -> String {
@@ -232,6 +245,7 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
         command
             .current_dir(&tmp)
             .env("HOME", &tmp)
+            .env("TZ", one_digit_hour_zone())
             .env_remove("BLASTDB")
             .arg("-c")
             .arg(format!(

@@ -7,7 +7,9 @@ use super::*;
 /// `Error: `; NCBI's `Error: (CStringException::eConvert) ` in LOSAT's words, compared with
 /// `losat_text` of NCBI's text).
 fn message(e: NcbiException) -> String {
-    let report = e.report_default_ex(106, 15, "Application's initialization failed");
+    let report =
+        String::from_utf8(e.report_default_ex(106, 15, "Application's initialization failed"))
+            .unwrap();
     let first = report.lines().next().unwrap();
     first.strip_prefix("Error: ").unwrap().to_string()
 }
@@ -35,7 +37,7 @@ fn conversions_fail_with_ncbis_messages() {
         message(string_to_int(b"x", 0).unwrap_err()),
         crate::wording::losat_text("Cannot convert string 'x' to Int8 (m_Pos = 0)")
     );
-    // ncbistr.cpp:876-918, 646-655 (quoted at `ncbi_str::string_to_uint8`, `string_to_uint`).
+    // ncbistr.cpp:876-918, 646-655 (cited at `ncbi_str::string_to_uint8`, `string_to_uint`).
     assert_eq!(string_to_uint(b"+42"), Ok(42));
     assert_eq!(
         message(string_to_uint(b"").unwrap_err()),
@@ -57,7 +59,7 @@ fn conversions_fail_with_ncbis_messages() {
             "Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)"
         )
     );
-    // ncbistr.cpp:798-873, 635-643 (quoted at `ncbi_str::string_to_int8`, `string_to_int`).
+    // ncbistr.cpp:798-873, 635-643 (cited at `ncbi_str::string_to_int8`, `string_to_int`).
     assert_eq!(string_to_int(b"-17", 0), Ok(-17));
     assert_eq!(
         message(string_to_int(b"12 ", 0).unwrap_err()),
@@ -75,7 +77,7 @@ fn conversions_fail_with_ncbis_messages() {
             "Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)"
         )
     );
-    // ncbistr.cpp:1312-1375, 1386-1403 (quoted at `ncbi_str::string_to_double`).
+    // ncbistr.cpp:1312-1375, 1386-1403 (cited at `ncbi_str::string_to_double`).
     assert_eq!(string_to_double(b"55.5"), Ok(55.5));
     assert_eq!(string_to_double(b"-1e3"), Ok(-1000.0));
     assert_eq!(
@@ -97,7 +99,7 @@ fn conversions_fail_with_ncbis_messages() {
     );
 }
 
-// basedata.cpp:120-140, 168-193 (quoted at `dom_acc_type` and `compute_pseudo_pssm_id`).
+// basedata.cpp:120-140, 168-193 (cited at `dom_acc_type` and `compute_pseudo_pssm_id`).
 #[test]
 fn source_signatures_and_pseudo_pssm_ids() {
     assert_eq!(dom_acc_type(b"cd00001"), 0);
@@ -176,7 +178,7 @@ fn fixture_copy(tag: &str) -> std::path::PathBuf {
     dir
 }
 
-// offl_sparcle_data.cpp:217-308 (quoted at `load_cdtrack`): the shapes of `cdtrack.txt` lines.
+// offl_sparcle_data.cpp:217-308 (cited at `load_cdtrack`): the shapes of `cdtrack.txt` lines.
 // Whole lines load; a line of the accession alone reads `buf[npos]` (as 0) and then throws
 // libstdc++'s `out_of_range` (oracle A4-1 case `ct3`); a line that ends after a field the loader
 // skips completes after reading `buf[npos]` (case `ct1`, refused), and a line that ends in a
@@ -269,7 +271,7 @@ fn pssm_ids_from_2_to_the_31_are_found() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// offl_sparcle_data.cpp:158-170 (quoted at `load_cddids`): an accession of 1 or 0 bytes sets no
+// offl_sparcle_data.cpp:158-170 (cited at `load_cddids`): an accession of 1 or 0 bytes sets no
 // flag (oracle A4-1 cases `acc1`, `acc0`: NCBI's output is that of the data without the row);
 // a blank line, or a lone CR, has the length `''` (cases `wsline`, `crline`).
 #[test]
@@ -295,7 +297,7 @@ fn short_accessions_and_blank_lines_load_as_ncbi() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// offl_sparcle_data.cpp:479 and :586 (quoted at `load_sites`): a site line whose coordinates are
+// offl_sparcle_data.cpp:479 and :586 (cited at `load_sites`): a site line whose coordinates are
 // its last field asks `reserve` for more than a vector holds (oracle A4-1 cases `annot10`,
 // `gen10`).
 #[test]

@@ -1,0 +1,179 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qx1 plus strand gene",
+            "query_len": 129,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sx1",
+                    "title": "sx1 plus strand gene"
+                  }
+                ],
+                "len": 218,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 72.5479,
+                    "score": 152,
+                    "evalue": 1.35579e-18,
+                    "identity": 31,
+                    "positive": 33,
+                    "query_from": 3,
+                    "query_to": 119,
+                    "query_frame": -2,
+                    "hit_from": 39,
+                    "hit_to": 155,
+                    "hit_frame": -1,
+                    "align_len": 39,
+                    "gaps": 0,
+                    "qseq": "QHMFVGQQ*FSQPFITAMGPSRIFGSSITFRLTANTPIK",
+                    "hseq": "QDIFAGQQ*FSQPFITAMGPSLIFGSSMTLRLTANTAFK",
+                    "midline": "Q +F GQQ*FSQPFITAMGPS IFGSS+T RLTANT  K"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 69.3404,
+                    "score": 145,
+                    "evalue": 1.25237e-17,
+                    "identity": 21,
+                    "positive": 27,
+                    "query_from": 13,
+                    "query_to": 120,
+                    "query_frame": -1,
+                    "hit_from": 49,
+                    "hit_to": 156,
+                    "hit_frame": -3,
+                    "align_len": 36,
+                    "gaps": 0,
+                    "qseq": "PTHVCWPAVIFPTFHNSHGAITDLWVVHYLPSDCEY",
+                    "hseq": "PRHICWPAIIFPAFHNRHGPVSDFWVIHDLTPDGEH",
+                    "midline": "P H+CWPA+IFP FHN HG ++D WV+H L  D E+"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 47.3464,
+                    "score": 97,
+                    "evalue": 5.23107e-11,
+                    "identity": 22,
+                    "positive": 26,
+                    "query_from": 2,
+                    "query_to": 121,
+                    "query_frame": -3,
+                    "hit_from": 38,
+                    "hit_to": 157,
+                    "hit_frame": -2,
+                    "align_len": 40,
+                    "gaps": 0,
+                    "qseq": "ANTCLLASSNFPNLS*QPWGHHGSLGRPLPSV*LRIRPLR",
+                    "hseq": "SKTYLLASNNFPSLS*PPWARL*FLGHP*PYA*RRTRPLK",
+                    "midline": "+ T LLAS+NFP+LS* PW     LG P P  * R RPL+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sx2",
+                    "title": "sx2 minus strand gene"
+                  }
+                ],
+                "len": 208,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 42.7643,
+                    "score": 87,
+                    "evalue": 1.25296e-09,
+                    "identity": 19,
+                    "positive": 23,
+                    "query_from": 12,
+                    "query_to": 101,
+                    "query_frame": -2,
+                    "hit_from": 117,
+                    "hit_to": 206,
+                    "hit_frame": 3,
+                    "align_len": 30,
+                    "gaps": 0,
+                    "qseq": "QQ*FSQPFITAMGPSRIFGSSITFRLTANT",
+                    "hseq": "KQ*LSHTFITAIGPSLILGSSITFRRSIHT",
+                    "midline": "+Q* S  FITA+GPS I GSSITFR + +T"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 29.9345,
+                    "score": 59,
+                    "evalue": 9.12225e-06,
+                    "identity": 12,
+                    "positive": 15,
+                    "query_from": 31,
+                    "query_to": 105,
+                    "query_frame": -1,
+                    "hit_from": 113,
+                    "hit_to": 187,
+                    "hit_frame": 2,
+                    "align_len": 25,
+                    "gaps": 0,
+                    "qseq": "WPAVIFPTFHNSHGAITDLWVVHYL",
+                    "hseq": "YETVTLPHFHNSHWTVSYLRVVHNL",
+                    "midline": "+  V  P FHNSH  ++ L VVH L"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 24.8942,
+                    "score": 48,
+                    "evalue": 0.00030018,
+                    "identity": 13,
+                    "positive": 14,
+                    "query_from": 32,
+                    "query_to": 100,
+                    "query_frame": -3,
+                    "hit_from": 118,
+                    "hit_to": 186,
+                    "hit_frame": 1,
+                    "align_len": 23,
+                    "gaps": 0,
+                    "qseq": "SSNFPNLS*QPWGHHGSLGRPLP",
+                    "hseq": "NSNSPTLS*QPLDRLLS*GRP*P",
+                    "midline": "+SN P LS*QP     S GRP P"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 12,
+              "eff_space": 4836,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+}

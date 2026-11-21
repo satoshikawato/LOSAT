@@ -7,12 +7,6 @@ use super::TblastnArgs;
 use anyhow::{bail, Result};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:114-117
-// ```c++
-// int CTblastnApp::Run(void)
-// {
-//     int status = BLAST_EXIT_SUCCESS;
-// 	const CArgs& args = GetArgs();
-// ```
 /// The words of a request (`extra_args`, then `-outfmt` and the `outfmt` parameter) as the CLI's
 /// parser reads them after `-query query -subject subject`: its defaults, value checks and errors.
 /// The inputs and the output are the call's, so `-query`, `-subject`, `-out`, `-db` and the
@@ -62,15 +56,6 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
-// ```c++
-//             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-//                	ERR_POST(Warning << "Query is Empty!");
-//                	return BLAST_EXIT_SUCCESS;
-//             }
-//             fasta.Reset(new CBlastFastaInputSource(
-//                                          m_CmdLineArgs->GetInputStream(),
-//                                          iconfig));
-// ```
 /// One search of `query` (protein FASTA) against `subject` (nucleotide FASTA) with `args`
 /// (`parse_args`), as `losat tblastn` searches the files `query_label` and `subject_label` with
 /// the same bytes, without NCBI's registry (`.ncbirc`, `tblastn.ini`, `NCBI_CONFIG__*`); the other

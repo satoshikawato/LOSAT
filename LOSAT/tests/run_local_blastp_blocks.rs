@@ -16,15 +16,6 @@
 //! have no spelling in the API, so this file no longer reaches them.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
-//! ```c++
-//!         formatter.PrintProlog();
-//!         ...
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             ...
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!         ...
-//!         formatter.PrintEpilog(opt);
-//! ```
 
 mod run_local_support;
 

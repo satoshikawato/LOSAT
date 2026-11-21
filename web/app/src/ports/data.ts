@@ -3,7 +3,7 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
-import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, MessagePlace, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, OutputPlace, ProgramId, RecordKey, RunOutput } from 'losat/domain';
 import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
@@ -81,7 +81,15 @@ export interface ResultSetRef {
 /** An output that a run could not write, and where its error is (`ResultSetRef.failed`). */
 export interface FailedOutput {
   readonly output: RunOutput;
-  readonly error: MessagePlace;
+  readonly error: OutputPlace;
+}
+
+/** What `RunStore.keepFailedRun` keeps of a failed run: its outputs, and its warnings. */
+export interface KeptRun {
+  /** The outputs that the run wrote before its error; undefined where no kept output has bytes, and the run is dropped. */
+  readonly result?: ResultSetRef;
+  /** What the run wrote to the CLI's standard error before its error; '' where it wrote nothing. */
+  readonly diagnostics: string;
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */
@@ -111,13 +119,16 @@ export interface RunStore {
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
   /**
-   * Drops a staged run that the engine failed after it began to write (its rejection says so:
-   * `runOutputFailedOf`), once its `fail` arrived (losat/ports run-output.ts), and resolves to what
-   * the run wrote to stream 3 before its error (its warnings, UTF-8, as `readDiagnostics` reads a
-   * committed run's; docs/web/abi_v2.md §5). Resolves to '' where its output arrived incomplete or
-   * could not be stored, and for a run that is not staged.
+   * Keeps a staged run that the engine failed after it began to write (its rejection says so: `runOutputFailedOf`),
+   * once its `fail` arrived (losat/ports run-output.ts): the outputs that the engine did not discard, the bytes that the
+   * CLI leaves in the output of the argv before its error, are committed as a completed run's are, to be read and
+   * exported (`readOutput`, `readOutputRange`), and the warnings that the run wrote to stream 3 before its error come
+   * back (UTF-8, as `readDiagnostics` reads a committed run's; docs/web/abi_v2.md §5). The run has no HSP records. Line
+   * WQA's sweep, D15, 2026-11-20 (before, a failed run was dropped and only its warnings were read: D3, 2026-11-19).
+   * Resolves to undefined, and drops the run, where its output arrived incomplete or could not be stored, and for a run
+   * that is not staged.
    */
-  discardFailedRun(runId: string): Promise<string>;
+  keepFailedRun(runId: string): Promise<KeptRun | undefined>;
   readOutput(runId: string, output: RunOutput): Promise<Uint8Array>;
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
   readOutputRange(runId: string, output: RunOutput, start: number, end: number): Promise<Uint8Array>;

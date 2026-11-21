@@ -5,29 +5,7 @@
 //! loop declines the call.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
-//! ```c
-//!             status = BLAST_GreedyGappedAlignment(
-//!                          query_tmp.sequence, subject->sequence,
-//!                          query_tmp.length, subject->length,
-//!                          gap_align, score_params,
-//!                          init_hsp->offsets.qs_offsets.q_off,
-//!                          init_hsp->offsets.qs_offsets.s_off,
-//!                          (Boolean) TRUE, FALSE, fence_hit);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2786-2794,2833-2834
-//! ```c
-//!    if (!compressed_subject) {
-//!       s = subject + s_off;
-//!       rem = 4; /* Special value to indicate that sequence is already
-//!                   uncompressed */
-//!    } else {
-//!       s = subject + s_off/4;
-//!       rem = s_off % 4;
-//!    }
-//! ...
-//!    if (compressed_subject)
-//!       rem = 0;
-//! ```
 //! NCBI runs the preliminary greedy alignment on the compressed subject (`rem` = `s_off % 4`
 //! to the right, 0 to the left) and the traceback on the uncompressed one (`rem` = 4). LOSAT
 //! gives the preliminary call the uncompressed form too, and has no packed form of the call
@@ -42,12 +20,6 @@
 //! which is false here.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520
-//! ```c
-//!           if (fence_hit) {
-//!               hsp_list->hsp_array[index] = Blast_HSPFree(hsp_list->hsp_array[index]);
-//!               break;
-//!           }
-//! ```
 //! A call widens only the bases around its ungapped hit (`X_WINDOW_MARGIN` on each side, into
 //! the worker's `GreedyAlignScratch::x_window`), with NCBI's fence sentry before and after them
 //! where the window does not reach an end of the chunk, as NCBI's partial fetch places it
@@ -112,17 +84,7 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
-/// ```c
-/// #define NCBI2NA_MASK 0x03
-/// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:365-368
-/// ```c
-///             while (seq1_index < len1 && seq2_index < len2 &&
-///                 seq1[seq1_index] ==
-///                 NCBI2NA_UNPACK_BASE(seq2[(seq2_index + rem) / 4],
-///                                      3 - (seq2_index + rem) % 4)) {
-/// ```
 /// Byte `i` of the result is `NCBI2NA_UNPACK_BASE(packed[i / 4], 3 - i % 4)` for the first
 /// `len` bases (the remainder count in the last packed byte is not a base and is not copied).
 pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
@@ -143,13 +105,6 @@ pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-/// ```c
-///         SBlastSequence compressed_seq =
-///             subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
-///                                       eNa_strand_plus, eNoSentinels);
-///         BlastSeqBlkSetCompressedSequence(subj,
-///                                   compressed_seq.data.release());
-/// ```
 /// One subject's packed sequence for the preliminary greedy calls: windows of it (`score_only`)
 /// and the one-byte copy of all of it, made on the first call that meets a fence and shared by
 /// every chunk and worker of that subject. Off unless this is the preliminary stage of a search
@@ -323,18 +278,6 @@ impl<'a> XPrelimSubject<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2794
-/// ```c
-/// BLAST_GreedyGappedAlignment(const Uint1* query, const Uint1* subject,
-///    Int4 query_length, Int4 subject_length, BlastGapAlignStruct* gap_align,
-///    const BlastScoringParameters* score_params,
-///    Int4 q_off, Int4 s_off, Boolean compressed_subject, Boolean do_traceback,
-///    Boolean * fence_hit)
-/// ...
-///    if (!compressed_subject) {
-///       s = subject + s_off;
-///       rem = 4; /* Special value to indicate that sequence is already
-///                   uncompressed */
-/// ```
 /// The preliminary greedy alignment (the call at blast_gapalign.c:4019-4025), on the one-byte
 /// copy of the chunk (`XPrelimSubject::chunk`) with `compressed_subject = false` (module doc:
 /// same result as the packed call). LOSAT has no packed form of this call. `score_only` runs it
@@ -414,10 +357,6 @@ mod tests {
     };
 
     /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
-    /// ```c
-    /// #define NCBI2NA_MASK 0x03
-    /// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
-    /// ```
     /// The one-byte copy of a packed subject (IUPAC letters resolved as the engine packs them)
     /// holds the resolved base at every position, and `XPrelimSubject::chunk` returns the tail
     /// that starts at a multiple of 4.
@@ -451,12 +390,6 @@ mod tests {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520
-    /// ```c
-    ///           if (fence_hit) {
-    ///               hsp_list->hsp_array[index] = Blast_HSPFree(hsp_list->hsp_array[index]);
-    ///               break;
-    ///           }
-    /// ```
     /// A sequence of score-only calls through `XPrelimSubject::score_only` (windows kept across
     /// calls, the whole copy after a fence) gives each call's result on the whole copy and leaves
     /// `max_dist` where the whole-copy calls leave it: hits of a query made of mutated pieces of

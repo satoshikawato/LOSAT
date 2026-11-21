@@ -182,17 +182,6 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:71-79
-    // ```c++
-    // TIndx CSeqDBRawFile::ReadSwapped(CSeqDBFileMemMap & lease,
-    //                                  TIndx            offset,
-    //                                  Uint4          * value) const
-    //
-    // {
-    //     *value = SeqDB_GetStdOrd((Uint4 *) lease.GetFileDataPtr(m_FileName,offset));
-    //
-    //     return offset + sizeof(*value);
-    // }
-    // ```
     fn be_u32(&mut self) -> Result<u32, ReadFault> {
         let mut bytes = [0u8; 4];
         self.fill(&mut bytes)?;
@@ -200,17 +189,6 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:81-89
-    // ```c++
-    // TIndx CSeqDBRawFile::ReadSwapped(CSeqDBFileMemMap & lease,
-    //                                  TIndx            offset,
-    //                                  Uint8          * value) const
-    //
-    // {
-    //     *value = SeqDB_GetBroken((Int8 *) lease.GetFileDataPtr(m_FileName,offset));
-    //
-    //     return offset + sizeof(*value);
-    // }
-    // ```
     // `SeqDB_GetBroken` reads the one little-endian field of the format.
     fn broken_u64(&mut self) -> Result<u64, ReadFault> {
         let mut raw = [0u8; 8];
@@ -219,22 +197,6 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:91-104
-    // ```c++
-    // TIndx CSeqDBRawFile::ReadSwapped(CSeqDBFileMemMap & lease,
-    //                                  TIndx            offset,
-    //                                  string         * value) const
-    // {
-    //     Uint4 len = 0;
-    //
-    //     len = SeqDB_GetStdOrd((Int4 *) lease.GetFileDataPtr(m_FileName,offset));
-    //
-    //     offset += sizeof(len);
-    //
-    //     value->assign(lease.GetFileDataPtr(offset), (int) len);
-    //
-    //     return offset + len;
-    // }
-    // ```
     fn string(&mut self) -> Result<Vec<u8>, ReadFault> {
         let len = self.be_u32()? as usize;
         // The length is checked before the buffer is allocated.
@@ -347,59 +309,6 @@ const CHECK_CHUNK_ENTRIES: usize = 1 << 18;
 const X_KEEP_CHECK_CHUNK_ENTRIES: usize = 1 << 14;
 
 impl IndexFile {
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:175-235
-    // ```c++
-    //     offset = x_ReadSwapped(m_Lease, offset, & f_format_version);
-    //     ...
-    //     	 bool dbv5 = ( 5 == f_format_version );
-    //         if (!dbv5 && (f_format_version != 4)) {
-    //             NCBI_THROW(CSeqDBException,
-    //                        eFileErr,
-    //                        "Error: Not a valid version 4 or 5 database.");
-    //         }
-    //
-    //         offset = x_ReadSwapped(m_Lease, offset, & f_db_seqtype);
-    //         if (dbv5) {
-    //         	offset = x_ReadSwapped(m_Lease, offset, & m_Volume);
-    //         }
-    //
-    //         offset = x_ReadSwapped(m_Lease, offset, & m_Title);
-    //         if (dbv5) {
-    //             offset = x_ReadSwapped(m_Lease, offset, & m_LMDBFile);
-    //        }
-    //
-    //         offset = x_ReadSwapped(m_Lease, offset, & m_Date);
-    //         ...
-    //         offset = x_ReadSwapped(m_Lease, offset, & m_NumOIDs);
-    //         ...
-    //         offset = x_ReadSwapped(m_Lease, offset, & m_VolLen);
-    //         ...
-    //         offset = x_ReadSwapped(m_Lease, offset, & m_MaxLen);
-    //
-    //         TIndx region_bytes = 4 * (m_NumOIDs + 1);
-    //
-    //         off1   = offset;
-    //         off2   = off1 + region_bytes;
-    //         off3   = off2 + region_bytes;
-    //         offend = off3 + region_bytes;
-    //     ...
-    //     char db_seqtype = ((f_db_seqtype == 1) ? 'p' : 'n');
-    //
-    //     if (db_seqtype != x_GetSeqType()) {
-    //         NCBI_THROW(CSeqDBException,
-    //                    eFileErr,
-    //                    "Error: requested sequence type does not match DB.");
-    //     }
-    //
-    //     m_OffHdr = off1; m_EndHdr = off2;
-    //     m_OffSeq = off2; m_EndSeq = off3;
-    //
-    //     if (db_seqtype == 'n') {
-    //         m_OffAmb = off3; m_EndAmb = offend;
-    //     } else {
-    //         m_OffAmb = m_EndAmb = 0;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:134-236
     // The constructor reads the values through the mapped file and checks nothing but the
     // version and the type. A file that ends before its header does (a write that failed)
@@ -499,6 +408,7 @@ impl IndexFile {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:175-235
     /// The values before the arrays and where the arrays start; the arrays' lengths are
     /// checked against the file's.
     fn parse_fixed<S: Source + ?Sized>(
@@ -614,7 +524,7 @@ impl IndexFile {
     }
 
     // NCBI maps the index file and reads an offset where it needs one
-    // (`x_GetHdr()[oid]`, quoted at `header_range`). LOSAT reads the fixed part
+    // (`x_GetHdr()[oid]`, cited at `header_range`). LOSAT reads the fixed part
     // when it opens the file and then the ranges of the arrays it needs with
     // positioned reads (the file stays open), so the arrays take no memory.
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): opens the index file `file` as `seqtype`, the arrays left
@@ -907,33 +817,12 @@ impl IndexFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:664-669
-    // ```c++
-    // void
-    // CSeqDBIdxFile::GetHdrStartEnd(int oid, TIndx & start, TIndx & end) const
-    // {
-    //     start = SeqDB_GetStdOrd(& x_GetHdr()[oid]);
-    //     end   = SeqDB_GetStdOrd(& x_GetHdr()[oid+1]);
-    // }
-    // ```
     /// Byte range of the header (`Blast-def-line-set`) of `oid` in the header file.
     pub fn header_range(&self, oid: u32) -> Result<(u64, u64), SeqDbError> {
         self.pair(Region::Header, oid)
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:671-681
-    // ```c++
-    // void
-    // CSeqDBIdxFile::GetSeqStartEnd(int oid, TIndx & start, TIndx & end) const
-    // {
-    //     start = SeqDB_GetStdOrd(& x_GetSeq()[oid]);
-    //
-    //     if ('p' == x_GetSeqType()) {
-    //         end = SeqDB_GetStdOrd(& x_GetSeq()[oid+1]);
-    //     } else {
-    //         end = SeqDB_GetStdOrd(& x_GetAmb()[oid]);
-    //     }
-    // }
-    // ```
     /// Byte range of the sequence data of `oid` in the sequence file. For a
     /// protein the range includes the NUL byte that follows the residues; for
     /// a nucleotide it ends where the ambiguity data start.
@@ -949,20 +838,6 @@ impl IndexFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:651-662
-    // ```c++
-    // bool
-    // CSeqDBIdxFile::GetAmbStartEnd(int oid, TIndx & start, TIndx & end) const
-    // {
-    //     if ('n' == x_GetSeqType()) {
-    //         start = SeqDB_GetStdOrd(& x_GetAmb()[oid]);
-    //         end   = SeqDB_GetStdOrd(& x_GetSeq()[oid+1]);
-    //
-    //         return (start <= end);
-    //     }
-    //
-    //     return false;
-    // }
-    // ```
     /// Byte range of the ambiguity data of `oid` (nucleotide volumes only).
     #[cfg(test)]
     pub fn ambiguity_range(&self, oid: u32) -> Result<Option<(u64, u64)>, SeqDbError> {

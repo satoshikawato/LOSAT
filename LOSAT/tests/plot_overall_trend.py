@@ -6,9 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-# NCBI reference: c++/src/objtools/align_format/format_flags.cpp:38-40
-# "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-# "evalue bitscore";
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 # Compare these unchanged fields on a common cohort of query/subject pairs.
 from comparison_data import CUSTOM_PALETTE, HUE_ORDER, PLOT_DIR, comparison_cases, load_case, require_plot_run
 
@@ -137,7 +135,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     require_plot_run()
     main()

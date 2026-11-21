@@ -48,28 +48,14 @@ impl fmt::Display for DateError {
 impl std::error::Error for DateError {}
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1595
-// ```c++
-// const char* CSeqDB::kBlastDbDateFormat = "b d, Y  H:m P";
-// ```
 const BLAST_DB_DATE_FORMAT: &str = "b d, Y  H:m P";
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:102-105
-// ```c++
-// static const char* kMonthAbbr[12] = {
-//     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-//     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-// };
-// ```
 const MONTH_ABBR: [&[u8; 3]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:97-99
-// ```c++
-// static int s_DaysInMonth[12] = {
-//     31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-// };
-// ```
 const DAYS_IN_MONTH: [u32; 12] = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// How `CTime::CTime(const string&, const CTimeFormat&)` fails for the BLAST database format.
@@ -77,13 +63,7 @@ const DAYS_IN_MONTH: [u32; 12] = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 /// The two exception classes derive from `CCoreException` separately, so
 /// `catch(CStringException &)` in `CSeqDBImpl::GetDate` catches only the first.
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:4499
-// ```c++
-// class NCBI_XNCBI_EXPORT CStringException : public CParseTemplException<CCoreException>
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:2074
-// ```c++
-// class NCBI_XNCBI_EXPORT CTimeException : public CCoreException
-// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParseFailure {
     /// `NStr::StringToLong` threw this `CStringException`: a number has no digit.
@@ -109,12 +89,6 @@ impl ParseFailure {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:537-540
-// ```c++
-//     enum EHourFormat{
-//         e24, eAM, ePM
-//     };
-//     EHourFormat hour_format = e24;
-// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HourFormat {
     E24,
@@ -127,13 +101,6 @@ enum HourFormat {
 /// Seconds and nanoseconds stay zero, and the time zone is `eLocal` (the default of the
 /// constructor) for every time built from this format, which has no `Z`, `z` or `o` symbol.
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:1248-1252
-// ```c++
-//         unsigned int  year        NCBI_TIME_BITFIELD(12);  // 4 digits
-//         unsigned char month       NCBI_TIME_BITFIELD( 4);  // 0..12
-//         unsigned char day         NCBI_TIME_BITFIELD( 5);  // 0..31
-//         unsigned char hour        NCBI_TIME_BITFIELD( 5);  // 0..23
-//         unsigned char min         NCBI_TIME_BITFIELD( 6);  // 0..59
-// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Time {
     year: u32,
@@ -145,13 +112,6 @@ struct Time {
 
 impl Time {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:2211-2215
-    // ```c++
-    // bool CTime::IsLeap(void) const
-    // {
-    //     int year = Year();
-    //     return (year % 4 == 0  &&  year % 100 != 0)  ||  year % 400 == 0;
-    // }
-    // ```
     fn is_leap(&self) -> bool {
         (self.year.is_multiple_of(4) && !self.year.is_multiple_of(100))
             || self.year.is_multiple_of(400)
@@ -165,19 +125,6 @@ impl Time {
     /// (an unmatched month name stops the format loop before validation); it is kept because
     /// it guards the table index.
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:2023-2033
-    // ```c++
-    //     if (Year() < 1583) // first Gregorian date February 24, 1582
-    //         return false;
-    //     if (Month()  < 1  ||  Month()  > 12)
-    //         return false;
-    //     if (Month() == 2) {
-    //         if (Day() < 1 ||  Day() > (IsLeap() ? 29 : 28))
-    //             return false;
-    //     } else {
-    //         if (Day() < 1 ||  Day() > s_DaysInMonth[Month() - 1])
-    //             return false;
-    //     }
-    // ```
     fn is_valid(&self) -> bool {
         if self.year < 1583 {
             return false;
@@ -202,34 +149,6 @@ impl Time {
     /// are zero on both sides. An empty time (all fields zero, from an empty string) is
     /// compared by the same fields and is never later than a valid one.
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:2137-2162
-    // ```c++
-    // bool CTime::operator> (const CTime& t) const
-    // {
-    //     CTime tmp(t);
-    //     if ( !tmp.IsEmptyDate() ) {
-    //         tmp.ToTime(GetTimeZone());
-    //     }
-    //     if (Year()   > tmp.Year())
-    //         return true;
-    //     if (Year()   < tmp.Year())
-    //         return false;
-    //     if (Month()  > tmp.Month())
-    //         return true;
-    //     if (Month()  < tmp.Month())
-    //         return false;
-    //     if (Day()    > tmp.Day())
-    //         return true;
-    //     if (Day()    < tmp.Day())
-    //         return false;
-    //     if (Hour()   > tmp.Hour())
-    //         return true;
-    //     if (Hour()   < tmp.Hour())
-    //         return false;
-    //     if (Minute() > tmp.Minute())
-    //         return true;
-    //     if (Minute() < tmp.Minute())
-    //         return false;
-    // ```
     fn is_later_than(&self, t: &Time) -> bool {
         (self.year, self.month, self.day, self.hour, self.min)
             > (t.year, t.month, t.day, t.hour, t.min)
@@ -246,36 +165,8 @@ fn byte_at(s: &[u8], pos: usize) -> u8 {
 /// With no digit, `value_str` is empty, `StringToInt8` finds `pos == pos0`, and it throws
 /// `CStringException` because the flags (0) lack `fConvErr_NoThrow`.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:742-746
-// ```c++
-//         for ( ; len  &&  *sss  &&  isdigit((unsigned char)(*sss));  --len) {
-//             *s++ = *sss++;
-//         }
-//         *s = '\0';
-//         long value = NStr::StringToLong(value_str);
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:572-575,860-862
-// ```c++
-//         if ( !(flags & NStr::fConvErr_NoThrow) ) {                    \
-//             err_guard.Throw();                                        \
-//             NCBI_THROW2(CStringException, eConvert,                   \
-//                         err_guard.Message(str, #to_type, msg), pos);  \
-// ...
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:658-666
-// ```c++
-// long NStr::StringToLong(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Long  ||  value > kMax_Long ) {
-//         S2N_CONVERT_ERROR(long, "overflow", ERANGE, 0);
-//     }
-//     return (long) value;
-// }
-// ```
 // `StringToInt8` with flags 0 is `ncbi_str::string_to_int8`; 4 digits at most do not overflow
 // a 64-bit `long`.
 fn read_number(s: &[u8], sss: &mut usize, len: usize) -> Result<i64, ParseFailure> {
@@ -287,16 +178,6 @@ fn read_number(s: &[u8], sss: &mut usize, len: usize) -> Result<i64, ParseFailur
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:149-156
-// ```c++
-// #define CHECK_RANGE2(value, what, min, max, err_action) \
-//     if ( value < min  ||  value > max ) {  \
-//         if ( err_action == eErr_Throw ) { \
-//             NCBI_THROW(CTimeException, eArgument, \
-//                        what " value '" + \
-//                        NStr::Int8ToString((Int8)value) + "' is out of range"); \
-//         } else { return false; } \
-//     }
-// ```
 // `line` is the line of the macro's use in `x_Init` (751 for the year, 772, 782, 788:
 // ncbitime.cpp).
 fn check_range(value: i64, what: &str, min: i64, max: i64, line: u32) -> Result<(), ParseFailure> {
@@ -318,59 +199,11 @@ fn check_range(value: i64, what: &str, min: i64, max: i64, line: u32) -> Result<
 /// format is accepted. `x_Init` runs with `err_action = eErr_Throw`, and its own
 /// `catch (const CException&)` rethrows in that mode.
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:209,472-474,1199-1200
-// ```c++
-//     CTimeFormat(const char* fmt, TFlags flags = fDefault);
-// ...
-//     explicit CTime(const string& str, const CTimeFormat& fmt = kEmptyStr,
-//                    ETimeZone tz = eLocal,
-//                    ETimeZonePrecision tzp = eTZPrecisionDefault);
-// ...
-//     bool x_Init(const string& str, const CTimeFormat& fmt,
-//                 EErrAction err_action = eErr_Throw);
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:361-371
-// ```c++
-//     if ((flags & f) == 0) {
-//         flags |= fFormat_Simple;  // default
-//     }
-// ...
-//     if ((flags & (fMatch_Strict | fMatch_Weak)) == 0) {
-//         flags |= fMatch_Strict;  // default
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1017-1029
-// ```c++
-//     memset(&m_Data, 0, sizeof(m_Data));
-// ...
-//     if ( !m_Data.tz ) {
-//         m_Data.tz = tz;
-//     }
-//     m_Data.tzprec = tzp;
-//     if (fmt.IsEmpty()) {
-//         x_Init(str, GetFormat());
-//     } else {
-//         x_Init(str, fmt);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:941-947
-// ```c++
-//     } catch (const CException&) {
-//         if (err_action == eErr_Throw) {
-//             throw;
-//         } else {
-//             return false;
-//         }
-//     }
-// ```
 fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:509-515
-    // ```c++
-    //     Clear();
-    // ...
-    //     if ( str.empty() ) {
-    //         return true;
-    //     }
-    // ```
     let mut time = Time::default();
     if text.is_empty() {
         return Ok(time);
@@ -388,34 +221,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     let format_matched = 'format: {
         for &f in fmt.as_bytes() {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:545,549-578
-            // ```c++
-            //     bool is_ignore_spaces = ((format.GetFlags() & CTimeFormat::fMatch_IgnoreSpaces) != 0);
-            // ...
-            //     for (fff = fmt.c_str();  *fff != '\0';  ++fff) {
-            // ...
-            //             if (isspace((unsigned char)(*fff))) {
-            //                 is_format_space = true;
-            //                 continue;
-            //             }
-            //             if (is_ignore_spaces) {
-            // ...
-            //             } else {
-            //                 // match spaces
-            //                 if (isspace((unsigned char)(*sss))) {
-            //                     if (is_format_space) {
-            //                         // Skip space symbols in time string
-            //                         SKIP_SPACES(sss);
-            //                     } else {
-            //                         break;  // error: non-matching spaces
-            //                     }
-            //                 } else {
-            //                     if (is_format_space) {
-            //                         break;  // error: non-matching spaces
-            //                     }
-            //                 }
-            //                 is_format_space = false;
-            //             }
-            // ```
             // `x_Init` calls the C library's `isspace` (`ncbi_str::is_space`): the NCBI C++
             // Toolkit code that BLAST+ runs does not call `setlocale`, so the "C" locale is in
             // effect.
@@ -426,10 +231,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
             if is_space(byte_at(s, sss)) {
                 if is_format_space {
                     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:460-461
-                    // ```c++
-                    // #define SKIP_SPACES(s) \
-                    //     while (isspace((unsigned char)(*s))) ++s;
-                    // ```
                     while is_space(byte_at(s, sss)) {
                         sss += 1;
                     }
@@ -445,25 +246,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // A name that matches none of the twelve leaves the month at 0 and consumes
                 // nothing; the next format symbol then stops the loop on non-matching spaces.
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:617-635
-                // ```c++
-                //         if (*fff == 'b'  ||  *fff == 'B') {
-                //             const char** name;
-                //             if (*fff == 'b') {
-                //                 name = kMonthAbbr;
-                // ...
-                //             for (unsigned char i = 0;  i < 12;  ++i) {
-                //                 size_t namelen = strlen(*name);
-                //                 if (NStr::strncasecmp(sss, *name, namelen) == 0) {
-                //                     sss += namelen;
-                //                     SET_MONTH(i + 1);
-                //                     break;
-                //                 }
-                //                 ++name;
-                //             }
-                //             is_month_present = true;
-                //             continue;
-                //         }
-                // ```
                 b'b' => {
                     for (i, name) in MONTH_ABBR.iter().enumerate() {
                         let namelen = name.len();
@@ -480,18 +262,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
 
                 // Text that is neither AM nor PM consumes nothing and leaves `e24`.
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:721-730
-                // ```c++
-                //         if (*fff == 'p'  ||  *fff == 'P') {
-                //             if (NStr::strncasecmp(sss, "AM", 2) == 0) {
-                //                 hour_format = eAM;
-                //                 sss += 2;
-                //             } else if (NStr::strncasecmp(sss, "PM", 2) == 0) {
-                //                 hour_format = ePM;
-                //                 sss += 2;
-                //             }
-                //             continue;
-                //         }
-                // ```
                 b'P' => {
                     let word = s.get(sss..sss + 2);
                     if word.is_some_and(|w| w.eq_ignore_ascii_case(b"AM")) {
@@ -506,22 +276,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // `Y` reads up to four digits. The 12-bit field keeps `value & 0xFFF`, so a
                 // year of 4096 or more is stored reduced (5679 becomes 1583).
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:735-737,750-754
-                // ```c++
-                //         size_t len = 2;
-                //         switch (*fff) {
-                //             case 'Y': len = 4; break;
-                // ...
-                //         case 'Y':
-                //             CHECK_RANGE2_YEAR(value, err_action);
-                //             SET_YEAR(value);
-                //             is_year_present = true;
-                //             break;
-                // ```
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:166,177
-                // ```c++
-                // #define CHECK_RANGE2_YEAR(value, err)   CHECK_RANGE2(value, "Year", 1583, kMax_Int, err)
-                // #define SET_YEAR(value)  m_Data.year  = static_cast<unsigned int>((value) & 0xFFF)
-                // ```
                 b'Y' => {
                     let value = read_number(s, &mut sss, 4)?;
                     check_range(value, "Year", 1583, i64::from(i32::MAX), 751)?;
@@ -529,19 +284,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 }
 
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:770-775
-                // ```c++
-                //         case 'D':
-                //         case 'd':
-                //             CHECK_RANGE2_DAY(value, err_action);
-                //             SET_DAY(value);
-                //             is_day_present = true;
-                //             break;
-                // ```
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:168,179
-                // ```c++
-                // #define CHECK_RANGE2_DAY(value, err)    CHECK_RANGE2(value, "Day", 1, 31, err)
-                // #define SET_DAY(value)   m_Data.day   = static_cast<unsigned char>((value) & 0x1F)
-                // ```
                 b'd' => {
                     let value = read_number(s, &mut sss, 2)?;
                     check_range(value, "Day", 1, 31, 772)?;
@@ -549,19 +292,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 }
 
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:781-786
-                // ```c++
-                //         case 'H':
-                //             CHECK_RANGE2_HOUR12(value, err_action);
-                //             SET_HOUR(value % 12);
-                //             is_12hour = true;
-                //             is_time_present = true;
-                //             break;
-                // ```
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:170,180
-                // ```c++
-                // #define CHECK_RANGE2_HOUR12(value, err) CHECK_RANGE2(value, "Hour", 0, 12, err)
-                // #define SET_HOUR(value)  m_Data.hour  = static_cast<unsigned char>((value) & 0x1F)
-                // ```
                 b'H' => {
                     let value = read_number(s, &mut sss, 2)?;
                     check_range(value, "Hour", 0, 12, 782)?;
@@ -570,18 +301,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 }
 
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:787-791
-                // ```c++
-                //         case 'm':
-                //             CHECK_RANGE2_MIN(value, err_action);
-                //             SET_MIN(value);
-                //             is_time_present = true;
-                //             break;
-                // ```
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:171,181
-                // ```c++
-                // #define CHECK_RANGE2_MIN(value, err)    CHECK_RANGE2(value, "Minute", 0, 59, err)
-                // #define SET_MIN(value)   m_Data.min   = static_cast<unsigned char>((value) & 0x3F)
-                // ```
                 b'm' => {
                     let value = read_number(s, &mut sss, 2)?;
                     check_range(value, "Minute", 0, 59, 788)?;
@@ -591,18 +311,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
                 // `,` and `:`, the characters of the format that are neither spaces nor in
                 // kFormatSymbolsTime.
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:129,604-611
-                // ```c++
-                // static const char* kFormatSymbolsTime = "yYMbBDdhHmsSlrgGzZwWpPo";
-                // ...
-                //             if (strchr(kFormatSymbolsTime, *fff) == 0) {
-                //                 // Match non-format symbols
-                //                 if (*fff == *sss) {
-                //                     ++sss;
-                //                     continue;
-                //                 }
-                //                 break;  // error: non-matching symbols
-                //             }
-                // ```
                 _ => {
                     if f == byte_at(s, sss) {
                         sss += 1;
@@ -616,11 +324,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     };
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:849-851
-    // ```c++
-    //     if (is_12hour  &&  hour_format == ePM) {
-    //         SET_HOUR(m_Data.hour + 12);
-    //     }
-    // ```
     if is_12hour && hour_format == HourFormat::Pm {
         time.hour = (time.hour + 12) & 0x1F;
     }
@@ -631,22 +334,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     // a white-space character at `sss` and `is_format_space` true. Trailing white space is
     // therefore "too long".
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:857-859,863-872
-    // ```c++
-    //         if (isspace((unsigned char)(*sss))  &&  is_format_space) {
-    //             SKIP_SPACES(sss);
-    //         }
-    // ...
-    //     if (*fff != '\0'  &&
-    //         !(format.GetFlags() & CTimeFormat::fMatch_ShortTime)) {
-    //         X_INIT_ERROR(eFormat, "Time string '" + str +
-    //                               "' is too short for time format '" + fmt + "'");
-    //     }
-    //     if (*sss != '\0'  &&
-    //         !(format.GetFlags() & CTimeFormat::fMatch_ShortFormat)) {
-    //         X_INIT_ERROR(eFormat, "Time string '" + str +
-    //                               "' is too long for time format '" + fmt + "'");
-    //     }
-    // ```
     if !format_matched {
         return Err(ParseFailure::time(
             "CTimeException::eFormat",
@@ -665,19 +352,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     // A completed loop has set year, month, day and time, so `ptcache` is 2222 and no field
     // is taken from the current time.
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:880-884
-    // ```c++
-    //     int ptcache = 0;
-    //     ptcache += (is_year_present  ? 2000 : 1000);
-    //     ptcache += (is_month_present ? 200 : 100);
-    //     ptcache += (is_day_present   ? 20 : 10);
-    //     ptcache += (is_time_present  ? 2 : 1);
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:932-934
-    // ```c++
-    //     if ( !IsValid() ) {
-    //         X_INIT_ERROR(eConvert, "Unable to convert string '" + str + "' to CTime");
-    //     }
-    // ```
     if !time.is_valid() {
         return Err(ParseFailure::time(
             "CTimeException::eConvert",
@@ -704,32 +379,6 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
 ///
 /// NCBI also caches the result in `m_Date`; that is left to the caller.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1010-1035
-// ```c++
-//     string date;
-//
-//     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
-//         string d = x_FixString( m_VolSet.GetVol(i)->GetDate() );
-//
-//         if (date.empty()) {
-//             date = d;
-//         } else if (d != date) {
-//             try {
-//                 CTime t1(date, CSeqDB::kBlastDbDateFormat);
-//                 CTime t2(d, CSeqDB::kBlastDbDateFormat);
-//
-//                 if (t2 > t1) {
-//                     date.swap(d);
-//                 }
-//             }
-//             catch(CStringException &) {
-//                 // Here I think it is better to pick any valid date
-//                 // than to propagate a string exception.
-//             }
-//         }
-//     }
-// ...
-//     return date;
-// ```
 pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
     let mut date = String::new();
 
@@ -743,7 +392,7 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
                 Err(ParseFailure::TimeException(exception)) => {
                     return Err(DateError {
                         date,
-                        reason: exception.get_msg().to_owned(),
+                        reason: String::from_utf8_lossy(exception.get_msg()).into_owned(),
                         exception: Box::new(exception),
                     });
                 }
@@ -754,7 +403,7 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
                 Err(ParseFailure::TimeException(exception)) => {
                     return Err(DateError {
                         date: d.to_owned(),
-                        reason: exception.get_msg().to_owned(),
+                        reason: String::from_utf8_lossy(exception.get_msg()).into_owned(),
                         exception: Box::new(exception),
                     });
                 }
@@ -770,23 +419,7 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1732
-// ```c++
-// 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
-// 	CTime date(GetDate(), kBlastDbDateFormat);
-// 	m->SetLast_updated(date.AsString(timeFmt));
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1512-1520
-// ```c++
-// string CTime::AsString(const CTimeFormat& format, TSeconds out_tz) const
-// {
-//     if ( !IsValid() ) {
-//         NCBI_THROW(CTimeException, eInvalid,
-//                    "Invalid time " + s_TimeDump(*this));
-//     }
-//     if ( IsEmpty() ) {
-//         return kEmptyStr;
-//     }
-// ```
 // The ISO 8601 form is `Y-M-DTh:m:s` (ncbitime.cpp:398, `eISO8601_DateTimeSec`); the
 // stored date has no seconds. An empty date is the empty time, written as the empty
 // string. The constructor has checked the time a date string gives (`IsValid`).
@@ -796,7 +429,9 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
 pub fn iso8601_date_time(date: &str) -> Result<String, String> {
     match iso8601(date) {
         Ok(text) => Ok(text),
-        Err(ParseFailure::TimeException(exception)) => Err(exception.get_msg().to_owned()),
+        Err(ParseFailure::TimeException(exception)) => {
+            Err(String::from_utf8_lossy(exception.get_msg()).into_owned())
+        }
         Err(ParseFailure::StringException(_)) => {
             Err(format!("a number of the date '{date}' has no digit"))
         }
@@ -873,7 +508,9 @@ mod tests {
 
     fn time_exception(text: &str) -> String {
         match parse_blast_db_date(text) {
-            Err(ParseFailure::TimeException(exception)) => exception.get_msg().to_owned(),
+            Err(ParseFailure::TimeException(exception)) => {
+                String::from_utf8_lossy(exception.get_msg()).into_owned()
+            }
             other => panic!("{text:?}: expected a CTimeException, got {other:?}"),
         }
     }
@@ -1081,7 +718,7 @@ mod tests {
         let err = database_date(&[PM_322, "not a date"]).unwrap_err();
         assert_eq!(err.date, "not a date");
         assert_eq!(err.reason, too_short("not a date"));
-        assert_eq!(err.exception.get_msg(), too_short("not a date"));
+        assert_eq!(err.exception.get_msg(), too_short("not a date").as_bytes());
         assert_eq!(
             err.to_string(),
             "BLAST database volume date 'not a date' is rejected: \
@@ -1365,7 +1002,12 @@ mod tests {
                             site.function.unwrap_or(""),
                             exception.get_msg()
                         ),
-                        (columns[2].to_string(), columns[3], columns[4], columns[5]),
+                        (
+                            columns[2].to_string(),
+                            columns[3],
+                            columns[4],
+                            columns[5].as_bytes()
+                        ),
                         "{:?}",
                         columns[0]
                     );

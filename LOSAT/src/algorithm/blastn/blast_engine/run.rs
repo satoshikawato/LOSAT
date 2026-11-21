@@ -10744,7 +10744,11 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        effective_word_size,
+        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        shortest_subject: prelim_subject::shortest_subject(
+            effective_word_size,
+            args.megablast_index_loaded.is_some(),
+        ),
         encoded_queries_blastna: &encoded_queries_blastna,
         encoded_queries_nomask,
         encoded_query_concat_blastna,

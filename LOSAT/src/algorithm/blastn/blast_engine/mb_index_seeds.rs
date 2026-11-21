@@ -26,8 +26,9 @@ use crate::seqdb::OidMap;
 /// The index's seeds of one query batch (`CIndexedDb_New` after `DoPreSearch`, or
 /// `CIndexedDb_Old`): the index, the OIDs of the database's ordinal ids, the batch's
 /// concatenated query and lookup segments, the word size, the number of the search among the
-/// index's searches (from 1), each volume's seeds once searched (or `None` after an error), and
-/// LOSAT's refusal of the search, the first by volume.
+/// index's searches (from 1; 0 for a batch without a valid context, which NCBI does not search),
+/// each volume's seeds once searched (or `None` after an error), and LOSAT's refusal of the
+/// search, the first by volume and kind.
 pub(super) struct IndexSeeds<'a> {
     index: &'a LoadedIndex,
     oids: OidMap<'a>,
@@ -36,7 +37,7 @@ pub(super) struct IndexSeeds<'a> {
     options: SearchOptions,
     search: u32,
     volumes: Vec<OnceLock<Option<VolumeSeeds>>>,
-    error: Mutex<Option<(usize, String)>>,
+    error: Mutex<Option<((usize, u8), String)>>,
 }
 
 impl<'a> IndexSeeds<'a> {
@@ -63,31 +64,30 @@ impl<'a> IndexSeeds<'a> {
                 word_size: word_size as u64,
                 two_hits: 0,
             },
-            search: index
-                .searches
-                .fetch_add(1, Ordering::Relaxed)
-                .wrapping_add(1),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+            // NCBI runs neither the preliminary search nor `DoPreSearch` for a batch (or a query
+            // chunk) without a valid context.
+            search: if context_valid.iter().any(|&valid| valid) {
+                index
+                    .searches
+                    .fetch_add(1, Ordering::Relaxed)
+                    .wrapping_add(1)
+            } else {
+                0
+            },
             volumes: index.volumes.iter().map(|_| OnceLock::new()).collect(),
             error: Mutex::new(None),
         }
     }
 
-    /// Keeps the refusal `what` of volume `at` unless one of an earlier volume is kept (the
-    /// refusal does not depend on the order of the search threads).
-    fn fail(&self, at: usize, what: String) {
+    /// Keeps the refusal `what` of volume `at` and kind `kind` unless one of an earlier volume,
+    /// or of the same volume and a lower kind, is kept. Each kind's text depends only on the
+    /// volume, so the refusal does not depend on the order of the search threads.
+    fn fail(&self, at: usize, kind: u8, what: String) {
         let mut first = self.error.lock().expect("the error cell is not poisoned");
-        if first.as_ref().is_none_or(|(volume, _)| at < *volume) {
-            *first = Some((at, what));
+        if first.as_ref().is_none_or(|(key, _)| (at, kind) < *key) {
+            *first = Some(((at, kind), what));
         }
-    }
-
-    /// LOSAT's refusal of volume `at` of an index that was not made from the database: `why`.
-    fn mismatch(&self, at: usize, why: &str) {
-        let path = &self.index.volumes[at].path;
-        self.fail(
-            at,
-            format!("a MegaBLAST index volume that does not match the database ({path}: {why})"),
-        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:812-857
@@ -107,6 +107,7 @@ impl<'a> IndexSeeds<'a> {
                     Err(why) => {
                         self.fail(
                             at,
+                            0,
                             format!(
                                 "a MegaBLAST index volume that LOSAT does not read ({path}: {why})"
                             ),
@@ -149,6 +150,7 @@ impl<'a> IndexSeeds<'a> {
                 let first = &self.index.volumes[0].path;
                 self.fail(
                     usize::MAX,
+                    0,
                     format!(
                         "an old-style MegaBLAST index of fewer sequences than the database \
                          ({first}) and more than one query batch or query chunk"
@@ -163,13 +165,21 @@ impl<'a> IndexSeeds<'a> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:869-875
     /// `GetResults(oid, chunk)`: the seeds of chunk `chunk` of the database sequence `ordinal`,
-    /// the word size and the volume, or `None` (NCBI's word size 0). A chunk past the index's
-    /// chunks of the sequence is refused (`VolumeSeeds::chunk_in_sequence`).
+    /// the word size and the volume, or `None` (NCBI's word size 0). A chunk that is a later
+    /// sequence's in the index is refused (`VolumeSeeds::chunk_of_a_later_sequence`).
     fn chunk_seeds(&self, ordinal: u32, chunk: u32) -> Option<(&[Seed], u32, usize)> {
         let (at, subj) = self.locate(ordinal);
         let seeds = self.volume(at)?;
-        if !seeds.chunk_in_sequence(subj, chunk) {
-            self.mismatch(at, "a sequence with more chunks than the index has");
+        if seeds.chunk_of_a_later_sequence(subj, chunk) {
+            let path = &self.index.volumes[at].path;
+            self.fail(
+                at,
+                1,
+                format!(
+                    "a MegaBLAST index volume that does not match the database ({path}: a \
+                     sequence with more chunks than the index has)"
+                ),
+            );
             return None;
         }
         Some((seeds.seeds(subj, chunk)?, seeds.word_size() as u32, at))
@@ -313,10 +323,12 @@ thread_local! {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1697-1782
 /// `MB_IndexedWordFinder` of a chunk whose list holds `seeds` (in their order) for word size
-/// `word_size`: the initial hits, with their ungapped extensions, into `hits`. A seed of the
-/// index can lie past the chunk's last letter, in the last byte of its sequence (the seeds run
-/// on into the next sequence of the index's local id); `Err` for a seed past the sequence's bytes
-/// (an index not made from the database; NCBI's extension reads past the sequence).
+/// `word_size`: the initial hits, with their ungapped extensions, into `hits`. The seeds of the
+/// index run on past the end of a sequence into the next one of the index's local id, so a
+/// seed's word can end past the chunk's last letter. `Err` for a seed that starts at or past the
+/// chunk's last letter (in the last byte of its sequence, which the index's boundary codes keep
+/// seeds from reaching in the searches LOSAT has seen, or past it, from an index not made from
+/// the database): NCBI's later stages read such an extension past the sequence.
 fn indexed_word_finder(
     scan: &ScanBatch<'_>,
     seeds: &[Seed],
@@ -337,7 +349,7 @@ fn indexed_word_finder(
             if q_off.wrapping_add(word_size).wrapping_sub(1) <= entry.qend {
                 continue;
             }
-            if s_off as usize > COMPRESSION_RATIO * s_seq_packed.len() {
+            if s_off as usize >= s_len {
                 found = Err(());
                 break;
             }
@@ -409,7 +421,12 @@ pub(super) fn index_chunk_hits<const UNGAPPED: bool>(
             )
             .is_err()
         {
-            index.mismatch(at, "a seed past the end of a sequence");
+            let path = &index.index.volumes[at].path;
+            index.fail(
+                at,
+                2,
+                format!("a MegaBLAST index seed past the last letter of its sequence ({path})"),
+            );
             subject_scratch.ungapped_hits.clear();
         }
     }

@@ -86,8 +86,10 @@ impl IndexVolume {
                 u64::from(header.ws_hint_word),
             )
         };
-        // makembindex writes neither; NCBI's search of an Nmer length of 0 takes `hkey_width - 1`
-        // below 0, and `GetMinOffset` of a stride from 2^15 on shifts an `int` by 32 bits or more.
+        // NCBI's makembindex writes no Nmer length of 0 (its `-nmer` is 8 to 15), whose search
+        // takes `hkey_width - 1` below 0; its `-stride` takes any positive `int`, but the search's
+        // `GetMinOffset` of a stride from 2^15 on shifts an `int` by 32 bits or more, which C++
+        // leaves undefined (LOSAT's makembindex refuses such a stride).
         if header.hkey_width == 0 {
             return Err("an Nmer length of 0".to_string());
         }

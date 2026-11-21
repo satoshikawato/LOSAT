@@ -70,9 +70,7 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     // LOSAT's sums wrap the same way (the line's decision 22: x86-64's two's complement), also in
     // a build with overflow checks.
     let x = x_dropoff.wrapping_neg();
-    // A seed of a MegaBLAST database index can lie past the subject's last letter, in the last
-    // byte of its sequence (`s_off <= 4 * s_seq_packed.len()`).
-    debug_assert!(q_off < q_seq.len() && s_off <= 4 * s_seq_packed.len());
+    debug_assert!(q_off < q_seq.len() && s_off < subject_len);
     debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
     let q = q_seq.as_ptr();
     let s = s_seq_packed.as_ptr();
@@ -86,7 +84,7 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     while i < left {
         i += 1;
         let p = s_off - i;
-        // SAFETY: p < s_off <= 4 * s_seq_packed.len(), so byte p / 4 is in the packed subject, and
+        // SAFETY: p < s_off < subject_len, so byte p / 4 is in the packed subject, and
         // q_off - i < q_off < q_seq.len() (the callers' offsets of a hit; i <= left).
         let ch = unsafe { *s.add(p >> 2) };
         let code = unsafe { *q.add(q_off - i) };
@@ -102,9 +100,8 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     let q_start = q_beg;
     let s_start = s_off - (q_off - q_start);
 
-    // Extend to the right: min(q_avail, s_avail) steps at most (none when NCBI's `Int4` s_avail
-    // is below 0: a seed past the subject's last letter).
-    let right = (q_seq.len() - q_off).min(subject_len.saturating_sub(s_off));
+    // Extend to the right: min(q_avail, s_avail) steps at most.
+    let right = (q_seq.len() - q_off).min(subject_len - s_off);
     let mut q_end = q_off;
     sum = 0;
     let mut x_current = x;

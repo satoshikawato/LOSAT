@@ -10,9 +10,9 @@
 //!
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
 //! (a mixed search, a two-hit search, `-db_hard_mask`), or reads the index in a way that leaves
-//! the search undefined or fails: LOSAT refuses it with that text, after the output of the query
-//! batches before (NCBI's output up to there), and NCBI's output is kept for the lines that take
-//! these searches.
+//! the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is kept for
+//! the lines that take these searches. Where NCBI fails in a later query batch, LOSAT first
+//! writes NCBI's output of the batches before.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -220,12 +220,25 @@ fn rows_that_differ() -> Vec<String> {
                     "-use_index true with {} is not supported by LOSAT's BLASTN",
                     here(refusal, &dir)
                 );
-                let ncbi_out = fs::read(fixtures().join("ncbi").join(format!("{}.out", case.name)))
-                    .unwrap();
-                let ncbi_out = here(&String::from_utf8(ncbi_out).unwrap(), &dir);
+                // Where NCBI fails (its search of a later query batch), LOSAT writes NCBI's
+                // output of the batches before and refuses there; elsewhere it writes nothing.
+                let ncbi = |extension: &str| {
+                    fs::read(
+                        fixtures()
+                            .join("ncbi")
+                            .join(format!("{}.{extension}", case.name)),
+                    )
+                    .unwrap()
+                };
+                let ncbi_failed = String::from_utf8(ncbi("rc")).unwrap().trim() != "0";
+                let want_out = if ncbi_failed {
+                    let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
+                    losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
+                } else {
+                    Vec::new()
+                };
                 output.status.code() == Some(1)
-                    && losat::wording::losat_output_bytes(ncbi_out.as_bytes())
-                        .starts_with(&output.stdout)
+                    && output.stdout == want_out
                     && stderr.contains(&line)
             }
             None => {

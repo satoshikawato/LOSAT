@@ -103,44 +103,44 @@ fn every_offset_matches_the_ported_loops() {
     assert!(calls > 100_000, "{calls}");
 }
 
-/// A seed of a MegaBLAST database index can start past its sequence's last letter, in the last
-/// byte of the sequence (a sequence of 21 letters in 6 bytes: offsets 21 to 23). NCBI's `Int4`
-/// lengths are then below 0, so neither extension takes a step to the right, and the left walks
-/// read the last byte (its padding letters are A): the exact extension gives the ported loops'
-/// results, the approximate one (with and without its exact pass) reads no byte past the 6.
+/// A seed of a MegaBLAST database index can start in its sequence's last 3 letters (the seed runs
+/// on into the next sequence of the index's local id): for a sequence of 22 letters in 6 bytes
+/// and a seed at 21, the approximate extension's blocks start at 24, past the last letter, and
+/// NCBI's `Int4` length gives no block to the right (a `usize` one wrapped and read past the 6
+/// bytes); its exact pass gives the exact extension's result.
 #[test]
-fn a_seed_past_the_last_letter_extends_to_the_left_only() {
+fn a_seed_in_the_last_three_letters_takes_no_block_to_the_right() {
     use super::super::extension::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
     let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -2);
     let score_table = build_nucl_score_table(1, -2);
     let mut state = 0x5eed_d5b2_u64;
-    let letters: Vec<u8> = (0..21).map(|_| (next(&mut state) & 3) as u8).collect();
+    let letters: Vec<u8> = (0..22).map(|_| (next(&mut state) & 3) as u8).collect();
     let mut packed = vec![0u8; 6];
     for (p, &letter) in letters.iter().enumerate() {
         packed[p / 4] |= letter << (2 * (3 - p % 4));
     }
-    // The query: the sequence's letters, the three padding A's, then other letters.
+    // The query: the sequence's letters, then other letters (the next sequence's).
     let mut query = letters.clone();
-    query.extend([0, 0, 0, 1, 2, 3, 1, 2, 3, 1, 2, 3]);
-    for s_off in 21..24 {
-        let exact = extend_hit_ungapped_exact_counted(&query, &packed, s_off, s_off, 21, 20, &matrix);
-        let ported = extend_hit_ungapped_exact_ported(&query, &packed, s_off, s_off, 21, 20, &matrix);
-        assert_eq!(key(exact), key(ported));
-        assert_eq!((exact.q_start, exact.q_start + exact.length), (0, s_off));
-        for reduced_cutoff in [i32::MAX, 0] {
-            let approx = extend_hit_ungapped_approx_ncbi(
+    query.extend([1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3]);
+    for s_off in 17..22 {
+        let exact =
+            extend_hit_ungapped_exact_counted(&query, &packed, s_off, s_off, 22, 20, &matrix);
+        let approx = |reduced_cutoff| {
+            extend_hit_ungapped_approx_ncbi(
                 &query,
                 &packed,
                 s_off,
                 s_off,
                 s_off + 12,
-                21,
+                22,
                 20,
                 &score_table,
                 reduced_cutoff,
                 &matrix,
-            );
-            assert!(approx.score > 0 && approx.q_start + approx.length <= s_off + 12);
-        }
+            )
+        };
+        assert_eq!(key(approx(0)), key(exact));
+        let blocks = approx(i32::MAX);
+        assert!(blocks.score > 0 && blocks.q_start + blocks.length <= s_off + 12);
     }
 }

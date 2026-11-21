@@ -75,21 +75,16 @@ impl VolumeSeeds {
         self.by_id(self.map_subject(subj, chunk))
     }
 
-    /// Whether chunk `chunk` of the volume's sequence `subj` is one of the sequence's chunks in
-    /// the index (a sequence past the volume's has none, and NCBI's `GetResults` gives it
-    /// nothing). A database sequence with more chunks than the index's sequence (an index not
-    /// made from the database) reads the next sequence's seeds, which NCBI's `GetResults` moves
-    /// out of the next sequence's list: what that sequence finds depends on the order of the
-    /// search threads.
-    pub(crate) fn chunk_in_sequence(&self, subj: u32, chunk: u32) -> bool {
-        let Some(&first) = self.map.get(subj as usize) else {
-            return true;
-        };
-        let end = match self.map.get(subj as usize + 1) {
-            Some(&next) => next,
-            None => (self.results.len() as u32).wrapping_add(1),
-        };
-        u64::from(first) + u64::from(chunk) < u64::from(end)
+    /// Whether chunk `chunk` of the volume's sequence `subj` is a later sequence's chunk in the
+    /// index: a database sequence with more chunks than the index's (an index not made from the
+    /// database) then reads a later sequence's seeds, which NCBI's `GetResults` moves out of that
+    /// sequence's list, so what that sequence finds depends on the order of the search threads.
+    /// (Past the last sequence's chunks NCBI's `GetResults` finds no list.)
+    pub(crate) fn chunk_of_a_later_sequence(&self, subj: u32, chunk: u32) -> bool {
+        match (self.map.get(subj as usize), self.map.get(subj as usize + 1)) {
+            (Some(&first), Some(&next)) => u64::from(first) + u64::from(chunk) >= u64::from(next),
+            _ => false,
+        }
     }
 
     /// `CheckResults(subj)`: whether a chunk of the volume's sequence `subj` has seeds; the
@@ -128,7 +123,8 @@ pub(crate) struct IndexedVolume {
 pub(crate) struct LoadedIndex {
     pub(crate) old_style: bool,
     pub(crate) volumes: Vec<IndexedVolume>,
-    /// The searches of the index so far (`DoPreSearch` calls: one a query batch or query chunk).
+    /// The searches of the index so far (`DoPreSearch` calls: one a query batch or query chunk
+    /// with a valid context).
     pub(crate) searches: AtomicU32,
 }
 

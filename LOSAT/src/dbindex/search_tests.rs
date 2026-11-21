@@ -149,20 +149,19 @@ fn an_oid_is_located_in_its_volume() {
     assert_eq!(old.locate(9), (0, 9));
 }
 
-/// The chunks of a sequence are its chunk ids up to the next sequence's first (to the last id for
-/// the last sequence); a sequence past the volume's has none to read.
+/// A chunk of a sequence past the sequence's chunk ids lands in a later sequence's (refused);
+/// past the last sequence's, or for a sequence past the volume's, NCBI finds no list.
 #[test]
-fn a_chunk_past_the_sequences_chunks_is_not_in_the_sequence() {
+fn a_chunk_past_the_sequences_chunks_is_a_later_sequences() {
     let seeds = VolumeSeeds {
         word_size: 28,
         map: vec![1, 3, 4],
         results: vec![None; 4],
     };
-    assert!(seeds.chunk_in_sequence(0, 1));
-    assert!(!seeds.chunk_in_sequence(0, 2));
-    assert!(seeds.chunk_in_sequence(1, 0));
-    assert!(!seeds.chunk_in_sequence(1, 1));
-    assert!(seeds.chunk_in_sequence(2, 0));
-    assert!(!seeds.chunk_in_sequence(2, 1));
-    assert!(seeds.chunk_in_sequence(3, 5));
+    assert!(!seeds.chunk_of_a_later_sequence(0, 1));
+    assert!(seeds.chunk_of_a_later_sequence(0, 2));
+    assert!(!seeds.chunk_of_a_later_sequence(1, 0));
+    assert!(seeds.chunk_of_a_later_sequence(1, 1));
+    assert!(!seeds.chunk_of_a_later_sequence(2, 7));
+    assert!(!seeds.chunk_of_a_later_sequence(3, 5));
 }

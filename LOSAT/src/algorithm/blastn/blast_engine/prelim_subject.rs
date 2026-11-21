@@ -1306,6 +1306,20 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+/// The shortest subject that the preliminary stage searches (the traceback skips the shorter
+/// ones too). NCBI skips only an empty subject; one shorter than a word has no word to scan
+/// (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches skip it, but
+/// the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
+/// into the next one of the index's local id, so an indexed search searches it.
+pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usize {
+    if indexed {
+        1
+    } else {
+        effective_word_size
+    }
+}
+
 /// The preliminary search of one subject, `search_subject`'s preliminary stage (`scan`: the batch's
 /// values and lookup tables, which the preliminary pass passes): the subject's lowercase masks
 /// (`-lcase_masking`) and the soft ranges between them, or a database sequence's soft ranges from
@@ -1397,17 +1411,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
-    // NCBI skips only an empty subject. A subject shorter than a word has no word to scan
-    // (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches end here;
-    // the seeds of a MegaBLAST database index can run past the end of a short sequence (into the
-    // next one of the index's local id), so an indexed search searches it.
-    let shortest = if batch.mb_index.is_some() {
-        1
-    } else {
-        effective_word_size
-    };
-    if s_len_full < shortest {
+    if s_len_full < shortest_subject(effective_word_size, batch.mb_index.is_some()) {
         if db_masked {
             subject_scratch.db_soft_ranges = soft_ranges;
             subject_scratch.db_hard_split.end();

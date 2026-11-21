@@ -162,10 +162,26 @@ pub(crate) struct RawSeqDbSource<'a> {
     mask_blocks: Vec<MaskBlock>,
     /// The blobs of the block, one per column of `columns`.
     column_blocks: Vec<ColumnBlock>,
-    /// NCBI's memory of its last lookup of a volume's id of an algorithm
-    /// (`CSeqDB_IdRemapper::GetVolAlgo`): the volume, the algorithm (its place in `masks`) and
-    /// whether the volume knows the algorithm (`RawSeqDbSource::next`).
-    last_lookup: Option<(usize, usize, bool)>,
+    /// NCBI's memory of its last lookup of a volume's id of an algorithm.
+    last_lookup: VolAlgoMemory,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
+/// `CSeqDB_IdRemapper::GetVolAlgo`'s memory: the volume and the algorithm (its place in the
+/// input's list) asked last, and whether that volume knows that algorithm. The question is
+/// kept before the lookup, which may fail; the id found is kept only when it does not.
+#[derive(Default)]
+struct VolAlgoMemory(Option<(usize, usize, bool)>);
+
+impl VolAlgoMemory {
+    /// The lookup of the algorithm `algorithm` in the volume `volume`, which knows it or not
+    /// (`known`): `true` when NCBI answers from its memory with the id of another lookup (the
+    /// same question as the last one, which failed).
+    fn reads_a_kept_id(&mut self, volume: usize, algorithm: usize, known: bool) -> bool {
+        let kept = !known && self.0 == Some((volume, algorithm, false));
+        self.0 = Some((volume, algorithm, known));
+        kept
+    }
 }
 
 impl<'a> RawSeqDbSource<'a> {
@@ -216,7 +232,7 @@ impl<'a> RawSeqDbSource<'a> {
             order,
             next: 0,
             block: None,
-            last_lookup: None,
+            last_lookup: VolAlgoMemory::default(),
         })
     }
 
@@ -318,11 +334,11 @@ impl<'a> RawSeqDbSource<'a> {
             let offsets = match self.mask_blocks[k].ranges(vol_oid) {
                 Ok(BlockMasks::NoMaskData) => Vec::new(),
                 Ok(BlockMasks::Ranges(ranges)) => {
-                    self.last_lookup = Some((range.volume, k, true));
+                    self.last_lookup.reads_a_kept_id(range.volume, k, true);
                     ranges.to_vec()
                 }
                 Ok(BlockMasks::AlgorithmNotInVolume) => {
-                    if self.last_lookup == Some((range.volume, k, false)) {
+                    if self.last_lookup.reads_a_kept_id(range.volume, k, false) {
                         return Err(WriteDbError::Unsupported(format!(
                             "OID {} of the input database: its volume does not know the \
                              database's only masking algorithm, and NCBI then reads the masks \
@@ -331,7 +347,6 @@ impl<'a> RawSeqDbSource<'a> {
                         ))
                         .into());
                     }
-                    self.last_lookup = Some((range.volume, k, false));
                     Vec::new()
                 }
                 Err(BlockMaskError::Ranges(error)) => return Err(error.into()),

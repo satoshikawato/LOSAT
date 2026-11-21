@@ -7621,6 +7621,22 @@ pub(super) const V5_CASES: &[V5Case] = &[
         ],
     },
     V5Case {
+        name: "R_e_asn1",
+        runs: &[
+            V5Run {
+                words: &["-in", "tests/writedb_v5/raw_n.fa", "-input_type", "asn1_bin", "-dbtype", "nucl", "-out", "{D}/db", "-randomize"],
+                status: 1,
+                stdout: b"",
+                stderr: b"\
+                    BLAST options error: Option randomize is only applicable to blastdb input type\n",
+            },
+        ],
+        date: "",
+        log: None,
+        files: &[
+        ],
+    },
+    V5Case {
         name: "R_e_sameout",
         runs: &[
             V5Run {

@@ -409,15 +409,9 @@ pub fn check_registry_settings(
     }
 }
 
-/// The checks of the arguments that LOSAT makes first: what LOSAT does not
-/// support, and the format version.
+/// The checks of the arguments that NCBI's parser makes, first: the format version and the
+/// dependencies between options.
 fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
-    if args.input_type != "fasta" && args.input_type != "blastdb" {
-        return Err(unsupported(format!(
-            "-input_type {} is not supported; only fasta and blastdb input are",
-            args.input_type
-        )));
-    }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1218-1219
     // The parser allows 4 and 5 only (`CArgAllow_Integers(eBDB_Version4, eBDB_Version5)`).
     let Some(version) = DbVersion::from_number(args.blastdb_version) else {
@@ -726,6 +720,13 @@ fn build_database_with_log(
             "Option randomize is only applicable to blastdb input type",
         ));
     }
+    // The input types LOSAT does not read are refused after NCBI's checks of the input type.
+    if args.input_type != "fasta" && !blastdb_input {
+        return Err(unsupported(format!(
+            "-input_type {} is not supported; only fasta and blastdb input are",
+            args.input_type
+        )));
+    }
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
     // `NStr::Split(dbname, " ", input_files)` runs with no flag
     // (ncbistr.hpp:2551-2555): adjacent delimiters are not merged and none is
@@ -810,7 +811,9 @@ fn build_database_with_log(
     if blastdb_input {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
         // The seed of `-randomize` is `time(nullptr)`, which `mt19937` takes modulo 2^32. NCBI
-        // reads the clock again when the copy starts; LOSAT reads it once for the build (`now`).
+        // reads the clock again when the copy starts, after the input's headers are read; LOSAT
+        // reads it once for the build (`now`), so that a build whose clock is fixed (the tests)
+        // has one instant. Under a clock that runs, the two may take different seconds.
         let randomize = args.randomize.then_some(now.unix_seconds as u32);
         let result = copy_input_databases(
             &mut db,

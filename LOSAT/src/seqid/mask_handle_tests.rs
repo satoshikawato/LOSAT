@@ -737,6 +737,39 @@ fn the_handles_seq_id_is_its_infos_with_the_case_of_its_own() {
     );
 }
 
+// The packed tree's info (seq_id_tree.hpp:359-388): one for every accession of a prefix (without
+// case), digit count and version, across GenBank, EMBL and DDBJ; any other Seq-id's info is its
+// handle's.
+#[test]
+fn a_packed_accession_shares_the_info_of_its_prefix_digits_and_version() {
+    let info = |id: &ParsedSeqId| mask_info_key(id).unwrap().unwrap();
+    let gb1 = P::Genbank(tx("AB000001", Some(1), "", ""));
+    assert_eq!(info(&gb1), info(&P::Ddbj(tx("ab000002", Some(1), "", ""))));
+    assert_eq!(info(&gb1), info(&P::Embl(tx("AB999999", Some(1), "", ""))));
+    assert_ne!(
+        info(&gb1),
+        info(&P::Genbank(tx("AB000001", Some(2), "", "")))
+    );
+    assert_ne!(info(&gb1), info(&P::Genbank(tx("AB000001", None, "", ""))));
+    assert_ne!(
+        info(&gb1),
+        info(&P::Genbank(tx("AB1000001", Some(1), "", "")))
+    );
+    assert_ne!(
+        info(&gb1),
+        info(&P::Genbank(tx("AC000001", Some(1), "", "")))
+    );
+    assert_ne!(info(&gb1), info(&P::Tpg(tx("AB000001", Some(1), "", ""))));
+    for id in [
+        P::Swissprot(tx("P12345", None, "ABC_HUMAN", "")),
+        lstr("rec1"),
+        P::Gi(5),
+        gnl("db", ObjectId::Id(7)),
+    ] {
+        assert_eq!(mask_info_key(&id), mask_handle_key(&id), "{id:?}");
+    }
+}
+
 #[test]
 fn which_handles_write_their_own_seq_id() {
     let acc = |a: &str| tx(a, Some(1), "", "");

@@ -9,9 +9,9 @@ use std::fmt;
 use super::error::Error;
 
 /// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`,
-/// `convert2blastmask` and `makembindex` are not searches: they have functions of their own
-/// (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
-/// `run_convert2blastmask`, `run_makembindex`).
+/// `windowmasker`, `convert2blastmask` and `makembindex` are not searches: they have functions of
+/// their own (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
+/// `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Program {
@@ -58,7 +58,7 @@ impl Program {
 
     /// The program of a command-line name. A program that the command line runs and the API
     /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`, `segmasker`,
-    /// `convert2blastmask`, `makembindex`) is named in the error.
+    /// `windowmasker`, `convert2blastmask`, `makembindex`) is named in the error.
     pub fn parse(name: &str) -> Result<Self, Error> {
         match name {
             "blastn" => Ok(Program::Blastn),
@@ -78,6 +78,9 @@ impl Program {
             )),
             "segmasker" => Err(Error::Argv(
                 "segmasker is not a search program: run_segmasker runs it".into(),
+            )),
+            "windowmasker" => Err(Error::Argv(
+                "windowmasker is not a search program: run_windowmasker runs it".into(),
             )),
             "convert2blastmask" => Err(Error::Argv(
                 "convert2blastmask is not a search program: run_convert2blastmask runs it".into(),

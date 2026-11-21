@@ -64,7 +64,7 @@ Tax ids are what `-taxids` and `-taxidlist` filters, the tabular `staxid` field 
 
 To search a database with `-db_soft_mask` or `-db_hard_mask`, or to read masked FASTA with `blastdbcmd -mask_sequence_with`, add masks when you build it:
 
-1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
+1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins), [`windowmasker`](windowmasker.md) (repeats of nucleotides, with a counts file) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
 2. Give it to `makeblastdb` with `-mask_data`. Add `-mask_id` to name the algorithm and `-mask_desc` to describe it.
 3. Look up the numeric algorithm id with `blastdbcmd -db DB -info` (the table "Available filtering algorithms").
 
@@ -164,5 +164,5 @@ losat blastdbcmd -db split_db -entry all -outfmt "%o %l" | tail -n 3
 
 - [BLAST databases](../databases.md)
 - [blastdbcmd](blastdbcmd.md): read sequences and information back
-- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [convert2blastmask](convert2blastmask.md): make masks
+- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [windowmasker](windowmasker.md), [convert2blastmask](convert2blastmask.md): make masks
 - [What LOSAT refuses](../refusals.md)

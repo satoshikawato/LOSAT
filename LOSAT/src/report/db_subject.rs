@@ -273,14 +273,23 @@ impl LookupFailure {
 
     /// The failure of a lookup with the error `error`: NCBI's message where it is one of NCBI's
     /// (`SeqDbError::ncbi_message`), NCBI's crash where LOSAT refuses a file that NCBI crashes on
-    /// (`SeqDbError::ncbi_crashes`), else LOSAT's text.
+    /// (`SeqDbError::ncbi_crashes`) or where a read fails after the file's first byte
+    /// (`SeqDbError::Read`: NCBI reads bytes of its mapping that the system no longer gives,
+    /// SIGBUS; line WQA D18, 2026-11-21), else LOSAT's text. A first byte that cannot be read
+    /// where the file is opened (`SeqDbError::Map`) is NCBI's failed mapping, an error that NCBI
+    /// reports: without NCBI's text for it (a code outside `utils::os_error_text` on WASI,
+    /// Windows) it is LOSAT's text, as a file that does not open (review r2 of D18, L1).
     pub fn of_error(error: &crate::seqdb::SeqDbError) -> Self {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
-            None if error.ncbi_crashes() => Self {
-                message: error.to_string().into_bytes(),
-                ncbi: NcbiFailure::Crashes,
-            },
+            None if error.ncbi_crashes()
+                || matches!(error, crate::seqdb::SeqDbError::Read { .. }) =>
+            {
+                Self {
+                    message: error.to_string().into_bytes(),
+                    ncbi: NcbiFailure::Crashes,
+                }
+            }
             None => Self::losat(error.to_string()),
         }
     }

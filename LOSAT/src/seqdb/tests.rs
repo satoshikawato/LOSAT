@@ -2653,6 +2653,28 @@ fn ncbis_errors_are_told_from_losats() {
         .ncbi_message(),
         None
     );
+    // A read that ended early (the file became shorter after it was opened) is LOSAT's: NCBI ends
+    // by SIGBUS where its mapped bytes are gone (line WQA D18), in LOSAT's words of a file that
+    // cannot be read, not a refusal of the database (`is_unreadable`, review M1).
+    let short = SeqDbError::Read {
+        path: path.clone(),
+        source: std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+    };
+    assert_eq!(short.ncbi_message(), None);
+    assert_eq!(short.ncbi_search_message(), None);
+    assert_eq!(short.ncbi_request_message(), None);
+    assert!(short.is_unreadable());
+    assert!(short
+        .to_string()
+        .starts_with("/data/db.pin cannot be read: "));
+    // The same at the first byte (no system code, so no NCBI text).
+    let first = SeqDbError::Map {
+        path: path.clone(),
+        len: 768,
+        source: std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+    };
+    assert_eq!(first.ncbi_message(), None);
+    assert!(first.is_unreadable());
     #[cfg(unix)]
     {
         // EACCES (13), EMFILE (24) and ENFILE (23) on Linux and macOS.
@@ -2686,7 +2708,196 @@ fn ncbis_errors_are_told_from_losats() {
             assert_eq!(error.ncbi_message().as_deref(), Some(text.as_bytes()));
             assert_eq!(error.ncbi_search_message(), Some(text));
         }
+        // blastdbcmd's request writes the exception's own message, without the search programs'
+        // words around it (NCBI BLAST+ 2.17.0, line WQA D18 probe 8).
+        for (code, strerror) in [(13, "Permission denied"), (24, "Too many open files")] {
+            let error = SeqDbError::Open {
+                path: path.clone(),
+                source: io(code),
+            };
+            assert_eq!(
+                error.ncbi_request_message(),
+                Some(
+                    format!("CMemoryFile: Cannot memory map file '/data/db.pin':{strerror}")
+                        .into_bytes()
+                )
+            );
+        }
+        assert_eq!(
+            SeqDbError::NotFound(b"LMDB runtime error: mdb_env_open: Permission denied".to_vec())
+                .ncbi_request_message()
+                .as_deref(),
+            Some(b"LMDB runtime error: mdb_env_open: Permission denied".as_slice())
+        );
+        // A first byte that the system refuses to read where the file is opened (EIO, 5) is
+        // NCBI's failed mapping of the whole file (NCBI BLAST+ 2.17.0 with `mmap()` failing with
+        // EIO, line WQA D18 probe 3).
+        let read = SeqDbError::Map {
+            path: path.clone(),
+            len: 768,
+            source: io(5),
+        };
+        assert_eq!(
+            read.ncbi_message().as_deref(),
+            Some(
+                b"Database memory map file error - Cannot map file '/data/db.pin' to memory \
+                  (offset=0, length=768): Input/output error"
+                    .as_slice()
+            )
+        );
+        assert_eq!(
+            read.ncbi_search_message(),
+            Some("Database memory map file error")
+        );
+        assert!(!read.is_unreadable());
+        // A later read that the system refuses: where NCBI's mapped bytes are not given (SIGBUS),
+        // LOSAT's own error (review M1 of D18).
+        let later = SeqDbError::Read {
+            path: path.clone(),
+            source: io(5),
+        };
+        assert_eq!(later.ncbi_message(), None);
+        assert_eq!(later.ncbi_search_message(), None);
+        assert_eq!(later.ncbi_request_message(), None);
+        assert!(later.is_unreadable());
+        assert_eq!(
+            later.to_string(),
+            "/data/db.pin cannot be read: Input/output error (os error 5)"
+        );
     }
+    // LOSAT Web: the WASI codes give the native CLI's texts on Linux (EACCES 2, EIO 29, EMFILE 33),
+    // not wasi-libc's (`I/O error`).
+    #[cfg(target_os = "wasi")]
+    {
+        let wasi = std::io::Error::from_raw_os_error;
+        let open = |code: i32| SeqDbError::Open {
+            path: path.clone(),
+            source: wasi(code),
+        };
+        assert_eq!(
+            open(2).ncbi_message().as_deref(),
+            Some(
+                b"Database memory map file error - CMemoryFile: Cannot memory map file \
+                  '/data/db.pin':Permission denied"
+                    .as_slice()
+            )
+        );
+        assert_eq!(
+            open(33).ncbi_message().as_deref(),
+            Some(b"Too many open files, please raise the open file limit".as_slice())
+        );
+        let read = SeqDbError::Map {
+            path: path.clone(),
+            len: 768,
+            source: wasi(29),
+        };
+        assert_eq!(
+            read.ncbi_message().as_deref(),
+            Some(
+                b"Database memory map file error - Cannot map file '/data/db.pin' to memory \
+                  (offset=0, length=768): Input/output error"
+                    .as_slice()
+            )
+        );
+    }
+}
+
+/// A database file whose first byte the system does not give where it is opened (a picked file
+/// of LOSAT Web that changed after the pick, a failing disk) is NCBI's error of a file it cannot
+/// map, not LOSAT's refusal of the database (line WQA D18, 2026-11-21): the read of the one
+/// constructor of `DbFile` (`with_handle`, `open`) through a handle that the system refuses to
+/// read (a directory's, EISDIR). A read that fails after the first byte is LOSAT's own error.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_whose_bytes_cannot_be_read_gives_ncbis_mapping_error() {
+    let dir = temp_dir("read-refused");
+    let mapping = |path: &Path, len: u64| {
+        format!(
+            "Database memory map file error - Cannot map file '{}' to memory (offset=0, \
+             length={len}): Is a directory",
+            path.display()
+        )
+        .into_bytes()
+    };
+    let path = dir.join("db.phr");
+    let handle = std::fs::File::open(&dir).unwrap();
+    let error = file::DbFile::with_handle(&path, handle, 10849)
+        .expect_err("a directory's handle is not read");
+    assert!(
+        matches!(error, SeqDbError::Map { len: 10849, .. }),
+        "{error:?}"
+    );
+    assert_eq!(error.ncbi_message(), Some(mapping(&path, 10849)));
+    assert_eq!(
+        error.ncbi_search_message(),
+        Some("Database memory map file error")
+    );
+    // `DbFile::open` reads through the same constructor.
+    let path = dir.join("db.psq");
+    std::fs::write(&path, [7u8; 40]).unwrap();
+    file::refused_reads::refuse(&path, &dir);
+    let error = file::DbFile::open(&path).expect_err("the first byte is not read");
+    assert_eq!(error.ncbi_message(), Some(mapping(&path, 40)));
+    // A file whose first byte is read, and whose later bytes are not.
+    let path = dir.join("db.pin");
+    let short = dir.join("short");
+    std::fs::write(&path, [7u8; 40]).unwrap();
+    std::fs::write(&short, [7u8]).unwrap();
+    file::refused_reads::refuse(&path, &short);
+    let opened = file::DbFile::open(&path).expect("the first byte is read");
+    let error = opened
+        .read_exact_at(&mut [0u8; 4], 4)
+        .expect_err("not read");
+    assert!(matches!(error, SeqDbError::Read { .. }), "{error:?}");
+    assert_eq!(error.ncbi_message(), None);
+    assert!(error.is_unreadable());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `has_parsed_seqids` leaves a header file whose bytes cannot be read to the first read of a
+/// header, where NCBI maps the file (after the outfmt 0 prolog; line WQA D18 review M2): a first
+/// byte that the system refuses ([`SeqDbError::Map`], NCBI's text there) and a later read
+/// ([`SeqDbError::Read`], LOSAT's own error).
+#[cfg(target_os = "linux")]
+#[test]
+fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
+    let dir = temp_dir("parsed-unreadable");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let name = dir.join("prot_v4").to_str().unwrap().to_string();
+    let phr = dir.join("prot_v4.phr");
+    let len = std::fs::metadata(&phr).unwrap().len();
+    file::refused_reads::refuse(&phr, &dir);
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert!(!db.has_parsed_seqids().unwrap());
+    let error = db.deflines(0).expect_err("the header file is not read");
+    assert_eq!(
+        error.ncbi_message(),
+        Some(
+            format!(
+                "Database memory map file error - Cannot map file '{}' to memory (offset=0, \
+                 length={len}): Is a directory",
+                phr.display()
+            )
+            .into_bytes()
+        )
+    );
+    let later = temp_dir("parsed-unreadable-later");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &later);
+    let name = later.join("prot_v4").to_str().unwrap().to_string();
+    let short = later.join("short");
+    std::fs::write(
+        &short,
+        &std::fs::read(later.join("prot_v4.phr")).unwrap()[..1],
+    )
+    .unwrap();
+    file::refused_reads::refuse(&later.join("prot_v4.phr"), &short);
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert!(!db.has_parsed_seqids().unwrap());
+    let error = db.deflines(0).expect_err("the header is not read");
+    assert!(matches!(error, SeqDbError::Read { .. }), "{error:?}");
+    assert!(error.is_unreadable());
+    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(&later).unwrap();
 }
 
 /// Opens a database as a search program would and prints what a program

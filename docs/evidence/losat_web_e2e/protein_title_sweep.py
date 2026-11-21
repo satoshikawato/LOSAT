@@ -9,14 +9,18 @@ under each defline:
 
 - the 1023 deflines of one to five of `,;~` and space that do not start with a space (the
   deflines of docs/evidence/losat_web_e2e/title_sweep.py): NCBI's loop runs past the end of
-  some of them and NCBI crashes; approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers only
-  the nucleotide subjects of BLASTN, TBLASTX and TBLASTN, so LOSAT's BLASTP rejects them;
+  some of them and NCBI crashes; approved exception 2 of PD-LOSAT-NCBI-DEFECTS, extended to
+  BLASTP by the maintainer in session SFd (DW-27, implemented in SFe): LOSAT stops the
+  cleanup at the end of the string (until SFe LOSAT's BLASTP rejected them);
 - the titles of the inventory (range RP, rows 18-20: trailing punctuation, spaces, brackets,
   prefixes, HTML character references, long titles).
 
-Each is "same" (stdout, stderr and exit status), or "losat-rejects": NCBI dies of a signal
-or decodes an HTML character reference, and LOSAT exits non-zero naming what it does not
-support. Any other outcome is printed; exits 1 when any is.
+Each is "same" (stdout, stderr and exit status), or "exception-2": NCBI dies of a signal,
+LOSAT exits 0 with NCBI's stderr, and LOSAT's stdout equals NCBI's for the same subject with
+a placeholder title of the length of LOSAT's title once the placeholder is replaced by the
+title that NCBI's loop gives when it stops at the end of the string (the check of
+title_sweep.py; the stand-in's file name has the length of the subject's). Any other outcome
+is printed; exits 1 when any is.
 
 Usage: protein_title_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--jobs N]
 """
@@ -28,6 +32,9 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2g"))
+from title_sweep import title  # noqa: E402  (NCBI's title stopped at the end of the string)
 
 REPO = Path(__file__).resolve().parents[3]
 INPUTS = REPO / "LOSAT/tests/fasta/outfmt0"
@@ -45,7 +52,6 @@ WORD_TITLES = [
     ",".join("abcdefghijklmnopqrstuvwxyz" * 2), "-".join("abcdefghijklmnopqrstuvwxyz" * 2),
     "word " * 13 + "end", "w" * 60 + " " + "v" * 20, "w" * 70 + " tail",
 ]
-REJECTION = b"not supported by LOSAT's BLASTP"
 
 
 def deflines() -> list[str]:
@@ -74,11 +80,19 @@ def main() -> int:
         ncbi = subprocess.run([str(args.bin_dir / "blastp"), *argv], capture_output=True, stdin=subprocess.DEVNULL)
         ours = subprocess.run([str(args.losat), "blastp", *argv], capture_output=True, stdin=subprocess.DEVNULL)
         if (ncbi.returncode, ncbi.stdout, ncbi.stderr) == (ours.returncode, ours.stdout, ours.stderr):
-            result = "same"
-        elif ours.returncode and REJECTION in ours.stderr and (ncbi.returncode < 0 or b"&" in defline.encode()):
-            result = "losat-rejects"
-        else:
-            result = f"DIFF ncbi={ncbi.returncode} losat={ours.returncode}"
+            return f"{index}\t{defline!r}\tsame"
+        expected_title = title(defline)
+        if ncbi.returncode < 0 and ours.returncode == 0 and expected_title:
+            placeholder = "Z" * len(expected_title)
+            stand_in = args.work / f"p{index}.faa"
+            stand_in.write_text(f">{placeholder}\n{residues}")
+            other = subprocess.run([str(args.bin_dir / "blastp"), *argv[:3], str(stand_in), *argv[4:]],
+                                   capture_output=True, stdin=subprocess.DEVNULL)
+            expected = (other.stdout.replace(placeholder.encode(), expected_title.encode())
+                        .replace(str(stand_in).encode(), str(subject).encode()))
+            if other.returncode == 0 and ours.stdout == expected and ours.stderr == other.stderr:
+                return f"{index}\t{defline!r}\texception-2"
+        result = f"DIFF ncbi={ncbi.returncode} losat={ours.returncode}"
         return f"{index}\t{defline!r}\t{result}"
 
     with ThreadPoolExecutor(args.jobs) as pool:

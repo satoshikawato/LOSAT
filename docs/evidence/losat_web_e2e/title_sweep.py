@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Compare TBLASTX and TBLASTN outfmt 0 on subject deflines of punctuation with NCBI (Session S08+; comparison only).
+"""Compare TBLASTX, TBLASTN and BLASTP outfmt 0 on subject deflines of punctuation with NCBI (Session S08+, BLASTP since SFe; comparison only).
 
 docs/evidence/losat_web_e2g/title_sweep.py (BLASTN) for the programs to which the
-maintainer extended approved exception 2 of PD-LOSAT-NCBI-DEFECTS in session S08b (DW-17):
-LOSAT stops the cleanup of the title at the end of the string where NCBI's
-`x_CleanAndCompress` runs past it (NCBI crashes in outfmt 0). Every defline of one to five
-of `,;~` and space that does not start with a space (1023 deflines) is the title of a
-subject with hits: the first subject of the TBLASTX `many` fixture, searched with the
-`many` query (TBLASTX) or with the frame +1 peptide of that query (TBLASTN, as
-docs/evidence/losat_web_e2b/punct_defline.py makes it). Each is "same" (stdout, stderr and
+maintainer extended approved exception 2 of PD-LOSAT-NCBI-DEFECTS: TBLASTX and TBLASTN in
+session S08b (DW-17), BLASTP in session SFd (DW-27, implemented in SFe): LOSAT stops the
+cleanup of the title at the end of the string where NCBI's `x_CleanAndCompress` runs past
+it (NCBI crashes in outfmt 0). Every defline of one to five of `,;~` and space that does
+not start with a space (1023 deflines) is the title of a subject with hits: the first
+subject of the TBLASTX `many` fixture, searched with the `many` query (TBLASTX) or with the
+frame +1 peptide of that query (TBLASTN, as docs/evidence/losat_web_e2b/punct_defline.py
+makes it); for BLASTP, the frame +1 peptide of that subject (from its first base, stop
+codons removed, as docs/evidence/losat_web_e2e/make_inputs.py makes the subject of the
+`punct.blastp` fixture) searched with the TBLASTN query. Each is "same" (stdout, stderr and
 exit status) or "exception-2": NCBI dies of a signal, LOSAT exits 0 with NCBI's stderr,
 and LOSAT's stdout equals NCBI's for the same subject with a placeholder title of the
 length of LOSAT's title once the placeholder is replaced by the title that NCBI's loop
 gives when it stops at the end of the string. Any other outcome is printed; exits 1 when
 any is.
 
-Usage: title_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--jobs N] [--programs tblastx,tblastn]
+Usage: title_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--jobs N] [--programs tblastx,tblastn,blastp]
 """
 from __future__ import annotations
 
@@ -34,19 +37,25 @@ MANY = REPO / "LOSAT/tests/fasta/outfmt0"
 CODE = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
 
 
-def inputs(work: Path) -> tuple[str, dict[str, Path]]:
-    """The subject's residues and each program's query (copied into `work`)."""
+def inputs(work: Path) -> tuple[dict[str, str], dict[str, Path]]:
+    """Each program's subject residues and query (copied into `work`)."""
     residues = (MANY / "tblastx_many_subject.fasta").read_text().split(">")[1].split("\n", 1)[1]
     query_text = (MANY / "tblastx_many_query.fasta").read_text()
     query_nt = work / "query.fna"
     query_nt.write_text(query_text)
     seq = "".join(query_text.split("\n")[1:])
     index = {base: i for i, base in enumerate("TCAG")}
-    peptide = "".join(CODE[index[seq[i]] * 16 + index[seq[i + 1]] * 4 + index[seq[i + 2]]]
-                      for i in range(30, len(seq) - 32, 3)).replace("*", "")
+
+    def frame1(seq: str, start: int, end: int) -> str:
+        return "".join(CODE[index[seq[i]] * 16 + index[seq[i + 1]] * 4 + index[seq[i + 2]]]
+                       for i in range(start, end, 3)).replace("*", "")
+    peptide = frame1(seq, 30, len(seq) - 32)
     query_aa = work / "query.faa"
     query_aa.write_text(f">pep frame +1 of the many query\n{peptide}\n")
-    return residues, {"tblastx": query_nt, "tblastn": query_aa}
+    subject_nt = "".join(residues.split())
+    subject_aa = frame1(subject_nt, 0, len(subject_nt) - 2) + "\n"
+    return ({"tblastx": residues, "tblastn": residues, "blastp": subject_aa},
+            {"tblastx": query_nt, "tblastn": query_aa, "blastp": query_aa})
 
 
 def main() -> int:
@@ -55,7 +64,7 @@ def main() -> int:
     parser.add_argument("--losat", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--programs", default="tblastx,tblastn")
+    parser.add_argument("--programs", default="tblastx,tblastn,blastp")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     residues, queries = inputs(args.work)
@@ -67,7 +76,7 @@ def main() -> int:
     def run(case: tuple[str, int, str]) -> tuple[str, str, str, tuple[int, int] | None]:
         program, index, defline = case
         subject = args.work / f"{program}_title_{index}.fa"
-        subject.write_text(f">{defline}\n{residues}")
+        subject.write_text(f">{defline}\n{residues[program]}")
         argv = ["-query", str(queries[program]), "-subject", str(subject)]
         try:
             ncbi = subprocess.run([str(args.bin_dir / program), *argv], capture_output=True, timeout=120)
@@ -81,7 +90,7 @@ def main() -> int:
         if ncbi.returncode < 0 and ours.returncode == 0 and expected_title:
             placeholder = "Z" * len(expected_title)
             stand_in = args.work / f"{program}_title_{index}_p.fa"
-            stand_in.write_text(f">{placeholder}\n{residues}")
+            stand_in.write_text(f">{placeholder}\n{residues[program]}")
             other = subprocess.run([str(args.bin_dir / program), "-query", str(queries[program]),
                                     "-subject", str(stand_in)], capture_output=True, timeout=120)
             expected = (other.stdout.replace(placeholder.encode(), expected_title.encode())

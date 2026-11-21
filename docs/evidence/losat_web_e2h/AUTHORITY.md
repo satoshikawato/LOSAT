@@ -280,6 +280,8 @@ NCBI の読み方は program と役割だけで決まる（AD-9、AD-21）。`sc
 
 文言は `not supported by LOSAT's <PROGRAM>` を含む。
 
+BLASTP の outfmt 0 で、hit のある subject の句読点だけの題（NCBI の `x_CleanAndCompress` が文字列の終わりを越えて読み、NCBI は SIGSEGV で落ちる）は SFd まで明示的な拒否だったが、保守者が承認済みの例外 2 に含め（DW-27、§K）、SFe で実装した：BLASTN・TBLASTX・TBLASTN と同じく掃除を文字列の終わりで止めた題を書く（CLI、ABI v2、ABI v1 の `run_pair` と FASTA の handle。README 判断 31）。この表にはもう無い。
+
 | # | 拒否 | 範囲 | 理由 | 行 |
 |---|---|---|---|---|
 | 1 | loader が有効なとき Seq-id として試される最初の行（§G4） | 4 program、query・subject、CLI・Web | NCBI の結果が GenBank か BLAST DB と network に依る。同じ入力が機械ごとに違う出力になる（BI §9-6）。LOSAT は network も BLAST DB も使わない。保守者の判断 2。読む時点（遅延）に出す。`DATA_LOADERS=none`（実効値）なら NCBI と同じく FASTA として読む | BI-13〜23、BI-55 |
@@ -293,7 +295,7 @@ NCBI の読み方は program と役割だけで決まる（AD-9、AD-21）。`sc
 
 ## K. NCBI の不具合に見える挙動（`PD-LOSAT-NCBI-DEFECTS` 1.4）
 
-保守者は 2026-10-10 に、各行の「推奨」の規則を承認した（計画 DW-27、`PD-LOSAT-NCBI-DEFECTS` 1.4）。BLASTP の outfmt 0 の句読点だけの subject の題も承認済みの例外 2 に含まれた（実装は SFe。それまでは §J の明示的な拒否）。
+保守者は 2026-10-10 に、各行の「推奨」の規則を承認した（計画 DW-27、`PD-LOSAT-NCBI-DEFECTS` 1.4）。BLASTP の outfmt 0 の句読点だけの subject の題も承認済みの例外 2 に含まれた。SFe で実装した（commit `SFe: BLASTP writes punctuation-only subject titles as exception 2 (DW-27)`。fixture `punct.blastp`、`docs/evidence/losat_web_e2e/title_sweep.py` の BLASTP の 1023 定義行。それまでは明示的な拒否）。
 
 規則（同文書の Rule）：1 NCBI が失敗して LOSAT が有効な結果を出せる＝承認済みの例外、2 NCBI の決まった結果は byte で再現、3 NCBI が失敗して有効な結果を定義できない＝明示的な拒否、4 NCBI が決まって受け付けるなら移植。以下は推奨を付けた候補で、保守者の答えを待つ。
 

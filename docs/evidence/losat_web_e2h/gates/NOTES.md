@@ -37,7 +37,7 @@ build failure, a dirty tree or a missing frozen input stops the run. Heavy stage
 | 7 | regression-fixtures | range 35, TBLASTX 84, BLASTN 183 (`--jobs 4`) | frozen NCBI hashes | ~3 min |
 | 8 | sf-fixtures | `LOSAT/tests/fasta_input_fixtures.py check --jobs 3` (all programs; expected `$BUILD_ROOT/sf-e2h/fixtures/ncbi`) | NCBI 2.17.0 frozen (3932 rows; before: same 1131, differs 13, rejects 2764, pending 24; after: all `same`/listed rejections) | unmeasured (est. 5-15 min) |
 | 9 | sf-sweeps | `fasta_sweep.py check` (2280) and `check_inputs.py check` (1032), `--jobs 3`, run from `$BUILD_ROOT/sfb-e2h/sweeps`; generate/freeze only if missing; `summary` | frozen NCBI in `sweeps/ncbi`; `unlisted`, `differs`, `timeout` must be 0 | check seconds; freeze 100 s + 43 s |
-| 10 | input-sweeps | `ctoolkit_compare`, `punct_defline`, `title_sweep`, `protein_title_sweep`, `range_sweep` (`--jobs 3`) | NCBI live | ~5 min |
+| 10 | input-sweeps | `ctoolkit_compare`, `punct_defline`, `title_sweep`, `protein_title_sweep`, `range_sweep` (`--jobs 3`) | NCBI live. Since SFe (DW-27) `title_sweep` runs TBLASTX, TBLASTN and BLASTP (1023 deflines each; `unexpected=0`), and `protein_title_sweep` expects `exception-2` instead of `losat-rejects` for the punctuation titles that NCBI crashes on | ~5 min |
 | 11 | fast-all | `ci_fast_regressions.py --all-cases --jobs 4` (S02 baseline, Gate A + Stage G frozen hashes, fixtures of every program) | frozen hashes (1 known mismatch `Sakai.MG1655.megablast`) | 30-40 min (est.; same 236 cases as capture) |
 | 12 | v1-wasi | `check_wasm_threading.py` + `v1_requests.js`, `cmp` with S11's `v1-requests-after.jsonl` | S11 run (ABI v1 frozen) | 2-3 min |
 | 13 | vabi-quick | `v_abi_cases.py --suite quick` + `v_abi.js` | | 4-10 min |

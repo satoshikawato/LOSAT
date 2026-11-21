@@ -154,9 +154,21 @@ options ("あなたの推奨案でいきましょう").
   outfmt 0 title of a protein subject with the same `CDeflineGenerator` and
   `x_CleanAndCompress` (`create_defline.cpp:219-312`) and crashes (SIGSEGV) on subject titles
   made only of punctuation when the subject has hits. The approved result: LOSAT stops the
-  cleanup at the end of the string, as for BLASTN, TBLASTX and TBLASTN. Until it is
-  implemented (Session SFe), LOSAT's BLASTP rejects such subjects with hits in outfmt 0
-  explicitly (E2h `AUTHORITY.md` §J).
+  cleanup at the end of the string, as for BLASTN, TBLASTX and TBLASTN. Implemented in
+  Session SFe (E2h), commit `SFe: BLASTP writes punctuation-only subject titles as exception 2
+  (DW-27)` on `feature/losat-web-gui` (until then LOSAT's BLASTP rejected such subjects with
+  hits in outfmt 0 explicitly): the BLASTP report writes the title that
+  `report/defline.rs` already gives the other programs, for the CLI, ABI v2 and ABI v1
+  (`run_pair` and the FASTA handles; E2h gate record decision 31). Checked as for TBLASTX
+  and TBLASTN: over all 1023 deflines of one to five of `,;~` and space on a protein subject
+  with hits (the frame +1 peptide of the TBLASTX `many` subject, searched with the TBLASTN
+  query), each BLASTP report equals NCBI's or, where NCBI crashes, NCBI's report for the
+  same subject with a placeholder defline once the placeholder is replaced by LOSAT's title
+  (`docs/evidence/losat_web_e2e/title_sweep.py`, which now runs BLASTP too, and
+  `protein_title_sweep.py`); fixture `punct.blastp` of `LOSAT/tests/outfmt0_manifest.tsv`
+  (contract `approved_punct_title`); the 2 + 2 BLASTP punctuation cases of the E2h sweeps
+  (`fasta_sweep.py`, `check_inputs.py`) are approved exceptions. This records the
+  implementation; the decision of version 1.4 is unchanged.
 
 ## Reproduced as NCBI (rule 2)
 

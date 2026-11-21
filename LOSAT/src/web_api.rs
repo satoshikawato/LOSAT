@@ -1379,6 +1379,66 @@ mod tests {
         .is_ok());
     }
 
+    // NCBI reference: c++/src/objmgr/util/create_defline.cpp:275-284
+    // ```c
+    //         case comma_space:
+    //             *out++ = curr;
+    //             *out++ = ' ';
+    //             while (next == ' ' || next == ',') {
+    //                 next = *in;
+    //                 in++;
+    //                 left--;
+    //             }
+    //             two_chars = next;
+    //             break;
+    // ```
+    // Session SFe (DW-27): ABI v1's BLASTP (`run_pair` and the FASTA handles) writes the
+    // outfmt 0 title of a subject with hits whose title is only punctuation that NCBI's
+    // `x_CleanAndCompress` reads past (`, ,` and `;~ ;`; NCBI BLAST+ 2.17.0 crashes) as the
+    // engine does, stopped at the end of the string (approved exception 2 of
+    // PD-LOSAT-NCBI-DEFECTS; ABI v1 rejected such a subject until SFe). The report from the
+    // query line to the epilogue equals the CLI's (fixture `punct.blastp`).
+    #[test]
+    fn v1_blastp_writes_punctuation_titles_as_exception_2() {
+        let query = include_str!("../tests/fasta/outfmt0/punct_hits_query.faa");
+        let subject = include_str!("../tests/fasta/outfmt0/punct_hits_subject.faa");
+        let cli = include_str!("../tests/fixtures/outfmt0/punct.blastp.out");
+        let body = |report: &[u8]| {
+            let report = String::from_utf8(report.to_vec()).expect("UTF-8 report");
+            let start = report.find("Query=").expect("query line");
+            let end = report.find("  Database:").expect("epilogue");
+            report[start..end].to_string()
+        };
+        assert!(body(cli.as_bytes()).contains("\n> , \n"));
+        assert!(body(cli.as_bytes()).contains("\n> ;~;\n"));
+        let blastp = |outfmt: &str| {
+            parse_blastp_args(
+                &["-outfmt", outfmt],
+                PathBuf::new(),
+                PathBuf::new(),
+                PathBuf::new(),
+            )
+            .expect("blastp web args")
+        };
+        let output = v1_blastp::run_web_pair(blastp("0"), query, subject).unwrap();
+        assert_eq!(body(&output), body(cli.as_bytes()));
+        assert!(v1_blastp::run_web_pair(blastp("6"), query, subject).is_ok());
+        let store = |text: &str| {
+            let records = parse_fasta_records(text.as_bytes(), "stored FASTA").unwrap();
+            fasta_store()
+                .lock()
+                .unwrap()
+                .insert(records, "s.fa".to_string(), text.as_bytes().to_vec())
+                .unwrap()
+        };
+        let (query_handle, subject_handle) = (store(query), store(subject));
+        let output = run_pair_handles("blastp", query_handle, subject_handle, "0", "").unwrap();
+        assert_eq!(body(&output), body(cli.as_bytes()));
+        for handle in [query_handle, subject_handle] {
+            fasta_store().lock().unwrap().release(handle).unwrap();
+        }
+    }
+
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {

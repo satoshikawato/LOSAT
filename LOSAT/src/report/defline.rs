@@ -272,29 +272,6 @@ fn contains(text: &[u8], pattern: &[u8]) -> bool {
     text.windows(pattern.len()).any(|window| window == pattern)
 }
 
-/// Rejects the outfmt 0 title of the protein subject record `record` (from 1) of
-/// `program` that LOSAT does not write as NCBI: a title that NCBI decodes
-/// (`NStr::HtmlDecode`), or one that NCBI's `x_CleanAndCompress` reads past (NCBI crashes;
-/// approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers the nucleotide subjects of
-/// BLASTN, TBLASTX and TBLASTN only).
-pub fn check_shown_protein_subject_title(
-    defline: &str,
-    record: usize,
-    program: &str,
-) -> anyhow::Result<()> {
-    check_shown_subject_title(defline, record, program)?;
-    let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
-        generate_defline(defline.as_bytes(), true, leave_prefix)
-            .is_ok_and(|title| title.reads_past_end)
-    });
-    if reads_past_end {
-        anyhow::bail!(
-            "subject record {record} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's {program}"
-        );
-    }
-    Ok(())
-}
-
 /// Whether `NStr::HtmlDecode` decodes a character reference in the outfmt 0 title of a
 /// nucleotide subject with the defline `defline`, in the alignment heading or in the
 /// description table (its result flags `fHtmlDec_CharRef_Entity` or
@@ -314,10 +291,12 @@ pub fn ncbi_nucleotide_title_is_decoded(defline: &str) -> bool {
 /// Rejects the outfmt 0 title of the subject record `record` (from 1) of `program` that
 /// the callers reading with `bio` do not write as NCBI: a title that NCBI decodes
 /// (`NStr::HtmlDecode`). NCBI makes the titles only of the subjects that a report shows,
-/// those with hits, so the callers check those subjects after the search. A title that
-/// NCBI's `x_CleanAndCompress` reads past (NCBI crashes) is written as `generate_defline`
-/// stops it at the end of the string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS,
-/// extended to TBLASTX and TBLASTN by the maintainer in session S08b, DW-17).
+/// those with hits, so the callers check those subjects after the search. The check is
+/// the same for a protein subject (BLASTP): the protein title of an empty title, `unnamed
+/// protein product`, has no character reference. A title that NCBI's `x_CleanAndCompress`
+/// reads past (NCBI crashes) is written as `generate_defline` stops it at the end of the
+/// string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS, extended to TBLASTX and TBLASTN
+/// by the maintainer in session S08b, DW-17, and to BLASTP in session SFd, DW-27).
 ///
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
 /// ```c
@@ -1375,6 +1354,33 @@ mod tests {
         }
         for defline in [", ;", ",,", "a, ,b", ", ,a", "id, ,", "MAG: , ,x"] {
             assert!(!reads_past_end(defline), "{defline:?}");
+        }
+        // A protein title (BLASTP, approved exception 2 since session SFd, DW-27) is made the
+        // same way: the protein rules (`. [` and `, [` become ` [`) do not meet these titles.
+        for defline in [
+            ", ,",
+            "; ;",
+            "~, ,",
+            ",, ,",
+            ", ,,",
+            ";  ;",
+            ", , ,",
+            ",~, ,",
+            ";~ ;",
+            ", ;",
+            ",,",
+            "a, ,b",
+            ", ,a",
+            "id, ,",
+            "MAG: , ,x",
+        ] {
+            for leave in [false, true] {
+                assert_eq!(
+                    generate_defline(defline.as_bytes(), true, leave),
+                    generate_defline(defline.as_bytes(), false, leave),
+                    "{defline:?}"
+                );
+            }
         }
     }
 

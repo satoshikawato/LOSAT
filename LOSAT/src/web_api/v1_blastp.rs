@@ -284,9 +284,9 @@ struct V1Shown {
 /// ABI v1's records as `bio` reads them (`run_web_pair_records`). Plan TD-1 freezes ABI
 /// v1's accepted inputs, its messages and their order: the search makes ABI v1's checks of
 /// these records where it made them when it searched them (`check_records`, the engine's
-/// query-interval check, and its `check_shown_subject_titles` before the outfmt 0 report),
-/// and searches the records of NCBI's reader made from them (`from_bio`), which those
-/// checks guarantee to be read alike.
+/// query-interval check, and its `check_v1_shown_subject_titles` before the outfmt 0
+/// report), and searches the records of NCBI's reader made from them (`from_bio`), which
+/// those checks guarantee to be read alike.
 struct V1Records<'a> {
     queries: &'a [fasta::Record],
     subjects: &'a [fasta::Record],

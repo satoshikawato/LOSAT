@@ -190,10 +190,11 @@ CONDITIONS = [
 # Subject titles of the first word with a non-UTF-8 byte in a tabular report: NCBI writes a partial
 # row and dies (AUTHORITY.md section K-1, J-6) only for a `Subject_` first word (RP-20); for this
 # case's first word (`\x81bad`) NCBI 2.17.0 exits 0, and TBLASTX, TBLASTN and BLASTP write NCBI's bytes.
-# BLASTP's punctuation-only subject title in outfmt 0 (NCBI crashes) stays an explicit rejection while the
-# Owner decides whether approved exception 2 extends to BLASTP (S7 decision 4): these rows expect it.
-EXPECT_OVERRIDE = {("blastp", "punctuation_title", "s", "0"): "explicit-rejection",
-                   ("blastp", "punctuation_title_semicolon", "s", "0"): "explicit-rejection"}
+# Rows whose expectation is not the one the frozen NCBI exit code decides (`auto`). Until session SFe the two
+# BLASTP punctuation-only subject titles in outfmt 0 (`punctuation_title{,_semicolon}`, NCBI crashes) expected an
+# explicit rejection here; the Owner extended approved exception 2 to BLASTP (DW-27), so they are `auto`
+# (approved-exception) like TBLASTX's and TBLASTN's.
+EXPECT_OVERRIDE: dict[tuple[str, str, str, str], str] = {}
 NONUTF8_ID_TITLE = ("non_utf8_title_id", _set(0, lambda t, d: b"\x81bad" + b" " + t.split(b" ", 1)[1]))
 
 NEW_PROGRAMS = (("tblastx", "nuc", "nuc"), ("tblastn", "prot", "nuc"), ("blastp", "prot", "prot"))

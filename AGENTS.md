@@ -75,9 +75,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      and LOSAT's result was shown to equal NCBI's output for a nearby input
      that does not reach the defect. BLASTN: a query chunk that NCBI would
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
-     CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
-     titles made only of punctuation stop at the end of the string (NCBI
-     reads past it and crashes). BLASTP: a one-hit gapped start whose window
+     CCoreException) is searched once. BLASTN, TBLASTX, TBLASTN and BLASTP:
+     outfmt 0 titles made only of punctuation stop at the end of the string
+     (NCBI reads past it and crashes). BLASTP: a one-hit gapped start whose window
      of 11 letters passes the end of a sequence reads the letters past it as
      the sentinel (NCBI reads past its buffer and can crash; LOSAT's output
      equals NCBI's under valgrind). Deterministic NCBI results, even wrong-looking ones, are

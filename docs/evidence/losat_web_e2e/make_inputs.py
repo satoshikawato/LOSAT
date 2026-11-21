@@ -12,6 +12,10 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
   stand-in subject of the `approved_punct_title` rows of LOSAT/tests/outfmt0_manifest.tsv
   (docs/evidence/losat_web_e2a/run_oracle.py). Its path has the length of the subject's.
 - punct_hits_query.faa: the frame +1 peptide of the `many` query (the TBLASTN query).
+- punct_hits_subject.faa, punct_hits_standin.faa (session SFe, DW-27: approved exception 2
+  extended to BLASTP): the frame +1 peptides (from the first base, stop codons removed) of
+  the records of punct_hits_subject.fna under its deflines and under the stand-in's: the
+  BLASTP subject and stand-in of the `punct.blastp` row (query punct_hits_query.faa).
 - e2e_protein_query.faa: seven MeenMJNV proteins with homologs in LvMJNV (identities from
   about 30 to 60 %, one weak pair) and the first AvCLPV protein (low complexity, for SEG);
   e2e_protein_subject.faa: the seven LvMJNV homologs and six other LvMJNV proteins (every
@@ -159,9 +163,16 @@ def main() -> None:
         (OUT / name).write_text("".join(f">{defline}\n{seq}" for defline, seq in zip(deflines, records)))
     seq = "".join((OUT / "tblastx_many_query.fasta").read_text().split("\n")[1:])
     index = {base: i for i, base in enumerate("TCAG")}
-    peptide = "".join(CODE[index[seq[i]] * 16 + index[seq[i + 1]] * 4 + index[seq[i + 2]]]
-                      for i in range(30, len(seq) - 32, 3)).replace("*", "")
+
+    def frame1(seq: str, start: int, end: int) -> str:
+        return "".join(CODE[index[seq[i]] * 16 + index[seq[i + 1]] * 4 + index[seq[i + 2]]]
+                       for i in range(start, end, 3)).replace("*", "")
+    peptide = frame1(seq, 30, len(seq) - 32)
     (OUT / "punct_hits_query.faa").write_text(f">pep frame +1 of the many query\n{peptide}\n")
+    for name, deflines in (("punct_hits_subject.faa", DEFLINES), ("punct_hits_standin.faa", STAND_INS)):
+        residues = ["".join(record.split()) for record in records]
+        (OUT / name).write_text("".join(f">{defline}\n{frame1(nt, 0, len(nt) - 2)}\n"
+                                        for defline, nt in zip(deflines, residues)))
     sweep_inputs()
     many_inputs()
     titles_input()

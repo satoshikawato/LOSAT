@@ -5043,52 +5043,26 @@ fn check_v1_query_intervals(
 
 /// ABI v1's rejection (`V1Checks`) of the outfmt 0 titles that it did not write as NCBI,
 /// of the subjects that the report shows (those with hits): a title that NCBI decodes
-/// (`NStr::HtmlDecode`) and a title of punctuation that NCBI's `x_CleanAndCompress` reads
-/// past (`report::defline::check_shown_protein_subject_title`). ABI v1's titles are its
-/// `bio` deflines (`web_api::v1_bio::from_bio`).
+/// (`report::defline::check_shown_subject_title`). ABI v1's titles are its `bio` deflines
+/// (`web_api::v1_bio::from_bio`). A title of punctuation that NCBI's `x_CleanAndCompress`
+/// reads past the end of is not rejected: ABI v1 writes it as the engine does, stopped at
+/// the end of the string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS, extended to BLASTP
+/// by the maintainer in session SFd, DW-27; `report::defline::generate_defline`).
+///
+/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4066
+/// ```c
+///     CStringUTF8 decoded = NStr::HtmlDecode (m_MainTitle);
+/// ```
 fn check_v1_shown_subject_titles(
     shown: &std::collections::BTreeSet<usize>,
     subject_records: &[FastaRecord],
 ) -> Result<()> {
     for &index in shown {
-        crate::report::defline::check_shown_protein_subject_title(
+        crate::report::defline::check_shown_subject_title(
             &String::from_utf8_lossy(&subject_records[index].title),
             index + 1,
             "BLASTP",
         )?;
-    }
-    Ok(())
-}
-
-/// LOSAT's rejection of a protein subject title of punctuation that NCBI's
-/// `x_CleanAndCompress` reads past the end of in the outfmt 0 titles of the subjects that
-/// the report shows (NCBI BLAST+ 2.17.0 crashes there). The approved exception 2 of
-/// PD-LOSAT-NCBI-DEFECTS covers the nucleotide subjects of BLASTN, TBLASTX and TBLASTN
-/// only (DW-17), so LOSAT's BLASTP keeps the rejection.
-///
-/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
-/// ```c
-///     // produce final result
-///     string penult = mag + prefix + decoded + suffix;
-///
-///     x_CleanAndCompress (final, penult, m_IsAA);
-/// ```
-fn check_shown_subject_titles(
-    shown: &std::collections::BTreeSet<usize>,
-    subject_records: &[FastaRecord],
-) -> Result<()> {
-    for &index in shown {
-        let title = &subject_records[index].title;
-        let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
-            crate::report::defline::generate_defline(title, true, leave_prefix)
-                .is_ok_and(|defline| defline.reads_past_end)
-        });
-        if reads_past_end {
-            bail!(
-                "subject record {} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's BLASTP",
-                index + 1
-            );
-        }
     }
     Ok(())
 }
@@ -8097,16 +8071,46 @@ fn run_resolved_in_pool(
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");
                 // NCBI makes the titles of the subjects that the report shows, those with
-                // hits (blast_format.cpp:1540); LOSAT rejects the titles that it does not
-                // write as NCBI (`check_shown_subject_titles`, and ABI v1's own).
-                let shown: std::collections::BTreeSet<usize> = pairwise_hits
-                    .iter()
-                    .map(|hit| hit.hit.s_idx as usize)
-                    .collect();
+                // hits (blast_format.cpp:1540), with GenerateDefline, whose
+                // x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
+                // BLAST+ 2.17.0 crashes there). LOSAT writes such a title stopped at the end
+                // of the string (`report::defline::generate_defline`, approved exception 2
+                // of PD-LOSAT-NCBI-DEFECTS, extended to BLASTP by the maintainer in session
+                // SFd, DW-27), as BLASTN, TBLASTX and TBLASTN do. ABI v1 rejects the titles
+                // that it did not write as NCBI (`check_v1_shown_subject_titles`).
+                // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1539-1541
+                // ```c
+                //     if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
+                //         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
+                //     }
+                // ```
+                // NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
+                // ```c
+                //     // produce final result
+                //     string penult = mag + prefix + decoded + suffix;
+                //
+                //     x_CleanAndCompress (final, penult, m_IsAA);
+                // ```
+                // NCBI reference: c++/src/objmgr/util/create_defline.cpp:275-284
+                // ```c
+                //         case comma_space:
+                //             *out++ = curr;
+                //             *out++ = ' ';
+                //             while (next == ' ' || next == ',') {
+                //                 next = *in;
+                //                 in++;
+                //                 left--;
+                //             }
+                //             two_chars = next;
+                //             break;
+                // ```
                 if reports.v1_titles {
+                    let shown: std::collections::BTreeSet<usize> = pairwise_hits
+                        .iter()
+                        .map(|hit| hit.hit.s_idx as usize)
+                        .collect();
                     check_v1_shown_subject_titles(&shown, subject_records)?;
                 }
-                check_shown_subject_titles(&shown, subject_records)?;
                 let masked_hits =
                     masked_query_rows(pairwise_hits, &query_frames, &ranges.query_input.placements);
                 write_blastp_pairwise_report(

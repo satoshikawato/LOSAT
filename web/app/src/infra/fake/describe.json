@@ -88,20 +88,31 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-searchsp",
     "help": "Effective length of the search space",
     "takes_value": true
    },
    {
     "flag": "-task",
-    "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
+    "help": "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn",
     "takes_value": true,
     "default": "megablast",
     "choices": [
      "megablast",
      "dc-megablast",
      "blastn",
-     "blastn-short"
+     "blastn-short",
+     "rmblastn"
     ]
    },
    {
@@ -126,7 +137,7 @@
    },
    {
     "flag": "-perc_identity",
-    "help": "Percent identity threshold for filtering HSPs (Blast_HSPTest)",
+    "help": "Percent identity threshold for filtering HSPs (default: 0, no filtering)",
     "takes_value": true
    },
    {
@@ -161,7 +172,7 @@
    },
    {
     "flag": "-max_hsps",
-    "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
+    "help": "Maximum number of HSPs per subject (unlimited when omitted)",
     "takes_value": true
    },
    {
@@ -171,12 +182,12 @@
    },
    {
     "flag": "-reward",
-    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)",
+    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)",
     "takes_value": true
    },
    {
     "flag": "-penalty",
-    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)",
+    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)",
     "takes_value": true
    },
    {
@@ -207,6 +218,11 @@
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: true]",
+    "takes_value": true
+   },
+   {
+    "flag": "-filtering_db",
+    "help": "BLAST database containing filtering elements (i.e.: repeats)",
     "takes_value": true
    },
    {
@@ -242,7 +258,7 @@
    },
    {
     "flag": "-subject_besthit",
-    "help": "Apply subject best hit filtering (disabled by default). Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135",
+    "help": "Apply subject best hit filtering (disabled by default)",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -253,6 +269,16 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
     "takes_value": true
    },
    {
@@ -377,6 +403,24 @@
      "-word_size": "28",
      "-xdrop_gap": "25",
      "-xdrop_gap_final": "100"
+    },
+    "rmblastn": {
+     "-culling_limit": "0",
+     "-dust": "20 64 1",
+     "-evalue": "10",
+     "-gapextend": "2",
+     "-gapopen": "5",
+     "-line_length": "60",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-penalty": "0",
+     "-reward": "0",
+     "-soft_masking": "true",
+     "-window_size": "0",
+     "-word_size": "11",
+     "-xdrop_gap": "30",
+     "-xdrop_gap_final": "100"
     }
    },
    "by": {},
@@ -397,19 +441,22 @@
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ],
     "-num_alignments": [
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ],
     "-num_descriptions": [
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ]
    }
   }
@@ -478,6 +525,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -485,6 +542,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -567,6 +634,25 @@
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "Return only the best HSP for each non overlapping query region",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-ungapped",
@@ -1072,6 +1158,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -1079,6 +1175,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -1606,6 +1712,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -1613,6 +1729,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -1780,6 +1906,15 @@
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "Return only the best HSP for each non overlapping query region",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-ungapped",
@@ -2138,6 +2273,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -2145,6 +2290,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -2189,6 +2344,11 @@
     "help": "",
     "takes_value": true,
     "default": "1"
+   },
+   {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
+    "takes_value": true
    },
    {
     "flag": "-max_target_seqs",
@@ -2242,12 +2402,28 @@
     "takes_value": true
    },
    {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
+    "takes_value": true
+   },
+   {
     "flag": "-lcase_masking",
     "help": "",
     "takes_value": false,
     "choices": [
      "true",
      "false"
+    ]
+   },
+   {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
     ]
    },
    {
@@ -2264,6 +2440,15 @@
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "Return only the best HSP for each non overlapping query region",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-query_loc",
@@ -2344,6 +2529,7 @@
      "-num_descriptions": "500",
      "-seg": "12 2.2 2.5",
      "-soft_masking": "false",
+     "-sum_stats": "true",
      "-threshold": "13",
      "-window_size": "40",
      "-word_size": "3",

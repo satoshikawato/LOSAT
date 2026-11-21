@@ -1,7 +1,7 @@
 //! BLASTN search coordination and execution
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c
-//!            ncbi-blast/c++/src/algo/blast/core/blast_engine.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c
+//!            c++/src/algo/blast/core/blast_engine.c
 //!
 //! This module contains the main `run()` function that coordinates the BLASTN
 //! search process:
@@ -17,6 +17,7 @@
 mod run;
 
 // Re-export the main run function
+pub(crate) use run::repeat_search_hits;
 pub use run::run;
 pub use run::run_local;
 pub use run::run_local_database;

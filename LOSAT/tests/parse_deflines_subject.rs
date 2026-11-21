@@ -208,9 +208,6 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
-// ```c++
-//         formatter.PrintProlog();
-// ```
 // BLASTP's query-anchored formats 1 to 4 read the queries as outfmt 0 does: the refusal of a query
 // with a subject's id comes with the query's batch, after the prolog that NCBI's application writes
 // before its first batch, the same bytes as outfmt 0's (line RG T3a review D3). The reference bytes
@@ -463,7 +460,7 @@ fn the_same_files_without_the_option_are_searched() {
 /// (probe `ncbi-parity-20261019/SM/subnodef`, the `*.s.*.pd.f11` runs of the five programs).
 fn no_defline_archive(line: u64) -> String {
     format!(
-        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the BLAST+ user manual.\"\n    }}\n  }}\n}}\n"
+        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the LOSAT user manual.\"\n    }}\n  }}\n}}\n"
     )
 }
 
@@ -521,7 +518,7 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
         for (subject, line) in &subjects {
             let message = format!(
                 "BLAST query/options error: Query input doesn't start with a defline or comment, \
-                 line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+                 line {line}\0\nPlease refer to the LOSAT user manual.\n"
             );
             for threads in ["1", "4", "8", "16"] {
                 for query in [&clean_query, &bad_query] {
@@ -556,14 +553,6 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 // The `Run` of each of the five programs ends so. `CATCH_ALL` posts the error, which the handler
 // writes to standard error at once (blast_aux.cpp:1155-1159), before `PrintErrorArchive` writes the
 // error archive: in one stream of both (`2>&1`) the error comes between the archives written
@@ -756,12 +745,14 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
         // same two files).
         let (status, stdout, stderr) = search(&bad_gi, "5", threads, Some("1"));
         let frozen = |extension: &str| {
-            std::fs::read(
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let bytes = std::fs::read(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("tests/fixtures/outfmt16")
                     .join(format!("prescan_badgi_blastx_5.{extension}")),
             )
-            .unwrap()
+            .unwrap();
+            losat::wording::losat_output_bytes(&bytes).into_owned()
         };
         let code = String::from_utf8(frozen("rc")).unwrap();
         assert_eq!(
@@ -1014,14 +1005,16 @@ fn tblastx_query_anchored_writes_one_record_as_a_query_and_a_subject() {
 }
 
 /// NCBI BLAST+ 2.17.0's standard error where its merge of a query-anchored section throws at
-/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255).
+/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255), in LOSAT's
+/// words (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 fn merge_exception(file: &str, line: u32, function: &str, message: &str) -> String {
-    format!(
+    losat::wording::losat_text(&format!(
         "Error: NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/\
          PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_\
          1751374548/c++/compilers/unix/../../src/objtools/alnmgr/{file}\", line {line}: Error: \
          (CAlnException::eMergeFailure) ncbi::objects::{function}() - {message}\n\n"
-    )
+    ))
+    .into_owned()
 }
 
 // Line RG T3c fix 2 (PD-LOSAT-NCBI-DEFECTS 1.39, rule 2): `txrep2.fa` is one record of two copies of a

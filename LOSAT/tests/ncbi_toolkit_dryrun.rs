@@ -10,8 +10,8 @@
 //! command line writes to its standard error (the example ends every failure with exit status
 //! 1). rpsblast and rpstblastn are not in the library (`api::Program`).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (quoted at
-//! `cli::main_entry`) and 926-1001 (quoted at `ncbi_environment::preparse`).
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (cited at
+//! `cli::main_entry`) and 926-1001 (cited at `ncbi_environment::preparse`).
 
 #![cfg(unix)]
 
@@ -452,7 +452,10 @@ fn argument_errors_are_reported_as_without_dryrun() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+/// NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+fn section_report() -> String {
+    losat::wording::losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n").into_owned()
+}
 
 /// NCBI BLAST+ 2.17.0 (probes `dry_conf_missing`, `dry_conf_bad`, `dry_ini_bad`, `dry_h`,
 /// `dry_help`, `dry_ver`): the configuration is loaded before the arguments are read, `-dryrun`
@@ -501,7 +504,7 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
             let bad = run_in(&dir, &bad_words, &[]);
             assert_eq!(
                 (bad.status.code(), text(&bad.stderr)),
-                (Some(2), SECTION_REPORT.repeat(2)),
+                (Some(2), section_report().repeat(2)),
                 "{program} -conffile"
             );
             if in_library(program) {
@@ -514,7 +517,7 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
             let bad = run_in(&dir, &bad_words, &[]);
             assert_eq!(
                 (bad.status.code(), text(&bad.stderr)),
-                (Some(2), SECTION_REPORT.repeat(2)),
+                (Some(2), section_report().repeat(2)),
                 "{program} .ini"
             );
             if in_library(program) {
@@ -546,11 +549,9 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
         } else if in_library(program) {
             assert_eq!(library.status.code(), Some(1), "{program}");
             assert!(
-                text(&library.stderr).contains(
-                    "the NCBI C++ Toolkit option -version runs on the command line of LOSAT's"
-                ) && text(&library.stderr).contains(
-                    "the library API and the Web engine do not write NCBI's version text"
-                ),
+                text(&library.stderr).contains("the option -version runs on the command line")
+                    && text(&library.stderr).contains("only: the library API")
+                    && text(&library.stderr).contains("not write NCBI's version text"),
                 "{program}: {library:?}"
             );
         }

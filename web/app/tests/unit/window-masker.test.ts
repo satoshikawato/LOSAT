@@ -29,12 +29,22 @@ import {
   EngineStoppedError,
   FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
+  MESSAGES_STREAM,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
   type AbiExports,
   type FileInfo,
 } from '../../../packages/losat/src/infra/reactor/abi';
+import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
+
+/** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
+const NO_LINKS: MainLinks = {
+  link: () => {
+    throw new Error('unused');
+  },
+  fault: () => undefined,
+};
 
 // --- the form and the argv ---------------------------------------------------------------------
 
@@ -255,15 +265,20 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
     },
     validate: () => {
       calls.push('validate');
-      return undefined;
+      return { ok: true, dataLoaders: true };
     },
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: role === ROLE_QUERY ? [{ id: 'q', length: bytes.length }] : [{ id: 's', length: bytes.length }] };
     },
     release: (h: number) => void calls.push(`release ${h}`),
-    run: () => void calls.push('run'),
+    // The run says where its messages go (stream 10: the diagnostics, 3), as every run of the engine does.
+    run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
+      calls.push('run');
+      sink(MESSAGES_STREAM, new Uint8Array([3, 0, 0, 0]));
+    },
     fileBegin: (kind: number, name: string, size: number) => {
       calls.push(`begin ${kind} ${name} ${size}`);
       if (options.stopOnBegin) {
@@ -300,8 +315,7 @@ function runtimeWith(abi: ReactorAbi) {
     },
     builds: { serial: 'serial', threads: 'threads' },
     use: undefined,
-    faultChannel: 'faults',
-    keeperChannel: 'keeper',
+    main: NO_LINKS,
   });
   // The runtime holds this instance as one that a search loaded.
   (runtime as unknown as { loaded: unknown }).loaded = {
@@ -546,8 +560,8 @@ describe.skipIf(reactors === undefined)('the counts file in the built serial rea
   const subject = readFileSync(resolve(LOSAT, 'tests/fixtures/blastn_regression/inputs/s60k.fa'));
 
   function search(abi: ReactorAbi, argv: readonly string[]): string {
-    const q = abi.register('blastn', ROLE_QUERY, query);
-    const s = abi.register('blastn', ROLE_SUBJECT, subject);
+    const q = abi.register('blastn', ROLE_QUERY, true, query);
+    const s = abi.register('blastn', ROLE_SUBJECT, true, subject);
     const chunks: Uint8Array[] = [];
     try {
       abi.run([...argv, '-num_threads', '1'], q.handle, s.handle, (stream, bytes) => {

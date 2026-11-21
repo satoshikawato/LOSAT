@@ -8,7 +8,7 @@ from pathlib import Path
 import pylosat
 import pytest
 from conftest import fasta
-from pylosat import ArgumentError, Pssm, Search, Sequences
+from pylosat import Alignment, ArgumentError, Pssm, Search, Sequences
 
 
 def test_keywords_are_the_words_of_the_command_line():
@@ -74,10 +74,30 @@ def test_a_pssm_query_is_an_input_not_an_option():
             Search(program, in_pssm="q.asn")
         with pytest.raises(ArgumentError, match="a PSSM query is given as the inputs"):
             Search.from_argv(program, ["-in_pssm", "q.asn"])
-    with pytest.raises(TypeError, match="or a Pssm"):
+    with pytest.raises(TypeError, match="or an Alignment"):
         Search("psiblast").run("q.asn", Sequences.from_text(">s\nMKT\n"))
     with pytest.raises(ArgumentError, match="psiblast and tblastn, not by blastp"):
         Search("blastp").run(Pssm.from_file("q.asn"), Sequences.from_text(">s\nMKT\n"))
+
+
+def test_an_alignment_query_is_an_input_and_its_master_choice_an_option():
+    # Line LIB item 1.6: the alignment query is `Alignment`, which the search gives as `-in_msa`;
+    # `-msa_master_idx` and `-ignore_msa_master` are options of the search.
+    with pytest.raises(TypeError, match="in_msa"):
+        Search("psiblast", in_msa="m.aln")
+    with pytest.raises(ArgumentError, match="a query alignment is given as the inputs"):
+        Search.from_argv("psiblast", ["-in_msa", "m.aln"])
+    assert Search("psiblast", msa_master_idx=2).argv == ("-msa_master_idx", "2")
+    assert Search("psiblast", ignore_msa_master=True).argv == ("-ignore_msa_master",)
+    assert Search.from_argv("psiblast", ["-msa_master_idx", "2"]).argv == ("-msa_master_idx", "2")
+    flags = {parameter.flag for parameter in pylosat.describe("psiblast").parameters}
+    assert {"-msa_master_idx", "-ignore_msa_master"} <= flags and "-in_msa" not in flags
+    # The other programs have no such options.
+    with pytest.raises(TypeError, match="msa_master_idx"):
+        Search("blastp", msa_master_idx=2)
+    with pytest.raises(TypeError, match="or an Alignment"):
+        Search("psiblast").run("m.aln", Sequences.from_text(">s\nMKT\n"))
+    assert Alignment.from_file(Path("m.aln")) == Alignment("m.aln")
 
 
 ROUNDS_QUERY = "outfmt0/e2e_many_query.faa"

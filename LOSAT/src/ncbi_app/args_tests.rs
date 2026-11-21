@@ -8,14 +8,16 @@
 use super::*;
 
 /// `program` as these tests read its command line. The synopsis of its usage (`Tool::help`),
-/// which orders the errors of `x_PostCheck`, is that of the four programs on this reader; the
-/// others' have no two such errors in these tests.
+/// which orders the errors of `x_PostCheck`, is that of the programs on this reader
+/// (`ON_THE_READER`); the others' have no two such errors in these tests.
 fn tool(program: &'static str) -> Tool {
     let help = match program {
         "blastdbcmd" => include_str!("../blastdbcmd/help.txt"),
         "dustmasker" => include_str!("../dustmasker/help.txt"),
         "segmasker" => include_str!("../segmasker/help.txt"),
         "convert2blastmask" => include_str!("../convert2blastmask/help.txt"),
+        "makembindex" => include_str!("../makembindex/help.txt"),
+        "windowmasker" => include_str!("../windowmasker/help.txt"),
         _ => "",
     };
     Tool {
@@ -24,8 +26,19 @@ fn tool(program: &'static str) -> Tool {
         version: "0",
         help,
         post_prefix: None,
+        components: &[],
     }
 }
+
+/// The programs that run on this reader (`ncbi_app`).
+const ON_THE_READER: [&str; 6] = [
+    "blastdbcmd",
+    "dustmasker",
+    "segmasker",
+    "convert2blastmask",
+    "makembindex",
+    "windowmasker",
+];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
     let words: Vec<String> = line.iter().map(|word| word.to_string()).collect();
@@ -39,8 +52,13 @@ fn messages(program: &'static str, line: &[&str]) -> (&'static str, Vec<String>)
     }
 }
 
+/// The texts as LOSAT writes them: the expected texts are NCBI's (`(m_Pos = <n>)` and the like),
+/// in LOSAT's words (`crate::wording::losat_text`).
 fn strings(texts: &[&str]) -> Vec<String> {
-    texts.iter().map(|text| text.to_string()).collect()
+    texts
+        .iter()
+        .map(|text| crate::wording::losat_text(text).into_owned())
+        .collect()
 }
 
 /// Every program's table.
@@ -158,8 +176,9 @@ fn every_argument_of_the_xml_is_in_its_table() {
             constraints += usize::from(usage.is_some());
         }
     }
-    // The 169 constraints of the 14 programs (line RG item K4i, SURVEY).
-    assert_eq!(constraints, 169);
+    // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), and makembindex's 6
+    // and windowmasker's 16.
+    assert_eq!(constraints, 169 + 6 + 16);
 }
 
 /// Which class a constraint is.
@@ -270,7 +289,7 @@ fn the_reader_gives_ncbi_s_verdicts() {
         let same = match (&got, case.code) {
             (Ok(_), "ok") => true,
             (Err(ArgsError::Invalid(error)), code) => {
-                error.code == code && error.messages == case.messages
+                error.code == code && error.messages == strings(&case.messages)
             }
             _ => false,
         };
@@ -281,8 +300,11 @@ fn the_reader_gives_ncbi_s_verdicts() {
     assert!(differing.is_empty(), "{}", differing.join("\n"));
 }
 
-/// The cases reach every constraint: each constrained argument of each program refuses a value
-/// outside it, and each constraint (its usage) takes a value inside it in some program.
+/// The cases reach every constraint: each constrained argument of each program of the probe
+/// refuses a value outside it, and each constraint (its usage) takes a value inside it in some
+/// program. (makembindex and windowmasker, whose XML came after the probe, are not in it; their
+/// constraints are of the classes the probe reaches, and their refusals are NCBI's in their own
+/// fixtures, `tests/makembindex`, `tests/windowmasker`.)
 #[test]
 fn the_verdicts_reach_every_constraint() {
     let cases = verdicts();
@@ -302,7 +324,9 @@ fn the_verdicts_reach_every_constraint() {
         }
     }
     assert_eq!(classes, CLASSES.into_iter().collect());
-    for (program, arguments) in programs() {
+    let probed: BTreeSet<&str> = cases.iter().map(|case| case.program).collect();
+    assert_eq!(probed.len(), 14);
+    for (program, arguments) in programs().filter(|(program, _)| probed.contains(program)) {
         for desc in arguments.descs {
             let Some(constraint) = desc.constraint else {
                 continue;
@@ -328,12 +352,12 @@ fn the_verdicts_reach_every_constraint() {
 }
 
 /// `x_PostCheck` stops at the first argument of `m_KeyFlagArgs` that throws, which is not in the
-/// XML: `usage_position` reads it from the synopsis. Every argument of the four programs on this
+/// XML: `usage_position` reads it from the synopsis. Every argument of the programs on this
 /// reader is in their synopsis, and the hidden arguments of the others are flags that no
 /// argument requires, so none of them is an error of `x_PostCheck`.
 #[test]
 fn the_synopsis_orders_the_errors_of_the_post_check() {
-    for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+    for program in ON_THE_READER {
         let help = tool(program).help;
         for desc in arguments(program).unwrap().descs {
             assert_ne!(
@@ -399,7 +423,7 @@ fn an_alias_is_its_argument() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (cited at
 // `constraint::string_to_int8`, `int8_value` and `integer_value`).
 #[test]
 fn integer_keys_convert_as_ncbi_s_reader() {

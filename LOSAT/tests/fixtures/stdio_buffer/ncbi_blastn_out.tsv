@@ -1,0 +1,16 @@
+# NCBI BLAST+ 2.17.0 blastn, `-query q.fa -subject q.fa -outfmt "6 qseqid sseqid" -out out.txt`, the query id is L bytes long
+# (so the row is qseqid(L) "\t" sseqid(L) "\n": four insertions); the write calls to the -out file under `strace -f -e trace=write,writev`.
+# binaries: official Linux x64 build ncbi-official-2.17.0 (static libstdc++, GCC 8.5.0) and conda env_blast 2.17.0 (libstdc++ of GCC 14): the same writes.
+# host: ws, 2026-11-20 (obs/ncbi_ofs_obs.sh). columns: L, sizes of the writes (the last is the close at exit)
+500	1002
+1000	2002
+1023	2048
+1024	2050
+1025	2052
+2000	4002
+5000	10001,1
+8190	8191,8191
+8191	8191,8192,1
+8192	8192,8193,1
+9000	9000,9001,1
+20000	20000,20001,1

@@ -8,12 +8,19 @@
 //! (`ReadClassSequential`, `ReadChoiceSimple`, `ReadContainer`, the object frames); `text.rs`
 //! and `ber.rs` are the two encodings' primitives.
 //!
-//! Where an error is raised matters for one thing, the end of the file. NCBI's input buffer throws
-//! a `CEofException` when a read passes the end. Every object frame (`END_OBJECT_FRAME`) turns it
-//! into a `CSerialException` (an error) unless fewer than two frames remain after it, in which case
-//! the `CEofException` goes on to `x_ProcessMaskData`, which treats it as the end of the file and drops the
-//! object being read. That happens at the type name of a text object, at its opening brace, and at the tag, the
-//! length and the closing bytes of the outermost binary SEQUENCE; the `Fail::Eof` below is that exception.
+//! What NCBI's reader throws for a file it cannot read is what LOSAT reports (`Fail`, then
+//! `MaskFileError::Ncbi`): the exception of the primitive at its place in NCBI's source, with
+//! what each object frame it leaves adds (`END_OBJECT_FRAME`: the frame's name for a
+//! `CSerialException`, its line for another `CException`; `ReadWithSetFlagMember` and
+//! `CEnumeratedTypeInfo::ReadEnum` add theirs), as makeblastdb's `CATCH_ALL` prints it. What it
+//! posts while it reads (a byte of a VisibleString read as `#`, a UTF8String tag) is handed out
+//! in order (`MaskFileReader::take_posts`).
+//!
+//! The end of the file is NCBI's `CEofException` (`Fail::Eof`). Every object frame turns it into
+//! a `CSerialException` (`HandleEOF`) unless fewer than two frames remain after it, in which case
+//! the `CEofException` goes on to `x_ProcessMaskData`, which treats it as the end of the file and
+//! drops the object being read. That happens at the type name of a text object, at its opening
+//! brace, and at the tag, the length and the closing bytes of the outermost binary SEQUENCE.
 
 use std::fmt;
 use std::io::Read;
@@ -22,16 +29,23 @@ use std::path::{Path, PathBuf};
 use super::ber::BerIn;
 use super::guess::guess_format;
 use super::schema::{
-    ChoiceDef, ClassDef, EnumDef, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM, BLAST_MASK_LIST,
-    DATE, DATE_STD, DBTAG, GIIMPORT_ID, ID_PAT, ID_PAT_ID, NA_STRAND, OBJECT_ID_ID, PACKED_SEQPNT,
-    PATENT_SEQ_ID, PDB_SEQ_ID, SEQ_BOND, SEQ_ID, SEQ_INTERVAL, SEQ_INTERVAL_FROM, SEQ_INTERVAL_ID,
-    SEQ_INTERVAL_STRAND, SEQ_INTERVAL_TO, SEQ_LOC, SEQ_LOC_BOND, SEQ_LOC_EMPTY, SEQ_LOC_EQUIV,
-    SEQ_LOC_INT, SEQ_LOC_MIX, SEQ_LOC_NULL, SEQ_LOC_PACKED_INT, SEQ_LOC_PACKED_PNT, SEQ_LOC_PNT,
-    SEQ_LOC_WHOLE, SEQ_POINT, TEXTSEQ_ID, T_OBJECT_ID,
+    ChoiceDef, ClassDef, EnumDef, Member, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM,
+    BLAST_MASK_LIST, DATE, DATE_STD, DBTAG, GIIMPORT_ID, ID_PAT, ID_PAT_ID, NA_STRAND,
+    OBJECT_ID_ID, PACKED_SEQPNT, PATENT_SEQ_ID, PDB_SEQ_ID, SEQ_BOND, SEQ_ID, SEQ_INTERVAL,
+    SEQ_INTERVAL_FROM, SEQ_INTERVAL_ID, SEQ_INTERVAL_STRAND, SEQ_INTERVAL_TO, SEQ_LOC,
+    SEQ_LOC_BOND, SEQ_LOC_EMPTY, SEQ_LOC_EQUIV, SEQ_LOC_INT, SEQ_LOC_MIX, SEQ_LOC_NULL,
+    SEQ_LOC_PACKED_INT, SEQ_LOC_PACKED_PNT, SEQ_LOC_PNT, SEQ_LOC_WHOLE, SEQ_POINT, TEXTSEQ_ID,
+    T_OBJECT_ID,
 };
 use super::text::{TextIn, TextSource};
-use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart};
-use crate::report::serial::asn_text_reader::StreamSource;
+use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart, NullElement};
+use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+use crate::report::serial::asn_text_reader::{PointerType, StreamSource};
+use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
+use crate::report::serial::object_frame::{
+    frame_info, frame_name, text_frame_site, FrameKind, READ_POINTER_FRAME_END,
+};
+use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -51,13 +65,12 @@ pub(crate) enum MaskFileFormat {
 /// Why a mask file could not be read.
 #[derive(Debug)]
 pub(crate) enum MaskFileError {
-    /// An error whose text NCBI's own code writes (the "Unknown encoding ..."
-    /// `CInvalidDataException`); carries the `WriteDbError` makeblastdb would end with.
+    /// What makeblastdb ends with, as NCBI's code writes it: the "Unknown encoding ..."
+    /// `CInvalidDataException` of the format guess, and what NCBI's serial reader throws for a
+    /// file it cannot read: its `CSerialException` or `CUtilException` (`Exception`, "Error: "
+    /// and the report, status 255), `std::bad_alloc` of a string's length (`OutOfMemory`,
+    /// status 4) or `std::length_error` (`Other` with its `what()`, status 255).
     Ncbi(WriteDbError),
-    /// The file is not a valid object for NCBI's serial reader; NCBI's serial-library text is
-    /// not reproduced (makeblastdb ends with status 255 and a `CSerialException` or
-    /// `CUtilException` text that names the NCBI build directory).
-    Malformed { path: PathBuf, message: String },
     /// NCBI reads it; LOSAT does not.
     Unsupported(String),
     /// The file ends where `next_list` expected the continuation that `more TRUE` announces.
@@ -72,9 +85,6 @@ impl fmt::Display for MaskFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MaskFileError::Ncbi(e) => write!(f, "{e}"),
-            MaskFileError::Malformed { path, message } => {
-                write!(f, "mask data in '{}': {message}", path.display())
-            }
             MaskFileError::Unsupported(what) => {
                 write!(f, "mask data that LOSAT does not read: {what}")
             }
@@ -89,25 +99,206 @@ impl fmt::Display for MaskFileError {
 
 impl std::error::Error for MaskFileError {}
 
-/// What a primitive or a frame reports.
+/// What a primitive or a frame reports: the class of what NCBI's reader throws. What a variant
+/// holds is in a box of one word (`Fail::serial`, `Fail::exception`, `Fail::unsupported`), so
+/// `Fail` is a tag and a word, and the result of a primitive (`R<u32>`, `R<()>`, `R<bool>`) is
+/// returned in two registers (an unboxed `String` made every result a niche of its capacity, a
+/// 64-bit constant at each `Ok` and `?`, returned through memory); no error is built on the
+/// paths that read a valid file.
 #[derive(Debug)]
 pub(super) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
     Eof,
-    /// The serial reader throws: `CSerialException`, `CUtilException` (bad number, overflow).
-    Format(String),
+    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
+    Serial(Box<NcbiException>),
+    /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
+    /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
+    Exception(Box<NcbiException>),
+    /// `std::bad_alloc` of the string that a length announces (`GetChars`' `reserve`).
+    OutOfMemory,
+    /// `std::length_error` of that `reserve`: `what()` is [`STRING_CREATE_LENGTH_ERROR`].
+    LengthError,
     /// NCBI reads it; LOSAT does not.
-    Unsupported(String),
+    Unsupported(Box<Refusal>),
 }
+
+/// What [`Fail::Unsupported`] says of what LOSAT does not read.
+#[derive(Debug)]
+pub(super) struct Refusal(String);
 
 pub(super) type R<T> = Result<T, Fail>;
 
-pub(super) fn format_err<T>(message: impl Into<String>) -> R<T> {
-    Err(Fail::Format(message.into()))
+impl Fail {
+    /// [`Fail::Serial`] of `e`.
+    #[cold]
+    pub(super) fn serial(e: NcbiException) -> Fail {
+        Fail::Serial(Box::new(e))
+    }
+
+    /// [`Fail::Exception`] of `e`.
+    #[cold]
+    pub(super) fn exception(e: NcbiException) -> Fail {
+        Fail::Exception(Box::new(e))
+    }
+
+    /// [`Fail::Unsupported`] of `what`.
+    #[cold]
+    pub(super) fn unsupported(what: String) -> Fail {
+        Fail::Unsupported(Box::new(Refusal(what)))
+    }
+}
+
+/// `ThrowError(flag, message)` of NCBI's object stream at `site` (`ThrowError1`,
+/// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
+/// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`. It returns the
+/// [`Fail`], not an `R`: the path that calls it ends there (`return Err(throw_error(..))`), so
+/// the reading path around it keeps nothing for its return.
+#[cold]
+#[inline(never)]
+pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl AsRef<[u8]>) -> Fail {
+    Fail::serial(NcbiException::new(
+        site,
+        [position.as_bytes(), b": ", message.as_ref()].concat(),
+    ))
+}
+
+/// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
+const fn istr_site(line: u32, kind: &'static str, function: &'static str) -> ThrowSite {
+    ThrowSite {
+        file: "src/serial/objistr.cpp",
+        line,
+        kind,
+        function: Some(function),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
+const HANDLE_EOF: ThrowSite = istr_site(
+    606,
+    "CSerialException::eEOF",
+    "ncbi::CObjectIStream::HandleEOF",
+);
+const SKIP_FILE_HEADER: ThrowSite = istr_site(
+    896,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::SkipFileHeader",
+);
+const EXPECTED_MEMBER: ThrowSite = istr_site(
+    1037,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::ExpectedMember",
+);
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
+// (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
+// 2.17.0 on `@0` and `@1`.)
+const GET_REGISTERED_OBJECT: ThrowSite = istr_site(
+    877,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::GetRegisteredObject",
+);
+
+/// `what()` of the `std::length_error` that libstdc++'s `_M_create` throws for a capacity over
+/// `max_size()` (`rpsbproc::prosite::CxxString`).
+pub(super) const STRING_CREATE_LENGTH_ERROR: &str = "basic_string::_M_create";
+
+/// The bytes of the file that one string of `length` bytes asks NCBI for (`GetChars`:
+/// `str.reserve(count)` before the bytes are read, when they are not all in the input buffer):
+/// a length over `max_size()` (2^63 - 1, `rpsbproc::prosite::CxxString`) is `std::length_error`;
+/// an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every host; one of
+/// [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which LOSAT refuses
+/// (DECISIONS 40 of line PS: memory that NCBI builds from a length field of the input, as
+/// `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the end of
+/// the file.
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:496-523
+// (checked with makeblastdb 2.17.0 on lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST ran
+// out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255.)
+pub(super) fn reserve_string(length: u64) -> R<()> {
+    if length > (1 << 63) - 1 {
+        return Err(Fail::LengthError);
+    }
+    let bytes = length + 1;
+    if bytes >= USER_SPACE_BYTES {
+        return Err(Fail::OutOfMemory);
+    }
+    if bytes >= HOST_DEPENDENT_BYTES {
+        return Err(host_dependent_string(length));
+    }
+    Ok(())
+}
+
+/// The refusal of a string of `length` bytes that `reserve_string` leaves to the host.
+#[cold]
+#[inline(never)]
+fn host_dependent_string(length: u64) -> Fail {
+    let bytes = length + 1;
+    Fail::unsupported(format!(
+        "a string whose length ({length} bytes) passes the end of the file: makeblastdb \
+         allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
+    ))
+}
+
+/// What reading a VisibleString posts, in the order NCBI posts it.
+#[derive(Debug)]
+pub(super) enum StringPost {
+    /// The warning of a UTF8String tag for a VisibleString (binary,
+    /// `ExpectStringTag`, objistrasnb.cpp:296-305).
+    Utf8Tag,
+    /// `ReplaceVisibleChar`'s post of a byte read as `#`: where, the byte, and the string (or
+    /// piece of it) that the message quotes.
+    BadChar {
+        position: StreamPosition,
+        byte: u8,
+        string: Vec<u8>,
+    },
+}
+
+/// A message that NCBI's reader posts while it reads a mask file.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MaskPost {
+    /// `ERR_POST_X(7)` of a byte read as `#`.
+    BadChar(ReplacedChar),
+    /// `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String tag for the VisibleString member at
+    /// the stack trace: once per process.
+    Utf8Tag(String),
+}
+
+impl MaskPost {
+    /// The line makeblastdb writes on its standard error (`ReplacedChar::post`,
+    /// `ncbi_exception::post_line`).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
+    pub(crate) fn line(&self) -> Vec<u8> {
+        match self {
+            MaskPost::BadChar(replaced) => replaced.post(Some("makeblastdb")),
+            MaskPost::Utf8Tag(trace) => crate::ncbi_exception::post_line(
+                Severity::Warning,
+                Some("803.10"),
+                Some("makeblastdb"),
+                format!(
+                    "CObjectIStreamAsnBinary: UTF8String data for VisibleString member {trace}, \
+                     ASN.1 specification may need an update"
+                )
+                .as_bytes(),
+            ),
+        }
+    }
+
+    /// Sets the stack trace that the post names (`Rd::read_str`).
+    fn set_trace(&mut self, trace: String) {
+        match self {
+            MaskPost::BadChar(replaced) => replaced.trace = trace,
+            MaskPost::Utf8Tag(text) => *text = trace,
+        }
+    }
 }
 
 /// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`).
 pub(super) trait Input {
+    /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
+    fn position(&self) -> String;
+    /// The depth of NCBI's object stack (`GetStackDepth()`), which the text reader's
+    /// `SkipWhiteSpace` asks at the end of the text.
+    #[inline]
+    fn set_stack_depth(&mut self, _depth: usize) {}
     /// `ReadFileHeader`: the type name that precedes an object in text; binary files have none.
     fn read_file_header(&mut self) -> R<Option<Vec<u8>>>;
     fn begin_class(&mut self) -> R<()>;
@@ -128,78 +319,193 @@ pub(super) trait Input {
     fn read_u32(&mut self) -> R<u32>;
     fn read_bool(&mut self) -> R<bool>;
     fn read_null(&mut self) -> R<()>;
-    /// A `VisibleString` as it is in the file (line breaks of a text string gone), and whether a
-    /// binary file gave it the tag of a UTF8String.
-    fn read_string(&mut self) -> R<(Vec<u8>, bool)>;
+    /// A `VisibleString` with each byte outside `' '..='~'` read as `#` (`eFNP_ReplaceAndWarn`,
+    /// the default of `SERIAL_WRONG_CHARS_READ`), and what NCBI posts while it reads it, in
+    /// `posts` (also when it then fails).
+    fn read_string(&mut self, posts: &mut Vec<StringPost>) -> R<Vec<u8>>;
+    /// `ReadEnum(values)`: the value (`CEnumeratedTypeInfo::ReadEnum` adds its line to an error).
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
-}
-
-// NCBI reference (598d8ae6): c++/include/serial/objistr.hpp:1160-1163
-// ```c++
-// inline
-// bool GoodVisibleChar(char c);
-//
-// #define SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING 0
-// ```
-// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
-// ```c++
-// inline
-// bool GoodVisibleChar(char c)
-// {
-//     return c >= ' ' && c <= '~';
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:307-311
-// ```c++
-// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_READ);
-// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_READ, eFNP_ReplaceAndWarn);
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1898
-// ```c++
-// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-//     const CObjectStack* io, const CTempString& str, char subst)
-// {
-//     ...
-//     if ( fix_method != eFNP_Replace ) {
-//         ...
-//         case eFNP_ReplaceAndWarn:
-//             ERR_POST_X(7, message);
-//             break;
-//     ...
-//     return subst;
-// }
-// ```
-/// A `VisibleString` is read with the default `eFNP_ReplaceAndWarn`: every byte outside
-/// `' '..='~'` becomes `m_NonPrintSubst` (`'#'`, objistr.cpp:463), and NCBI posts a diagnostic
-/// per byte (`Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options` / `Bad char [0x9]
-/// in string at line 1` / the chunk); a UTF8String tag for a VisibleString posts a warning once
-/// (`Warning: (803.10) ... UTF8String data for VisibleString member`). Both leave the status
-/// at 0. LOSAT does not write those lines, so the reader refuses such a string
-/// ([`Rd::read_str`]); this function is the value NCBI stores, which the refusal does not need
-/// but the tests compare.
-pub(super) fn fix_visible_chars(s: &mut [u8]) {
-    for c in s {
-        if !(b' '..=b'~').contains(c) {
-            *c = b'#';
-        }
-    }
+    /// `ReadPointerType()`, where NCBI reads a `CRef<>` that is empty at that moment
+    /// (`Rd::read_pointer`): a `NULL` is taken, the `@` or `:` that starts the other two forms too.
+    fn read_pointer_type(&mut self) -> R<PointerType>;
+    /// `ReadObjectPointer()`: the object index after `@` (text: `ReadInt8`, `TObjectIndex` being
+    /// 64 bits) or of the object reference tag (binary: `ReadStdSigned`). Its value does not matter:
+    /// `GetRegisteredObject` throws for every index.
+    fn read_object_pointer(&mut self) -> R<()>;
+    /// `ReadOtherPointer()`: the name of the type whose value follows.
+    fn read_other_pointer(&mut self) -> R<Vec<u8>>;
+    /// `ReadOtherPointerEnd()`, after that value.
+    fn read_other_pointer_end(&mut self) -> R<()>;
 }
 
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
 const MAX_DEPTH: usize = 400;
 
-/// What `Seq-loc` reading found, besides the value.
-struct Collected {
-    /// The first variant of a `Seq-loc` that LOSAT does not model; it is raised after the whole
-    /// object has been read, so that an error NCBI raises later in the object comes first.
-    unsupported: Option<String>,
+/// The refusal of a frame past [`MAX_DEPTH`].
+#[cold]
+#[inline(never)]
+fn too_deep() -> Fail {
+    Fail::unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
 }
 
-/// The state of one `CObjectIStream`: the primitives, and the number of object frames.
+/// A frame of NCBI's object stack (`object_frame`). The reader keeps only the depth of its stack
+/// (`Rd::depth`): each frame is a value of the function that reads what it holds (`Rd::frame`),
+/// which hands it to `Rd::exit` when it is left, for the error that leaves it (`Rd::leave`) and
+/// the stack traces that wait for it (`Trace`).
+#[derive(Clone, Copy, Debug)]
+struct Frame {
+    kind: FrameKind,
+    /// The named frame of `ReadPointer`, whose `END_OBJECT_FRAME` is not the text reader's for
+    /// its kind (`end`).
+    read_pointer: bool,
+    /// The type of a named, class, choice or container frame (`Object type= `).
+    type_name: Option<&'static str>,
+    /// The member or variant of a member or variant frame (`SetTopMemberId`), as the place of its
+    /// name in the schema (`Member::name`, `Variant::name`): one word to store for each member.
+    member: Option<&'static &'static str>,
+}
+
+impl Frame {
+    /// A frame of `kind` of the type `type_name`.
+    fn new(kind: FrameKind, type_name: Option<&'static str>) -> Frame {
+        Frame {
+            kind,
+            read_pointer: false,
+            type_name,
+            member: None,
+        }
+    }
+
+    /// The member or variant of a member or variant frame.
+    fn member(self) -> Option<&'static str> {
+        self.member.copied()
+    }
+
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves the frame: the
+    /// text reader's for its kind (`text_frame_site`), `READ_POINTER_FRAME_END` for the named
+    /// frame of `ReadPointer`.
+    fn end(self) -> (&'static str, u32, &'static str) {
+        if self.read_pointer {
+            READ_POINTER_FRAME_END
+        } else {
+            text_frame_site(self.kind, false)
+        }
+    }
+}
+
+/// Where [`Rd::begin_pointer`] found the value of a `CRef<>`.
+#[derive(Clone, Copy)]
+enum Pointee {
+    /// `NULL`: there is none.
+    Null,
+    /// `eThisPointer`: it follows.
+    This,
+    /// `eOtherPointer`: it follows inside `ReadPointer`'s named frame of the declared type,
+    /// entered at this depth.
+    Other(usize, &'static str),
+}
+
+/// The `GetStackTrace()` of the posts of one VisibleString (`Rd::read_str`), built as the frames
+/// that were on the stack when it was read give their steps: a member or variant frame when its
+/// member changes or it is left, any other frame when it is left; the frame at the bottom names
+/// the type, and fills the trace into the posts.
+struct Trace {
+    /// The posts in `Rd::posts`.
+    posts: std::ops::Range<usize>,
+    /// The frames below this depth have not given their steps yet.
+    level: usize,
+    /// The steps given so far, from the top of the stack down.
+    steps: Vec<StackStep<'static>>,
+}
+
+/// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, cited at `read_seq_loc_parts`):
+/// each Seq-loc starts a walk of its own (`my_id`, NULL), takes the Seq-ids of its parts in
+/// order, and hands its own to the Seq-loc around it (`x_UpdateId(id, my_id)`) once its walk is
+/// done. makeblastdb's `GetId` of a mask is this walk of the mask's Seq-loc.
+#[derive(Debug)]
+enum IdWalk {
+    /// Every Seq-id met so far is `Equals` to this one (`None`: none yet).
+    Same(Option<ParsedSeqId>),
+    /// `x_CheckId` returned false: two Seq-ids differ, or a `feat` came. Nothing after it is
+    /// walked, and `GetId` returns NULL.
+    Stopped,
+    /// The walk reached an element that is an empty `CRef<>`: `CCoreException` `eNullPtr`.
+    Null(NullElement),
+}
+
+impl IdWalk {
+    /// `x_UpdateId(id, &seq_id)` of a part.
+    fn update(&mut self, seq_id: ParsedSeqId) {
+        match self {
+            IdWalk::Same(None) => *self = IdWalk::Same(Some(seq_id)),
+            // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
+            IdWalk::Same(Some(first)) if *first != seq_id => *self = IdWalk::Stopped,
+            _ => {}
+        }
+    }
+
+    /// `(*li)->CheckId(id, may_throw)` of an element of a `mix` or `equiv`: the element's own walk
+    /// `inner`, if this walk gets that far.
+    fn nested(&mut self, inner: IdWalk) {
+        if !matches!(self, IdWalk::Same(_)) {
+            return;
+        }
+        match inner {
+            IdWalk::Same(Some(seq_id)) => self.update(seq_id),
+            // `x_UpdateId(id, NULL)` keeps `id`.
+            IdWalk::Same(None) => {}
+            stopped_or_null => *self = stopped_or_null,
+        }
+    }
+
+    /// An element that is an empty `CRef<>`, dereferenced if this walk gets that far.
+    fn null(&mut self, null: NullElement) {
+        if matches!(self, IdWalk::Same(_)) {
+            *self = IdWalk::Null(null);
+        }
+    }
+}
+
+/// The lists of `CRef`s that a mask file holds, as `NullElement::list` names them.
+const LIST_MASKS: &str = "the masks of a Blast-mask-list";
+const LIST_MIX: &str = "a Seq-loc-mix (mix)";
+const LIST_EQUIV: &str = "a Seq-loc-equiv (equiv)";
+const LIST_PACKED_INT: &str = "a Packed-seqint (packed-int)";
+
+/// The state of one `CObjectIStream`: the primitives, the object stack and what was posted.
 pub(super) struct Rd<I: Input> {
     pub(super) inp: I,
+    /// `GetStackDepth()`: the frames entered and not left.
     depth: usize,
-    collected: Collected,
+    /// The stack traces that wait for frames still on the stack (empty but for a VisibleString
+    /// that posted).
+    traces: Vec<Trace>,
+    /// The messages posted since the caller last took them (`MaskFileReader::take_posts`).
+    pub(super) posts: Vec<MaskPost>,
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
+// (`eNullValue` and `eMissingValue` are not thrown for these types: `ExpectedMember` throws
+// `eFormatError` with the default `eSerialVerifyData_Yes`.)
+const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
+    "src/serial/member.cpp",
+    752,
+    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
+);
+
+/// What reading `member` makes of `fail`: `ReadWithSetFlagMember` rethrows a `CSerialException`
+/// of a member with a set flag (`Member::set_flag`).
+#[cold]
+#[inline(never)]
+fn member_error(fail: Fail, member: &Member) -> Fail {
+    match fail {
+        Fail::Serial(e) if member.set_flag => {
+            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
+            let message = format!("error while reading {}", member.name);
+            Fail::serial(e.rethrow_same(file, line, function, message))
+        }
+        other => other,
+    }
 }
 
 impl<I: Input> Rd<I> {
@@ -207,187 +513,236 @@ impl<I: Input> Rd<I> {
         Rd {
             inp,
             depth: 0,
-            collected: Collected { unsupported: None },
+            traces: Vec::new(),
+            posts: Vec::new(),
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-199
-    // ```c++
-    // #define BEGIN_OBJECT_FRAME_OFx(Stream, Args) \
-    //     (Stream).PushFrame Args; \
-    //     try {
-    //
-    // #define END_OBJECT_FRAME_OF(Stream) \
-    //     } catch (CSerialException& s_expt) { \
-    //     ...
-    //     } catch ( CEofException& e_expt ) { \
-    //         (Stream).HandleEOF(e_expt); \
-    // ```
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
-    // ```c++
-    // void CObjectIStream::HandleEOF(CEofException& expt)
-    // {
-    //     string msg(TopFrame().GetFrameInfo());
-    //     PopFrame();
-    //     if (GetStackDepth() < 2) {
-    //         NCBI_RETHROW_SAME(expt,msg);
-    //     } else {
-    //         ThrowError(fEOF, msg);
-    //     }
-    // }
-    // ```
-    /// One `BEGIN_OBJECT_FRAME` ... `END_OBJECT_FRAME`.
-    pub(super) fn frame<T>(&mut self, f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
-        if self.depth >= MAX_DEPTH {
-            return Err(Fail::Unsupported(format!(
-                "objects nested more than {MAX_DEPTH} levels deep"
-            )));
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (cited at
+    // `report::serial::object_frame::text_frame_site`)
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, cited at
+    // `HANDLE_EOF`)
+    /// One `BEGIN_OBJECT_FRAME` ... `END_OBJECT_FRAME` of a frame of `kind` (of the type
+    /// `type_name`): an error that leaves it gets NCBI's handling. A `CSerialException` takes the
+    /// frame's name (`AddFrameInfo(GetFrameName())`); a `CEofException` is `HandleEOF`, which
+    /// passes it on when fewer than 2 frames stay and throws its own `CSerialException` (with the
+    /// frame's information, and without the frame's name) otherwise; another `CException` takes
+    /// the frame's line (`NCBI_RETHROW_SAME` with `GetFrameInfo()`, at the `END_OBJECT_FRAME` of
+    /// the text reader: only its numbers and tags throw one).
+    fn frame<T>(
+        &mut self,
+        kind: FrameKind,
+        type_name: Option<&'static str>,
+        f: impl FnOnce(&mut Self) -> R<T>,
+    ) -> R<T> {
+        self.frame_with(Frame::new(kind, type_name), |s, _| f(s))
+    }
+
+    /// [`frame`](Self::frame) of `frame`, which `f` may change (`set_member`).
+    #[inline(always)]
+    fn frame_with<T>(
+        &mut self,
+        mut frame: Frame,
+        f: impl FnOnce(&mut Self, &mut Frame) -> R<T>,
+    ) -> R<T> {
+        let depth = self.enter()?;
+        let result = f(self, &mut frame);
+        self.exit(depth, frame, result)
+    }
+
+    /// `BEGIN_OBJECT_FRAME`: the depth below the new frame, which [`exit`](Self::exit) takes
+    /// once what the frame holds has been read. Every `enter` is followed by its `exit`, with no
+    /// return between them.
+    #[inline(always)]
+    fn enter(&mut self) -> R<usize> {
+        let depth = self.depth;
+        if depth >= MAX_DEPTH {
+            return Err(too_deep());
         }
-        self.depth += 1;
-        let result = f(self);
-        self.depth -= 1;
+        self.depth = depth + 1;
+        self.inp.set_stack_depth(depth + 1);
+        Ok(depth)
+    }
+
+    /// `END_OBJECT_FRAME` of `frame`, which [`enter`](Self::enter) entered at `depth`, after
+    /// what it holds was read with `result`: the traces that wait for it take its step, and an
+    /// error gets [`leave`](Self::leave) (`exit_traced`, the one place that needs the frame).
+    #[inline(always)]
+    fn exit<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
+        self.depth = depth;
+        self.inp.set_stack_depth(depth);
         match result {
-            Err(Fail::Eof) if self.depth >= 2 => format_err("unexpected end of file"),
+            Ok(value) if self.traces.is_empty() => Ok(value),
+            result => self.exit_traced(depth, frame, result),
+        }
+    }
+
+    /// [`exit`](Self::exit) of a frame that traces wait for or that an error leaves.
+    #[cold]
+    #[inline(never)]
+    fn exit_traced<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
+        if !self.traces.is_empty() {
+            self.trace_frame(depth, frame);
+        }
+        result.map_err(|fail| self.leave(frame, fail))
+    }
+
+    /// What leaving `frame` (the stack is below it now) adds to `fail`.
+    #[cold]
+    #[inline(never)]
+    fn leave(&mut self, frame: Frame, fail: Fail) -> Fail {
+        match fail {
+            Fail::Serial(mut e) => {
+                e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member()));
+                Fail::Serial(e)
+            }
+            Fail::Eof if self.depth >= 2 => {
+                let info = frame_info(frame.kind, frame.type_name, frame.member());
+                Fail::serial(NcbiException::new(
+                    HANDLE_EOF,
+                    format!("{}: {info}", self.inp.position()),
+                ))
+            }
+            Fail::Exception(e) => {
+                let (file, line, function) = frame.end();
+                let info = frame_info(frame.kind, frame.type_name, frame.member());
+                Fail::exception(e.rethrow_same(file, line, function, info))
+            }
             other => other,
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1398-1425
-    // ```c++
-    // void CObjectIStream::ReadClassSequential(const CClassTypeInfo* classType,
-    //                                          TObjectPtr classPtr)
-    // {
-    //     TMemberIndex prevIndex = kInvalidMember;
-    //     BEGIN_OBJECT_FRAME3(eFrameClass, classType, classPtr);
-    //     BeginClass(classType);
-    //
-    //     ReadClassSequentialContentsBegin(classType);
-    //
-    //     TMemberIndex index;
-    //     while ( (index = BeginClassMember(classType, *pos)) != kInvalidMember ) {
-    //         ...
-    //         ReadClassSequentialContentsMember(classPtr);
-    //
-    //         EndClassMember();
-    //     }
-    //
-    //     ReadClassSequentialContentsEnd(classPtr);
-    //
-    //     EndClass();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-107
-    // ```c++
-    // #define ClassSequentialContentsBegin(classType) \
-    // { \
-    //     CClassTypeInfo::CIterator pos(classType); \
-    //     BEGIN_OBJECT_FRAME(eFrameClassMember); \
-    //     {
-    //
-    // #define ClassSequentialContentsMember(Func, Args) \
-    //     { \
-    //         const CMemberInfo* memberInfo = classType->GetMemberInfo(index); \
-    //         SetTopMemberId(memberInfo->GetId()); \
-    //         for ( TMemberIndex i = *pos; i < index; ++i ) { \
-    //             classType->GetMemberInfo(i)->NCBI_NAME2(Func,MissingMember)Args; \
-    //         } \
-    //         { \
-    //             memberInfo->NCBI_NAME2(Func,Member)Args; \
-    //         } \
-    //         pos.SetIndex(index + 1); \
-    //     }
-    //
-    // #define ClassSequentialContentsEnd(Func, Args) \
-    //     } \
-    //     END_OBJECT_FRAME(); \
-    //     for ( ; pos.Valid(); ++pos ) { \
-    //         classType->GetMemberInfo(pos)->NCBI_NAME2(Func,MissingMember)Args; \
-    //     } \
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:871-876
-    // ```c++
-    // void CMemberInfoFunctions::ReadMissingSimpleMember(CObjectIStream& in,
-    //                                                    const CMemberInfo* memberInfo,
-    //                                                    TObjectPtr classPtr)
-    // {
-    //     _ASSERT(!memberInfo->Optional());
-    //     in.ExpectedMember(memberInfo);
-    // ```
+    /// `SetTopMemberId`: the member or variant of the top frame, `frame`. A trace that waits for
+    /// the frame takes the member it had.
+    #[inline(always)]
+    fn set_member(&mut self, frame: &mut Frame, name: &'static &'static str) {
+        if !self.traces.is_empty() {
+            self.trace_frame(self.depth - 1, *frame);
+        }
+        frame.member = Some(name);
+    }
+
+    /// The step of `frame`, at `depth`, for the traces that wait for it (`GetStackTrace()`: the
+    /// type of the bottom frame, then the member of each member or variant frame and `E` of each
+    /// element frame above it). The bottom frame completes them.
+    #[cold]
+    #[inline(never)]
+    fn trace_frame(&mut self, depth: usize, frame: Frame) {
+        let mut i = 0;
+        while i < self.traces.len() {
+            if self.traces[i].level != depth + 1 {
+                i += 1;
+                continue;
+            }
+            if depth == 0 {
+                let trace = self.traces.remove(i);
+                self.complete_trace(trace, frame.type_name);
+                continue;
+            }
+            let trace = &mut self.traces[i];
+            trace.level = depth;
+            match frame.kind {
+                FrameKind::ClassMember | FrameKind::ChoiceVariant => {
+                    trace.steps.extend(frame.member().map(StackStep::Member));
+                }
+                FrameKind::ArrayElement => trace.steps.push(StackStep::Element),
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Fills `trace`, whose bottom frame is of the type `root`, into its posts.
+    fn complete_trace(&mut self, trace: Trace, root: Option<&'static str>) {
+        let text = object_stack_trace(root.unwrap_or("?"), trace.steps.into_iter().rev());
+        for post in &mut self.posts[trace.posts] {
+            post.set_trace(text.clone());
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1038
-    // ```c++
-    // bool CObjectIStream::ExpectedMember(const CMemberInfo* memberInfo)
-    // {
-    //     const CItemInfo* info = CItemsInfo::FindNextMandatory(memberInfo);
-    //     if (info) {
-    //         if (GetVerifyData() == eSerialVerifyData_Yes) {
-    //             ThrowError(fFormatError,
-    //                     "member "+info->GetId().ToString()+" expected");
-    // ```
+    /// `ReadMissingSimpleMember` of the members `missing` (`ExpectedMember` of the first that is
+    /// neither `OPTIONAL` nor has a `DEFAULT`).
+    #[inline]
+    fn missing_members(&self, missing: &[Member]) -> R<()> {
+        match missing.iter().find(|m| !m.optional) {
+            Some(m) => Err(self.expected_member(m)),
+            None => Ok(()),
+        }
+    }
+
+    /// `ExpectedMember` of the member `m`.
+    #[cold]
+    #[inline(never)]
+    fn expected_member(&self, m: &Member) -> Fail {
+        throw_error(
+            EXPECTED_MEMBER,
+            &self.inp.position(),
+            format!("member {} expected", m.name),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
+    // the binary stream's, objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109
+    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:871-876
     /// A SEQUENCE read member by member, in declaration order (`ReadClassSequential`): a member
     /// that is not in the file is an error unless it is `OPTIONAL` or has a `DEFAULT`. `read`
-    /// reads the value of member `index`.
+    /// reads the value of member `index`; a member with a set flag reads it in
+    /// `ReadWithSetFlagMember` (cited at [`READ_WITH_SET_FLAG_MEMBER`]). An `OPTIONAL` member held
+    /// by `CRef<>` (`Member::pointer`) is read by `read_pointer`: `read` is not called for a
+    /// `NULL`, which leaves the member unset.
     pub(super) fn read_class(
         &mut self,
         def: &'static ClassDef,
         mut read: impl FnMut(&mut Self, usize) -> R<()>,
     ) -> R<()> {
-        self.frame(|s| {
+        self.frame(FrameKind::Class, Some(def.name), |s| {
             s.inp.begin_class()?;
             let mut pos = 0usize;
-            s.frame(|s| {
+            s.frame_with(Frame::new(FrameKind::ClassMember, None), |s, frame| {
                 while let Some(index) = s.inp.begin_member(def, pos)? {
-                    for m in &def.members[pos..index] {
-                        if !m.optional {
-                            return format_err(format!("member {} expected", m.name));
+                    let member = &def.members[index];
+                    s.set_member(frame, &member.name);
+                    if index > pos {
+                        s.missing_members(&def.members[pos..index])?;
+                    }
+                    // `ReadPointer` of a member held by `CRef<>` around `read`, which is called at
+                    // this one place. Such a member has no set flag (`Member::set_flag`): the
+                    // errors of `begin_pointer` are not `ReadWithSetFlagMember`'s.
+                    let pointee = if member.pointer {
+                        s.begin_pointer(member.ty.type_name())?
+                    } else {
+                        Pointee::This
+                    };
+                    if !matches!(pointee, Pointee::Null) {
+                        let result = read(s, index);
+                        if let Err(fail) = s.end_pointer(pointee, result) {
+                            return Err(member_error(fail, member));
                         }
                     }
-                    read(s, index)?;
                     pos = index + 1;
                     s.inp.end_member()?;
                 }
                 Ok(())
             })?;
-            for m in &def.members[pos..] {
-                if !m.optional {
-                    return format_err(format!("member {} expected", m.name));
-                }
-            }
+            s.missing_members(&def.members[pos..])?;
             s.inp.end_class()
         })
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1500
-    // ```c++
-    // void CObjectIStream::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
-    //                                       TObjectPtr choicePtr)
-    // {
-    //     BEGIN_OBJECT_FRAME3(eFrameChoice, choiceType, choicePtr);
-    //     BeginChoice(choiceType);
-    //     BEGIN_OBJECT_FRAME(eFrameChoiceVariant);
-    //     TMemberIndex index = BeginChoiceVariant(choiceType);
-    //     if ( index == kInvalidMember ) {
-    //         ThrowError(fFormatError,"choice variant id expected");
-    //     }
-    //     ...
-    //     variantInfo->ReadVariant(*this, choicePtr);
-    //
-    //     EndChoiceVariant();
-    //     END_OBJECT_FRAME();
-    //     EndChoice();
-    //     END_OBJECT_FRAME();
-    // ```
     /// A CHOICE: `read` reads the value of the variant.
     pub(super) fn read_choice<T>(
         &mut self,
         def: &'static ChoiceDef,
         read: impl FnOnce(&mut Self, usize) -> R<T>,
     ) -> R<T> {
-        self.frame(|s| {
+        self.frame(FrameKind::Choice, Some(def.name), |s| {
             s.inp.begin_choice()?;
-            let value = s.frame(|s| {
+            let value = s.frame_with(Frame::new(FrameKind::ChoiceVariant, None), |s, frame| {
                 let index = s.inp.begin_variant(def)?;
+                s.set_member(frame, &def.variants[index].name);
                 let value = read(s, index)?;
                 s.inp.end_variant()?;
                 Ok(value)
@@ -398,36 +753,19 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1318-1346
-    // ```c++
-    // void CObjectIStream::ReadContainer(const CContainerTypeInfo* containerType,
-    //                                    TObjectPtr containerPtr)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameArray, containerType);
-    //     BeginContainer(containerType);
-    //
-    //     TTypeInfo elementType = containerType->GetElementType();
-    //     BEGIN_OBJECT_FRAME2(eFrameArrayElement, elementType);
-    //     ...
-    //     while ( BeginContainerElement(elementType) ) {
-    //         ...
-    //         EndContainerElement();
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    //
-    //     EndContainer();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
+    // (The containers of these types are the anonymous `SEQUENCE OF` and `SET OF` of a member or
+    // of an implicit class such as `Packed-seqint`, which NCBI reads as its member without a
+    // class frame: the container frame's type has no name, its element frame names none,
+    // checked with makeblastdb 2.17.0's traces.)
     /// A `SEQUENCE OF` or `SET OF`: `read` reads one element.
     pub(super) fn read_container(
         &mut self,
         set: bool,
         mut read: impl FnMut(&mut Self) -> R<()>,
     ) -> R<()> {
-        self.frame(|s| {
+        self.frame(FrameKind::Array, Some(""), |s| {
             s.inp.begin_container(set)?;
-            s.frame(|s| {
+            s.frame(FrameKind::ArrayElement, None, |s| {
                 while s.inp.begin_element()? {
                     read(s)?;
                 }
@@ -437,26 +775,168 @@ impl<I: Input> Rd<I> {
         })
     }
 
-    /// A `VisibleString` member `name`. A byte outside `' '..='~'`, or the tag of a UTF8String
-    /// in a binary file, is read (NCBI stores `'#'` for the byte), but the object is then refused
-    /// as [`Fail::Unsupported`] once it has been read to its end, so that an error NCBI raises
-    /// later in the object comes first: NCBI's diagnostics for it are not reproduced.
-    fn read_str(&mut self, name: &'static str) -> R<Vec<u8>> {
-        let (mut s, utf8_tag) = self.inp.read_string()?;
-        if utf8_tag {
-            self.collected.unsupported.get_or_insert_with(|| {
-                format!("a UTF8String tag for the VisibleString member `{name}` (NCBI warns and reads it)")
-            });
+    // NCBI reference (598d8ae6): c++/src/serial/ptrinfo.cpp:210-227
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1133-1213
+    // NCBI reference (598d8ae6): c++/src/serial/classinfob.cpp:244-252
+    // (`MapType` is `GetClassInfoByName`. The classes it knows are those whose type information
+    // the process has built so far: the declared type is one of them, another type may or may not
+    // be (makeblastdb 2.17.0: "class not found: Seq-interval" for `:Seq-interval` as the first
+    // mask; a type it knows is read whole and then fails with "incompatible member type", or with
+    // the first error inside it when the value is not of that type).)
+    /// `CPointerTypeInfo::ReadPointer` of a `CRef<>` to a value of the type named `declared` that
+    /// is empty when NCBI reads it: an `OPTIONAL` member held by `CRef<>` (the generated classes
+    /// preallocate the mandatory ones) and each element of a list of `CRef`s (`AddElementIn`
+    /// pushes an empty `CRef`, stltypes.hpp:246-263). `read` reads the value and takes what it
+    /// needs of it (`This`, and `Other` naming `declared`, inside `ReadPointer`'s named frame);
+    /// `false` is a `NULL`, which it does not read. `@n` is NCBI's error; a value of another type
+    /// is refused (`Fail::Unsupported`), as what NCBI does with it depends on what its process
+    /// has read before.
+    fn read_pointer(
+        &mut self,
+        declared: &'static str,
+        read: impl FnOnce(&mut Self) -> R<()>,
+    ) -> R<bool> {
+        let pointee = self.begin_pointer(declared)?;
+        if let Pointee::Null = pointee {
+            return Ok(false);
         }
-        if let Some(&byte) = s.iter().find(|c| !(b' '..=b'~').contains(c)) {
-            self.collected.unsupported.get_or_insert_with(|| {
-                format!(
-                    "byte 0x{byte:02x} in the VisibleString member `{name}` (NCBI replaces it with '#' and logs it)"
-                )
-            });
+        let result = read(self);
+        self.end_pointer(pointee, result).map(|()| true)
+    }
+
+    /// [`read_pointer`](Self::read_pointer) up to the value: where it is ([`Pointee`]), the named
+    /// frame of `Other` entered. [`end_pointer`](Self::end_pointer) follows the value. A mask
+    /// file's pointers are `NULL` or the value itself; the others are read by
+    /// [`begin_other_pointer`](Self::begin_other_pointer).
+    #[inline(always)]
+    fn begin_pointer(&mut self, declared: &'static str) -> R<Pointee> {
+        match self.inp.read_pointer_type()? {
+            PointerType::Null => Ok(Pointee::Null),
+            PointerType::This => Ok(Pointee::This),
+            other => self.begin_other_pointer(other, declared),
         }
-        fix_visible_chars(&mut s);
-        Ok(s)
+    }
+
+    /// [`begin_pointer`](Self::begin_pointer) of an object index (`@n`) or a value of a named type
+    /// (`:Type`).
+    #[cold]
+    #[inline(never)]
+    fn begin_other_pointer(&mut self, kind: PointerType, declared: &'static str) -> R<Pointee> {
+        match kind {
+            PointerType::Null => Ok(Pointee::Null),
+            PointerType::This => Ok(Pointee::This),
+            PointerType::Object => {
+                self.inp.read_object_pointer()?;
+                Err(throw_error(
+                    GET_REGISTERED_OBJECT,
+                    &self.inp.position(),
+                    "invalid object index: NO_COLLECT defined",
+                ))
+            }
+            PointerType::Other => {
+                let name = self.inp.read_other_pointer()?;
+                if name != declared.as_bytes() {
+                    return Err(self.other_type(&name, declared));
+                }
+                Ok(Pointee::Other(self.enter()?, declared))
+            }
+        }
+    }
+
+    /// The refusal of `:name` (a value of the type `name`) where a `declared` belongs.
+    #[cold]
+    #[inline(never)]
+    fn other_type(&self, name: &[u8], declared: &'static str) -> Fail {
+        let name = String::from_utf8_lossy(name);
+        Fail::unsupported(format!(
+            "':{name}', a value of the type {name} where a {declared} belongs ({}): whether \
+             makeblastdb reads it depends on the types its process has met before",
+            self.inp.position()
+        ))
+    }
+
+    /// [`read_pointer`](Self::read_pointer) after the value of `pointee`, read with `result`: the
+    /// `END_OBJECT_FRAME` of the named frame of `Other` and `ReadOtherPointerEnd`.
+    #[inline(always)]
+    fn end_pointer<T>(&mut self, pointee: Pointee, result: R<T>) -> R<T> {
+        match pointee {
+            Pointee::Other(depth, declared) => {
+                let frame = Frame {
+                    read_pointer: true,
+                    ..Frame::new(FrameKind::Named, Some(declared))
+                };
+                let value = self.exit(depth, frame, result)?;
+                self.inp.read_other_pointer_end()?;
+                Ok(value)
+            }
+            Pointee::Null | Pointee::This => result,
+        }
+    }
+
+    /// The element stated as `NULL` that `read_pointer` just read, of the list `list`.
+    fn null_element(&self, list: &'static str) -> NullElement {
+        NullElement {
+            list,
+            position: self.inp.position(),
+        }
+    }
+
+    /// A `VisibleString`: each byte outside `' '..='~'` read as `#`, with NCBI's posts
+    /// (`StringPost`, here with the stack trace).
+    fn read_str(&mut self) -> R<Vec<u8>> {
+        let mut posts = Vec::new();
+        let result = self.inp.read_string(&mut posts);
+        if !posts.is_empty() {
+            let start = self.posts.len();
+            for post in posts {
+                self.posts.push(match post {
+                    StringPost::Utf8Tag => MaskPost::Utf8Tag(String::new()),
+                    StringPost::BadChar {
+                        position,
+                        byte,
+                        string,
+                    } => MaskPost::BadChar(ReplacedChar {
+                        trace: String::new(),
+                        byte,
+                        position,
+                        string: string.into(),
+                    }),
+                });
+            }
+            // `GetStackTrace()` now: the frames on the stack give it as they are left.
+            let trace = Trace {
+                posts: start..self.posts.len(),
+                level: self.depth,
+                steps: Vec::new(),
+            };
+            if self.depth == 0 {
+                self.complete_trace(trace, None);
+            } else {
+                self.traces.push(trace);
+            }
+        }
+        result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:416-432
+    // (A `CEofException` stays one through `NCBI_RETHROW_SAME`: `HandleEOF` does not report it.)
+    /// An ENUMERATED or an INTEGER with named values (`CEnumeratedTypeInfo::ReadEnum`).
+    fn read_enum(&mut self, def: &'static EnumDef) -> R<i32> {
+        const READ_ENUM: (&str, u32, &str) = (
+            "src/serial/enumerated.cpp",
+            428,
+            "ncbi::CEnumeratedTypeInfo::ReadEnum",
+        );
+        let (file, line, function) = READ_ENUM;
+        self.inp.read_enum(def).map_err(|fail| match fail {
+            Fail::Serial(e) => {
+                Fail::serial(e.rethrow_same(file, line, function, "invalid enum value"))
+            }
+            Fail::Exception(e) => {
+                Fail::exception(e.rethrow_same(file, line, function, "invalid enum value"))
+            }
+            other => other,
+        })
     }
 
     /// Reads a value of type `ty` and appends a canonical encoding of it to `out`: two values
@@ -464,12 +944,7 @@ impl<I: Input> Rd<I> {
     /// them, apart from members that are left out in one and stated with their `DEFAULT` in the
     /// other (those differ here). The encoding is self-delimiting (every item states its kind,
     /// a string its length, a list its count).
-    pub(super) fn read_value(
-        &mut self,
-        ty: &'static Ty,
-        name: &'static str,
-        out: &mut Vec<u8>,
-    ) -> R<()> {
+    pub(super) fn read_value(&mut self, ty: &'static Ty, out: &mut Vec<u8>) -> R<()> {
         match ty {
             Ty::Int32 => {
                 let v = self.inp.read_i32()?;
@@ -492,7 +967,7 @@ impl<I: Input> Rd<I> {
                 out.push(u8::from(v));
             }
             Ty::Str => {
-                let v = self.read_str(name)?;
+                let v = self.read_str()?;
                 out.push(b's');
                 out.extend_from_slice(&(v.len() as u64).to_le_bytes());
                 out.extend_from_slice(&v);
@@ -502,7 +977,7 @@ impl<I: Input> Rd<I> {
                 out.push(b'n');
             }
             Ty::Enum(def) => {
-                let v = self.inp.read_enum(def)?;
+                let v = self.read_enum(def)?;
                 out.push(b'e');
                 out.extend_from_slice(&v.to_le_bytes());
             }
@@ -515,7 +990,7 @@ impl<I: Input> Rd<I> {
                     }
                     out.push(1);
                     next = index + 1;
-                    s.read_value(def.members[index].ty, def.members[index].name, out)
+                    s.read_value(def.members[index].ty, out)
                 })?;
                 for _ in next..def.members.len() {
                     out.push(0);
@@ -525,17 +1000,20 @@ impl<I: Input> Rd<I> {
                 out.push(b'C');
                 self.read_choice(def, |s, index| {
                     out.push(index as u8);
-                    s.read_value(def.variants[index].ty, def.variants[index].name, out)
+                    s.read_value(def.variants[index].ty, out)
                 })?;
             }
             Ty::SeqOf(element) | Ty::SetOf(element) => {
+                // The lists read here hold numbers (`Int-fuzz.alt`); the lists of `CRef`s (`masks`,
+                // `mix`, `equiv`, `packed-int`) are read by their own readers, through
+                // `read_pointer`.
                 out.push(b'L');
                 let count_at = out.len();
                 out.extend_from_slice(&[0u8; 8]);
                 let mut count = 0u64;
                 self.read_container(matches!(ty, Ty::SetOf(_)), |s| {
                     count += 1;
-                    s.read_value(element, name, out)
+                    s.read_value(element, out)
                 })?;
                 out[count_at..count_at + 8].copy_from_slice(&count.to_le_bytes());
             }
@@ -550,7 +1028,7 @@ impl<I: Input> Rd<I> {
     fn read_seq_id(&mut self) -> R<ParsedSeqId> {
         self.read_choice(&SEQ_ID, |s, index| {
             Ok(match index {
-                0 => ParsedSeqId::Local(s.read_object_id("local")?),
+                0 => ParsedSeqId::Local(s.read_object_id()?),
                 1 => ParsedSeqId::Gibbsq(s.inp.read_i32()?),
                 2 => ParsedSeqId::Gibbmt(s.inp.read_i32()?),
                 3 => ParsedSeqId::Giim(s.read_giimport_id()?),
@@ -575,7 +1053,7 @@ impl<I: Input> Rd<I> {
     }
 
     /// An `Object-id` (`T_OBJECT_ID`).
-    fn read_object_id(&mut self, name: &'static str) -> R<ObjectId> {
+    fn read_object_id(&mut self) -> R<ObjectId> {
         let Ty::Choice(def) = &T_OBJECT_ID else {
             unreachable!("Object-id is a CHOICE")
         };
@@ -583,7 +1061,7 @@ impl<I: Input> Rd<I> {
             Ok(if index == OBJECT_ID_ID {
                 ObjectId::Id(s.inp.read_i32()?)
             } else {
-                ObjectId::Str(s.read_str(name)?)
+                ObjectId::Str(s.read_str()?)
             })
         })
     }
@@ -592,24 +1070,24 @@ impl<I: Input> Rd<I> {
         let (mut db, mut tag) = (None, None);
         self.read_class(&DBTAG, |s, index| {
             match index {
-                0 => db = Some(s.read_str("db")?),
-                _ => tag = Some(s.read_object_id("tag")?),
+                0 => db = Some(s.read_str()?),
+                _ => tag = Some(s.read_object_id()?),
             }
             Ok(())
         })?;
-        match (db, tag) {
-            (Some(db), Some(tag)) => Ok(Dbtag { db, tag }),
-            _ => format_err("member expected"),
-        }
+        Ok(Dbtag {
+            db: mandatory(db),
+            tag: mandatory(tag),
+        })
     }
 
     fn read_textseq_id(&mut self) -> R<TextseqId> {
         let mut id = TextseqId::default();
         self.read_class(&TEXTSEQ_ID, |s, index| {
             match index {
-                0 => id.name = Some(s.read_str("name")?),
-                1 => id.accession = Some(s.read_str("accession")?),
-                2 => id.release = Some(s.read_str("release")?),
+                0 => id.name = Some(s.read_str()?),
+                1 => id.accession = Some(s.read_str()?),
+                2 => id.release = Some(s.read_str()?),
                 _ => id.version = Some(s.inp.read_i32()?),
             }
             Ok(())
@@ -622,15 +1100,16 @@ impl<I: Input> Rd<I> {
         self.read_class(&GIIMPORT_ID, |s, index| {
             match index {
                 0 => id = Some(s.inp.read_i32()?),
-                1 => db = Some(s.read_str("db")?),
-                _ => release = Some(s.read_str("release")?),
+                1 => db = Some(s.read_str()?),
+                _ => release = Some(s.read_str()?),
             }
             Ok(())
         })?;
-        match id {
-            Some(id) => Ok(GiimportId { id, db, release }),
-            None => format_err("member id expected"),
-        }
+        Ok(GiimportId {
+            id: mandatory(id),
+            db,
+            release,
+        })
     }
 
     fn read_patent_seq_id(&mut self) -> R<PatentSeqId> {
@@ -642,66 +1121,60 @@ impl<I: Input> Rd<I> {
             }
             Ok(())
         })?;
-        match (seqid, cit) {
-            (Some(seqid), Some(cit)) => Ok(PatentSeqId { seqid, cit }),
-            _ => format_err("member expected"),
-        }
+        Ok(PatentSeqId {
+            seqid: mandatory(seqid),
+            cit: mandatory(cit),
+        })
     }
 
     fn read_id_pat(&mut self) -> R<IdPat> {
         let (mut country, mut id, mut doc_type) = (None, None, None);
         self.read_class(&ID_PAT, |s, index| {
             match index {
-                0 => country = Some(s.read_str("country")?),
+                0 => country = Some(s.read_str()?),
                 1 => {
                     id = Some(s.read_choice(&ID_PAT_ID, |s, variant| {
                         Ok(if variant == 0 {
-                            PatentNumber::Number(s.read_str("number")?)
+                            PatentNumber::Number(s.read_str()?)
                         } else {
-                            PatentNumber::AppNumber(s.read_str("app-number")?)
+                            PatentNumber::AppNumber(s.read_str()?)
                         })
                     })?);
                 }
-                _ => doc_type = Some(s.read_str("doc-type")?),
+                _ => doc_type = Some(s.read_str()?),
             }
             Ok(())
         })?;
-        match (country, id) {
-            (Some(country), Some(id)) => Ok(IdPat {
-                country,
-                id,
-                doc_type,
-            }),
-            _ => format_err("member expected"),
-        }
+        Ok(IdPat {
+            country: mandatory(country),
+            id: mandatory(id),
+            doc_type,
+        })
     }
 
     fn read_pdb_seq_id(&mut self) -> R<PdbSeqId> {
         let (mut mol, mut chain, mut rel, mut chain_id) = (None, None, None, None);
         self.read_class(&PDB_SEQ_ID, |s, index| {
             match index {
-                0 => mol = Some(s.read_str("mol")?),
+                0 => mol = Some(s.read_str()?),
                 1 => chain = Some(s.inp.read_i32()?),
                 2 => rel = Some(s.read_date()?),
-                _ => chain_id = Some(s.read_str("chain-id")?),
+                _ => chain_id = Some(s.read_str()?),
             }
             Ok(())
         })?;
-        match mol {
-            Some(mol) => Ok(PdbSeqId {
-                mol,
-                chain,
-                rel,
-                chain_id,
-            }),
-            None => format_err("member mol expected"),
-        }
+        Ok(PdbSeqId {
+            mol: mandatory(mol),
+            chain,
+            rel,
+            chain_id,
+        })
     }
 
     fn read_date(&mut self) -> R<Date> {
         self.read_choice(&DATE, |s, variant| {
             if variant == 0 {
-                return Ok(Date::Str(s.read_str("str")?));
+                return Ok(Date::Str(s.read_str()?));
             }
             let mut std = DateStd {
                 year: 0,
@@ -718,20 +1191,15 @@ impl<I: Input> Rd<I> {
                     0 => year = Some(s.inp.read_i32()?),
                     1 => std.month = Some(s.inp.read_i32()?),
                     2 => std.day = Some(s.inp.read_i32()?),
-                    3 => std.season = Some(s.read_str("season")?),
+                    3 => std.season = Some(s.read_str()?),
                     4 => std.hour = Some(s.inp.read_i32()?),
                     5 => std.minute = Some(s.inp.read_i32()?),
                     _ => std.second = Some(s.inp.read_i32()?),
                 }
                 Ok(())
             })?;
-            match year {
-                Some(year) => {
-                    std.year = year;
-                    Ok(Date::Std(std))
-                }
-                None => format_err("member year expected"),
-            }
+            std.year = mandatory(year);
+            Ok(Date::Std(std))
         })
     }
 
@@ -744,7 +1212,7 @@ impl<I: Input> Rd<I> {
                 SEQ_INTERVAL_FROM => from = s.inp.read_u32()?,
                 SEQ_INTERVAL_TO => to = s.inp.read_u32()?,
                 SEQ_INTERVAL_STRAND => {
-                    let v = s.inp.read_enum(&NA_STRAND)?;
+                    let v = s.read_enum(&NA_STRAND)?;
                     // The values of Na-strand are 0..=4 and 255.
                     strand = Some(v as u8);
                 }
@@ -752,19 +1220,12 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // fuzz-from, fuzz-to: read, not used.
                     scratch.clear();
-                    s.read_value(
-                        SEQ_INTERVAL.members[index].ty,
-                        SEQ_INTERVAL.members[index].name,
-                        &mut scratch,
-                    )?;
+                    s.read_value(SEQ_INTERVAL.members[index].ty, &mut scratch)?;
                 }
             }
             Ok(())
         })?;
-        let Some(id) = id else {
-            return format_err("member id expected");
-        };
-        Ok((MaskInterval { from, to, strand }, id))
+        Ok((MaskInterval { from, to, strand }, mandatory(id)))
     }
 
     /// A `Seq-point` (also the members `a` and `b` of a `Seq-bond`), and its Seq-id.
@@ -774,23 +1235,17 @@ impl<I: Input> Rd<I> {
         self.read_class(&SEQ_POINT, |s, index| {
             match index {
                 0 => point = s.inp.read_u32()?,
-                1 => strand = Some(s.inp.read_enum(&NA_STRAND)? as u8),
+                1 => strand = Some(s.read_enum(&NA_STRAND)? as u8),
                 2 => id = Some(s.read_seq_id()?),
                 _ => {
                     // fuzz: read, not used.
                     scratch.clear();
-                    s.read_value(
-                        SEQ_POINT.members[index].ty,
-                        SEQ_POINT.members[index].name,
-                        &mut scratch,
-                    )?;
+                    s.read_value(SEQ_POINT.members[index].ty, &mut scratch)?;
                 }
             }
             Ok(())
         })?;
-        let Some(id) = id else {
-            return format_err("member id expected");
-        };
+        let id = mandatory(id);
         let interval = MaskInterval {
             from: point,
             to: point,
@@ -799,113 +1254,17 @@ impl<I: Input> Rd<I> {
         Ok((interval, id))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3620
-    // ```c++
-    // bool CSeq_loc::x_CheckId(const CSeq_id*& id, bool may_throw) const
-    // {
-    //     switch ( Which() ) {
-    //     case e_not_set:
-    //     case e_Null:
-    //         {
-    //             // no Seq-id
-    //             return true;
-    //         }
-    //     case e_Empty:
-    //         {
-    //             return x_UpdateId(id, &GetEmpty(), may_throw);
-    //         }
-    //     case e_Whole:
-    //         {
-    //             return x_UpdateId(id, &GetWhole(), may_throw);
-    //         }
-    //     case e_Int: ... x_UpdateId(id, &loc.GetId(), may_throw);
-    //     case e_Pnt: ... x_UpdateId(id, &pnt.GetId(), may_throw);
-    //     case e_Packed_int: ... (each interval) ...
-    //     case e_Packed_pnt: ... x_UpdateId(id, &pnts.GetId(), may_throw);
-    //     case e_Mix: ... (*li)->CheckId(id, may_throw) for each sub-location ...
-    //     case e_Bond: ... A, then B when it is set ...
-    //     case e_Equiv: ... (*li)->CheckId(id, may_throw) for each ...
-    //     case e_Feat:
-    //     default:
-    //         if (may_throw) { NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...); }
-    //         return false;
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3528-3620
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:403-422
-    // ```c++
-    // bool CSeq_loc::x_UpdateId(const CSeq_id*& total_id, const CSeq_id* id,
-    //                           bool may_throw) const
-    // {
-    //     if ( total_id == id ) {
-    //         return true;
-    //     }
-    //
-    //     if ( !total_id ) {
-    //         total_id = id;
-    //     } else if ( (id  &&  !total_id->Equals(*id)) ) {
-    //         if (may_throw) {
-    //             ...
-    //         } else {
-    //             return false;
-    //         }
-    //     }
-    //     return true;
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_loc.hpp:939-945
-    // ```c++
-    // inline
-    // const CSeq_id* CSeq_loc::GetId(void) const
-    // {
-    //     const CSeq_id* sip = NULL;
-    //     return CheckId(sip, false) ? sip : NULL;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_loc.hpp:926-945
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1439-1555,1559-1600
-    // ```c++
-    // void CSeq_loc_CI_Impl::x_ProcessLocation(const CSeq_loc& loc)
-    // {
-    //     switch ( loc.Which() ) {
-    //     case CSeq_loc::e_not_set:
-    //     case CSeq_loc::e_Null:
-    //     case CSeq_loc::e_Empty:
-    //         ... (a range only with eEmpty_Allow: TRange::GetEmpty(), the Seq-id of `empty`) ...
-    //     case CSeq_loc::e_Whole:
-    //         ... info.m_Range = TRange::GetWhole(); ...
-    //     case CSeq_loc::e_Int:  x_ProcessInterval(loc.GetInt(), loc);
-    //     case CSeq_loc::e_Pnt:  x_ProcessPoint(loc.GetPnt(), loc);
-    //     case CSeq_loc::e_Packed_int: ... x_ProcessInterval(**ii, loc) for each ...
-    //     case CSeq_loc::e_Packed_pnt:
-    //         ... strand of the pack; for each point: info.m_Range.Set(*pi, *pi) ...
-    //     case CSeq_loc::e_Mix:   ... x_ProcessLocation(**li) for each ...
-    //     case CSeq_loc::e_Equiv: ... x_ProcessLocation(**li) for each part ...
-    //     case CSeq_loc::e_Bond:
-    //         x_ProcessPoint(bond.GetA(), loc);
-    //         if ( bond.IsSetB() ) { x_ProcessPoint(bond.GetB(), loc); }
-    //     default:
-    //         NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...);
-    //     }
-    // }
-    // ```
     /// One `Seq-loc` (any variant, nested `mix` and `equiv` included): appends the ranges
     /// `CSeq_loc_CI` visits to `parts`, in its order (a `whole` Seq-loc is the interval 0 to
     /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
-    /// and follows `CSeq_loc::GetId()` in `id` (`x_CheckId`: the first Seq-id, kept while the others
-    /// are `Equals` to it; `Err` once two differ or a `feat` comes, which has none).
-    fn read_seq_loc_parts(
-        &mut self,
-        parts: &mut Vec<MaskPart>,
-        id: &mut Result<Option<ParsedSeqId>, ()>,
-    ) -> R<()> {
-        fn update(total: &mut Result<Option<ParsedSeqId>, ()>, id: ParsedSeqId) {
-            match total {
-                Ok(None) => *total = Ok(Some(id)),
-                // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
-                Ok(Some(first)) if *first != id => *total = Err(()),
-                _ => {}
-            }
-        }
+    /// and walks it in `walk` (a new [`IdWalk`]) as `CSeq_loc::CheckId` does. An element of
+    /// `packed-int`, `mix` or `equiv` stated as `NULL` (an empty `CRef<>`) is where the walk
+    /// dereferences it, if it gets that far (`**ii`, `(*li)->CheckId`).
+    fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
         self.read_choice(&SEQ_LOC, |s, index| {
             match index {
                 SEQ_LOC_NULL => {
@@ -914,12 +1273,12 @@ impl<I: Input> Rd<I> {
                 }
                 SEQ_LOC_EMPTY => {
                     let seq_id = s.read_seq_id()?;
-                    update(id, seq_id);
+                    walk.update(seq_id);
                     parts.push(MaskPart::Empty);
                 }
                 SEQ_LOC_WHOLE => {
                     let seq_id = s.read_seq_id()?;
-                    update(id, seq_id);
+                    walk.update(seq_id);
                     parts.push(MaskPart::Interval(MaskInterval {
                         from: 0,
                         to: u32::MAX - 1,
@@ -928,20 +1287,26 @@ impl<I: Input> Rd<I> {
                 }
                 SEQ_LOC_INT => {
                     let (interval, seq_id) = s.read_seq_interval()?;
-                    update(id, seq_id);
+                    walk.update(seq_id);
                     parts.push(MaskPart::Interval(interval));
                 }
                 SEQ_LOC_PACKED_INT => {
                     s.read_container(false, |s| {
-                        let (interval, seq_id) = s.read_seq_interval()?;
-                        update(id, seq_id);
-                        parts.push(MaskPart::Interval(interval));
+                        let read = s.read_pointer(SEQ_INTERVAL.name, |s| {
+                            let (interval, seq_id) = s.read_seq_interval()?;
+                            walk.update(seq_id);
+                            parts.push(MaskPart::Interval(interval));
+                            Ok(())
+                        })?;
+                        if !read {
+                            walk.null(s.null_element(LIST_PACKED_INT));
+                        }
                         Ok(())
                     })?;
                 }
                 SEQ_LOC_PNT => {
                     let (interval, seq_id) = s.read_seq_point()?;
-                    update(id, seq_id);
+                    walk.update(seq_id);
                     parts.push(MaskPart::Interval(interval));
                 }
                 SEQ_LOC_PACKED_PNT => {
@@ -949,7 +1314,7 @@ impl<I: Input> Rd<I> {
                     let mut scratch = Vec::new();
                     s.read_class(&PACKED_SEQPNT, |s, member| {
                         match member {
-                            0 => strand = Some(s.inp.read_enum(&NA_STRAND)? as u8),
+                            0 => strand = Some(s.read_enum(&NA_STRAND)? as u8),
                             1 => seq_id = Some(s.read_seq_id()?),
                             3 => s.read_container(false, |s| {
                                 points.push(s.inp.read_u32()?);
@@ -958,19 +1323,12 @@ impl<I: Input> Rd<I> {
                             _ => {
                                 // fuzz: read, not used.
                                 scratch.clear();
-                                s.read_value(
-                                    PACKED_SEQPNT.members[member].ty,
-                                    PACKED_SEQPNT.members[member].name,
-                                    &mut scratch,
-                                )?;
+                                s.read_value(PACKED_SEQPNT.members[member].ty, &mut scratch)?;
                             }
                         }
                         Ok(())
                     })?;
-                    let Some(seq_id) = seq_id else {
-                        return format_err("member id expected");
-                    };
-                    update(id, seq_id);
+                    walk.update(mandatory(seq_id));
                     parts.extend(points.into_iter().map(|p| {
                         MaskPart::Interval(MaskInterval {
                             from: p,
@@ -980,12 +1338,30 @@ impl<I: Input> Rd<I> {
                     }));
                 }
                 SEQ_LOC_MIX | SEQ_LOC_EQUIV => {
-                    s.read_container(index == SEQ_LOC_EQUIV, |s| s.read_seq_loc_parts(parts, id))?;
+                    let list = if index == SEQ_LOC_MIX {
+                        LIST_MIX
+                    } else {
+                        LIST_EQUIV
+                    };
+                    s.read_container(index == SEQ_LOC_EQUIV, |s| {
+                        let read = s.read_pointer(SEQ_LOC.name, |s| {
+                            let mut inner = IdWalk::Same(None);
+                            s.read_seq_loc_parts(parts, &mut inner)?;
+                            walk.nested(inner);
+                            Ok(())
+                        })?;
+                        if !read {
+                            walk.null(s.null_element(list));
+                        }
+                        Ok(())
+                    })?;
                 }
                 SEQ_LOC_BOND => {
+                    // `b` is an OPTIONAL `CRef<>` (`read_class`): a `NULL` leaves it unset, which
+                    // `x_CheckId` and `CSeq_loc_CI` skip (`CanGetB`, `IsSetB`).
                     s.read_class(&SEQ_BOND, |s, _| {
                         let (interval, seq_id) = s.read_seq_point()?;
-                        update(id, seq_id);
+                        walk.update(seq_id);
                         parts.push(MaskPart::Interval(interval));
                         Ok(())
                     })?;
@@ -993,37 +1369,51 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
                     let mut scratch = Vec::new();
-                    s.read_value(
-                        SEQ_LOC.variants[index].ty,
-                        SEQ_LOC.variants[index].name,
-                        &mut scratch,
-                    )?;
-                    *id = Err(());
+                    s.read_value(SEQ_LOC.variants[index].ty, &mut scratch)?;
+                    *walk = IdWalk::Stopped;
                 }
             }
             Ok(())
         })
     }
 
-    /// One `Seq-loc` of `masks`: the ranges `CSeq_loc_CI` visits and `CSeq_loc::GetId()`.
-    fn read_seq_loc(&mut self) -> R<MaskLoc> {
+    /// One `Seq-loc` of `masks`: the ranges `CSeq_loc_CI` visits and `CSeq_loc::GetId()`, or the
+    /// element stated as `NULL` that `GetId` dereferences.
+    fn read_seq_loc(&mut self) -> R<Result<MaskLoc, NullElement>> {
         let mut parts = Vec::new();
-        let mut id = Ok(None);
-        self.read_seq_loc_parts(&mut parts, &mut id)?;
-        Ok(MaskLoc {
-            id: id.ok().flatten(),
-            parts,
-        })
+        let mut walk = IdWalk::Same(None);
+        self.read_seq_loc_parts(&mut parts, &mut walk)?;
+        let id = match walk {
+            IdWalk::Same(id) => id,
+            IdWalk::Stopped => None,
+            IdWalk::Null(null) => return Ok(Err(null)),
+        };
+        Ok(Ok(MaskLoc { id, parts }))
     }
 
-    /// A `Blast-mask-list`; the caller checks the end of the class frame.
+    /// A `Blast-mask-list`; the caller checks the end of the class frame. Its masks are kept up to
+    /// the first one whose `GetId` dereferences an element stated as `NULL` (the mask itself, or
+    /// one inside it), which is `MaskList::null_element`; the rest is read and dropped.
     fn read_mask_list_members(&mut self) -> R<MaskList> {
         let mut masks = Vec::new();
+        let mut null_element = None;
         let mut more = None;
         self.read_class(&BLAST_MASK_LIST, |s, index| {
             if index == 0 {
                 s.read_container(false, |s| {
-                    masks.push(s.read_seq_loc()?);
+                    let read = s.read_pointer(SEQ_LOC.name, |s| {
+                        let loc = s.read_seq_loc()?;
+                        if null_element.is_none() {
+                            match loc {
+                                Ok(loc) => masks.push(loc),
+                                Err(null) => null_element = Some(null),
+                            }
+                        }
+                        Ok(())
+                    })?;
+                    if !read && null_element.is_none() {
+                        null_element = Some(s.null_element(LIST_MASKS));
+                    }
                     Ok(())
                 })
             } else {
@@ -1031,10 +1421,11 @@ impl<I: Input> Rd<I> {
                 Ok(())
             }
         })?;
-        let Some(more) = more else {
-            return format_err("member more expected");
-        };
-        Ok(MaskList { masks, more })
+        Ok(MaskList {
+            masks,
+            more: mandatory(more),
+            null_element,
+        })
     }
 
     /// `file >> MSerial_Asn... >> *obj` for a `Blast-db-mask-info`.
@@ -1043,97 +1434,68 @@ impl<I: Input> Rd<I> {
         let mut algo_program = 0;
         let mut algo_options = Vec::new();
         let mut masks = None;
-        self.read_top(BLAST_DB_MASK_INFO.name, |s| {
+        self.read_top(&BLAST_DB_MASK_INFO, |s| {
             s.read_class(&BLAST_DB_MASK_INFO, |s, index| {
                 match index {
                     0 => algo_id = s.inp.read_i32()?,
-                    1 => algo_program = s.inp.read_enum(&BLAST_FILTER_PROGRAM)?,
-                    2 => algo_options = s.read_str("algo-options")?,
+                    1 => algo_program = s.read_enum(&BLAST_FILTER_PROGRAM)?,
+                    2 => algo_options = s.read_str()?,
                     _ => masks = Some(s.read_mask_list_members()?),
                 }
                 Ok(())
             })
         })?;
-        let Some(masks) = masks else {
-            return format_err("member masks expected");
-        };
         Ok(MaskInfo {
             algo_id,
             algo_program,
             algo_options,
-            masks,
+            masks: mandatory(masks),
         })
     }
 
     /// `file >> MSerial_Asn... >> *obj` for a `Blast-mask-list` (the continuation).
     fn read_list(&mut self) -> R<MaskList> {
         let mut list = None;
-        self.read_top(BLAST_MASK_LIST.name, |s| {
+        self.read_top(&BLAST_MASK_LIST, |s| {
             list = Some(s.read_mask_list_members()?);
             Ok(())
         })?;
-        list.ok_or_else(|| Fail::Format("no Blast-mask-list".into()))
+        Ok(mandatory(list))
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-901
-    // ```c++
-    // // root reader
-    // void CObjectIStream::SkipFileHeader(TTypeInfo typeInfo)
-    // {
-    //     ResetState();
-    //     ...
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     string name = ReadFileHeader();
-    //     const string& tname = typeInfo->GetName();
-    //     if ( !name.empty() && !tname.empty() && name != tname ) {
-    //         ThrowError(fFormatError,
-    //                    "incompatible type "+name+"<>"+typeInfo->GetName());
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:971-975
-    // ```c++
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo)
-    // {
-    //     // root object
-    //     SkipFileHeader(typeInfo);
-    //     Read(object, typeInfo, eNoFileHeader);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
-    // ```c++
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo, ENoFileHeader)
-    // {
-    //     // root object
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     ReadObject(object, typeInfo);
-    //
-    //     EndOfRead();
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
-    fn read_top(&mut self, type_name: &str, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
+    /// `file >> MSerial_Asn... >> *obj` of the type `def`: `SkipFileHeader`, then `Read` with
+    /// `read`, each in a frame of its own.
+    fn read_top(&mut self, def: &'static ClassDef, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
+        // Every frame entered was left (`exit`), and with it every stack trace completed.
+        debug_assert!(self.depth == 0 && self.traces.is_empty());
         self.depth = 0;
-        self.collected.unsupported = None;
-        if let Some(name) = self.frame(|s| s.inp.read_file_header())? {
-            if !name.is_empty() && name != type_name.as_bytes() {
-                return format_err(format!(
-                    "incompatible type {}<>{type_name}",
-                    String::from_utf8_lossy(&name)
-                ));
+        self.frame(FrameKind::Named, Some(def.name), |s| {
+            match s.inp.read_file_header()? {
+                Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(
+                    SKIP_FILE_HEADER,
+                    &s.inp.position(),
+                    [
+                        b"incompatible type ".as_slice(),
+                        &name,
+                        b"<>",
+                        def.name.as_bytes(),
+                    ]
+                    .concat(),
+                )),
+                _ => Ok(()),
             }
-        }
-        self.frame(read)?;
-        match self.collected.unsupported.take() {
-            Some(what) => Err(Fail::Unsupported(what)),
-            None => Ok(()),
-        }
+        })?;
+        self.frame(FrameKind::Named, Some(def.name), read)
     }
+}
+
+/// The value of a member that `ReadClassSequential` read: a member that is neither `OPTIONAL` nor
+/// has a `DEFAULT` was read when `Rd::read_class` returns (`missing_members`).
+fn mandatory<T>(value: Option<T>) -> T {
+    value.expect("ReadClassSequential has read every mandatory member")
 }
 
 /// One `Seq-id` of an ASN.1 binary value, read by the mask reader's builder, for the test that
@@ -1141,7 +1503,7 @@ impl<I: Input> Rd<I> {
 #[cfg(test)]
 pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
     let mut rd = Rd::new(BerIn::new(data));
-    rd.frame(|s| s.read_seq_id())
+    rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
 /// [`seq_id_from_binary`] for ASN.1 text, for the test that compares the builder with
@@ -1150,7 +1512,7 @@ pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
 pub(super) fn seq_id_from_text(data: &[u8]) -> R<ParsedSeqId> {
     use crate::report::serial::asn_text_reader::SliceSource;
     let mut rd = Rd::new(TextIn::new(SliceSource::new(data)));
-    rd.frame(|s| s.read_seq_id())
+    rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
 /// Where the reader is in its file.
@@ -1188,6 +1550,8 @@ pub(crate) struct MaskFileReader {
     source: Source,
     /// Set by the first error or end of file (NCBI stops reading the file there).
     state: State,
+    /// What NCBI's reader posted while it read the objects, not yet taken (`take_posts`).
+    posts: Vec<MaskPost>,
 }
 
 impl fmt::Debug for MaskFileReader {
@@ -1206,25 +1570,8 @@ impl fmt::Debug for MaskFileReader {
 }
 
 impl MaskFileReader {
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:933-943
-    // ```c++
-    //         CNcbiIfstream mask_file(file_list[i].c_str(), ios::binary);
-    //         CFormatGuess::EFormat mask_file_format = CFormatGuess::eUnknown;
-    //         {{
-    //              CFormatGuess fg(mask_file);
-    //              fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eBinaryASN);
-    //              fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eTextASN);
-    //              fg.GetFormatHints().DisableAllNonpreferred();
-    //              mask_file_format = fg.GuessFormat();
-    //          }}
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:160-176
-    // ```c++
-    //     switch (fmt) {
-    //     ...
-    //     default:
-    //         NCBI_THROW(CInvalidDataException, eInvalidInput, string("Unknown encoding for ") + msg);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:933-947
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:160-181
     /// [`open_named`](Self::open_named) for a file that messages call by its path.
     #[cfg(test)]
     pub(crate) fn open(path: &Path) -> Result<Self, MaskFileError> {
@@ -1250,6 +1597,12 @@ impl MaskFileReader {
         Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
     }
 
+    /// The reader of the bytes `input` gives; `path` is only used in messages.
+    #[cfg(test)]
+    pub(crate) fn from_read(path: &Path, input: Box<dyn Read>) -> Result<Self, MaskFileError> {
+        Self::from_reader(path, input)
+    }
+
     /// The reader of the file `input`; `path` is only used in messages.
     fn from_reader(path: &Path, mut input: Box<dyn Read>) -> Result<Self, MaskFileError> {
         let Some((format, sample)) = guess_format(&mut input) else {
@@ -1271,6 +1624,7 @@ impl MaskFileReader {
             path: path.to_path_buf(),
             source,
             state: State::Open,
+            posts: Vec::new(),
         })
     }
 
@@ -1300,30 +1654,44 @@ impl MaskFileReader {
         match &mut self.source {
             Source::Text(rd) => {
                 rd.inp.new_object();
-                text(rd)
+                let result = text(rd);
+                self.posts.append(&mut rd.posts);
+                result
             }
             Source::Binary { data, offset } => {
                 let start = (*offset).min(data.len());
                 let mut rd = Rd::new(BerIn::new(&data[start..]));
                 let result = binary(&mut rd);
                 *offset = start + rd.inp.offset();
+                self.posts.append(&mut rd.posts);
                 result
             }
         }
     }
 
+    /// The messages that NCBI's reader posted while it read the objects returned so far (and the
+    /// one that failed), in the order posted: makeblastdb writes them as they come, before what
+    /// it then does with the object or the error.
+    pub(crate) fn take_posts(&mut self) -> Vec<MaskPost> {
+        std::mem::take(&mut self.posts)
+    }
+
+    /// A call after the reader stopped (makeblastdb does not read on after an error).
     fn stopped(&self) -> MaskFileError {
         if self.state == State::FailedEof {
             return MaskFileError::EofInContinuation {
                 path: self.path.clone(),
             };
         }
-        MaskFileError::Malformed {
-            path: self.path.clone(),
-            message: "reader stopped after an earlier error".into(),
-        }
+        MaskFileError::Unsupported(format!(
+            "mask data in '{}' after the error that stopped its reader",
+            self.path.display()
+        ))
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-263 (`CATCH_ALL`)
+    /// The error of the reader's `fail`: what makeblastdb's `CATCH_ALL` reports for what NCBI's
+    /// reader threw.
     fn fail(&mut self, fail: Fail) -> MaskFileError {
         self.state = if matches!(fail, Fail::Eof) {
             State::FailedEof
@@ -1331,11 +1699,14 @@ impl MaskFileReader {
             State::Failed
         };
         match fail {
-            Fail::Format(message) => MaskFileError::Malformed {
-                path: self.path.clone(),
-                message,
-            },
-            Fail::Unsupported(what) => MaskFileError::Unsupported(what),
+            Fail::Serial(e) | Fail::Exception(e) => {
+                MaskFileError::Ncbi(WriteDbError::Exception(*e))
+            }
+            Fail::OutOfMemory => MaskFileError::Ncbi(WriteDbError::OutOfMemory),
+            Fail::LengthError => {
+                MaskFileError::Ncbi(WriteDbError::Other(STRING_CREATE_LENGTH_ERROR.to_string()))
+            }
+            Fail::Unsupported(what) => MaskFileError::Unsupported(what.0),
             Fail::Eof => MaskFileError::EofInContinuation {
                 path: self.path.clone(),
             },
@@ -1343,19 +1714,6 @@ impl MaskFileReader {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:947-960
-    // ```c++
-    //         int algo_id = -1;
-    //         while (true) {
-    //             CRef<CBlast_db_mask_info> first_obj;
-    //
-    //             try {
-    //                 s_ReadObject(mask_file, mask_file_format, first_obj, "mask data in '" + file_list[i] + "'");
-    //             }
-    //             catch (CEofException&) {
-    //                 // must be end of file
-    //                 break;
-    //             }
-    // ```
     /// The next `Blast-db-mask-info`; `None` at the end of the file. A `CEofException` of the
     /// serial reader (nothing left but white space and comments, or a file that ends inside the
     /// type name or the first bytes of an object) is the end, as in `x_ProcessMaskData`; a
@@ -1376,13 +1734,7 @@ impl MaskFileReader {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:994-996
-    // ```c++
-    //                 if (! masks->GetMore())
-    //                     break;
-    //
-    //                 s_ReadObject(mask_file, mask_file_format, masks, "mask data (continuation)");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:994-998
     /// The `Blast-mask-list` that follows an object with `more TRUE`. A file that ends there is
     /// [`MaskFileError::EofInContinuation`]. After an error every call is an error again.
     pub(crate) fn next_list(&mut self) -> Result<MaskList, MaskFileError> {

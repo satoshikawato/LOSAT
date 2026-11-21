@@ -7,7 +7,7 @@ fn parse_args(args: &[&str]) -> TblastxArgs {
     let mut all_args = vec!["losat".to_string(), "tblastx".to_string()];
     all_args.extend(args.iter().map(|s| s.to_string()));
 
-    // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
     let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
     let crate::cli::Commands::Tblastx(args) = cli.command else {
@@ -66,7 +66,7 @@ fn test_custom_threshold() {
     assert_eq!(args.word_threshold(), 20.0);
 }
 
-// NCBI c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
 // BLAST_GetSuggestedWindowSize) and c++/src/algo/blast/blastinput/blast_args.cpp:586-623
 // (TBLASTX takes the suggestion, plus 2, unless -threshold is given): PAM30 reads 18 and 15;
 // the name is kept as typed.
@@ -174,13 +174,6 @@ fn test_seg_options() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-// ```c++
-// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
-// {
-//     if (args[kArgLookupTableMaskingOnly]) {
-//         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-//     }
-// ```
 // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is false
 // (`kDfltArgLookupTableMaskingOnlyProt`).
 #[test]
@@ -198,6 +191,42 @@ fn test_soft_masking_sets_mask_at_hash() {
         assert!(!soft(&["-soft_masking", value]), "{value}");
     }
     assert!(soft(&["-seg", "no", "-soft_masking", "true"]));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244 and 321-323
+// (cited at `TblastxArgs::sum_stats`); c++/src/algo/blast/api/tblastx_options.cpp:76-81 (the
+// default, true)
+// `-sum_stats` takes NCBI's boolean spellings (`NStr::StringToBool`); omitted, the search links
+// with sum statistics and the archive records nothing (`None`).
+#[test]
+fn test_sum_stats() {
+    let parse = |extra: &[&str]| {
+        let mut argv = vec![
+            "losat", "tblastx", "-query", "q.fa", "-subject", "s.fa", "-outfmt", "6",
+        ];
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from(argv).map(|cli: crate::cli::Cli| match cli.command {
+            crate::cli::Commands::Tblastx(args) => args,
+            _ => panic!("wrong program"),
+        })
+    };
+    let omitted = parse(&[]).unwrap();
+    assert_eq!(omitted.sum_stats, None);
+    assert!(omitted.sum_stats());
+    for value in ["true", "TRUE", "t", "T", "1", "yes", "on"] {
+        let args = parse(&["-sum_stats", value]).unwrap();
+        assert_eq!(args.sum_stats, Some(true), "{value}");
+        assert!(args.sum_stats(), "{value}");
+    }
+    for value in ["false", "F", "f", "0", "no", "off"] {
+        let args = parse(&["-sum_stats", value]).unwrap();
+        assert_eq!(args.sum_stats, Some(false), "{value}");
+        assert!(!args.sum_stats(), "{value}");
+    }
+    for value in ["maybe", "2", ""] {
+        assert!(parse(&["-sum_stats", value]).is_err(), "{value}");
+    }
+    assert!(parse(&["-sum_stats"]).is_err());
 }
 
 #[test]
@@ -218,4 +247,47 @@ fn test_query_and_subject_paths() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("query.fasta"));
     assert_eq!(args.subject, Some(PathBuf::from("subject.fasta")));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-944
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (cited at
+// `check_ncbi_options`)
+// `-max_intron_length` is an integer of 0 or more (NCBI's argument errors for the others are the
+// parser's); 0 runs as without it, any other value is NCBI's options error for TBLASTX.
+#[test]
+fn test_max_intron_length() {
+    let parse = |extra: &[&str]| {
+        let mut argv = vec![
+            "losat", "tblastx", "-query", "q.fa", "-subject", "s.fa", "-outfmt", "6",
+        ];
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from(argv).map(|cli: crate::cli::Cli| match cli.command {
+            crate::cli::Commands::Tblastx(args) => args,
+            _ => panic!("wrong program"),
+        })
+    };
+    let check = |args: &TblastxArgs| crate::algorithm::tblastx::blast_engine::check_options(args);
+    let omitted = parse(&[]).unwrap();
+    assert_eq!(omitted.max_intron_length, None);
+    assert!(check(&omitted).is_ok());
+    let zero = parse(&["-max_intron_length", "0"]).unwrap();
+    assert_eq!(zero.max_intron_length, Some(0));
+    assert!(check(&zero).is_ok());
+    let uneven = crate::blastinput::app::options_error(
+        "Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only",
+    )
+    .to_string();
+    for value in ["1", "4", "100", "2147483647"] {
+        let args = parse(&["-max_intron_length", value]).unwrap();
+        assert_eq!(check(&args).unwrap_err().to_string(), uneven, "{value}");
+    }
+    // The e-value's check comes first (blast_options.c:1518-1523).
+    let both = parse(&["-max_intron_length", "100", "-evalue", "0"]).unwrap();
+    assert!(check(&both)
+        .unwrap_err()
+        .to_string()
+        .contains("expect value or cutoff score must be greater than zero"));
+    for value in ["-1", "1.5", "abc", "2147483648", ""] {
+        assert!(parse(&["-max_intron_length", value]).is_err(), "{value}");
+    }
 }

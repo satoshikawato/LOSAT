@@ -1,7 +1,7 @@
 //! BLAST Sequence Encoding
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c
-//!            ncbi-blast/c++/src/algo/blast/core/blast_util.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c
+//!            c++/src/algo/blast/core/blast_util.c
 //!
 //! This module provides the nucleotide encodings of NCBI BLAST that the engines use:
 //! - IUPAC letters to BLASTNA codes (`encode_iupac_to_blastna`,
@@ -29,18 +29,7 @@
 /// Compression ratio: 4 nucleotides per byte
 pub const COMPRESSION_RATIO: usize = 4;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
-// ```c
-// const Uint1 IUPACNA_TO_BLASTNA[128]={
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
-// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 const IUPACNA_TO_BLASTNA: [u8; 128] = [
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
@@ -50,18 +39,7 @@ const IUPACNA_TO_BLASTNA: [u8; 128] = [
     15, 15, 15, 15, 15, 15, 15,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
-// ```c
-// const Uint1 IUPACNA_TO_BLASTNA[128]={
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
-// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 const IUPACNA_TO_BLASTNA_FULL: [u8; 256] = {
     let mut table = [15u8; 256];
     let mut i = 0usize;
@@ -78,18 +56,7 @@ const IUPACNA_TO_BLASTNA_FULL: [u8; 256] = {
 };
 
 /// Encode an ASCII sequence to BLASTNA (IUPAC) codes (one base per byte).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
-/// ```c
-/// const Uint1 IUPACNA_TO_BLASTNA[128]={
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
-/// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 pub fn encode_iupac_to_blastna(seq: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(seq.len());
     for &base in seq {
@@ -110,11 +77,7 @@ pub fn encode_iupac_to_blastna_into(seq: &[u8], out: &mut [u8]) {
 /// The ncbi4na value of an IUPAC nucleotide letter, either case (bit 0 A, 1 C, 2 G, 3 T;
 /// a gap is 0 and `N` 15), or `None` for another byte.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425
-/// ```c
-/// static unsigned char ctable[16] = {0xFF, 0x00, 0x01, 0xFF, 0x02, 0xFF, 0xFF, 0xFF,
-/// 		                           0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425
 pub fn iupacna_to_ncbi4na(letter: u8) -> Option<u8> {
     Some(match letter.to_ascii_uppercase() {
         b'A' => 1,
@@ -137,19 +100,8 @@ pub fn iupacna_to_ncbi4na(letter: u8) -> Option<u8> {
     })
 }
 
-// NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
+// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98,227-230,287-308 and
 // c++/include/util/random_gen.hpp:224-241
-// ```c
-// static const size_t kStateOffset = 12;
-// m_State[0] = m_Seed = seed;
-// for (int i = 1; i < kStateSize; ++i)
-//     m_State[i] = 1103515245 * m_State[i-1] + 12345;
-// m_RJ = kStateOffset; m_RK = kStateSize - 1;
-// for (int i = 0; i < 10 * kStateSize; ++i) GetRand();
-// r = m_State[m_RK] + m_State[m_RJ--];
-// m_State[m_RK--] = r;
-// return r >> 1;
-// ```
 /// NCBI's `CRandom` (the lagged Fibonacci generator), which resolves the ambiguous
 /// letters of a subject (`resolve_ncbi4na_to_ncbi2na`).
 pub(crate) struct NcbiRandom {
@@ -191,27 +143,7 @@ impl NcbiRandom {
 /// compressed subject that the preliminary search reads: each ambiguous letter becomes a
 /// compatible base drawn from `CRandom` seeded with the length of the sequence.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
-/// ```c
-/// void s_Ncbi4naToNcbi2na(const string & ncbi4na, int base_length,
-///                         unsigned char * ncbi2na)
-/// {
-///     int inp_bytes   = base_length;
-///     CRandom random(base_length);
-///     ...
-///         if (c  != 0xFF) {
-///             // No ambiguities, so we can do this the easy way.
-///         	ncbi2na[i] = c;
-///
-///         } else {
-///             if (b == 0 || b == 0x0F) {
-///             	//gap or N
-///                 ncbi2na[i] = random.GetRand() & 0x3;
-///             }
-///             else {
-///     ...
-///             	int pick = random.GetRand() % bitcount;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
 #[cfg(test)]
 pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
     let mut random = NcbiRandom::new(ncbi4na.len() as u32);
@@ -224,7 +156,7 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
 /// The ncbi2na code of one ncbi4na code, an ambiguous one drawn from `random` (the next base
 /// of `resolve_ncbi4na_to_ncbi2na`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
 #[inline]
 pub(crate) fn resolve_ncbi4na_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     match mask {
@@ -270,27 +202,9 @@ const UNAMBIGUOUS_NCBI2NA: [u8; 256] = {
 /// with its ambiguous letters resolved as NCBI resolves them (`resolve_ncbi4na_to_ncbi2na`).
 /// The letters have been checked (IUPAC); another byte is read as `N`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-/// ```c
-///     virtual SBlastSequence GetCompressedPlusStrand() {
-///         SBlastSequence retval(size());
-///         string ncbi4na = kEmptyStr;
-///         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-///         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-///         return retval;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1167-1194
-/// ```c
-///     // Populate the compressed sequence up to the last byte
-///     for (ci = 0, i = 0; ci < retval.length-1; ci++, i+= COMPRESSION_RATIO) {
-///         Uint1 a, b, c, d;
-///         a = ((*source_ptr & NCBI2NA_MASK)<<6); ++source_ptr;
-///     ...
-///     // Set the number of bases in the last 2 bits of the last byte in the
-///     // compressed sequence
-///     retval.data.get()[ci] |= source.length%COMPRESSION_RATIO;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1167-1194
 ///
 /// The letters are read once: `A`, `C`, `G` and `T` through a table, the others as
 /// `resolve_ncbi4na_to_ncbi2na` resolves their ncbi4na values, in order, from a `CRandom`
@@ -338,68 +252,5 @@ pub fn encode_subject_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `encode_subject_ncbi2na_packed` as it was written before its one-pass form: every
-    /// letter to ncbi4na, all of them resolved, then packed.
-    fn encode_subject_ncbi2na_packed_two_pass(seq: &[u8]) -> Vec<u8> {
-        if seq.is_empty() {
-            return Vec::new();
-        }
-        let ncbi4na: Vec<u8> = seq
-            .iter()
-            .map(|&letter| iupacna_to_ncbi4na(letter).unwrap_or(15))
-            .collect();
-        let codes = resolve_ncbi4na_to_ncbi2na(&ncbi4na);
-        let mut packed = vec![0u8; codes.len() / COMPRESSION_RATIO + 1];
-        for (index, &code) in codes.iter().enumerate() {
-            let shift = 6 - 2 * (index % COMPRESSION_RATIO);
-            packed[index / COMPRESSION_RATIO] |= code << shift;
-        }
-        *packed.last_mut().expect("at least one byte") |= (codes.len() % COMPRESSION_RATIO) as u8;
-        packed
-    }
-
-    #[test]
-    fn subject_packing_equals_the_two_pass_form() {
-        // Every byte value alone and between unambiguous letters.
-        for byte in 0..=255u8 {
-            for seq in [vec![byte], vec![b'A', byte, b'c', b'G', b't', byte, byte]] {
-                assert_eq!(
-                    encode_subject_ncbi2na_packed(&seq),
-                    encode_subject_ncbi2na_packed_two_pass(&seq),
-                    "{seq:?}"
-                );
-            }
-        }
-        // Mixed letters of every length up to 64 and a few long ones (a linear congruential
-        // generator picks them; one letter in eight is ambiguous or not a letter).
-        let alphabet = b"ACGTacgtACGTacgtACGTacgtACGTacgtMRSVWYHKDBNmrsvwyhkdbn-UuX*";
-        let mut state = 0x2545_f491_u32;
-        let mut next = || {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            state >> 8
-        };
-        let lengths = (0..=64).chain([1_000, 4_097, 100_003]);
-        for length in lengths {
-            for _ in 0..4 {
-                let seq: Vec<u8> = (0..length)
-                    .map(|_| {
-                        let pick = next() as usize;
-                        if pick.is_multiple_of(8) {
-                            alphabet[32 + pick / 8 % (alphabet.len() - 32)]
-                        } else {
-                            alphabet[pick / 8 % 32]
-                        }
-                    })
-                    .collect();
-                assert_eq!(
-                    encode_subject_ncbi2na_packed(&seq),
-                    encode_subject_ncbi2na_packed_two_pass(&seq),
-                    "length {length}"
-                );
-            }
-        }
-    }
-}
+#[path = "blast_encoding_tests.rs"]
+mod tests;

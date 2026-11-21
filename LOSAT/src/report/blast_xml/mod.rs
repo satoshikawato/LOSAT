@@ -30,18 +30,19 @@ pub struct CaughtException(pub crate::ncbi_exception::NcbiException);
 
 impl std::fmt::Display for CaughtException {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.get_msg())
+        f.write_str(&String::from_utf8_lossy(self.0.get_msg()))
     }
 }
 
 impl std::error::Error for CaughtException {}
 
-/// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast); the
-/// `&auml;` is NCBI's text (api/version.cpp:47-51) and is escaped again when written.
-pub const REFERENCE_GAPPED_BLAST: &str = "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.";
+/// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast): NCBI's text
+/// (`CReference::GetString(eGappedBlast)`, `report::reference`), whose `&auml;` is escaped again
+/// when written.
+pub const REFERENCE_GAPPED_BLAST: &str = super::reference::Publication::GappedBlast.string();
 
-/// `BlastOutput_reference` of megablast (`CReference::eMegaBlast`).
-pub const REFERENCE_MEGABLAST: &str = "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.";
+/// `BlastOutput_reference` of megablast (`CReference::GetString(eMegaBlast)`).
+pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.string();
 
 #[cfg(test)]
 mod tests;

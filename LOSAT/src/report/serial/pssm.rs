@@ -1,23 +1,9 @@
-//! NCBI-ScoreMat's `PssmWithParameters` (objects/scoremat/scoremat.asn): the value that psiblast
+//! NCBI-ScoreMat's `PssmWithParameters` (c++/src/objects/scoremat/scoremat.asn): the value that psiblast
 //! writes with `-out_pssm` (`MSerial_AsnText`), and its writer over an `Encoder`, in the member
 //! order of the ASN.1 module, so that the ASN.1 binary and the archive can write the same value.
 //! The reader of the ASN.1 text is `blastinput::pssm_text`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396
-//! ```c++
-//! CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
-//!                              const CPsiBlastIterationState* itr)
-//! {
-//!     if (pssm.Empty()) {
-//!         return;
-//!     }
-//!
-//!     if (m_CmdLineArgs->SaveCheckpoint() &&
-//!         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//!          itr->GetIterationNumber() >= 1)) {
-//!         *m_CmdLineArgs->GetCheckpointStream() << MSerial_AsnText << *pssm;
-//!     }
-//! ```
 //!
 //! A member is written when it is set: an OPTIONAL member that is `None` is not, and neither is a
 //! member with a DEFAULT that was not set (`is_protein` and `by_row` hold whether and how they were
@@ -36,14 +22,6 @@ use super::encoder::Encoder;
 
 /// `PssmWithParameters`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:345-366
-// ```asn
-// PssmWithParameters ::= SEQUENCE {
-//     ...
-//     pssm        Pssm,
-//     ...
-//     params      PssmParameters OPTIONAL
-// }
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssmWithParameters {
     pub pssm: Pssm,
@@ -52,27 +30,6 @@ pub struct PssmWithParameters {
 
 /// `Pssm`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:259-297
-// ```asn
-// Pssm ::= SEQUENCE {
-//     ...
-//     isProtein       BOOLEAN DEFAULT TRUE,
-//     ...
-//     identifier      Object-id OPTIONAL,
-//     ...
-//     numRows         INTEGER,    -- number of rows
-//     numColumns      INTEGER,    -- number of columns
-//     ...
-//     rowLabels       SEQUENCE OF VisibleString OPTIONAL,
-//     ...
-//     byRow           BOOLEAN DEFAULT FALSE,
-//     ...
-//     query           Seq-entry OPTIONAL,
-//     ...
-//     intermediateData    PssmIntermediateData OPTIONAL,
-//     ...
-//     finalData           PssmFinalData OPTIONAL
-// }
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pssm {
     /// `isProtein`: `Some` when set (written), `None` for the default TRUE (not written).
@@ -94,13 +51,6 @@ pub use crate::seqid::model::ObjectId;
 /// The PSSM's query: the `Seq-entry` `seq` variant, a Bioseq with its ids, its descriptors, its
 /// `Seq-inst` and its `annot`.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
-// ```asn
-// Bioseq ::= SEQUENCE {
-//     id SET OF Seq-id ,            -- equivalent identifiers
-//     descr Seq-descr OPTIONAL , -- descriptors
-//     inst Seq-inst ,            -- the sequence data
-//     annot SET OF Seq-annot OPTIONAL }
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssmQuery {
     /// The ids, read and written as every Seq-id of NCBI's ASN.1 text (`seqid::asn_text`,
@@ -117,12 +67,7 @@ pub struct PssmQuery {
 /// variant, a Bioseq-set as the generic reader read it, which NCBI's object manager takes with its
 /// annotations (`pssm_search::annot_index::index_entry`) and NCBI's application then stops at
 /// (`CSeq_entry::GetSeq()`, `pssm_search::in_pssm::psi_search_and_object`).
-// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:63-66
-// ```asn
-// Seq-entry ::= CHOICE {
-//         seq Bioseq ,
-//         set Bioseq-set }
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:58-60,63
 #[derive(Debug, Clone, PartialEq)]
 pub enum SeqEntry {
     Seq(Box<PssmQuery>),
@@ -157,15 +102,7 @@ impl SeqEntry {
 
 /// One `Seqdesc` of the query: a `title`, or another variant as the generic reader read it (the
 /// `Seqdesc` CHOICE value).
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:73-79
-// ```asn
-// Seqdesc ::= CHOICE {
-//     mol-type GIBB-mol ,           -- type of molecule
-//     modif SET OF GIBB-mod ,       -- modifiers
-//     method GIBB-method ,          -- sequencing method
-//     name VisibleString ,          -- a name for this sequence
-//     title VisibleString ,         -- a title for this sequence
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:47-52
 #[derive(Debug, Clone, PartialEq)]
 pub enum Seqdesc {
     Title(Vec<u8>),
@@ -211,24 +148,6 @@ impl PssmQuery {
 
 /// `Seq-inst`.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
-// ```asn
-// Seq-inst ::= SEQUENCE {            -- the sequence data itself
-//     repr ENUMERATED {              -- representation class
-//         ...
-//     mol ENUMERATED {               -- molecule class in living organism
-//         ...
-//     length INTEGER OPTIONAL ,      -- length of sequence in residues
-//     fuzz Int-fuzz OPTIONAL ,       -- length uncertainty
-//     topology ENUMERATED {          -- topology of molecule
-//         ...
-//         other (255) } DEFAULT linear ,
-//     strand ENUMERATED {            -- strandedness in living organism
-//         ...
-//         other (255) } OPTIONAL ,   -- default ds for DNA, ss for RNA, pept
-//     seq-data Seq-data OPTIONAL ,   -- the sequence
-//     ext Seq-ext OPTIONAL ,         -- extensions for special types
-//     hist Seq-hist OPTIONAL }       -- sequence history
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqInst {
     /// `repr`: the value's name and number (`raw`, 2).
@@ -295,17 +214,6 @@ pub const SEQ_INST_MOL: [(&str, i32); 6] = [
 
 /// The protein `Seq-data` variants that the reader types, and the others as it read them.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:346-358
-// ```asn
-// Seq-data ::= CHOICE {              -- sequence representations
-//     iupacna IUPACna ,              -- IUPAC 1 letter nuc acid code
-//     iupacaa IUPACaa ,              -- IUPAC 1 letter amino acid code
-//     ...
-//     ncbieaa NCBIeaa ,              -- extended ASCII 1 letter aa codes
-//     ncbipaa NCBIpaa ,              -- amino acid probabilities
-//     ncbistdaa NCBIstdaa,           -- consecutive codes for std aas
-//     gap Seq-gap                    -- gap types
-// }
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum SeqData {
     /// `iupacaa` (`IUPACaa ::= StringStore`).
@@ -321,28 +229,6 @@ pub enum SeqData {
 
 /// `PssmIntermediateData`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:197-243
-// ```asn
-// PssmIntermediateData ::= SEQUENCE {
-//     ...
-//     resFreqsPerPos              SEQUENCE OF INTEGER OPTIONAL,
-//     ...
-//     weightedResFreqsPerPos      SEQUENCE OF REAL OPTIONAL,
-//     ...
-//     freqRatios                  SEQUENCE OF REAL,
-//     ...
-//     informationContent          SEQUENCE OF REAL OPTIONAL,
-//     ...
-//     gaplessColumnWeights        SEQUENCE OF REAL OPTIONAL,
-//     ...
-//     sigma                       SEQUENCE OF REAL OPTIONAL,
-//     ...
-//     intervalSizes               SEQUENCE OF INTEGER OPTIONAL,
-//     ...
-//     numMatchingSeqs             SEQUENCE OF INTEGER OPTIONAL,
-//     ...
-//     numIndeptObsr               SEQUENCE OF REAL OPTIONAL
-// }
-// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PssmIntermediateData {
     pub res_freqs_per_pos: Option<Vec<i32>>,
@@ -358,28 +244,6 @@ pub struct PssmIntermediateData {
 
 /// `PssmFinalData`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:154-191
-// ```asn
-// PssmFinalData ::= SEQUENCE {
-//     ...
-//     scores              SEQUENCE OF INTEGER,
-//     ...
-//     lambda              REAL,
-//     ...
-//     kappa               REAL,
-//     ...
-//     h                   REAL,
-//     ...
-//     scalingFactor       INTEGER DEFAULT 1,
-//     ...
-//     lambdaUngapped      REAL OPTIONAL,
-//     ...
-//     kappaUngapped       REAL OPTIONAL,
-//     ...
-//     hUngapped           REAL OPTIONAL,
-//     ...
-//     wordScoreThreshold    REAL OPTIONAL
-// }
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssmFinalData {
     pub scores: Vec<i32>,
@@ -396,22 +260,6 @@ pub struct PssmFinalData {
 
 /// `PssmParameters`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:319-341
-// ```asn
-// PssmParameters ::= SEQUENCE {
-//     ...
-//     pseudocount INTEGER OPTIONAL,
-//     ...
-//     rpsdbparams     FormatRpsDbParameters OPTIONAL,
-//     ...
-//     constraints     CoreDef OPTIONAL,
-//     ...
-//     bitScoreThresh  REAL OPTIONAL,
-//     ...
-//     bitScoreReportingThresh  REAL OPTIONAL,
-//     ...
-//     annotatedSites  Site-annot-set OPTIONAL
-// }
-// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PssmParameters {
     pub pseudocount: Option<i32>,
@@ -426,17 +274,6 @@ pub struct PssmParameters {
 
 /// `FormatRpsDbParameters`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:303-315
-// ```asn
-// FormatRpsDbParameters ::= SEQUENCE {
-//     ...
-//     matrixName   VisibleString,
-//     ...
-//     gapOpen      INTEGER OPTIONAL,
-//     ...
-//     gapExtend    INTEGER OPTIONAL
-//     ...
-// }
-// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatRpsDbParameters {
     pub matrix_name: Vec<u8>,
@@ -445,7 +282,7 @@ pub struct FormatRpsDbParameters {
 }
 
 /// The six Karlin-Altschul values of a `finalData`, written in place of the object's: psiblast's
-/// K/A write-back into the PSSM it searched (`psiblast_impl.cpp:150-168`, quoted at
+/// K/A write-back into the PSSM it searched (`psiblast_impl.cpp:150-168`, cited at
 /// `algorithm::psiblast::in_pssm_files::InPssmRounds::written_back`), which sets all six.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FinalKarlin {
@@ -489,13 +326,6 @@ fn write_sequence<E: Encoder>(
 
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142 (the `pssm` variant of the
 // request's queries; line RG F1b-2)
-// ```asn
-// Blast4-queries ::= CHOICE {
-//     pssm                    PssmWithParameters,
-//     seq-loc-list            SEQUENCE OF Seq-loc,
-//     bioseq-set              Bioseq-set
-// }
-// ```
 /// Writes `value` as the value of a member or variant of an enclosing document, with the
 /// enclosing document's encoder: the search strategy's request writes a PSSM query so
 /// (`report::archive::writer`, `queries pssm`), and its strings and octets wrap at the depth where
@@ -587,26 +417,6 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
 
 /// The query's Bioseq (`CPsiBlastInputData::x_ExtractQueryForPssm` makes psiblast's).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:144-175
-// ```c++
-//     m_QueryBioseq.Reset(new CBioseq);
-//     // set the sequence id
-//     CRef<CSeq_align> aln =
-//         const_cast<CSeq_align_set*>(&*m_SeqAlignSet)->Set().front();
-//     CRef<CSeq_id> query_id(const_cast<CSeq_id*>(&aln->GetSeq_id(0)));
-//     m_QueryBioseq->SetId().push_back(query_id);
-//
-//     CRef<CSeqdesc> desc(new CSeqdesc);
-//     desc->SetTitle(m_QueryTitle);
-//     m_QueryBioseq->SetDescr().Set().push_back(desc);
-//
-//     // set required Seq-inst fields
-//     m_QueryBioseq->SetInst().SetRepr(CSeq_inst::eRepr_raw);
-//     m_QueryBioseq->SetInst().SetMol(CSeq_inst::eMol_aa);
-//     m_QueryBioseq->SetInst().SetLength(GetQueryLength());
-//
-//     // set the sequence data in ncbistdaa format
-//     CNCBIstdaa& seq = m_QueryBioseq->SetInst().SetSeq_data().SetNcbistdaa();
-// ```
 fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
     enc.begin_sequence("Bioseq");
     enc.member("id", 0);
@@ -871,6 +681,7 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
 /// `value` in ASN.1 text (`MSerial_AsnText`), as one document; `Err` when the encoder refuses a
 /// value (a byte outside the visible ASCII range in a VisibleString: `asn_text_posting` writes it
 /// as NCBI does).
+#[cfg(test)]
 pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::SerialError> {
     asn_text_with_karlin(value, None)
 }
@@ -878,17 +689,26 @@ pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::S
 /// `asn_text` of a PSSM that psiblast writes to its file: the document with `#` for each byte of a
 /// VisibleString that NCBI's ASN.1 text stream replaces (a query title outside 0x20..0x7E), and
 /// NCBI's post of each such byte (`encoder::ReplacedChar`, positions from the document's start),
-/// which psiblast makes while it writes the file (`SavePssmToFile`, quoted at the module). A PSSM
+/// which psiblast makes while it writes the file (`SavePssmToFile`, cited at the module). A PSSM
 /// without such a byte is written by `asn_text` alone; one with it again through `Traced`.
 ///
-/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444 (quoted at
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444 (cited at
 /// `seqalign::write_query_posting`: `ReplaceVisibleChar` for each byte that is not
 /// `GoodVisibleChar`)
 pub fn asn_text_posting(
     value: &PssmWithParameters,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
-    match asn_text(value) {
-        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value),
+    asn_text_posting_with_karlin(value, None)
+}
+
+/// `asn_text_posting` of `value` with `karlin`, when given, in place of the six values of its
+/// `finalData` (`asn_text_with_karlin`).
+pub fn asn_text_posting_with_karlin(
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
+    match asn_text_with_karlin(value, karlin) {
+        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value, karlin),
         written => written.map(|bytes| (bytes, Vec::new())),
     }
 }
@@ -898,10 +718,11 @@ pub fn asn_text_posting(
 #[inline(never)]
 fn asn_text_traced(
     value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
     let mut out = Vec::new();
     let mut enc = super::encoder::Traced::new(super::asn_text::AsnTextEncoder::new(&mut out), 0);
-    write_document(&mut enc, value, None);
+    write_document(&mut enc, value, karlin);
     if let Some(error) = enc.error() {
         return Err(error);
     }

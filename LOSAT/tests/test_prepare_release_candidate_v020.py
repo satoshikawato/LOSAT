@@ -46,6 +46,23 @@ def raw_contract() -> dict:
     return json.loads((REPO_ROOT / CONTRACT_REL).read_text(encoding="utf-8"))
 
 
+def unfilled_contract() -> dict:
+    """The repository contract with every lineage field empty, as on dev before a cut. On the
+    release branch the repository contract is filled (plan section 7, step 5), so a test of the
+    unfilled state empties it here instead of reading it as it is."""
+    contract = raw_contract()
+    lineage = contract["certification_lineage"]
+    lineage["candidate_sha"] = ""
+    for label, run in lineage["runs"].items():
+        for item in run["runs"] if label == "G" else [run]:
+            item.update(run_id=None, conclusion=None)
+    for item in lineage["local_evidence"].values():
+        item["evidence_sha256"] = None
+    for item in lineage["ws_evidence"]["J"].values():
+        item["record"] = None
+    return contract
+
+
 def filled_contract(candidate_sha: str) -> dict:
     """The repository contract with every lineage field filled, as on the cut day."""
     contract = raw_contract()
@@ -196,7 +213,12 @@ class ContractTests(unittest.TestCase):
 
     def test_contract_lists_rejected_tasks_and_toolchain(self) -> None:
         contract = release.load_contract(REPO_ROOT)
-        self.assertEqual(contract["public_cli"]["rejected_tasks"], ["rmblastn"])
+        # rmblastn runs since line RG X6 (matrix-only scoring, 2026-11-20).
+        self.assertEqual(contract["public_cli"]["rejected_tasks"], [])
+        self.assertEqual(
+            contract["public_cli"]["blastn_tasks"],
+            ["megablast", "blastn", "dc-megablast", "blastn-short", "rmblastn"],
+        )
         self.assertEqual(
             contract["public_cli"]["blastp_tasks"], ["blastp", "blastp-fast", "blastp-short"]
         )
@@ -213,13 +235,14 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(set(toolchain["output_affecting_environment"]), set(release.OUTPUT_ENV_KEYS))
         self.assertTrue(all(v == "" for v in toolchain["output_affecting_environment"].values()))
 
-    def test_lineage_shape_is_fixed_but_unfilled_in_the_repository(self) -> None:
+    def test_lineage_shape_is_fixed_in_the_repository(self) -> None:
+        # Unfilled on dev; filled on release/0.2 from the cut on (plan section 7, step 5).
         lineage = release.load_contract(REPO_ROOT)["certification_lineage"]
         self.assertEqual(sorted(lineage["runs"]), ["B", "C", "F", "G", "H", "I"])
         self.assertEqual(lineage["runs"]["G"]["required_consecutive_green"], 3)
         self.assertEqual(len(lineage["runs"]["G"]["runs"]), 3)
         self.assertEqual(sorted(lineage["local_evidence"]), ["A", "D", "E"])
-        self.assertEqual(lineage["candidate_sha"], "")
+        self.assertRegex(lineage["candidate_sha"], r"^(|[0-9a-f]{40})$")
         self.assertTrue(lineage["rerun_required"])
         for name, sha in lineage["v010_ancestors"].items():
             if name != "note":
@@ -473,7 +496,7 @@ class LineageTests(unittest.TestCase):
             self.validate(contract)
 
     def test_unfilled_lineage_flag_skips_lineage_and_warns(self) -> None:
-        contract = raw_contract()
+        contract = unfilled_contract()
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("GITHUB_ACTIONS", None)
             with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
@@ -486,17 +509,17 @@ class LineageTests(unittest.TestCase):
             os.environ.pop("GITHUB_ACTIONS", None)
             with self.assertRaisesRegex(release.ReleaseFailure, "candidate SHA mismatch"):
                 release.validate_candidate(
-                    self.repo.root, "c" * 40, raw_contract(), allow_unfilled_lineage=True
+                    self.repo.root, "c" * 40, unfilled_contract(), allow_unfilled_lineage=True
                 )
 
     def test_unfilled_lineage_flag_is_refused_under_github_actions(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             with self.assertRaisesRegex(release.ReleaseFailure, "GITHUB_ACTIONS"):
-                self.validate(raw_contract(), allow_unfilled_lineage=True)
+                self.validate(unfilled_contract(), allow_unfilled_lineage=True)
 
-    def test_unfilled_repository_contract_fails_without_the_flag(self) -> None:
+    def test_unfilled_contract_fails_without_the_flag(self) -> None:
         with self.assertRaisesRegex(release.ReleaseFailure, "contract not filled"):
-            self.validate(raw_contract())
+            self.validate(unfilled_contract())
 
 
 class ArchiveTests(unittest.TestCase):
@@ -773,8 +796,18 @@ class AssemblyTests(unittest.TestCase):
         root = archive.name.removesuffix(".tar.gz")
         self.assertEqual(
             names,
-            [f"{root}/LICENSE", f"{root}/README.md", f"{root}/RELEASE-METADATA.json", f"{root}/losat"],
+            [
+                f"{root}/LICENSE",
+                f"{root}/README.md",
+                f"{root}/RELEASE-METADATA.json",
+                f"{root}/THIRD_PARTY_LICENSES",
+                f"{root}/THIRD_PARTY_NOTICES",
+                f"{root}/losat",
+            ],
         )
+        with tarfile.open(archive) as handle:
+            for name in release.LICENSE_DOCUMENTS:
+                self.assertEqual(handle.extractfile(f"{root}/{name}").read(), (REPO_ROOT / name).read_bytes())
 
     def test_dry_run_assembly_is_marked_unchecked(self) -> None:
         sidecar, _ = self.assemble(False)
@@ -1169,6 +1202,10 @@ class WorkflowTests(unittest.TestCase):
             checkouts = len(re.findall(r"uses: actions/checkout@", workflow))
             self.assertGreater(checkouts, 0, name)
             self.assertEqual(workflow.count(message), checkouts, f"{name}: one check per checkout")
+        # The publishing workflows check the release's tag in the same way: one script, never a checkout ref.
+        for name in ("publish-crate.yml", "python-wheels.yml"):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            self.assertIn(".github/scripts/release_tag_source.sh", workflow, name)
 
 
 if __name__ == "__main__":

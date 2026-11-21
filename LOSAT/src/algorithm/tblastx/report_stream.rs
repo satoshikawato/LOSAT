@@ -7,19 +7,6 @@
 //! `x_batch_pipe.rs` is), so that it reads that file's types.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-215
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!             CRef<CSearchResultSet> results = lcl_blast->Run();
-//!     ...
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//!     ...
-//!         }
-//!         formatter.PrintEpilog(opt);
-//! ```
 //!
 //! When the stream acts (`check`), the loop writes a batch's reports right after it has taken
 //! the batch (`-db`: its titles read and its prefetch done) and added its queries' warnings: it
@@ -55,9 +42,13 @@
 //!   database that cannot be read, a header file that cannot be read) comes after the reports of
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
-//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
-//!   extension that scores higher past the end of its query frame, `extension::query_batch`, and a
-//!   one-hit merge of lengths that add up to 0). Any other error that LOSAT raises where NCBI would
+//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: a statistics
+//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, an ungapped
+//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
+//!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
+//!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
+//!   the re-evaluation's fetch of a subject whose header cannot be read under a negative seqid list,
+//!   `subject_loop::x_fetch_keeps`). Any other error that LOSAT raises where NCBI would
 //!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
 //!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
 //!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
@@ -239,7 +230,7 @@ pub(super) fn check(
     if unreadable {
         return Err(Off::Unreadable);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315
     // A batch's concatenated query holds each query's six frames, each at most a third of the
     // query's letters, after a sentinel byte: at most `2 * letters + 7` per query. All queries
     // bound every batch (`check_diag_table_window`).
@@ -362,56 +353,5 @@ pub(super) fn batch_input(input: &QueryInput, searched: std::ops::Range<usize>) 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::common::database::ReportRefusal;
-
-    // Line DBID, DECISIONS 19: the `-db` part of `check` does not read a database with parsed
-    // Seq-ids of more than its bound (`Off::LargeParsed`, before any header is read: nrefuse_v5,
-    // whose headers refuse the reports, is not read above its bound), and reads it up to the
-    // bound, at one thread and in a pool, for outfmt 6 and 0.
-    #[test]
-    #[cfg_attr(
-        not(feature = "parallel"),
-        ignore = "needs threads: a build without the parallel feature has none"
-    )]
-    fn a_database_with_parsed_seqids_beyond_the_bound_keeps_its_reports_after_the_loop() {
-        let open = |name: &str| {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/db_search/ids")
-                .join(name);
-            crate::algorithm::tblastx::database::TblastxDatabase::open(
-                path.to_str().unwrap(),
-                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
-            )
-            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
-        };
-        let formats = [
-            report::TblastxOutputFormat::Tabular,
-            report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
-        ];
-        let answers = |pool: &SearchPool<'_>| {
-            ["nucl_v5", "nrefuse_v5"].map(|name| {
-                let database = open(name);
-                let count = database.num_oids();
-                formats.map(|format| {
-                    [count, count - 1].map(|max| database_check(&database, format, max, None, pool))
-                })
-            })
-        };
-        let headers = Err(Off::Database(ReportRefusal::Headers));
-        let large = Err(Off::LargeParsed);
-        let serial = answers(&SearchPool::x_serial());
-        assert_eq!(
-            serial,
-            [
-                [[Ok(()), large], [Ok(()), large]],
-                [[headers, large], [headers, large]],
-            ]
-        );
-        let parallel =
-            crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
-                .unwrap();
-        assert_eq!(serial, parallel);
-    }
-}
+#[path = "report_stream_tests.rs"]
+mod tests;

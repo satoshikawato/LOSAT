@@ -49,11 +49,6 @@ gzipped: the runner inflates it into a fresh `<tmp>` as `<tmp>/<basename without
 small PSSM committed as text, or a file NCBI cannot read: missing, FASTA, gzip, cut short, whose error
 names the path). `query_argv` gives the arguments of a query cell, the same for NCBI and LOSAT.
 
-`libm_last_digit_differences` is PD-LOSAT-PLATFORM-LIBM's rule for ASN.1 text (the last of the 15
-digits of a REAL value may differ by 1); `pssm_problems` applies it to the PSSM files only when its
-caller asks (`db_search_fixtures.py check --libm-last-digit`, which the WASI guard
-`check_wasm_threading.py` passes). Every other comparison is of all bytes.
-
 This module has no manifest of its own: `run_oracle.py` / `check_losat.py` (outfmt 0 manifest) and
 `db_search_fixtures.py` call it.
 """
@@ -66,9 +61,12 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass, field
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 XINCLUDE = "xinclude"
 PSSM = "pssm"
@@ -85,10 +83,23 @@ EXTENSIONS = {"13": "json", "14": "xml"}
 _PSSM_INPUTS: list[Path] = []
 
 
+# The options of psiblast's command line that give the query as an alignment: the library API takes
+# the alignment as the inputs (`Inputs::msa`) and the two master options in its argv, but only with
+# the alignment (`db_search_fixtures.py check_row`: a row that gives them without `-in_msa`, the
+# rules of the options themselves, is `library-skip`).
+ALIGNMENT_OPTIONS = ("-in_msa", "-msa_master_idx", "-ignore_msa_master")
+
+
 def query_argv(cell: str, root: Path) -> list[str]:
     """The arguments of a query cell (`root`: the directory the runs start in, LOSAT/): `-query
     <cell>`, or for a PSSM query (psiblast, tblastn) `-in_pssm <file>` (`pssm-gz:<path>` inflated into a
-    temporary directory, `pssm:<path>` as it is)."""
+    temporary directory, `pssm:<path>` as it is), or for an alignment query (psiblast) `-in_msa <file>`
+    (`msa:<path>`), or none at all for the cell `none:` (a row that tests the options of an input the
+    command line does not give)."""
+    if cell == "none:":
+        return []
+    if cell.startswith("msa:"):
+        return ["-in_msa", cell.removeprefix("msa:")]
     if cell.startswith("pssm:"):
         return ["-in_pssm", cell.removeprefix("pssm:")]
     if cell.startswith("pssm-gz:"):
@@ -233,12 +244,13 @@ def problems(result: Result, row: dict[str, str], frozen: Path, first_difference
         out.append(f"stdout is not empty ({len(result.run.stdout)} bytes)")
     if result.master is None:
         out.append("no master file")
-    elif result.master != expected:
-        out.append("master " + first_difference(expected, result.master))
+    elif result.master != losat_wording.losat_output_bytes(expected):
+        out.append("master " + first_difference(losat_wording.losat_output_bytes(expected), result.master))
     if len(result.sides) != len(expected_sides):
         out.append(f"{len(result.sides)} side files, expected {len(expected_sides)}")
     else:
         for n, (want, got) in enumerate(zip(expected_sides, result.sides), 1):
+            want = losat_wording.losat_output_bytes(want)
             if want != got:
                 out.append(f"side file {n} " + first_difference(want, got))
     if result.stray:
@@ -372,18 +384,10 @@ def frozen_pssm_agrees(row: dict[str, str], frozen_dir: Path) -> bool:
     return True
 
 
-def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, first_difference,
-                  libm_reference: Callable[[str], bytes | None] | None = None,
-                  accepted: list[str] | None = None) -> list[str]:
+def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, first_difference) -> list[str]:
     """What differs between a run's PSSM files and those of `row` (empty: the same): the names and
     SHA-256 of `side_sha256`, with the first differing line where the file is frozen; and whether the
-    frozen files agree with `side_sha256` (every file of the `pssm` kind is frozen).
-
-    Without `libm_reference` every byte counts. With it (PD-LOSAT-PLATFORM-LIBM, the WASI commands:
-    `db_search_fixtures.py check --libm-last-digit`), a file whose SHA-256 is not the cell's is the same
-    when it differs from the expected bytes only as `libm_last_digit_differences` allows, and
-    `accepted` gets `<name>: <n> values`. The expected bytes are the frozen file, or for a file that is
-    not frozen (over `FREEZE_LIMIT`) `libm_reference(name)`, which must have the cell's SHA-256."""
+    frozen files agree with `side_sha256` (every file of the `pssm` kind is frozen)."""
     row_id = row.get("fixture_id") or row["row_id"]
     expected = [(name, digest) for name, digest, _ in parse_pssm_cell(row.get("side_sha256", ""), row_id)]
     digests = dict(expected)
@@ -400,18 +404,6 @@ def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, fir
             if sha256(got) == digests[name]:
                 continue
             want = stored_bytes.get(name)
-            if libm_reference is not None:
-                if want is None:
-                    want = libm_reference(name)
-                    if want is None or sha256(want) != digests[name]:
-                        out.append(f"{name} differs (sha256 {sha256(got)}, expected {digests[name]}; not frozen, "
-                                   f"and the reference run's file has sha256 {sha256(want) if want is not None else 'none'})")
-                        continue
-                values = libm_last_digit_differences(got, want)
-                if values is not None:
-                    if accepted is not None:
-                        accepted.append(f"{name}: {values} values")
-                    continue
             if want is not None:
                 out.append(f"{name} " + first_difference(want, got))
             else:
@@ -419,40 +411,3 @@ def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, fir
     if result.stray:
         out.append(f"unexpected files {result.stray}")
     return out
-
-
-# --- PD-LOSAT-PLATFORM-LIBM: the last digit of a full-precision value ------------------------------
-
-# A REAL value of ASN.1 text, `{ M, 10, E }`: NCBI's CObjectOStreamAsn::WriteDouble writes a double with
-# 15 significant digits (DBL_DIG) and drops the trailing zeros of the mantissa. A Seq-align's score
-# writes it as `real { M, 10, E }` (outfmt 11, 8), psiblast's ASN.1 PSSM as it is (`lambda { M, 10, E }`,
-# and the values of `informationContent { ... }` one per line).
-ASN_REAL = re.compile(rb"\{ (-?[0-9]+), 10, (-?[0-9]+) \}")
-ASN_REAL_DIGITS = 15
-
-
-def libm_last_digit_differences(got: bytes, want: bytes) -> int | None:
-    """PD-LOSAT-PLATFORM-LIBM's rule, the one copy of it in the Python tools: the number of ASN.1 REAL
-    values (`ASN_REAL`) in which `got` differs from `want`, when each of them has the same exponent
-    as `want`'s and a mantissa of 15 digits, as `want`'s, that differs from it by exactly 1, and every
-    byte outside the values is the same (0: the same bytes); None for any other difference. A value
-    computed by a libm that differs from glibc's by 1 ULP moves the last of the 15 printed digits; any
-    other difference is not that. The Rust copy for the `-outfmt 11` tests is
-    `archives_match_allowing_libm_last_digit` (LOSAT/tests/outfmt11_blastx.rs)."""
-    if got == want:
-        return 0
-    got_parts, want_parts = ASN_REAL.split(got), ASN_REAL.split(want)
-    # [bytes, mantissa, exponent, bytes, ..., bytes]: the bytes between the values at 0, 3, 6, ...
-    if len(got_parts) != len(want_parts) or got_parts[::3] != want_parts[::3]:
-        return None
-    values = 0
-    for index in range(1, len(got_parts), 3):
-        (got_m, got_e), (want_m, want_e) = got_parts[index:index + 2], want_parts[index:index + 2]
-        if (got_m, got_e) == (want_m, want_e):
-            continue
-        # (Two mantissas of 15 digits that differ by 1 have the same sign.)
-        if got_e != want_e or abs(int(got_m) - int(want_m)) != 1 \
-                or len(got_m.lstrip(b"-")) != ASN_REAL_DIGITS or len(want_m.lstrip(b"-")) != ASN_REAL_DIGITS:
-            return None
-        values += 1
-    return values

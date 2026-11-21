@@ -10,36 +10,9 @@
 //! guessed.
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1006-1051
-//! ```c++
-//!     out << "<" << role << " name=\"";
-//!     string name = CUtf8::AsUTF8(GetName(),eEncoding_Unknown);
-//!     s_WriteEscapedStr(out,name.c_str());
-//!     out  << "\"";
-//! // type
-//!     const CArgDescMandatory* am =
-//!         dynamic_cast<const CArgDescMandatory*>(this);
-//!     if (am) {
-//!         out << " type=\"" << CArgDescriptions::GetTypeName(am->GetType()) << "\"";
-//!     }
-//! // use (Flags are always optional)
-//!     if (s_IsOptional(*this) || s_IsFlag(*this)) {
-//!         out << " optional=\"true\"";
-//!     }
-//!     out << ">" << endl;
-//!     ...
-//! // constraint
-//!     string constraint = CUtf8::AsUTF8(GetUsageConstraint(),eEncoding_Unknown);
-//!     if (!constraint.empty()) {
-//!         out << "<" << "constraint";
-//!         if (IsConstraintInverted()) {
-//!             out << " inverted=\"true\"";
-//!         }
-//!         out << ">" << endl;
-//!         s_WriteXmlLine( out, "description", constraint.c_str());
-//!         GetConstraint()->PrintUsageXml(out);
-//!         out << "</" << "constraint" << ">" << endl;
-//!     }
-//! ```
+//! (`CArgDesc::PrintUsageXml`: the start tag of a key or a flag with its name, a key's type and
+//! `optional="true"` for an optional argument or a flag, then one line for each of its parts,
+//! and a `<constraint>` element of the usage text and the constraint's own lines.)
 
 use std::fmt::Write as _;
 use std::fs;
@@ -237,17 +210,6 @@ fn read_argument<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2387-2400
-// ```c++
-//     static const char* s_TypeName[k_EType_Size] = {
-//         "String",
-//         "Boolean",
-//         "Int8",
-//         "Integer",
-//         "IntId",
-//         "Real",
-//         "File_In",
-//         "File_Out",
-// ```
 /// The `Kind` of a key's type name (`CArgDescriptions::GetTypeName`).
 fn kind_of(type_name: &str) -> Option<&'static str> {
     Some(match type_name {
@@ -452,26 +414,6 @@ fn element_of(line: &str) -> Option<(&str, &str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4041-4058
-// ```c++
-//     for (i = 0;  i < str.size();  i++) {
-//         char c = str[i];
-//         switch ( c ) {
-//         case '&':
-//             result.append("&amp;");
-//             break;
-//         case '<':
-//             result.append("&lt;");
-//             break;
-//         case '>':
-//             result.append("&gt;");
-//             break;
-//         case '\'':
-//             result.append("&apos;");
-//             break;
-//         case '"':
-//             result.append("&quot;");
-//             break;
-// ```
 /// The text that `NStr::XmlEncode` wrote as `text`: its five entities and the character references
 /// (`&#xa;`) of the control characters.
 fn decode(text: &str) -> Result<String, String> {

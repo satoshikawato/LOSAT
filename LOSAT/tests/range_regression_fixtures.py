@@ -33,7 +33,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from blastn_regression_fixtures import FIELDS, REPORT_ENV, run_case, sha256  # noqa: E402
+from blastn_regression_fixtures import (  # noqa: E402
+    FIELDS,
+    REPORT_ENV,
+    expected_losat_bytes,
+    run_case,
+    sha256,
+)
 from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -168,7 +174,8 @@ def command_freeze(args) -> int:
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
                      "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env,
                      "oracle_env": oracle_env})
-        print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
+        line_count = result.stdout.count(b"\n")
+        print(f"{case_id}\texit {result.returncode}\t{line_count} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen -query_loc/-subject_loc outputs of {version} (comparison oracle only; see range_regression_fixtures.py).\n")
         handle.write("# Run from LOSAT/: env <env> <argv> (LOSAT: losat <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
@@ -187,6 +194,8 @@ def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
     problems = []
     if sha256(expected_out) != row["stdout_sha256"]:
         problems.append("frozen stdout file does not match the manifest")
+    expected_out = expected_losat_bytes(expected_out)
+    expected_err = expected_losat_bytes(expected_err)
     if str(result.returncode) != row["exit"]:
         problems.append(f"exit {result.returncode}, expected {row['exit']}")
     if result.stdout != expected_out:

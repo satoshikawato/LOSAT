@@ -1,6 +1,6 @@
 //! BLASTP alignment reconstruction helpers.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
@@ -14,13 +14,7 @@ fn blastp_positive_score<const BLOSUM62: bool>(
     query_residue: u8,
     subject_residue: u8,
 ) -> bool {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
-    // ```c
-    // if (*q == *s)
-    //    num_ident++;
-    // else if (matrix[*q][*s] > 0)
-    //    num_pos ++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-818
     if BLOSUM62 {
         blosum62_score_ncbistdaa_direct(query_residue, subject_residue) > 0
     } else {
@@ -28,26 +22,7 @@ fn blastp_positive_score<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-// ```c
-// static Int2
-// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query,
-//                                         const Uint1* subject,
-//                                         const BlastHSP* hsp,
-//                                         Int4* num_ident_ptr,
-//                                         Int4* align_length_ptr,
-//                                         const BlastScoreBlk* sbp,
-//                                         Int4* num_pos_ptr)
-// {
-//    ...
-//    if (*q == *s)
-//        num_ident++;
-//    else if (matrix[*q][*s] > 0)
-//        num_pos ++;
-//    ...
-//    *num_pos_ptr = num_pos + num_ident;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-824
 #[derive(Debug, Clone)]
 #[cfg_attr(
     not(test),
@@ -66,39 +41,14 @@ pub struct ProteinAlignmentView {
     pub alignment_len: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-// ```c
-// if (!hsp->gap_info) {
-//    /* Ungapped case. Check that lengths are the same in query and subject,
-//       then count number of matches. */
-//    if (q_length != s_length)
-//       return -1;
-//    align_length = q_length;
-//    for (i=0; i<align_length; i++) {
-//       if (*q == *s)
-//          num_ident++;
-//       else if (matrix[*q][*s] > 0)
-//          num_pos ++;
-//       q++;
-//       s++;
-//    }
-// } else {
-//    ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
 pub fn build_alignment_view_with_matrix(
     query: &[u8],
     subject: &[u8],
     hit: &Hit,
     matrix: ScoringMatrix,
 ) -> Option<ProteinAlignmentView> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-    // ```c
-    // if (*q == *s)
-    //    num_ident++;
-    // else if (matrix[*q][*s] > 0)
-    //    num_pos ++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
     if matrix == ScoringMatrix::Blosum62 {
         build_alignment_view_with_matrix_impl::<true>(query, subject, hit, matrix)
     } else {
@@ -106,26 +56,28 @@ pub fn build_alignment_view_with_matrix(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-// ```c
-// static Int2
-// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query,
-//                                         const Uint1* subject,
-//                                         const BlastHSP* hsp,
-//                                         Int4* num_ident_ptr,
-//                                         Int4* align_length_ptr,
-//                                         const BlastScoreBlk* sbp,
-//                                         Int4* num_pos_ptr)
-// {
-//    ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
 fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
     query: &[u8],
     subject: &[u8],
     hit: &Hit,
     matrix: ScoringMatrix,
 ) -> Option<ProteinAlignmentView> {
+    // An ungapped HSP of length 0 (`-ungapped` with a low `-threshold`, which `Blast_HSPTest` keeps)
+    // has no column: empty rows, whose range of the subject may start at its first letter.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780
+    if hit.length == 0 {
+        return Some(ProteinAlignmentView {
+            query_aln: String::new(),
+            subject_aln: String::new(),
+            num_ident: 0,
+            num_positives: 0,
+            gap_letters: 0,
+            gap_opens: 0,
+            alignment_len: 0,
+        });
+    }
     let q_offset = hit.q_start.checked_sub(1)?;
     let s_offset = hit.s_start.min(hit.s_end).checked_sub(1)?;
 
@@ -214,106 +166,5 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::utils::matrix::ncbistdaa;
-
-    use super::*;
-
-    #[test]
-    fn test_build_alignment_view_ungapped() {
-        let hit = Hit {
-            identity: 75.0,
-            length: 4,
-            mismatch: 1,
-            gapopen: 0,
-            q_start: 1,
-            q_end: 4,
-            s_start: 1,
-            s_end: 4,
-            e_value: 1e-10,
-            bit_score: 50.0,
-            num_ident: 3,
-            query_frame: 0,
-            query_length: 4,
-            q_idx: 0,
-            s_idx: 0,
-            raw_score: 20,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: None,
-            num_positives: 4,
-        };
-
-        let query = [1u8, 2, 3, 4];
-        let subject = [1u8, 2, 5, 4];
-        let view =
-            build_alignment_view_with_matrix(&query, &subject, &hit, ScoringMatrix::Blosum62)
-                .expect("alignment");
-        assert_eq!(view.alignment_len, 4);
-        assert_eq!(view.num_ident, 3);
-        assert_eq!(view.gap_letters, 0);
-    }
-
-    #[test]
-    fn test_build_alignment_view_gapped() {
-        let hit = Hit {
-            identity: 75.0,
-            length: 4,
-            mismatch: 0,
-            gapopen: 1,
-            q_start: 1,
-            q_end: 3,
-            s_start: 1,
-            s_end: 4,
-            e_value: 1e-10,
-            bit_score: 50.0,
-            num_ident: 3,
-            query_frame: 0,
-            query_length: 3,
-            q_idx: 0,
-            s_idx: 0,
-            raw_score: 20,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: Some(vec![
-                GapEditOp::Sub(2),
-                GapEditOp::Del(1),
-                GapEditOp::Sub(1),
-            ]),
-            num_positives: 3,
-        };
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
-        // ```c
-        // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
-        // '-','A','B','C','D','E','F','G','H','I','K','L','M',
-        // 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
-        // 'O', 'J'};
-        // ```
-        let query = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::N];
-        let subject = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::D, ncbistdaa::C];
-        let view =
-            build_alignment_view_with_matrix(&query, &subject, &hit, ScoringMatrix::Blosum62)
-                .expect("alignment");
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:45-51
-        // ```c
-        // eGapAlignDel = 0, /**< Deletion: a gap in query */
-        // ...
-        // eGapAlignIns = 6, /**< Insertion: a gap in subject */
-        // ```
-        assert_eq!(view.query_aln, "AR-N");
-        assert_eq!(view.subject_aln, "ARDC");
-        assert_eq!(view.gap_letters, 1);
-        assert_eq!(view.gap_opens, 1);
-    }
-}
+#[path = "alignment_tests.rs"]
+mod tests;

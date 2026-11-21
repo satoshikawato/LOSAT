@@ -1,0 +1,695 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 115,
+          to 133,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 186,
+          to 199,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 324,
+          to 337,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 573,
+          to 591,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 644,
+          to 657,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 782,
+          to 795,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1031,
+          to 1049,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1102,
+          to 1115,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1240,
+          to 1253,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1489,
+          to 1507,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1560,
+          to 1573,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1698,
+          to 1711,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1947,
+          to 1965,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2018,
+          to 2031,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2156,
+          to 2169,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2405,
+          to 2423,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2476,
+          to 2489,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2614,
+          to 2627,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2863,
+          to 2881,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2934,
+          to 2947,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3072,
+          to 3085,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3321,
+          to 3339,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3392,
+          to 3405,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3530,
+          to 3543,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3779,
+          to 3797,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3850,
+          to 3863,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 237,
+          to 255,
+          id gi 7
+        },
+        {
+          from 308,
+          to 321,
+          id gi 7
+        },
+        {
+          from 446,
+          to 459,
+          id gi 7
+        },
+        {
+          from 695,
+          to 713,
+          id gi 7
+        },
+        {
+          from 766,
+          to 779,
+          id gi 7
+        },
+        {
+          from 904,
+          to 917,
+          id gi 7
+        },
+        {
+          from 1158,
+          to 1171,
+          id gi 7
+        },
+        {
+          from 1250,
+          to 1263,
+          id gi 7
+        },
+        {
+          from 1341,
+          to 1354,
+          id gi 7
+        },
+        {
+          from 1381,
+          to 1395,
+          id gi 7
+        },
+        {
+          from 1404,
+          to 1420,
+          id gi 7
+        },
+        {
+          from 1426,
+          to 1439,
+          id gi 7
+        },
+        {
+          from 2002,
+          to 2020,
+          id gi 7
+        },
+        {
+          from 2143,
+          to 2172,
+          id gi 7
+        },
+        {
+          from 2196,
+          to 2214,
+          id gi 7
+        },
+        {
+          from 2287,
+          to 2304,
+          id gi 7
+        },
+        {
+          from 2330,
+          to 2343,
+          id gi 7
+        },
+        {
+          from 2400,
+          to 2414,
+          id gi 7
+        },
+        {
+          from 2766,
+          to 2778,
+          id gi 7
+        },
+        {
+          from 2808,
+          to 2828,
+          id gi 7
+        },
+        {
+          from 2944,
+          to 2962,
+          id gi 7
+        }
+      },
+      packed-int {
+        {
+          from 2,
+          to 18,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 41,
+          to 67,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 92,
+          to 106,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 130,
+          to 143,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 360,
+          to 374,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 405,
+          to 420,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 1115,
+          to 1135,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 1666,
+          to 1687,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 2379,
+          to 2394,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 2463,
+          to 2477,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 2530,
+          to 2547,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 2661,
+          to 2677,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 2837,
+          to 2853,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3023,
+          to 3035,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3049,
+          to 3064,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3094,
+          to 3109,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3190,
+          to 3207,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3319,
+          to 3332,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3345,
+          to 3358,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 3362,
+          to 3377,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 21,
+          to 78,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 83,
+          to 99,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 204,
+          to 231,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 307,
+          to 322,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 442,
+          to 459,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 486,
+          to 515,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 547,
+          to 573,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 677,
+          to 691,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 850,
+          to 868,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1037,
+          to 1053,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1078,
+          to 1092,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1098,
+          to 1112,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1151,
+          to 1163,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1199,
+          to 1213,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1229,
+          to 1243,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1257,
+          to 1270,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1320,
+          to 1334,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1491,
+          to 1505,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 1747,
+          to 1767,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 33,
+          to 55,
+          id gi 9
+        },
+        {
+          from 74,
+          to 88,
+          id gi 9
+        },
+        {
+          from 146,
+          to 163,
+          id gi 9
+        },
+        {
+          from 336,
+          to 370,
+          id gi 9
+        },
+        {
+          from 384,
+          to 396,
+          id gi 9
+        },
+        {
+          from 461,
+          to 479,
+          id gi 9
+        },
+        {
+          from 636,
+          to 651,
+          id gi 9
+        },
+        {
+          from 1342,
+          to 1360,
+          id gi 9
+        },
+        {
+          from 1722,
+          to 1734,
+          id gi 9
+        },
+        {
+          from 1849,
+          to 1863,
+          id gi 9
+        }
+      }
+    },
+    more FALSE
+  }
+}

@@ -548,7 +548,10 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
         tax_browser_url(Some(&read)),
         b"http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
-    // An empty value is no entry (`HasEntry`, `Get(...).empty()`).
+    // An empty PROTOCOL is the scheme (`GetProtocol`'s `HasEntry` counts it); an empty browser URL
+    // is NCBI's (`Get(...).empty()`). NCBI BLAST+ 2.17.0, `./.ncbirc` `[BLASTFMTUTIL]` `PROTOCOL=`,
+    // outfmt 18 of a taxid whose name holds `<@taxBrowserURL@>` (line RG, review of T4a0 `pe`):
+    // `Url //www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi rid 0 ...`.
     let read = read_registry(
         b"[BLASTFMTUTIL]\nPROTOCOL=\n[TAX_BROWSER]\nBLASTFMTUTIL=\n",
         Layer::SystemWide,
@@ -556,7 +559,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
     .unwrap();
     assert_eq!(
         tax_browser_url(Some(&read)),
-        b"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
+        b"//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
     let read = read_registry(
         b"[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//x/<@rid@>\n",
@@ -579,24 +582,6 @@ fn crate_test_taxdb(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
         data.extend(*record);
     }
     (index, data)
-}
-
-#[test]
-fn a_registry_read_posts_as_ncbi() {
-    // NCBI BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): the posts of one read; each
-    // query's report reads `./.ncbirc` twice.
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-    let read = read_registry(b"[FOO]\na=1\na=2\n", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3\n"
-            .to_vec()
-    );
-    let read = read_registry(b"\xef", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
-    );
 }
 
 /// A query whose batch NCBI did not search (no valid context) has a null Seq-align-set, which
@@ -673,7 +658,7 @@ impl TaxSubjects for ThrowingSubjects {
     }
 }
 
-// NCBI taxFormat.cpp:995-1023 (`x_InitTaxInfoMap`: the `catch` of each HSP's load, `continue`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (`x_InitTaxInfoMap`: the `catch` of each HSP's load, `continue`)
 // where the load of a subject throws (`DB contains no accession info.`, a batch whose prefetch is
 // off; review 2 of line DBID pfoff-2, M2, probe `bp.fmt.U2.18`): the report leaves out each HSP of
 // that subject before any read or lookup, and the subject is not the previous id, so the report

@@ -7,6 +7,7 @@ export { sha256Hex } from './infra/digest.js';
 export {
   ABI_VERSION,
   discardedStream,
+  discardSignal,
   DISCARD_STREAM,
   EngineAllocationError,
   EngineCallError,
@@ -15,6 +16,10 @@ export {
   FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
+  PLACE_NOWHERE,
+  PLACE_RUN,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -23,6 +28,7 @@ export {
   type BegunInflation,
   type ChunkBuffer,
   type CountsFileInfo,
+  type DiscardSignal,
   type FileInfo,
   type FileLoader,
   type RegistryFileInfo,
@@ -36,7 +42,8 @@ export { reactorControl, toProgramDescription, type EngineControl } from './infr
 export { ReactorInflater } from './infra/reactor/inflater.js';
 export { compileReactor, instantiateSerial, loadReactor, type CompiledReactor, type ReactorInstance } from './infra/reactor/instance.js';
 export { ReactorScanner, reopening } from './infra/reactor/scanner.js';
-export { WasmEngine, type RuntimeEnd, type WasmEngineOptions } from './infra/engine-worker/gateway.js';
+export { ENGINE_ENDED, ENGINE_NOT_STARTED, WasmEngine, type RuntimeEnd, type WasmEngineOptions } from './infra/engine-worker/gateway.js';
 export { DEFAULT_RENEWAL, type RenewalLimits } from './infra/engine-worker/policy.js';
 export { RunOutputReceiver, type RunOutputResult } from './infra/run-output/receiver.js';
 export { RunOutputWriter } from './infra/run-output/writer.js';
+export { holdLife, watchLife, webLocks, type LifeLocks } from './infra/worker-life.js';

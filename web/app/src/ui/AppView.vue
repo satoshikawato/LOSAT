@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
-import type { Attention } from '../application/attention';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watchEffect, type Ref } from 'vue';
+import { holdsResults, type Attention } from '../application/attention';
+import { withRemedy, type Availability } from '../application/availability';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
@@ -9,11 +10,13 @@ import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
+import { holdWhilePressed } from './press-hold';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import { useRunAnnouncements } from './run-announcements';
 import StorageStatus from './StorageStatus.vue';
+import { tabNavigation, type MainTab } from './tab-history';
 import TabList from './TabList.vue';
 
 const props = defineProps<{
@@ -23,13 +26,40 @@ const props = defineProps<{
   counts: CountsLoader;
   results: ResultsBrowser;
   attention: Attention;
+  availability: Availability;
   usesFakeEngine: boolean;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
-const tab = ref<'search' | 'results'>('search');
+const availabilityState = useStore(props.availability.state);
+/**
+ * What of LOSAT could not be loaded or stopped, and the remedy, once for the page (line WQA's sweep, D1 and D2): a
+ * reload also loses the results of this session, which the page then says.
+ */
+const unavailable = computed(() => {
+  const problem = availabilityState.value.problem;
+  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some(holdsResults));
+});
+/** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
+const shown = ref<MainTab>('search');
+const navigation = tabNavigation(window.history);
+/** How far the form was scrolled, and what had the focus, when the Search tab was left: Back returns there, as between pages. */
+const form = { scroll: 0, focus: null as Element | null };
+function leave(): void {
+  if (shown.value !== 'search') return;
+  form.scroll = window.scrollY;
+  form.focus = document.activeElement;
+}
+const tab = computed<MainTab>({
+  get: () => shown.value,
+  set: (value) => {
+    if (value !== shown.value) leave();
+    shown.value = value;
+    navigation.choose(value);
+  },
+});
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
-const mainTabs = ref<{ focus: () => void }>();
+const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
 /** Search and Results: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
@@ -70,6 +100,55 @@ async function showSearch(): Promise<void> {
   mainTabs.value?.focus();
 }
 
+/**
+ * Back or Forward moved between the tabs' history entries (tab-history.ts). The form comes back where
+ * it was scrolled, with the focus where it was (it stays mounted, so "Run LOSAT" has it again after
+ * Back); a focus that is not there to give back goes to the Search tab, without scrolling, when it
+ * was on the other tab or went with the results. The results come back from their heading, as
+ * "Run LOSAT" shows them: their panel mounts again and its views read their content afterwards
+ * (outputs, alignments), so a position further down could not be met (review of 6fff89265).
+ */
+async function arrived(): Promise<void> {
+  const next = navigation.arrived();
+  if (next === shown.value) return;
+  leave();
+  shown.value = next;
+  await nextTick();
+  if (next === 'results') {
+    resultsPanel.value?.showHeading();
+    return;
+  }
+  window.scrollTo(0, form.scroll);
+  const panel = document.getElementById(MAIN_TABS[0].panel);
+  const active = document.activeElement;
+  const onTab = MAIN_TABS.some((main) => main.id === active?.id);
+  if (form.focus instanceof HTMLElement && form.focus.isConnected && panel?.contains(form.focus)) {
+    form.focus.focus({ preventScroll: true });
+  } else if (active === null || active === document.body || !active.isConnected || onTab) {
+    mainTabs.value?.focus({ preventScroll: true });
+  }
+}
+const onPopState = () => void arrived();
+
+/**
+ * From a press until its click, the main area keeps its height, and what the page says above the tabs stays as it was,
+ * so the page does not move under the press (press-hold.ts).
+ */
+const mainArea = ref<HTMLElement>();
+const pressing = ref(false);
+let stopHold: () => void = () => undefined;
+/** `source` as it was when a press started, until its click; as it is between presses. */
+function steady<T>(source: () => T): Readonly<Ref<T>> {
+  const shown = shallowRef(source());
+  watchEffect(() => {
+    const now = source();
+    if (!pressing.value) shown.value = now;
+  });
+  return shown;
+}
+const unavailableShown = steady(() => unavailable.value);
+const resumeShown = steady(() => attentionState.value.resume);
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -78,10 +157,19 @@ const keep = (event: DragEvent) => {
 onMounted(() => {
   window.addEventListener('dragover', keep);
   window.addEventListener('drop', keep);
+  window.addEventListener('popstate', onPopState);
+  stopHold = holdWhilePressed(
+    () => mainArea.value,
+    (now) => {
+      pressing.value = now;
+    },
+  );
 });
 onUnmounted(() => {
   window.removeEventListener('dragover', keep);
   window.removeEventListener('drop', keep);
+  window.removeEventListener('popstate', onPopState);
+  stopHold();
 });
 </script>
 
@@ -93,12 +181,14 @@ onUnmounted(() => {
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
-  <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="dismissResume" />
+  <p v-if="unavailableShown" class="error unavailable" role="alert" data-testid="losat-unavailable">{{ unavailableShown }}</p>
+  <ResumeNotice v-if="resumeShown" :report="resumeShown" @dismiss="dismissResume" />
   <!-- The tabs stay in the page's navigation landmark, which they were before they were tabs (WA2-AX-12). -->
   <nav aria-label="Main">
     <TabList ref="mainTabs" v-model="tab" class="main-tabs" label="Main" :tabs="MAIN_TABS" />
   </nav>
-  <main class="layout">
+  <!-- data-losat: whether LOSAT works now, also while a press keeps the alert above as it was (the E2E tests wait for it). -->
+  <main ref="mainArea" class="layout" :data-losat="unavailable === undefined ? 'available' : 'unavailable'">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
       <SearchPanel

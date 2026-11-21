@@ -8,76 +8,12 @@ use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::Ostream;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
-use crate::writedb::metadata::{db_files_metadata, DbMetadata};
+use crate::writedb::metadata::{db_files_metadata, metadata_user_path, DbMetadata};
 
 use super::{database_error, refusal, Diag};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1206-1222
-// ```c++
-//         else if (args["metadata"]) {
-//         	x_InitBlastDB();
-//             string output_prefix = args["metadata_output_prefix"]
-//                     ? args["metadata_output_prefix"].AsString()
-//                     : kEmptyStr;
-//             if (!output_prefix.empty() && (output_prefix.back() != CFile::GetPathSeparator()))
-//                 output_prefix += CFile::GetPathSeparator();
-//         	CRef<CBlast_db_metadata> m = m_BlastDb->GetDBMetaData(output_prefix);
-//             unique_ptr<CObjectOStreamJson> json_out(new CObjectOStreamJson(out, eNoOwnership));
-//             json_out->SetDefaultStringEncoding(eEncoding_Ascii);
-//             json_out->PreserveKeyNames();
-//             CConstObjectInfo obj_info(m, m->GetTypeInfo());
-//             json_out->WriteObject(obj_info);
-//             json_out->Flush();
-//             out.flush();
-//             out << NcbiEndl;
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
-// ```c++
-// CRef<CBlast_db_metadata> CSeqDB::GetDBMetaData(string user_path)
-// {
-// 	CRef<CBlast_db_metadata> m (new CBlast_db_metadata());
-// 	int num_seqs = 0;
-// 	Uint8 total_length = 0;
-//
-// 	GetTotals(CSeqDB::eFilteredAll, &num_seqs, &total_length, true);
-// 	vector<string> dblist;
-//     NStr::Split(GetDBNameList(), " ", dblist, NStr::fSplit_Tokenize);
-//     NON_CONST_ITERATE(vector<string>, itr, dblist) {
-//         size_t off = (*itr).find_last_of(CFile::GetPathSeparator());
-//         if (off != string::npos ) {
-//         	(*itr).erase(0, off+1);
-//         }
-//     }
-//
-// 	string dbnames = NStr::Join(dblist, " ");
-// 	m->SetDbname(dbnames);
-//
-//     m->SetDbtype(GetSequenceType() == CSeqDB::eProtein ? "Protein" : "Nucleotide" );
-// 	m->SetDb_version(GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5?5:4);
-// 	m->SetDescription(GetTitle());
-// 	m->SetNumber_of_letters(total_length);
-// 	m->SetNumber_of_sequences(num_seqs);
-//
-// 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
-// 	CTime date(GetDate(), kBlastDbDateFormat);
-// 	m->SetLast_updated(date.AsString(timeFmt));
-//
-// 	Int8 disk_bytes(0), cached_bytes(0);
-// 	x_GetDBFilesMetaData(disk_bytes, cached_bytes, m->SetFiles(), user_path);
-// 	m->SetBytes_total(disk_bytes);
-// 	m->SetBytes_to_cache(cached_bytes);
-//
-// 	m->SetNumber_of_volumes(m_Impl->GetNumOfVols());
-//
-// 	if (GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5) {
-// 		set<TTaxId> tax_ids;
-// 		GetDBTaxIds(tax_ids);
-// 		if((tax_ids.size() > 1) || ((tax_ids.size() == 1) && (0 != *tax_ids.begin()))){
-// 			m->SetNumber_of_taxids(static_cast<int>(tax_ids.size()));
-// 		}
-// 	}
-// ```
 // `GetDBNameList` is the `-db` value as given (`m_DBNames`, seqdbimpl.cpp:55): the names of a
 // list go by spaces alone, and a double quote stays in the piece it is in (probes N121-N175 of
 // line BDC). A date `CTime` does not read ends NCBI with an exception that names its source files (exit status 255, probes J189,
@@ -93,13 +29,7 @@ pub(super) fn metadata(
     diag: &mut Diag,
     out: &mut Ostream<'_>,
 ) -> i32 {
-    let mut prefix = args
-        .value("metadata_output_prefix")
-        .unwrap_or("")
-        .to_string();
-    if !prefix.is_empty() && !prefix.ends_with(std::path::MAIN_SEPARATOR) {
-        prefix.push(std::path::MAIN_SEPARATOR);
-    }
+    let prefix = metadata_user_path(args.value("metadata_output_prefix"));
     let dbname: Vec<&str> = name
         .split(' ')
         .filter(|piece| !piece.is_empty())

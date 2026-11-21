@@ -21,10 +21,14 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
 use crate::seqid::ParsedSeqId;
 
-/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order (the first is
-/// `GetSeqId()`), its title descriptor and its letters in `eCoding_Iupac`.
+/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order, its title
+/// descriptor and its letters in `eCoding_Iupac`.
 pub(crate) struct MaskedBioseq<'a> {
     pub ids: &'a [ParsedSeqId],
+    /// `GetSeqId()` where a handle that outlives the sequence made the info of the sequence's
+    /// access handle ([`access_seq_id`]): windowmasker's id lists matched as Seq-ids
+    /// (`windowmasker::ids::IdLists::handle_seq_id`). `None`: the access Seq-id as it is.
+    pub handle_seq_id: Option<ParsedSeqId>,
     pub title: Option<&'a [u8]>,
     /// The name of the organism of the Bioseq's first source (a database sequence's), from which
     /// `GenerateDefline` makes an empty title (`report::defline::BioseqFacts::taxname`).
@@ -91,7 +95,7 @@ pub(crate) struct MaskInfoWriter {
     algo_id: i32,
     program: FilterProgram,
     options: Vec<u8>,
-    /// `m_ListOfMasks`: the first Seq-id and the mask of each sequence with a mask.
+    /// `m_ListOfMasks`: the Seq-id that names each sequence with a mask (`seq_id`) and its mask.
     masks: Vec<(ParsedSeqId, Vec<(u32, u32)>)>,
 }
 
@@ -99,25 +103,7 @@ impl MaskWriter {
     /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`;
     /// `serial` is `None` for the format `interval`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:45-54
-    /// ```c++
-    ///     m_BlastDbMaskInfo.Reset(new CBlast_db_mask_info());
-    ///     m_BlastDbMaskInfo->SetAlgo_id(algo_id);
-    ///     m_BlastDbMaskInfo->SetAlgo_program((int)filt_program);
-    ///     m_BlastDbMaskInfo->SetAlgo_options(algo_options);
-    ///
-    ///     if (format == "maskinfo_asn1_bin") {
-    ///         m_OutputFormat = eSerial_AsnBinary;
-    ///     } else if (format == "maskinfo_asn1_text") {
-    ///         m_OutputFormat = eSerial_AsnText;
-    ///     } else if (format == "maskinfo_xml") {
-    ///         m_OutputFormat = eSerial_Xml;
-    ///     } else if (format == "interval") {
-    ///         m_OutputFormat = eSerial_None;  // N.B.: used to signal interval format
-    ///     } else {
-    ///         throw runtime_error("Invalid output format: " + format);
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:45-67
     pub(crate) fn mask_info(
         serial: Option<Serial>,
         algo_id: i32,
@@ -140,15 +126,6 @@ impl MaskWriter {
         match self {
             MaskWriter::Interval => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:41-56
-                // ```c++
-                //     PrintId( bsh, parsed_id );
-                //     os << endl;
-                //     PrintMasks(os, mask);
-                // ...
-                //     ITERATE(TMaskList, i, mask) {
-                //         os << i->first << " - " << i->second << "\n";
-                //     }
-                // ```
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
                 interval_lines(mask, &mut text);
@@ -156,12 +133,6 @@ impl MaskWriter {
             }
             MaskWriter::Tabular => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_tab.cpp:40-49
-                // ```c++
-                //     const string id = IdToString(bsh, parsed_id);
-                //     ITERATE(TMaskList, i, mask) {
-                //         os << id << "\t" << i->first << "\t" << i->second << "\n";
-                //     }
-                // ```
                 let id = id_to_string(seq, parsed_id)?;
                 let mut text = Vec::new();
                 for &(from, to) in mask {
@@ -173,51 +144,21 @@ impl MaskWriter {
             MaskWriter::Fasta { hard_masking } => {
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                fasta_letters(seq.iupac, mask, *hard_masking, &mut text);
-                out.write_all(&text)?;
+                fasta_letters(seq.iupac, mask, *hard_masking, text, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
-                // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:63-90
-                // ```c++
-                //     if (mask.empty()) {
-                //         return;
-                //     }
-                //     ...
-                //     CConstRef<CSeq_id> id = bsh.GetSeqId();
-                //     CSeq_loc seqloc(const_cast<CSeq_id&>(*id), masked_ranges);
-                //     switch (m_OutputFormat) {
-                //     case eSerial_AsnBinary:
-                //         os << MSerial_AsnBinary << seqloc;
-                //     ...
-                // ```
+                // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:61-90
                 if mask.is_empty() {
                     return Ok(());
                 }
                 let mut bytes = Vec::new();
-                let document = Document::SeqLoc(first_id(seq), mask);
+                let document = Document::SeqLoc(seq_id(seq), mask);
                 write_document(*serial, &document, &mut bytes, out, diag)?;
                 out.write_all(&bytes)?;
             }
             MaskWriter::MaskInfo(writer) => {
-                // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:138-176
-                // ```c++
-                // void CMaskWriterBlastDbMaskInfo::Print( const objects::CSeq_id& id,
-                //                                         const TMaskList & mask )
-                // {
-                //     if (mask.empty()) {
-                //         return;
-                //     }
-                //     ...
-                //     CRef<CSeq_loc> seqloc(new CSeq_loc(const_cast<CSeq_id&>(id),
-                //                                        masked_ranges));
-                //     CRef<CBlast_mask_list> mask_list(new CBlast_mask_list);
-                //     mask_list->SetMasks().push_back(seqloc);
-                //     mask_list->SetMore(true);
-                //     m_ListOfMasks.push_back(mask_list);
-                // ...
-                //     Print(*bsh.GetSeqId(), mask);
-                // ```
-                writer.print_id(first_id(seq), mask, out)?;
+                // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:137-176
+                writer.print_id(seq_id(seq), mask, out)?;
             }
         }
         Ok(())
@@ -228,18 +169,6 @@ impl MaskWriter {
     /// write nothing.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:89-106
-    /// ```c++
-    ///     if (m_ListOfMasks.empty()) {
-    ///         CRef<CBlast_mask_list> empty_list(new CBlast_mask_list);
-    ///         empty_list->SetMasks();
-    ///         empty_list->SetMore(false);
-    ///         m_ListOfMasks.push_back(empty_list);
-    ///     }
-    ///
-    ///     x_ConsolidateListOfMasks();
-    ///     m_BlastDbMaskInfo->SetMasks(*m_ListOfMasks.front());
-    ///     s_WriteObject(m_BlastDbMaskInfo, os, m_OutputFormat);
-    /// ```
     /// (`x_ConsolidateListOfMasks`, :108-136, moves the Seq-loc of each list into one list and
     /// sets its `more` to false.)
     /// (`m_OutputFormat` `eSerial_None`, the format `interval`, writes nothing either.)
@@ -258,7 +187,7 @@ impl MaskWriter {
 }
 
 impl MaskInfoWriter {
-    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`, quoted at
+    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`, cited at
     /// `MaskWriter::mask_info`.
     pub(crate) fn new(
         serial: Option<Serial>,
@@ -279,21 +208,7 @@ impl MaskInfoWriter {
     /// format `interval`, the intervals at once (`CMaskWriterInt::PrintMasks`, no id); else
     /// the mask is kept for the object that `finish` writes.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:138-150
-    /// ```c++
-    /// void CMaskWriterBlastDbMaskInfo::Print( const objects::CSeq_id& id,
-    ///                                         const TMaskList & mask )
-    /// {
-    ///     if (mask.empty()) {
-    ///         return;
-    ///     }
-    ///
-    ///     if (m_OutputFormat == eSerial_None) {
-    ///         // assume interval output format and return
-    ///         CMaskWriterInt::PrintMasks(os, mask);
-    ///         return;
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:137-150
     pub(crate) fn print_id(
         &mut self,
         id: &ParsedSeqId,
@@ -316,15 +231,7 @@ impl MaskInfoWriter {
 
 /// `CMaskWriterInt::PrintMasks`: one line `from - to` for each interval.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:50-56
-/// ```c++
-/// void CMaskWriterInt::PrintMasks(CNcbiOstream& os, const TMaskList& mask)
-/// {
-///     ITERATE(TMaskList, i, mask) {
-///         os << i->first << " - " << i->second << "\n";
-///     }
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:49-56
 /// The lines are added to `text`.
 fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     for &(from, to) in mask {
@@ -333,9 +240,32 @@ fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     }
 }
 
-/// `bsh.GetSeqId()`: the first Seq-id of the sequence.
-fn first_id<'a>(seq: &MaskedBioseq<'a>) -> &'a ParsedSeqId {
-    seq.ids.first().expect("a sequence has a Seq-id")
+/// `bsh.GetSeqId()`: the Seq-id of the sequence's access handle, as the handles that outlive the
+/// sequence give it back (`MaskedBioseq::handle_seq_id`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:128-131
+fn seq_id<'s>(seq: &'s MaskedBioseq<'_>) -> &'s ParsedSeqId {
+    seq.handle_seq_id
+        .as_ref()
+        .unwrap_or_else(|| access_seq_id(seq.ids))
+}
+
+/// The Seq-id of `CBioseq_Handle::GetAccessSeq_id_Handle()` of a sequence whose Seq-ids are `ids`
+/// (a handle of `CBioseq_CI` has no Seq-id of its own): its first gi, else its first Textseq-id,
+/// else its first Seq-id. A gi of 0 is not a gi there (`IsGi()` asks for a non-zero packed
+/// value, and gi 0's handle packs 0): `>gi|0|gb|AB000001.1|` is named `genbank`, `>lcl|x|gi|0`
+/// `local`, and only a sequence whose first id is gi 0 and that has no Textseq-id `gi 0`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:939-985
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2102-2106
+/// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:279-282
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:609-627
+pub(crate) fn access_seq_id(ids: &[ParsedSeqId]) -> &ParsedSeqId {
+    ids.iter()
+        .find(|id| matches!(id, ParsedSeqId::Gi(gi) if *gi != 0))
+        .or_else(|| ids.iter().find(|id| id.textseq().is_some()))
+        .or_else(|| ids.first())
+        .expect("a sequence has a Seq-id")
 }
 
 /// The object of one document.
@@ -482,26 +412,16 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
 }
 
 /// `CMaskWriter::IdToString`: `>`, with `-parse_seqids` the Seq-ids in FASTA form
-/// (`GetStringDescr(eFormat_FastA)`) and a space, then `CDeflineGenerator::GenerateDefline`.
+/// (`GetStringDescr(eFormat_FastA)`, which ranks the ids for a protein when the Bioseq is one:
+/// segmasker's `lcl|a|sp|P12345|` is `sp|P12345|`) and a space, then
+/// `CDeflineGenerator::GenerateDefline`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer.cpp:46-55
-/// ```c++
-/// string CMaskWriter::IdToString( objects::CBioseq_Handle& bsh, bool parsed_id )
-/// {
-///     CNcbiOstrstream oss;
-///     oss << ">";
-///     if( parsed_id ) {
-///         oss << CSeq_id::GetStringDescr(*bsh.GetCompleteBioseq(),
-///                                        CSeq_id::eFormat_FastA) + " ";
-///     }
-///     oss << sequence::CDeflineGenerator().GenerateDefline(bsh);
-///     return CNcbiOstrstreamToString(oss);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer.cpp:46-65
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
 fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, WriteError> {
     let mut text = vec![b'>'];
     if parsed_id {
-        bioseq_fasta(seq.ids, false, &mut text);
+        bioseq_fasta(seq.ids, seq.protein, &mut text);
         text.push(b' ');
     }
     let mut facts = bioseq_facts(seq.ids);
@@ -524,47 +444,54 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
 /// The letters of `CMaskWriterFasta::Print`: lines of 60, the masked letters in lower case
 /// (`N` with `-hard_masking`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:57-100
-/// ```c++
-///         string accumulator;
-///         TMaskList::const_iterator imask = mask.begin();
-///
-///         for( TSeqPos i = 0; i < data.size(); ++i )
-///         {
-///             char letter = data[i];
-///
-///             if( imask != mask.end() && i >= imask->first ) {
-///                 if( i <= imask->second ) {
-///                 	if(m_HardMasking) {
-///                 		letter = 'N';
-///                 	}
-///                 	else {
-///                 		letter = tolower((unsigned char) letter);
-///                 	}
-/// 				}
-///                 else
-///                 {
-///                     ++imask;
-///
-///                     if(imask != mask.end()
-///                         && i >= imask->first && i <= imask->second ) {
-///                     	... (the same)
-/// 					}
-///                 }
-///             }
-///
-///             accumulator.append( 1, letter );
-///
-///             if( !((i + 1)%60) )
-///             {
-///                 os << accumulator << "\n";
-///                 accumulator = "";
-///             }
-///         }
-///
-///         if( accumulator.length() ) os << accumulator << "\n";
-/// ```
-fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mut Vec<u8>) {
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:57-101
+/// `text` is the definition line; it and the lines go to `out` a block of lines at a time
+/// (NCBI writes each line to its buffered stream), so the text of a record is never held
+/// whole. Each line is copied whole and then masked in place ([`mask_line`]): the loop over
+/// the letters touches only the line, not the growing text.
+fn fasta_letters(
+    iupac: &[u8],
+    mask: &[(u32, u32)],
+    hard_masking: bool,
+    mut text: Vec<u8>,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    const LINE: usize = 60;
+    const BLOCK: usize = 1 << 16;
+    let mut imask = 0;
+    let mut pos = 0u64;
+    for letters in iupac.chunks(LINE) {
+        let at = text.len();
+        text.extend_from_slice(letters);
+        mask_line(&mut text[at..], pos, mask, &mut imask, hard_masking);
+        text.push(b'\n');
+        pos += letters.len() as u64;
+        if text.len() >= BLOCK {
+            out.write_all(&text)?;
+            text.clear();
+        }
+    }
+    out.write_all(&text)
+}
+
+/// NCBI's walk over the mask for the letters of one line, the first at `pos`: a letter at or
+/// past the start of interval `imask` is masked while within it; past its end, the walk takes
+/// the next interval (one step per letter) and masks the letter if it is within that one
+/// (NCBI's loop cited at [`fasta_letters`]).
+fn mask_line(
+    line: &mut [u8],
+    pos: u64,
+    mask: &[(u32, u32)],
+    imask: &mut usize,
+    hard_masking: bool,
+) {
+    // A letter before the start of interval `imask` changes neither itself nor `imask`, so a
+    // line that ends before that start is left as it is.
+    match mask.get(*imask) {
+        None => return,
+        Some(&(first, _)) if pos + line.len() as u64 <= u64::from(first) => return,
+        Some(_) => {}
+    }
     let masked = |letter: u8| {
         if hard_masking {
             b'N'
@@ -572,52 +499,26 @@ fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mu
             letter.to_ascii_lowercase()
         }
     };
-    let mut imask = 0;
-    let mut line = 0;
-    for (i, &letter) in iupac.iter().enumerate() {
-        let i_pos = i as u64;
-        let mut letter = letter;
-        if let Some(&(first, second)) = mask.get(imask) {
+    let mut i_pos = pos;
+    for letter in line {
+        if let Some(&(first, second)) = mask.get(*imask) {
             if i_pos >= u64::from(first) {
                 if i_pos <= u64::from(second) {
-                    letter = masked(letter);
+                    *letter = masked(*letter);
                 } else {
-                    imask += 1;
-                    if let Some(&(first, second)) = mask.get(imask) {
+                    *imask += 1;
+                    if let Some(&(first, second)) = mask.get(*imask) {
                         if i_pos >= u64::from(first) && i_pos <= u64::from(second) {
-                            letter = masked(letter);
+                            *letter = masked(*letter);
                         }
                     }
                 }
             }
         }
-        out.push(letter);
-        line += 1;
-        if line == 60 {
-            out.push(b'\n');
-            line = 0;
-        }
-    }
-    if line > 0 {
-        out.push(b'\n');
+        i_pos += 1;
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fasta_letters_follow_ncbis_one_step_mask_iterator() {
-        // A mask list where one position passes two intervals: NCBI advances the iterator
-        // once per position, so the second interval [3, 3] after [0, 1] is reached at 2 and
-        // its letter 3 is masked; a third interval right after is reached only at its own
-        // positions.
-        let mut out = Vec::new();
-        fasta_letters(b"ACGTACGT", &[(0, 1), (3, 3), (4, 5)], false, &mut out);
-        assert_eq!(out, b"acGtacGT\n");
-        let mut out = Vec::new();
-        fasta_letters(&[b'A'; 61], &[(59, 60)], true, &mut out);
-        assert_eq!(&out[..], [&[b'A'; 59][..], b"N\nN\n"].concat());
-    }
-}
+#[path = "writer_tests.rs"]
+mod tests;

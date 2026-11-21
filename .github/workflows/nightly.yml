@@ -2,8 +2,8 @@ name: Nightly
 
 # Heavy checks kept off pull requests: every capture case (including the long
 # TBLASTX manifest cases) against the S02 baseline and the frozen hashes, the
-# WASI command/reactor matrix with the NCBI comparison oracle, the RustSec advisories of the
-# dependencies (cargo deny), and the coverage of the cargo test set (a report).
+# WASI command/reactor matrix with the NCBI comparison oracle, the known advisories of the
+# dependencies (cargo deny, npm audit, pip-audit), CodeQL of dev (no open alert), and the coverage of the cargo test set (a report).
 #
 # GitHub starts a schedule only on the default branch, main, which moves only when dev is
 # promoted: on 2026-10-25 seven scheduled runs in a row had tested one main commit while dev,
@@ -64,15 +64,18 @@ jobs:
           retention-days: 30
 
   audit:
-    name: cargo deny advisories
-    # RustSec advisories of the three lock files (LOSAT, web/adapter, python; deny.toml). The
-    # advisory database is fetched at run time, so this job stays off pull requests: a failed fetch
-    # or a new advisory does not stop unrelated work. Vulnerable, unmaintained, unsound and yanked
-    # crates all fail, as cargo audit --deny warnings did here before (two lock files; python's was
-    # not audited). Not --locked, as in ci.yml. The other checks of deny.toml run on every pull
-    # request (ci.yml, `rust lint`).
+    name: dependency advisories
+    # Known advisories of every dependency lock (scripts/dependency_advisories.sh): RustSec for the
+    # three Cargo lock files (LOSAT, web/adapter, python; deny.toml), npm audit for web/'s lock file
+    # and pip-audit for python's pinned test tools. Dependabot alerts watch only main, which lags
+    # dev by weeks, so dev is checked here every night. The advisory databases are fetched at run
+    # time, so this job stays off pull requests: a failed fetch or a new advisory does not stop
+    # unrelated work. Vulnerable, unmaintained, unsound and yanked crates all fail, as cargo audit
+    # --deny warnings did here before. Not --locked, as in ci.yml. The other checks of deny.toml run
+    # on every pull request (ci.yml, `rust lint`). release-readiness-v020.yml (job `security`) runs
+    # the same script on the release candidate.
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -81,15 +84,30 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-deny@0.20.2
-      - name: cargo deny check advisories (LOSAT, web/adapter, python)
-        run: |
-          status=0
-          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
-            echo "::group::$manifest"
-            cargo deny --manifest-path "$manifest" --config deny.toml check advisories || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check pip-audit==2.10.1
+      - name: Advisories (cargo, npm, pip)
+        run: scripts/dependency_advisories.sh
+
+  # CodeQL of dev's head every night (Owner 2026-11-19 「C」): codeql.yml scans this commit in the four
+  # languages, files it under refs/heads/dev, and its job `open alerts` fails while an alert is open
+  # on dev, so the run of dev fails and job `dev` of the next scheduled run reports it. main is
+  # scanned on push, weekly and when dispatched (codeql.yml).
+  codeql:
+    if: github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/codeql.yml
+    with:
+      own_commit: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
 
   # No NCBI counterpart. A report, not a gate (SWEBOK 2026-11-04 audit, KA5 T12: no coverage
   # measurement): the line and function coverage of LOSAT's sources under the test set of ci.yml's
@@ -97,8 +115,8 @@ jobs:
   # the artifact `coverage`. Instrumented, the tests ran 6.3 times as long as without (2026-11-07,
   # 3,403 tests, 8 test threads on a loaded 32-core machine), so they run in four shards; each
   # exports lcov and `coverage report` adds them (LOSAT/tests/coverage_summary.py). cargo-llvm-cov
-  # leaves out the test files (tests/, examples/, tests.rs, *_tests.rs) and build.rs; inline
-  # #[cfg(test)] modules of src files are counted. No threshold, and `continue-on-error` keeps a
+  # leaves out the test files (tests/, examples/, tests.rs, *_tests.rs) and build.rs; the unit
+  # tests of src files live in such sibling files (check_inline_test_modules.py). No threshold, and `continue-on-error` keeps a
   # failure of these jobs (a test, the tool) out of the run's conclusion, which job `dev` and the
   # release gates read; ci.yml's `rust-tests` is the gate for the tests. Not on main: the scheduled
   # run tests main, which moves only when a dev commit is promoted, after dev's nightly ran the

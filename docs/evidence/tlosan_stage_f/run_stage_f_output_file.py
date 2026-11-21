@@ -16,7 +16,6 @@ def sha(data: bytes) -> str:
 
 
 # NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
-# formatter.PrintOneResultSet(...);
 # Output-file bytes and empty stdout are checked after formatting.
 def main() -> int:
     out = Path(sys.argv[1]).resolve()

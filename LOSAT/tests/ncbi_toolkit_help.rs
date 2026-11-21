@@ -6,24 +6,8 @@
 //! flag. LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), so the
 //! test holds `-help-full` to LOSAT's `-help` in the same place.
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (quoted at
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 //! `cli::try_parse_from`) and c++/src/corelib/ncbiapp.cpp:685-697
-//! ```c++
-//!     catch (const CArgHelpException& e) {
-//!         x_AddDefaultArgs();
-//!         // Print USAGE
-//!         if (e.GetErrCode() == CArgHelpException::eHelpXml) {
-//!             m_ArgDesc->PrintUsageXml(cout);
-//!         } else {
-//!             CArgHelpException::TErrCode code =  e.GetErrCode();
-//!             string str;
-//!             m_ArgDesc->ShowAllArguments(code == CArgHelpException::eHelpShowAll)->PrintUsage
-//!                 (str, code == CArgHelpException::eHelpFull || code == CArgHelpException::eHelpShowAll);
-//!             cout << str;
-//!         }
-//!         *exit_code = e.GetErrCode() == CArgHelpException::eHelpErr ? 2 : 0;
-//!     }
-//! ```
 
 #![cfg(unix)]
 
@@ -61,7 +45,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 13] = [
+const PROGRAMS: [(&str, &str); 14] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -75,6 +59,7 @@ const PROGRAMS: [(&str, &str); 13] = [
     ("blastdbcmd", "-out"),
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
+    ("windowmasker", "-out"),
 ];
 
 #[test]
@@ -171,7 +156,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
     for (program, value_option) in PROGRAMS
         .iter()
         .copied()
-        .chain([("convert2blastmask", "-out")])
+        .chain([("convert2blastmask", "-out"), ("makembindex", "-input")])
     {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
@@ -179,7 +164,12 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         let ncbi = ncbi_xml(program);
         if matches!(
             program,
-            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "blastdbcmd"
+                | "dustmasker"
+                | "segmasker"
+                | "windowmasker"
+                | "convert2blastmask"
+                | "makembindex"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {
@@ -196,10 +186,11 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.contains(&format!("<name>{program}</name>\n<version>")));
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
             // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
-            // run of a search (blastp's and psiblast's `-use_sw_tback`, blastp's and tblastn's
-            // `-ungapped` with `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a
-            // database, is in `cli::RUN_REFUSALS` with them). The arguments left in are read
-            // (`ncbi_xmlhelp_tests`).
+            // run of a search (psiblast's `-use_sw_tback`, tblastn's `-ungapped` with
+            // `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a database, is in
+            // `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
+            // statistics, line RG item X4; blastp's `-ungapped` runs, line NP item O4b).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
                 if kept.contains(&name) {
@@ -226,7 +217,6 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
                         || message.contains(&format!("-{name} ("))
                             && message.contains("is not supported by LOSAT's")
-                        || message.contains(&format!("unsupported BLASTX option '-{name}'"))
                         || program == "rpstblastn" && name == "ungapped",
                     "{program} -{name}: {message}"
                 );

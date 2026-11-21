@@ -1,7 +1,9 @@
 // Display helpers of the UI. They format application values only, never BLAST values.
+import { withUnit } from '../domain/units';
+
 const UNITS = ['bytes', 'kB', 'MB', 'GB', 'TB'] as const;
 
-/** A byte count in SI units, for example "1.5 MB". */
+/** A byte count in SI units, for example "1.5 MB" (the number and the unit joined by a no-break space: line WQA's sweep, D9, 2026-11-19). */
 export function formatBytes(bytes: number): string {
   let value = bytes;
   let unit = 0;
@@ -10,7 +12,7 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   const digits = unit === 0 ? 0 : 1;
-  return `${value.toFixed(digits)} ${UNITS[unit]}`;
+  return withUnit(value.toFixed(digits), UNITS[unit]!);
 }
 
 /** A count with thousands separators, for example "12,345". */
@@ -29,7 +31,7 @@ export function formatDuration(ms: number): string {
 
 /** A short time span with its unit, for example "420 ms" or "2.6 s" (a step of a run, which `formatDuration` rounds down to the second). */
 export function formatMillis(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+  return ms < 1000 ? withUnit(Math.round(ms), 'ms') : withUnit((ms / 1000).toFixed(1), 's');
 }
 
 /**
@@ -43,10 +45,12 @@ export function formatDateTime(ms: number): string {
   return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
 }
 
-/** The first paragraph of an option's help (`describe`), without the references to NCBI's sources. */
+/**
+ * The first paragraph of an option's help (`describe`). The engine's help names no NCBI sources
+ * (`LOSAT/tests/entry_names.rs`, `help_has_no_source_references_and_a_true_footer`).
+ */
 export function optionHelp(raw: string | undefined): string {
-  const paragraph = (raw ?? '').split(/\n\s*\n/)[0] ?? '';
-  return paragraph.replace(/\s*(?:NCBI reference|Reference):.*$/s, '').trim();
+  return ((raw ?? '').split(/\n\s*\n/)[0] ?? '').trim();
 }
 
 /** A count and its noun, singular for one: "1 subject", "3 subjects", "1 HSP", "5 HSPs" (W4b screen review L12). */

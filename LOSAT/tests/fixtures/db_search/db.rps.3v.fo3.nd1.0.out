@@ -1,0 +1,100 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: t
+           3 sequences; 560 total letters
+
+
+
+Query= YP_009220649.1 DNA polymerase [White spot syndrome virus]
+
+Length=2351
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  351     2e-115
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 351 bits (900),  Expect = 2e-115
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+
+Query  1101  HRQIMQLRDRLVLEKMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASWKNSNSNRQT  1160
+             HRQIMQLRDRLVLEKMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASWKNSNSNRQT
+Sbjct  1     HRQIMQLRDRLVLEKMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASWKNSNSNRQT  60
+
+Query  1161  PITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKV  1220
+             PITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKV
+Sbjct  61    PITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKV  120
+
+Query  1221  NDDMHIAPASLEYMLQVLPIMLIDRPYIGAHITAGKCRTLEDILSELEKDFSVEKDEEII  1280
+             NDDMHIAPASLEYMLQVLPIMLIDRPYIGAHITAGKCRTLEDILSELEKDFSVEKDEEII
+Sbjct  121   NDDMHIAPASLEYMLQVLPIMLIDRPYIGAHITAGKCRTLEDILSELEKDFSVEKDEEII  180
+
+Query  1281  RTHWTFKGQK  1290
+             RTHWTFKGQK
+Sbjct  181   RTHWTFKGQK  190
+
+
+ Score = 21.3 bits (44),  Expect = 0.36
+ Identities = 15/52 (29%), Positives = 25/52 (48%), Gaps = 4/52 (8%)
+
+Query  1515  MIPEYDEQTGKYYYVMDIAL---KNKMA-AIIPILVNSLTKGIQFVERRDAG  1562
+             +I E ++     Y  +DIA+   KN  +    PI     + G++F+E  DA 
+Sbjct  29    VIDECNQIVLSEYRPIDIAVASWKNSNSNRQTPITRIEESLGLRFIENLDAE  80
+
+
+ Score = 19.3 bits (39),  Expect = 1.5
+ Identities = 8/33 (24%), Positives = 15/33 (45%), Gaps = 0/33 (0%)
+
+Query  660  FENVNHDTAISTDAMERAIGQHKILYYDIETTD  692
+            ++N N +       +E ++G   I   D E T+
+Sbjct  51   WKNSNSNRQTPITRIEESLGLRFIENLDAEKTN  83
+
+
+ Score = 17.4 bits (34),  Expect = 6.1
+ Identities = 8/35 (23%), Positives = 15/35 (43%), Gaps = 1/35 (3%)
+
+Query  2039  ILDRLLKATHSSCTNNEER-TRVLQQYSNCTLSSY  2072
+             + DRL+     + T +      V+ + +   LS Y
+Sbjct  7     LRDRLVLEKMKNKTTDSLLLLDVIDECNQIVLSEY  41
+
+
+ Score = 16.6 bits (32),  Expect = 9.8
+ Identities = 6/22 (27%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+
+Query  785  ISGWNNVAFDDPFVFTRIVKHL  806
+            ++ W N   +     TRI + L
+Sbjct  48   VASWKNSNSNRQTPITRIEESL  69
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.132    0.388    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0504    0.140     1.90     42.6     43.6 
+
+Effective search space used: 980050
+
+
+  Database: t
+    Posted date:  Nov 8, 2026  9:56 AM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

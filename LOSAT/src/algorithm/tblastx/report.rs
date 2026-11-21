@@ -26,27 +26,7 @@ use super::scoring::{Blosum62Score, TbxScore};
 /// (`A` 1, `C` 2, `G` 4, `T` 8, ambiguity letters their union, `U` as `T`, `X` as `N`);
 /// another byte is a gap (0), which translates to `X`.
 ///
-/// NCBI reference: c++/src/objects/seqfeat/Genetic_code_table.cpp:94,97-112
-/// ```c++
-///     static char  charToBase [17] = "-ACMGRSVTWYHKDBN";
-///     ...
-///     // illegal characters map to 0
-///     for (i = 0; i < 256; i++) {
-///         sm_BaseToIdx [i] = 0;
-///     }
-///
-///     // map iupacna alphabet to EBaseCode
-///     for (i = eBase_gap; i <= eBase_N; i++) {
-///         ch = charToBase [i];
-///         sm_BaseToIdx [(int) ch] = i;
-///         ch = (unsigned char)tolower (ch);
-///         sm_BaseToIdx [(int) ch] = i;
-///     }
-///     sm_BaseToIdx [(int) 'U'] = eBase_T;
-///     sm_BaseToIdx [(int) 'u'] = eBase_T;
-///     sm_BaseToIdx [(int) 'X'] = eBase_N;
-///     sm_BaseToIdx [(int) 'x'] = eBase_N;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:94,97-112
 #[cfg(test)]
 fn display_base(base: u8) -> u8 {
     match base.to_ascii_uppercase() {
@@ -96,94 +76,11 @@ const DISPLAY_BASE_PLUS: [u8; 256] = display_base_table(false);
 const DISPLAY_BASE_MINUS: [u8; 256] = display_base_table(true);
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112
-// ```c++
-//     static char  charToBase [17] = "-ACMGRSVTWYHKDBN";
-//     static char  baseToComp [17] = "-TGKCYSBAWRDMHVN";
-//
-//     // illegal characters map to 0
-//     for (i = 0; i < 256; i++) {
-//         sm_BaseToIdx [i] = 0;
-//     }
-//
-//     // map iupacna alphabet to EBaseCode
-//     for (i = eBase_gap; i <= eBase_N; i++) {
-//         ch = charToBase [i];
-//         sm_BaseToIdx [(int) ch] = i;
-//         ch = (unsigned char)tolower (ch);
-//         sm_BaseToIdx [(int) ch] = i;
-//     }
-//     sm_BaseToIdx [(int) 'U'] = eBase_T;
-//     sm_BaseToIdx [(int) 'u'] = eBase_T;
-//     sm_BaseToIdx [(int) 'X'] = eBase_N;
-//     sm_BaseToIdx [(int) 'x'] = eBase_N;
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:145-148
-// ```c++
-//     static int  expansions [4] = {eBase_A, eBase_C, eBase_G, eBase_T};
-//                                 // T = 0, C = 1, A = 2, G = 3
-//     static int  codonIdx [9] = {0, 2, 1, 0, 3, 0, 0, 0, 0};
-//
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:170-209
-// ```c++
-//                 // expand ambiguous IJK nucleotide symbols into component bases XYZ
-//                 for (p = 0; p < 4 && go_on; p++) {
-//                     x = expansions [p];
-//                     if ((x & i) != 0) {
-//                         for (q = 0; q < 4 && go_on; q++) {
-//                             y = expansions [q];
-//                             if ((y & j) != 0) {
-//                                 for (r = 0; r < 4 && go_on; r++) {
-//                                     z = expansions [r];
-//                                     if ((z & k) != 0) {
-//
-//                                         // calculate offset in genetic code string
-//
-//                                         // the T = 0, C = 1, A = 2, G = 3 order is
-//                                         // necessary because the genetic code strings
-//                                         // are presented in TCAG order in printed tables
-//                                         // and in the genetic code strings
-//                                         cd = 16 * codonIdx [x] + 4 * codonIdx [y] + codonIdx [z];
-//
-//                                         // lookup amino acid for codon XYZ
-//                                         ch = (*ncbieaa) [cd];
-//                                         if (aa == '\0') {
-//                                             aa = ch;
-//                                         } else if (aa != ch) {
-//                                             // allow Asx (Asp or Asn) and Glx (Glu or Gln)
-//                                             if ((aa == 'B' || aa == 'D' || aa == 'N') &&
-//                                                 (ch == 'D' || ch == 'N')) {
-//                                                 aa = 'B';
-//                                             } else if ((aa == 'Z' || aa == 'E' || aa == 'Q') &&
-//                                                        (ch == 'E' || ch == 'Q')) {
-//                                                 aa = 'Z';
-//                                             } else if ((aa == 'J' || aa == 'I' || aa == 'L') &&
-//                                                 (ch == 'I' || ch == 'L')) {
-//                                                 aa = 'J';
-//                                             } else {
-//                                                 aa = 'X';
-//                                             }
-//                                         }
-//
-//                                         // lookup translation start flag
-// ```
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160
-// ```c++
-//     // ambiguous codons map to unknown amino acid or not start
-//     for (i = 0; i <= 4096; i++) {
-//         m_AminoAcid [i] = 'X';
-//         m_OrfStart [i] = '-';
-//         m_OrfStop [i] = '-';
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:228-231
-// ```c++
-//                 // assign amino acid
-//                 if (aa != '\0') {
-//                     m_AminoAcid [st] = aa;
-//                 }
-// ```
 pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::GeneticCode) -> u8 {
     let expansions = [(1, 2), (2, 1), (4, 3), (8, 0)];
     let mut aa = 0;
@@ -220,7 +117,7 @@ pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::G
     }
 }
 
-// NCBI reference: c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160,228-231 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160,228-231 (cited at
 // `display_codon` above): NCBI's display reads the residue of a codon's state from a
 // table (`m_AminoAcid`) that it fills once per code; `alnvec.cpp:911-918` (at
 // `display_residue`) steps the state by the three bases.
@@ -281,40 +178,10 @@ impl DisplayCode {
     }
 }
 
-// NCBI reference: c++/src/objtools/alnmgr/alnvec.hpp:292-302
-// ```c++
-//     if (GetWidth(row) == 3) {
-//         string buff;
-//         buffer.erase();
-//         if (IsPositiveStrand(row)) {
-//             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buff);
-//         } else {
-//             CSeqVector& seq_vec = x_GetSeqVector(row);
-//             TSeqPos size = seq_vec.size();
-//             seq_vec.GetSeqData(size - seq_to - 1, size - seq_from, buff);
-//         }
-//         TranslateNAToAA(buff, buffer, GetGenCode(row));
-// ```
-// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:116-121
-// ```c++
-//         CBioseq_Handle h = GetBioseqHandle(row);
-//         CSeqVector vec = h.GetSeqVector
-//             (CBioseq_Handle::eCoding_Iupac,
-//              IsPositiveStrand(row) ?
-//              CBioseq_Handle::eStrand_Plus :
-//              CBioseq_Handle::eStrand_Minus);
-// ```
-// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:911-918
-// ```c++
-//     int state = 0;
-//     size_t aa_i = 0;
-//     for (size_t na_i = 0; na_i < na_size; ) {
-//         for (size_t i = 0; i < 3; i++) {
-//             state = tbl.NextCodonState(state, na[na_i++]);
-//         }
-//         aa[aa_i++] = tbl.GetCodonResidue(state);
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:292-302
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:292-302
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:116-121
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:911-918
 /// The displayed residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence`: the
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
@@ -359,21 +226,8 @@ fn displayed_rows(
     (query_row.collect(), subject_row.collect())
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1948-1953
-// ```c++
-//             CRef<CAlnVec> avRef = x_GetAlnVecForSeqalign(**iter);
-//     ...
-//                 avRef->SetGenCode(m_SlaveGeneticCode);
-//                 avRef->SetGenCode(m_MasterGeneticCode, 0);
-// ```
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:982-986
-// ```c++
-//         alnVec->SetGapChar('-');
-//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-//         alnVec->SetGenCode(m_DbGeneticCode, 1);
-//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1948-1953
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
 /// The residues of the displayed rows of `hsp` (`displayed_rows`), query and subject, in row
 /// order, each translated as it is read.
 fn displayed_residues<'r>(
@@ -459,10 +313,11 @@ pub(crate) enum SubjectLetters<'a> {
     },
     /// The reported sequences of a `-db` search by rank (`database::ReportedSubjects`): their
     /// lengths, and their stores, read where their batches were reported (empty when no report
-    /// reads letters); a row reads the letters of its HSP's codons as `Stored`.
+    /// reads letters); a row reads the letters of its HSP's codons as `Stored`, the engine's
+    /// counts those of the re-evaluation (`database::ReportedStore`).
     Database {
         lengths: &'a [u32],
-        stores: &'a [std::sync::Arc<PackedNucleotide>],
+        stores: &'a [super::database::ReportedStore],
     },
 }
 
@@ -489,7 +344,7 @@ impl<'a> SubjectLetters<'a> {
                 return;
             }
             Self::Stored { stores, ordinals } => &stores[ordinals[s_idx] as usize],
-            Self::Database { stores, .. } => &*stores[s_idx],
+            Self::Database { stores, .. } => &*stores[s_idx].shown,
         };
         let mut letters = Vec::new();
         store.letters_into(from, to, &mut letters);
@@ -508,12 +363,28 @@ impl<'a> SubjectLetters<'a> {
             Self::Stored { stores, ordinals } => {
                 stored_letters(&stores[ordinals[s_idx] as usize], hsp, window)
             }
-            Self::Database { stores, .. } => stored_letters(&stores[s_idx], hsp, window),
+            Self::Database { stores, .. } => stored_letters(&stores[s_idx].shown, hsp, window),
         }
     }
 
-    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
-    /// buffer of a stored subject's letters.
+    /// `letters` as the search's re-evaluation read them, for the engine's counts: a database
+    /// sequence's re-evaluated store (`database::ReportedStore::engine`, `B` over the masked
+    /// bases of `-db_hard_mask`), the rows' letters otherwise.
+    fn engine_letters<'w>(&self, hsp: &TblastxHsp, window: &'w mut Vec<u8>) -> (&'w [u8], usize)
+    where
+        'a: 'w,
+    {
+        match self {
+            Self::Database { stores, .. } => {
+                stored_letters(&stores[hsp.hit.s_idx as usize].engine, hsp, window)
+            }
+            Self::Records(_) | Self::Stored { .. } => self.letters(hsp, window),
+        }
+    }
+
+    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject's letters as the
+    /// re-evaluation read them (`engine_letters`); `window` is the buffer of a stored subject's
+    /// letters.
     fn engine_counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
@@ -523,7 +394,7 @@ impl<'a> SubjectLetters<'a> {
         window: &mut Vec<u8>,
         sc: S,
     ) -> (usize, usize) {
-        let (subject, subject_first) = self.letters(hsp, window);
+        let (subject, subject_first) = self.engine_letters(hsp, window);
         hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 
@@ -619,8 +490,8 @@ fn stored_letters<'w>(
 }
 
 /// The engine's identities of `hsp` (`SubjectLetters::engine_identities`) against `store`, its
-/// subject's packed letters: the batch loop's, which names the subjects by ordinal id before the
-/// reports name them by rank.
+/// subject's packed letters as the re-evaluation read them (`database::ReportedStore::engine`):
+/// the batch loop's, which names the subjects by ordinal id before the reports name them by rank.
 pub(crate) fn stored_engine_identities(
     hsp: &TblastxHsp,
     store: &PackedNucleotide,
@@ -669,32 +540,8 @@ fn row_counts<S: TbxScore>(sc: S, query_row: &[u8], subject_row: &[u8]) -> (usiz
     )
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
-// ```c++
-//         if(sequence_standard[i]==sequence[i]){
-//     ...
-//             match ++;
-//         } else {
-//             if ((m_AlignType&eProt)
-//                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
-//                 positive ++;
-// ```
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1003-1021
-// ```c++
-//             for (unsigned int i = 0;
-//                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
-//                  ++i) {
-//                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
-//                     ++num_ident;
-//                     ++num_positives;
-//                     ++num_matches;
-//                 } else {
-//     ...
-//                     if (matrix && !matrix->GetData().empty() &&
-//                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
-//                         ++num_positives;
-//                     }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2150
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1021
 /// The identities and the positives (identities included) of the letter pairs of two
 /// displayed rows, in row order (`row_counts`, `displayed_counts`), by the display matrix of
 /// the search's matrix (BLOSUM62's instance reads the constant matrix).
@@ -715,15 +562,7 @@ fn pair_counts<S: TbxScore>(sc: S, pairs: impl Iterator<Item = (u8, u8)>) -> (us
 /// The identity counts of outfmt 6 and 7, which NCBI takes from the displayed rows
 /// (`tblastx` does not set the formatter's no-fetch mode, blast_format.cpp:791-792).
 ///
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1460-1465
-/// ```c++
-///     case ePercentIdentical:
-///         x_PrintPercentIdentical(); break;
-///     case eNumIdentical:
-///         x_PrintNumIdentical(); break;
-///     case eMismatches:
-///         x_PrintMismatches(); break;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1460-1465
 pub(crate) fn set_displayed_identities<S: TbxScore>(
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
@@ -763,49 +602,8 @@ pub(crate) fn set_displayed_identities<S: TbxScore>(
 /// `displayed_rows`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2717
-/// ```c
-///       if (!delete_hsp) {
-///           const Uint1* query_nomask = query_blk->sequence_nomask +
-///               query_info->contexts[context].query_offset;
-///           Int4 align_length = 0;
-///           Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
-///                    							    subject_start,
-///                                					hsp,
-///                                					score_params->options,
-///                                					&align_length,
-///                                					sbp);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:770-792
-/// ```c
-///    if(NULL != sbp)
-///    {
-/// 	   if(sbp->protein_alphabet)
-/// 		   matrix = sbp->matrix->data;
-///    }
-///
-///    if (!hsp->gap_info) {
-///       /* Ungapped case. Check that lengths are the same in query and subject,
-///          then count number of matches. */
-///       if (q_length != s_length)
-///          return -1;
-///       align_length = q_length;
-///       for (i=0; i<align_length; i++) {
-///          if (*q == *s)
-///             num_ident++;
-///          else if (NULL != matrix) {
-///         	 if (matrix[*q][*s] > 0)
-///         		 num_pos ++;
-///             }
-///          q++;
-///          s++;
-///       }
-///    	}
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:831-832
-/// ```c
-///    if(NULL != matrix)
-/// 	   *num_pos_ptr = num_pos + num_ident;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:831-833
 fn hsp_engine_counts<S: TbxScore>(
     hsp: &TblastxHsp,
     query: &[u8],
@@ -842,8 +640,9 @@ fn hsp_engine_counts<S: TbxScore>(
 /// The engine counts of the Seq-aligns of `hits` (outfmt 8, 12), by HSP index: the engine's
 /// `num_ident` (the search's count, which `set_displayed_identities` replaces by the display
 /// count; read before it) and its `num_positives`, which the search does not count
-/// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
-/// Made only when a Seq-align format is requested.
+/// (`hsp_engine_counts` on the letters the re-evaluation read, `SubjectLetters::engine_letters`,
+/// with `B` over the masked bases of `-db_hard_mask`: the same letters give the same identities,
+/// checked in debug builds). Made only when a Seq-align format is requested.
 pub(crate) fn engine_counts<S: TbxScore>(
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
@@ -871,49 +670,10 @@ pub(crate) fn engine_counts<S: TbxScore>(
 
 /// The SEG masks of a query in nucleotide coordinates, by frame.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_filter.c:1256
-/// ```c
-///     BlastSeqLocCombine(filter_out, 0);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_filter.c:908-931
-/// ```c
-///    for (index=0; index < query_info->num_queries; ++index)
-///    {
-///        Int4 frame_start = index*NUM_FRAMES;
-///        Int4 frame_index;
-///        Int4 dna_length = BlastQueryInfoGetQueryLength(query_info,
-///                                                       eBlastTypeBlastx,
-///                                                       index);
-///    ...
-///                if (frame < 0) {
-///                    to = dna_length - CODON_LENGTH*seq_range->left + frame;
-///                    from = dna_length - CODON_LENGTH*seq_range->right + frame + 1;
-///                } else {
-///                    from = CODON_LENGTH*seq_range->left + frame - 1;
-///                    to = CODON_LENGTH*seq_range->right + frame - 1;
-///                }
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_query_info.c:143-160
-/// ```c
-///     Int4 start_context = NUM_FRAMES*query_index;
-///     Int4 dna_length = 2;
-///     ...
-///     if (query_info->contexts[start_context].query_length == 0)
-///         start_context += 3;
-///
-///     for (index = start_context; index < start_context + 3; ++index)
-///         dna_length += query_info->contexts[index].query_length;
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_util.c:923-929
-/// ```c
-/// BLAST_GetTranslatedProteinLength(size_t nucleotide_length, unsigned int context)
-/// {
-///     if (nucleotide_length == 0 || nucleotide_length <= context % CODON_LENGTH) {
-///         return 0;
-///     }
-///     return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1256
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:908-931
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:143-160
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
 /// The minus-frame conversion is NCBI's: it starts one codon after the masked run, so the
 /// last residue of a run is not lowercased (and a run of one residue is empty).
 pub(super) fn query_dna_masks(
@@ -951,63 +711,10 @@ pub(super) fn query_dna_masks(
         .collect()
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:936-951
-// ```c++
-//                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
-//                 TSeqRange range(Map(kTarget, masked_range));
-//                 if (range.NotEmpty() && range != kTarget) {
-//                     int frame = BLAST_ContextToFrame(program, index);
-//     ...
-//                     CRef<CSeqLocInfo> seqloc_info
-//                         (new CSeqLocInfo(seqint, frame));
-// ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:4305-4326
-// ```c++
-//             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-//                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-//                 int actualAlnStart = 0, actualAlnStop = 0;
-//                 if(m_AV->IsPositiveStrand(i)){
-//                     actualAlnStart =
-//                         m_AV->GetAlnPosFromSeqPos(i,
-//                                                   interval.GetFrom(),
-//                                                           CAlnMap::eBackwards, true);
-//                     actualAlnStop =
-//                         m_AV->GetAlnPosFromSeqPos(i,
-//                                                   interval.GetTo(),
-//                                                   CAlnMap::eBackwards, true);
-//                 } else {
-//                     actualAlnStart =
-//                         m_AV->GetAlnPosFromSeqPos(i,
-//                                                   interval.GetTo(),
-//                                                   CAlnMap::eBackwards, true);
-//                     actualAlnStop =
-//                         m_AV->GetAlnPosFromSeqPos(i,
-//                                                   interval.GetFrom(),
-//                                                   CAlnMap::eBackwards, true);
-//                 }
-// ```
-// NCBI reference: c++/src/objtools/alnmgr/alnmap.cpp:551-558,593-595
-// ```c++
-//         if ((plus ? seq_pos < start : seq_pos > stop)) {
-//             return GetAlnStart(seg.GetAlnSeg());
-//         }
-//         if ((plus ? seq_pos > stop : seq_pos < start)) {
-//             return GetAlnStop(seg.GetAlnSeg());
-//         }
-//     ...
-//     TSeqPos delta = (seq_pos - start) / GetWidth(row);
-//     return m_AlnStarts[seg.GetAlnSeg()]
-//         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
-// ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2500-2521
-// ```c++
-//             int locFrame = (*iter)->seqloc->GetFrame();
-//             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-//                && locFrame == frame){
-//     ...
-//                     } else if (m_SeqLocChar==eLowerCase){
-//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:551-558,593-595
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2521
 /// The masks that the report shows for a query: NCBI's `Map` puts each mask of the searched
 /// letters (nucleotide coordinates of its frame) into the query's record by the start of
 /// its interval (`offset`, 0 without `-query_loc`), cut at the interval's end, and drops a
@@ -1179,13 +886,6 @@ pub(crate) fn pairwise_hits(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
-// ```c++
-//     // Set the identity score
-//     if (hsp->num_ident >= 0) {
-//         static const string kNumIdent("num_ident");
-//         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
-//     }
-// ```
 /// The Seq-align's `num_ident` of each HSP of `hits`, by HSP index (`PairwiseHit::seqalign_num_ident`,
 /// which the outfmt 0 report reads with `-sorthits` and `-sorthsps`): the engine's identities,
 /// which `hits` hold until `set_displayed_identities` replaces them by the display counts (the
@@ -1358,20 +1058,7 @@ impl<'a> PairwiseRows<'a> {
             hit.q_start.min(hit.q_end) as i32 - 1,
             hit.q_start.max(hit.q_end) as i32 - 1,
         );
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
-        // ```c++
-        // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
-        // {
-        //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
-        //     ENa_strand strand = GetStrand(*slc);
-        //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
-        //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
-        //                            strand ==  eNa_strand_plus ?
-        //                            eNa_strand_plus : eNa_strand_minus,
-        //                            *(ss.GetIds().front()), scope);
-        //     return frame;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:430-440
         // The frames that the report prints come from the records' coordinates and
         // lengths (`seq_range::record_frame`); without ranges they are the search's.
         let query_frame = record_frame(hit.query_frame > 0, hit.q_start - 1, query_length) as i8;
@@ -1405,6 +1092,8 @@ impl<'a> PairwiseRows<'a> {
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
             subject_stored_gaps: Vec::new(),
+            query_stored_gaps: Vec::new(),
+            query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
         }
     }
@@ -1423,16 +1112,7 @@ fn row_string(row: Vec<u8>) -> String {
 /// start of the query's interval (`RemapToQueryLoc`) and of the subject's interval
 /// (`s_RemapToSubjectLoc`), in nucleotides, on either strand.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
-/// ```c++
-/// 	if (seqinfo_src->CanReturnPartialSequence() == true)
-/// 	{
-///         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
-///         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
-///              	   RemapToQueryLoc(*iter, query_loc);
-///              	   if ( !is_ooframe )
-///                    	s_RemapToSubjectLoc(*iter, *subj_loc);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
 /// A subject interval has the strand both, so `RemapAlignToLoc` (seq_align_util.cpp:71-78)
 /// moves its row by the interval's start.
 fn shift_hit(hit: &mut crate::common::Hit, queries: &Placements, subjects: &Placements) {
@@ -1459,18 +1139,7 @@ pub(crate) fn shift_to_records(
     }
 }
 
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1275-1283
-// ```c++
-//     x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration, subj_bioseq);
-//     // Print number of alignments found, but only if it has been set.
-//     if (align_set) {
-//        int num_hits = align_set->Get().size();
-//        if (num_hits != 0) {
-//            PrintFieldNames(is_csv);
-//        }
-//        m_Ostream << "# " << num_hits << " hits found" << "\n";
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1275-1283
 /// The block header of one query in outfmt 7: the program, the query, the subjects, and,
 /// for a searched query (`num_hits` is `Some`), the fields when there are hits and the
 /// count of HSPs.
@@ -1481,12 +1150,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# TBLASTX {}", crate::NCBI_BLAST_VERSION)?;
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
-    // ```c
-    //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
-    //                                             m_ParseLocalIds, kHtmlFormat,
-    //                                             kTabularFormat, rid);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
     writeln!(writer, "# Database: {database}")?;
@@ -1506,18 +1170,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 /// block header of every query and, with the epilog (`Some` of the queries that earlier calls
 /// wrote, `report_stream`), the count of queries.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-/// ```c
-/// void CBlastTabularInfo::Print()
-/// {
-///     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-///         if (iter != m_FieldsToShow.begin())
-///             m_Ostream << m_FieldDelimiter;
-///         x_PrintField(*iter);
-///     }
-///     m_Ostream << "\n";
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tabular<W: Write>(
     hits: &[TblastxHsp],
@@ -1561,10 +1214,6 @@ pub(crate) fn write_tabular<W: Write>(
             // (`TabularRows::write_thrown_default`).
             let thrown = loads.thrown(hsp.hit.s_idx as usize).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-            // ```c++
-            //        		const CBioseq_Handle& subject_bh =
-            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-            // ```
             // A subject's first row loads it where the query's batch did not prefetch it
             // (`QueryWarnings::subject_read`; a subject's HSPs follow each other).
             if previous != Some(hsp.hit.s_idx) {
@@ -1600,19 +1249,8 @@ pub(crate) fn write_tabular<W: Write>(
             }
         }
     }
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2233-2238
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
-    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
-    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
-    // ```
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1322-1325
-    // ```c++
-    // void CBlastTabularInfo::PrintNumProcessed(int num_queries)
-    // {
-    //     m_Ostream << "# BLAST processed " << num_queries << " queries\n";
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
     if let (true, Some(queries_before)) = (comments, epilog) {
         writeln!(
             writer,
@@ -1802,29 +1440,13 @@ impl TblastxOutputFormat {
 
 /// The format of a validated `-outfmt` value.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-/// ```c
-///     if (args[kArgOutputFormat]) {
-///         string fmt_choice =
-///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 ///
 /// A tabular format with a field list or a delimiter, and every outfmt 10 and 20, is the custom
-/// tabular report (`report::tabular::TabularSpec::of`); the default outfmt 6 and 7 (the `std`
+/// tabular report (`report::tabular::TabularSpec::of_app`); the default outfmt 6 and 7 (the `std`
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-/// ```c++
-///     if (m_FormatType == CFormattingArgs::eTabular ||
-///         m_FormatType == CFormattingArgs::eTabularWithComments ||
-///         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-///         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-///     ...
-///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-///         if(!m_CustomDelim.empty()) {
-///             tabinfo.SetCustomDelim(m_CustomDelim);
-///         }
-/// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
     // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
@@ -1832,7 +1454,13 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     if let Ok(choice) = &choice {
         if choice.custom() || matches!(choice.number, 10 | 18 | 20) {
             if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
-                .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+                .and_then(|format| {
+                    crate::report::tabular::TabularSpec::of_app(
+                        format,
+                        choice,
+                        crate::report::archive::options::RequestKind::Tblastx,
+                    )
+                })
             {
                 return TblastxOutputFormat::CustomTabular(spec.intern());
             }
@@ -1869,21 +1497,8 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
 /// 0 when omitted) and `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 when omitted), with the
 /// nucleotide lengths of the queries (`query_lengths`, read for the coverage only).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1533-1538
-/// ```c
-///                } else {
-///         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-///                }
-///
-///                Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1763-1766
-/// ```c
-///     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
-///        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-///     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1521-1538
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1766
 /// TBLASTX is ungapped, so the preliminary stage removes the HSPs below the query coverage
 /// after the e-value reap, before the hit list (or the culling writer) receives a subject's
 /// HSPs, and a subject left without HSPs never reaches it. After the traceback (and the
@@ -1897,6 +1512,7 @@ pub(crate) struct HitFilters<'a> {
     pub max_hsps: usize,
     pub query_cov_hsp_perc: f64,
     pub query_lengths: &'a [usize],
+    pub subject_besthit: bool,
 }
 
 impl HitFilters<'_> {
@@ -1929,43 +1545,39 @@ impl HitFilters<'_> {
         });
         hsps.is_empty()
     }
+
+    /// `-subject_besthit` on one final list of a query (`s_FilterBlastResults`, after `-max_hsps`
+    /// and the coverage, which the preliminary reap already applied to these HSPs): the contexts
+    /// are the query's frames. The best e-value is not set again, as NCBI's is not. Every HSP here
+    /// has a positive length (the one-hit word finder's HSPs of length 0 or less are dropped
+    /// before the re-evaluation, as NCBI's re-evaluation deletes them:
+    /// `link_one_hit_with_int4_ends`), so the `usize` offsets are NCBI's `Int4` ones.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
+    pub(super) fn subject_besthit(&self, hsps: &mut Vec<TblastxHsp>) {
+        if !self.subject_besthit {
+            return;
+        }
+        crate::core::blast_hits::subject_besthit(hsps, false, |hsp| {
+            crate::core::blast_hits::BestHitExtent {
+                context: super::hsp_culling::tblastx_context(hsp.hit.query_frame) as i64,
+                query_frame: hsp.hit.query_frame,
+                offset: hsp.hit.sort_query_offset as i64,
+                end: hsp.hit.sort_query_end as i64,
+                query_length: 0,
+            }
+        });
+    }
 }
 
 /// The final HSP list of a run in NCBI's order, which every format prints: per query (in
 /// input order) the subjects that the hit list keeps, best first, and each subject's
 /// HSPs in the order of its Seq-align.
 ///
-/// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1802-1803
-/// ```c
-///     /* Sort the HSP array by score */
-///     Blast_HSPListSortByScore(hsp_list);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_collector.c:143-150
-/// ```c
-///       for (index = 0; index < results->num_queries; index++) {
-///          if (hsp_list_array[index]) {
-///             if (!results->hitlist_array[index]) {
-///                results->hitlist_array[index] =
-///                   Blast_HitListNew(params->prelim_hitlist_size);
-///             }
-///             Blast_HitListUpdate(results->hitlist_array[index],
-///                                 hsp_list_array[index]);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1768-1772
-/// ```c
-///     /* Re-sort the hit lists according to their best e-values, because they
-///        could have changed. Only do this for a database search. */
-///     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
-///         Blast_HSPResultsSortByEvalue(results);
-///     }
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-/// ```c
-///         // Sort HSPs with e-values as first priority and scores as
-///         // tie-breakers, since that is the order we want to see them in
-///         // in Seq-aligns.
-///         Blast_HSPListSortByEvalue(hsp_list);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1802-1803
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-150
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 /// The subjects reach the hit list in oid order, each with its HSPs in score order (the
 /// state after linking). A query with more subjects than the hit list size sorts every list
 /// by e-value when the list fills (`Blast_HitListUpdate`), so the comparison of its subjects
@@ -2006,73 +1618,11 @@ pub(crate) fn final_hit_order(
 /// pipe after the traceback (`hsp_culling.rs`). `query_lengths` are the queries'
 /// nucleotide lengths (the lengths of their frames are the culling trees' ranges).
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1341
-/// ```c
-///     if (s <= 0) {
-///         return;
-///     }
-/// ...
-///     if (m_HitSaveOpts->hsp_filt_opt->culling_opts == NULL) {
-///         BlastHSPCullingOptions* culling = BlastHSPCullingOptionsNew(s);
-///         BlastHSPFilteringOptions_AddCulling(m_HitSaveOpts->hsp_filt_opt,
-///                                             &culling,
-///                                             eBoth);
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:330-341
-/// ```c
-///         else if (filt_opts->culling_opts &&
-///                  (filt_opts->culling_stage & ePrelimSearch))
-///         {
-///             BlastHSPCullingParams* params =
-///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
-///                      filt_opts->culling_opts,
-///                      opts_memento->m_ExtnOpts->compositionBasedStats,
-///                      opts_memento->m_ScoringOpts->gapped_calculation);
-///             if(params->culling_max > 1){
-///             	params->culling_max += 3;
-///             }
-///             writer_info = BlastHSPCullingInfoNew(params);
-///         }
-/// ```
-/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:386-394
-/// ```c
-///         } else if (filt_opts->culling_opts &&
-///                    (filt_opts->culling_stage & eTracebackSearch)) {
-///             BlastHSPCullingParams* params =
-///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
-///                      filt_opts->culling_opts,
-///                      opts_memento->m_ExtnOpts->compositionBasedStats,
-///                      opts_memento->m_ScoringOpts->gapped_calculation);
-///             BlastHSPPipeInfo_Add(&pipe_info,
-///                                  BlastHSPCullingPipeInfoNew(params));
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-730
-/// ```c
-///    s_BlastHSPCullingInit(data, results);
-///    for (qid = 0; qid < results->num_queries; ++qid) {
-///          if (!(results->hitlist_array[qid])) continue;
-///          num_list = results->hitlist_array[qid]->hsplist_count;
-///          for (sid = 0; sid < num_list; ++sid) {
-///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
-///         	 Blast_HSPListSortByEvalue(hsp_list);
-///         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
-///          }
-///          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
-///    }
-///
-///    for (qid = 0; qid < results->num_queries; ++qid) {
-/// ...
-///       for (sid = 0; sid < num_list; ++sid) {
-///          s_BlastHSPCullingRun(data,
-///                    results->hitlist_array[qid]->hsplist_array[sid]);
-/// ...
-///    s_BlastHSPCullingFinal(data, results);
-/// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1720-1721
-/// ```c
-///         /* post-traceback pipes */
-///         BlastHSPStreamTBackClose(hsp_stream, results);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1341
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:330-341
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:386-394
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-730
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1720-1721
 /// The culling writer replaces the preliminary hit list (the collector): each subject's
 /// HSPs (after the `-evalue` reap, in score order) go into the trees, subject by subject
 /// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
@@ -2149,10 +1699,11 @@ pub(crate) fn culled_hit_order(
             };
             list.update_best_evalue();
             trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
+            filters.subject_besthit(&mut list.hsps);
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (cited at
         // `DbStatistics::sorts_results`)
         if sorts_results {
             final_lists.sort_by_evalue();
@@ -2167,599 +1718,5 @@ pub(crate) fn culled_hit_order(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::common::Hit;
-
-    fn hsp(q_idx: u32, s_idx: u32, raw_score: i32, e_value: f64, offset: usize) -> TblastxHsp {
-        TblastxHsp {
-            hit: Hit {
-                identity: 0.0,
-                length: 10,
-                mismatch: 0,
-                gapopen: 0,
-                q_start: 1,
-                q_end: 30,
-                s_start: 1,
-                s_end: 30,
-                e_value,
-                bit_score: raw_score as f64 / 2.0,
-                num_ident: 0,
-                query_frame: 1,
-                query_length: 0,
-                q_idx,
-                s_idx,
-                raw_score,
-                sort_query_offset: offset,
-                sort_query_end: offset + 10,
-                sort_subject_offset: offset,
-                sort_subject_end: offset + 10,
-                has_sort_offsets: true,
-                gap_info: None,
-                num_positives: 0,
-            },
-            subject_frame: 1,
-            num: 1,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (quoted at
-    // `seqalign_identities`): each row keeps its HSP's Seq-align `num_ident`, the engine's
-    // identities that the HSP holds before `set_displayed_identities` replaces them, while
-    // `hit.num_ident` is the count of the displayed rows (here 10 of 10 equal residues).
-    #[test]
-    fn rows_keep_the_seqalign_identities_of_their_hsps() {
-        let code = GeneticCode::from_id(1);
-        let letters = b"ATGGCTAAACTGGAAGGTCCATTTAGCCGA";
-        let queries = [FastaRecord::new("q", b"q", letters)];
-        let subjects = [FastaRecord::new("s", b"s", letters)];
-        let mut hits = [hsp(0, 0, 50, 1e-5, 0), hsp(0, 0, 40, 1e-4, 0)];
-        (hits[0].hit.num_ident, hits[1].hit.num_ident) = (7, 9);
-        let identities = seqalign_identities(&hits);
-        assert_eq!(identities, [7, 9]);
-        let placements = Placements::default();
-        let rows = pairwise_hits(
-            &hits,
-            Some(&identities),
-            &queries,
-            &subjects,
-            SubjectLetters::Records(&subjects),
-            &[TblastxQueryStats::default()],
-            &code,
-            &code,
-            &placements,
-            &placements,
-        );
-        let counts: Vec<(usize, usize)> = rows
-            .iter()
-            .map(|row| (row.hit.num_ident, row.seqalign_num_ident))
-            .collect();
-        assert_eq!(counts, [(10, 7), (10, 9)]);
-    }
-
-    // NCBI c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112: the display reads the
-    // IUPAC letters of both cases, U as T and X as N; another byte is a gap.
-    #[test]
-    fn display_bases_follow_the_translation_table() {
-        assert_eq!(display_base(b'a'), 1);
-        assert_eq!(display_base(b'T'), 8);
-        assert_eq!(display_base(b'u'), 8);
-        assert_eq!(display_base(b'X'), 15);
-        assert_eq!(display_base(b'n'), 15);
-        assert_eq!(display_base(b'R'), 5);
-        assert_eq!(display_base(b'*'), 0);
-    }
-
-    // The display table (graduated `LOSAT_X_DISPTABLE`) holds the scan's answers: each byte's code
-    // on both strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
-    #[test]
-    fn display_table_gives_the_residues_of_the_scan() {
-        let reversed = |mask: u8| {
-            ((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3)
-        };
-        for byte in 0..=255u8 {
-            assert_eq!(DISPLAY_BASE_PLUS[byte as usize], display_base(byte));
-            assert_eq!(
-                DISPLAY_BASE_MINUS[byte as usize],
-                reversed(display_base(byte))
-            );
-        }
-        let letters = b"ACGTUNXRYMKSWBDHVacgtunxry-*";
-        let mut state = 0x9e37_79b9_7f4a_7c15u64;
-        let sequence: Vec<u8> = (0..61)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                letters[(state % letters.len() as u64) as usize]
-            })
-            .collect();
-        let mut codes = 0;
-        for id in 0..=255u8 {
-            let Ok(code) = GeneticCode::try_from_id(id) else {
-                continue;
-            };
-            codes += 1;
-            let table = display_table(&code);
-            for (codon, &residue) in table.iter().enumerate() {
-                let masks = [
-                    (codon >> 8) as u8,
-                    ((codon >> 4) & 15) as u8,
-                    (codon & 15) as u8,
-                ];
-                assert_eq!(residue, display_codon(masks, &code));
-            }
-            let display = DisplayCode { table };
-            for frame in [1i8, 2, 3, -1, -2, -3] {
-                for offset in 0..(sequence.len() + 1 - frame.unsigned_abs() as usize) / 3 {
-                    assert_eq!(
-                        display.residue(&sequence, frame, offset),
-                        display_residue_scan(&sequence, frame, offset, &code),
-                        "code {id} frame {frame} offset {offset}"
-                    );
-                }
-            }
-        }
-        assert!(codes > 20);
-    }
-
-    // NCBI c++/src/objects/seqfeat/Genetic_code_table.cpp:191-207 merges D/N to B, E/Q
-    // to Z and I/L to J; the minus strand is the IUPAC complement in reverse.
-    #[test]
-    fn displayed_residues_merge_ambiguous_codons_on_both_strands() {
-        let code = GeneticCode::from_id(1);
-        assert_eq!(display_residue(b"GCN", 1, 0, &code), b'A');
-        assert_eq!(display_residue(b"RAY", 1, 0, &code), b'B');
-        assert_eq!(display_residue(b"SAR", 1, 0, &code), b'Z');
-        assert_eq!(display_residue(b"MTA", 1, 0, &code), b'J');
-        assert_eq!(display_residue(b"NNN", 1, 0, &code), b'X');
-        assert_eq!(display_residue(b"TAR", 1, 0, &code), b'*');
-        // Frame -1 of ATG reads CAT; frame +2 of AATGC reads ATG.
-        assert_eq!(display_residue(b"ATG", -1, 0, &code), b'H');
-        assert_eq!(display_residue(b"AATGC", 2, 0, &code), b'M');
-        // The complement of RTY is RAY.
-        assert_eq!(display_residue(b"RTY", -1, 0, &code), b'B');
-    }
-
-    // NCBI c++/src/objtools/align_format/tabular.cpp:1003-1021 and showalign.cpp:2131-2150:
-    // equal letters are identities (X/X too); B/D is positive, J/I is not (J is not in the
-    // display matrix).
-    #[test]
-    fn row_counts_use_the_displayed_letters() {
-        assert_eq!(row_counts(Blosum62Score, b"XAB*J", b"XADKI"), (2, 3));
-    }
-
-    // The identities pass counts without the rows: the counts of a residue-by-residue loop
-    // over `display_residue` (the query with code 1, the subject with code 4), on every frame
-    // pair, for HSPs at the start, inside and at the end of the subject's frame, for a record and
-    // a stored subject with ambiguous bases; and the same as `row_counts` of the rows.
-    #[test]
-    fn displayed_counts_equal_the_counts_of_the_rows() {
-        let (query_code, db_code) = (GeneticCode::from_id(1), GeneticCode::from_id(4));
-        let subject: Vec<u8> = (0..120u32)
-            .map(|i| b"ACGTACGTRYNACGT"[(i * 7 + i / 5) as usize % 15])
-            .collect();
-        let query: Vec<u8> = (0..120u32)
-            .map(|i| b"ACGTACGTN"[(i * 11 + i / 4) as usize % 9])
-            .collect();
-        let records = [FastaRecord::new("s", b"s", &subject)];
-        let stores = [PackedNucleotide::from_subject_letters(&subject).expect("letters")];
-        let ordinals = [0u32];
-        let forms = [
-            SubjectLetters::Records(&records),
-            SubjectLetters::Stored {
-                stores: &stores,
-                ordinals: &ordinals,
-            },
-        ];
-        let frame_length = |frame: i8| (120 - usize::from(frame.unsigned_abs()) + 1) / 3;
-        let mut window = Vec::new();
-        let (mut mismatched, mut positive) = (0, 0);
-        for subjects in forms {
-            for query_frame in [1i8, 2, 3, -1, -2, -3] {
-                for subject_frame in [1i8, 2, 3, -1, -2, -3] {
-                    let last = frame_length(subject_frame) - 10;
-                    for (query_offset, subject_offset) in [(0, 0), (3, 7), (25, last)] {
-                        let mut hsp = hsp(0, 0, 10, 1.0, 0);
-                        hsp.hit.query_frame = query_frame as i32;
-                        hsp.hit.sort_query_offset = query_offset;
-                        hsp.hit.sort_query_end = query_offset + 10;
-                        hsp.hit.sort_subject_offset = subject_offset;
-                        hsp.hit.sort_subject_end = subject_offset + 10;
-                        hsp.subject_frame = subject_frame;
-                        let mut expected = (0, 0);
-                        for i in 0..10 {
-                            let q =
-                                display_residue(&query, query_frame, query_offset + i, &query_code);
-                            let s = display_residue(
-                                &subject,
-                                subject_frame,
-                                subject_offset + i,
-                                &db_code,
-                            );
-                            if q == s {
-                                expected.0 += 1;
-                                expected.1 += 1;
-                            } else if protein_display_score(ScoringMatrix::Blosum62, q, s) > 0 {
-                                expected.1 += 1;
-                            }
-                        }
-                        let counts = subjects.counts(
-                            &hsp,
-                            &query,
-                            &query_code,
-                            &db_code,
-                            &mut window,
-                            Blosum62Score,
-                        );
-                        assert_eq!(
-                            counts, expected,
-                            "frames {query_frame} {subject_frame} at {subject_offset}"
-                        );
-                        let (query_row, subject_row) =
-                            subjects.rows(&hsp, &query, &query_code, &db_code, &mut window);
-                        assert_eq!(
-                            row_counts(Blosum62Score, &query_row, &subject_row),
-                            expected
-                        );
-                        mismatched += usize::from(expected.0 < 10);
-                        positive += usize::from(expected.1 > expected.0);
-                    }
-                }
-            }
-        }
-        // Not all identities, and some positives that are not identities.
-        assert!(mismatched > 0 && positive > 0, "{mismatched} {positive}");
-    }
-
-    // The rows are ASCII letters (uppercase and the lowercase of the masks): the String keeps
-    // the row; any other byte gives the text of `from_utf8_lossy`.
-    #[test]
-    fn row_strings_are_the_lossy_text_of_the_rows() {
-        for row in [&b"ARNDxyz*-"[..], b"", &[b'A', 0xff, b'C', 0xc3]] {
-            assert_eq!(
-                row_string(row.to_vec()),
-                String::from_utf8_lossy(row).into_owned()
-            );
-        }
-        let row = b"MKV".to_vec();
-        let pointer = row.as_ptr();
-        let text = row_string(row);
-        assert_eq!(text.as_ptr(), pointer);
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_filter.c:925-931: a minus-frame run starts one
-    // codon too high, so its last residue is not masked.
-    #[test]
-    fn query_masks_convert_with_ncbis_frame_formulas() {
-        let stats = TblastxQueryStats {
-            seg_masks: vec![(1, vec![(2, 5)]), (-1, vec![(2, 5)])],
-            ..TblastxQueryStats::default()
-        };
-        // A 30-nt query: frame lengths 10, 9, 9, so the DNA length is 30.
-        let masks = query_dna_masks(&stats, 30);
-        assert_eq!(masks[0], (1, vec![(6, 12)]));
-        assert_eq!(masks[1], (-1, vec![(18, 23)]));
-        let masks: Vec<FrameMasks> = shown_query_masks(masks, 30, 0)
-            .into_iter()
-            .map(|(frame, ranges)| FrameMasks::new(frame, ranges))
-            .collect();
-        let mut plus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut plus, 1, 0, 29, &masks);
-        assert_eq!(&plus, b"AAaaaAAAAA");
-        // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
-        // residues 2 and 3 only.
-        let mut minus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut minus, -1, 0, 29, &masks);
-        assert_eq!(&minus, b"AAaaAAAAAA");
-    }
-
-    // The scan of all the ranges of a frame, which every row made before `LOSAT_X_TBXMASKSEEK`
-    // graduated: the reference of `mask_seek_lowercases_the_letters_of_the_full_scan`.
-    fn lowercase_query_row_full_scan(
-        row: &mut [u8],
-        frame: i8,
-        low: i32,
-        high: i32,
-        masks: &[FrameMasks],
-    ) {
-        let columns = row.len() as i32;
-        let column = |nt: i32| -> i32 {
-            let column = if frame > 0 {
-                if nt < low {
-                    0
-                } else if nt > high {
-                    columns - 1
-                } else {
-                    (nt - low) / 3
-                }
-            } else if nt > high {
-                0
-            } else if nt < low {
-                columns - 1
-            } else {
-                columns - 1 - (nt - low) / 3
-            };
-            column.clamp(0, columns - 1)
-        };
-        for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-            for &(from, to) in &frame_masks.ranges {
-                if to < low || from > high {
-                    continue;
-                }
-                let (first, last) = if frame > 0 {
-                    (column(from), column(to))
-                } else {
-                    (column(to), column(from))
-                };
-                for residue in &mut row[first as usize..=last as usize] {
-                    *residue = residue.to_ascii_lowercase();
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn mask_seek_lowercases_the_letters_of_the_full_scan() {
-        // Ranges in any order, overlapping, empty (start after end) or outside the row, on rows
-        // of both frame signs.
-        let mut state = 0x2545_f491_4f6c_dd1du64;
-        let mut next = |bound: i32| -> i32 {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            (state % bound as u64) as i32
-        };
-        for _ in 0..2000 {
-            let ranges: Vec<(i32, i32)> = (0..next(9))
-                .map(|_| {
-                    let from = next(70) - 5;
-                    (from, from + next(16) - 3)
-                })
-                .collect();
-            let masks = [
-                FrameMasks::new(1, ranges.clone()),
-                FrameMasks::new(-1, ranges),
-            ];
-            let low = next(55);
-            let high = low + 2 + next(58 - low);
-            for frame in [1, -1] {
-                let mut full = vec![b'A'; ((high - low + 1) / 3) as usize];
-                let mut seek = full.clone();
-                lowercase_query_row_full_scan(&mut full, frame, low, high, &masks);
-                lowercase_query_row(&mut seek, frame, low, high, &masks);
-                assert_eq!(seek, full, "frame {frame} low {low} high {high}");
-            }
-        }
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins
-    // only intervals that overlap (adjacent ones stay apart), per frame, before the conversion
-    // to nucleotides; the XML writer reads that list (blast_aux.cpp:930-959), in context order,
-    // each mask with its context's frame, moved into the record by the interval's start.
-    #[test]
-    fn xml_masks_join_overlapping_intervals_only_and_keep_the_frames() {
-        let stats = TblastxQueryStats {
-            // Frame 1: residues 2-4 and 5-7 (adjacent, apart), frame 2: 2-6 and 4-7 (joined),
-            // frame -1: one run.
-            seg_masks: vec![
-                (1, vec![(5, 8), (2, 5)]),
-                (2, vec![(2, 7), (4, 8)]),
-                (-1, vec![(2, 5)]),
-            ],
-            ..TblastxQueryStats::default()
-        };
-        let mut out = Vec::new();
-        xml_query_masks(&stats, 30, 0, &mut out);
-        let got: Vec<(i32, i32, i32)> = out.iter().map(|m| (m.from, m.to, m.frame)).collect();
-        assert_eq!(got, vec![(6, 12, 1), (15, 21, 1), (7, 22, 2), (18, 23, -1)]);
-        // `-query_loc`: moved by the interval's start, buffer cleared first.
-        xml_query_masks(&stats, 30, 100, &mut out);
-        assert_eq!(out.len(), 4);
-        assert_eq!((out[0].from, out[0].to), (106, 112));
-        // No SEG masks, no masks.
-        xml_query_masks(&TblastxQueryStats::default(), 30, 0, &mut out);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings() {
-        assert_eq!(output_format("5"), TblastxOutputFormat::Xml);
-        // The XML2 and JSON documents of 16 and 15 take the path of outfmt 5 (`is_structured_xml`).
-        use crate::report::blast_xml2::Xml2Kind;
-        assert_eq!(
-            output_format(" 16 std"),
-            TblastxOutputFormat::Xml2(Xml2Kind::Single16)
-        );
-        assert_eq!(
-            output_format("15"),
-            TblastxOutputFormat::Xml2(Xml2Kind::Single15)
-        );
-        for (outfmt, structured) in [
-            ("5", true),
-            ("13", true),
-            ("14", true),
-            ("15", true),
-            ("16", true),
-            ("0", false),
-            ("6", false),
-            ("7", false),
-            ("8", false),
-            ("9", false),
-            ("12", false),
-        ] {
-            assert_eq!(
-                output_format(outfmt).is_structured_xml(),
-                structured,
-                "{outfmt}"
-            );
-        }
-        for (outfmt, counts) in [
-            ("0", true),
-            ("5", false),
-            ("6", true),
-            ("7", true),
-            ("8", false),
-            ("9", false),
-            ("12", false),
-            ("15", false),
-            ("16", false),
-        ] {
-            let format = output_format(outfmt);
-            assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
-        }
-        // The custom tabular reports make their own rows.
-        for outfmt in ["6 qseqid", "10", "20 std"] {
-            let format = output_format(outfmt);
-            assert!(!format.reads_displayed_counts(), "{outfmt}");
-            assert!(format.is_tabular(), "{outfmt}");
-        }
-        // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
-        // messages (not the archive, XML2 and JSON; the Seq-annots only with
-        // `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID P3, which the test process may have set).
-        let seq_annots =
-            |number| crate::algorithm::common::database::seq_annots_prefetch(Some(number));
-        for (outfmt, prefetches) in [
-            ("0", true),
-            ("5", true),
-            ("6", true),
-            ("7 qseqid", true),
-            ("10", true),
-            ("20 qseqid", true),
-            ("8", seq_annots(8)),
-            ("9", seq_annots(9)),
-            ("11", false),
-            ("12", seq_annots(12)),
-            ("13", false),
-            ("15", false),
-            ("16", false),
-        ] {
-            assert_eq!(
-                output_format(outfmt).prefetches_subjects(),
-                prefetches,
-                "{outfmt}"
-            );
-        }
-    }
-
-    // NCBI c++/src/algo/blast/api/blast_aux.cpp:825-842 (`Map`): with `-query_loc` a mask
-    // moves by the interval's start and is cut at its end; one that covers the whole
-    // interval, or starts past it, is not shown.
-    #[test]
-    fn shown_query_masks_follow_ncbis_map() {
-        let masks = vec![(2, vec![(0, 9), (3, 20), (0, 29), (31, 40), (5, 4)])];
-        assert_eq!(
-            shown_query_masks(masks, 30, 100),
-            vec![(2, vec![(100, 109), (103, 120)])]
-        );
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_hits.c:3243-3299 (Blast_HitListUpdate) and
-    // 3078-3107 (s_EvalueCompareHSPLists): equal best e-values are ordered by the score of
-    // the first HSP, which is the highest score until the hit list overflows and its lists
-    // are sorted by e-value.
-    #[test]
-    fn hit_list_keeps_ncbis_subjects_on_ties() {
-        let hits = vec![
-            hsp(0, 0, 120, 1e-3, 0),
-            hsp(0, 0, 100, 1e-5, 20),
-            hsp(0, 1, 110, 1e-5, 0),
-        ];
-        let order = |size| -> Vec<(u32, i32)> {
-            final_hit_order(hits.clone(), size, &HitFilters::default())
-                .iter()
-                .map(|hsp| (hsp.hit.s_idx, hsp.hit.raw_score))
-                .collect()
-        };
-        // Not full: subject 0 compares with its highest score (120 > 110).
-        assert_eq!(order(2), vec![(0, 100), (0, 120), (1, 110)]);
-        // Full at 1: the lists are sorted by e-value (100 < 110), so subject 1 is kept.
-        assert_eq!(order(1), vec![(1, 110)]);
-    }
-
-    #[test]
-    fn outfmt7_headers_follow_print_header() {
-        let header = |hits| {
-            let mut out = Vec::new();
-            write_outfmt7_query_header(&mut out, b"q1 title", "db", hits).unwrap();
-            String::from_utf8(out).unwrap()
-        };
-        assert_eq!(
-            header(None),
-            "# TBLASTX 2.17.0+\n# Query: q1 title\n# Database: db\n"
-        );
-        assert!(header(Some(0)).ends_with("# Database: db\n# 0 hits found\n"));
-        assert!(header(Some(2)).contains("# Fields: query acc.ver, subject acc.ver"));
-        assert!(header(Some(2)).ends_with("# 2 hits found\n"));
-    }
-
-    #[test]
-    fn output_formats_are_read_after_trimming() {
-        assert_eq!(
-            output_format(" 0"),
-            TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-        );
-        assert_eq!(output_format("6"), TblastxOutputFormat::Tabular);
-        assert_eq!(
-            output_format("7 "),
-            TblastxOutputFormat::TabularWithComments
-        );
-    }
-
-    // Outfmt 1 to 4 are the pairwise report's query-anchored views (line RG T3c); a value that
-    // TBLASTX does not write is never read as a table.
-    #[test]
-    fn the_query_anchored_formats_are_pairwise_views_and_others_unsupported() {
-        use crate::report::pairwise::PairwiseView;
-        for (outfmt, identity, anchored) in [
-            ("1", true, true),
-            ("2", false, true),
-            ("3", true, false),
-            (" 4 qseqid", false, false),
-        ] {
-            assert_eq!(
-                output_format(outfmt),
-                TblastxOutputFormat::Pairwise(PairwiseView::QueryAnchored { identity, anchored }),
-                "{outfmt}"
-            );
-        }
-        assert_eq!(output_format("17"), TblastxOutputFormat::Unsupported);
-        assert_eq!(output_format("99"), TblastxOutputFormat::Unsupported);
-    }
-
-    // NCBI blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
-    // default 6 and 7 (the `std` fields with a tab) keep `write_tabular` and the report pool.
-    #[test]
-    fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
-        use crate::report::tabular::TabularKind;
-        for (outfmt, format) in [
-            ("6", TblastxOutputFormat::Tabular),
-            ("6 std", TblastxOutputFormat::Tabular),
-            (" 7 std ", TblastxOutputFormat::TabularWithComments),
-            ("6 -qseqid", TblastxOutputFormat::Tabular),
-            ("6 delim=", TblastxOutputFormat::Tabular),
-            (
-                "0 qseqid",
-                TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
-            ),
-            ("11 qseqid", TblastxOutputFormat::Archive),
-        ] {
-            assert_eq!(output_format(outfmt), format, "{outfmt}");
-        }
-        for (outfmt, kind, delimiter) in [
-            ("6 qseqid", TabularKind::Tabular, "\t"),
-            ("6 delim=, std", TabularKind::Tabular, ","),
-            ("7 qaccver foo", TabularKind::Commented, "\t"),
-            ("10", TabularKind::Csv, ","),
-            ("10 delim=; std", TabularKind::Csv, ";"),
-            ("20 qseqid", TabularKind::CsvWithHeader, ","),
-        ] {
-            match output_format(outfmt) {
-                TblastxOutputFormat::CustomTabular(spec) => {
-                    assert_eq!((spec.kind, spec.delimiter.as_str()), (kind, delimiter))
-                }
-                other => panic!("{outfmt}: {other:?}"),
-            }
-        }
-    }
-}
+#[path = "report_tests.rs"]
+mod tests;

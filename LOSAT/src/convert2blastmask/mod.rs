@@ -18,31 +18,12 @@ use crate::ncbi_app::Tool;
 const PROGRAM: &str = "CONVERT2BLASTMASK";
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:141-145
-// ```c++
-// const char * const CConvert2BlastMaskApplication::USAGE_LINE
-//     = "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb";
-//
-// void CConvert2BlastMaskApplication::Init(void) {
-//     HideStdArgs(fHideLogfile | fHideConffile | fHideFullVersion | fHideXmlHelp | fHideDryRun);
-// ```
 /// The text of `convert2blastmask -help` (NCBI 2.17.0's, frozen): `-logfile`, `-conffile`,
 /// `-version-full`, `-xmlhelp` and `-dryrun` are hidden. Its part before `REQUIRED ARGUMENTS`
 /// is the usage that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:111-120
-// ```c++
-//     CConvert2BlastMaskApplication() {
-//         CRef<CVersion> version(new CVersion());
-//         version->SetVersionInfo(new CBlastVersion());
-//         SetFullVersion(version);
-//         m_StopWatch.Start();
-//         if (m_UsageReport.IsEnabled()) {
-//         	m_UsageReport.AddParam(CBlastUsageReport::eVersion, GetVersion().Print());
-//         	m_UsageReport.AddParam(CBlastUsageReport::eProgram, (string) "convert2blastmask");
-//         }
-//     }
-// ```
 /// convert2blastmask as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's
 /// usage report (`ncbi_environment`), the arguments of its XML
 /// (`ncbi_xmlhelp/convert2blastmask.xml`) and no prefix on its diagnostics.
@@ -52,16 +33,10 @@ static TOOL: Tool = Tool {
     version: crate::NCBI_BLAST_VERSION,
     help: HELP,
     post_prefix: None,
+    components: &[],
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
-// ```c++
-// int main(int argc, const char* argv[])
-// {
-//     // Execute main application function
-//     return CConvert2BlastMaskApplication().AppMain(argc, argv);
-// }
-// ```
 /// Runs `convert2blastmask` with `words` (the command line after `losat convert2blastmask`),
 /// after its application start `start`, on the process's standard streams; the exit status.
 pub(crate) fn run(

@@ -96,7 +96,7 @@ LOSAT：最初の batch の後の、100 残基未満の無効な query の連な
 | `-evalue`・`-perc_identity` の 10 進数でない書き方（NCBI の `0x10`、`0x1p-3`、`1e` など） | `expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's BLASTN)`（引数）。NCBI が引数の誤りにする書き方（`inf`、` 1`）は、LOSAT も引数の誤り（`expected a number`）にする |
 | 出力形式 0・6・7 以外（NCBI が受け付ける 1〜5・8〜21）と、表形式の独自の指定（欄や `delim=`） | `output format N is not supported by LOSAT's BLASTN`、`the custom output format specification … is not supported by LOSAT's BLASTN` |
 | `-query -` と `-subject -` の組、またはパイプからの空の query（NCBI は位置の無いストリームを空と見なさない） | 上の「位置の無いストリーム」の文言 |
-| 予備の hit list の大きさが負になる `-max_target_seqs`（NCBI は落ちる。「Query is Empty!」の後） | `… whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN` |
+| 予備の hit list の大きさが負になる `-max_target_seqs`（NCBI は落ちる。「Query is Empty!」の後） | 線 O1c で拒否をやめた: 大きさを 64 bit で計算し、NCBI の 1073741798 と同じく全 hit を残す（PD-LOSAT-NCBI-DEFECTS の例外 19） |
 | Rayon の上限（65535）を超える `-num_threads`（NCBI は CPU の数に減らす） | `… exceeds Rayon maximum 65535, which is not supported by LOSAT` |
 | システムが起動できない数の `-num_threads`（NCBI は CPU の数に減らす） | `failed to build blastn pool with N threads; a thread count that the system cannot start is not supported by LOSAT` |
 | NCBI の blastn の他の task（`blastn-short`・`dc-megablast`・`rmblastn`。`blast_options_handle.cpp:211-222`、`blastn_args.cpp:57-59`）と、LOSAT に無い NCBI の blastn のオプション（2.17.0 の `-help` の 53 個：`-db`、`-strand`、`-ungapped`、`-xdrop_gap`、`-num_alignments`、`-h`、`-version` など。`cli.rs` の `is_unported_blastn_arg`） | `the task … is not supported by LOSAT's BLASTN`、`the NCBI BLAST+ option -… is not supported by LOSAT's BLASTN`（引数。第 6 回の監査。以前は理由の無い引数の誤りだった） |

@@ -376,16 +376,6 @@ fn an_oid_past_the_volumes_is_not_found_by_the_locator() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3394-3401
-// ```c++
-// int CSeqDBVol::GetColumnId(const string   & title,
-//                            CSeqDBLockHold & locked)
-// {
-//     //m_Atlas.Lock(locked);
-//
-//     if (! m_HaveColumns) {
-//         x_OpenAllColumns(locked);
-//     }
-// ```
 /// The columns are opened by their readers only (`x_OpenAllColumns`), never when the database
 /// is opened or its sequences and headers are read, as a search reads them: a column whose index
 /// is not a column index changes nothing until the masks are asked for (line SW, SW8 follow-up 2;
@@ -1419,10 +1409,12 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
 /// have a blob of 8 bytes and the others none.
 fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
     let base = dir.name("edge");
-    let mut column = crate::writedb::mask_data::column::Column::new(
+    let mut column = crate::writedb::column::Column::new(
         &base,
         false,
         0,
+        0,
+        super::column::MASK_DATA_TITLE,
         &Default::default(),
         b"Fri Nov 14 12:00:00 2026",
         0,

@@ -2,12 +2,13 @@
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
 import { RunOutputWriter, sha256Hex, toProgramDescription } from 'losat';
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, recordMismatch, type ProgramId } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, recordMismatch, type ProgramId, type RunOutput } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   HITS_STREAM,
   InputMismatchError,
   RunCancelledError,
+  withRunOutputFailed,
   type EngineGateway,
   type EnginePhase,
   type EngineRunRequest,
@@ -51,10 +52,12 @@ export class FakeEngine implements EngineGateway {
 
   /**
    * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
-   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list).
+   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list), no
+   * inputs read together (a run of `-parse_deflines` reads its records as one without it), and no help
+   * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
   }
 
   /**
@@ -75,10 +78,11 @@ export class FakeEngine implements EngineGateway {
       }
       const [flag, value] = word.split(/=(.*)/s, 2);
       const option = parameters.find((p) => p.flag === flag);
-      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax` };
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help to list the options\n` };
       if (option.takesValue && value === undefined) i++;
     }
-    return { ok: true };
+    // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
+    return { ok: true, dataLoaders: true };
   }
 
   async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
@@ -90,7 +94,17 @@ export class FakeEngine implements EngineGateway {
       if (phase === 'preparing') this.register(request);
     }
     if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
-      throw new Error('No sequence input was provided');
+      // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
+      // then `fail`; line WQA's sweep, D3, 2026-11-19), and the output that the CLI leaves before its error, the
+      // argv's own, with the others dropped (line WQA's sweep, D15, 2026-11-20): here marked lines.
+      const writer = new RunOutputWriter(output);
+      const encoder = new TextEncoder();
+      const own = ownOutput(request.argv);
+      writer.write(own, encoder.encode(`# ${FAKE_MARKER}\n`));
+      for (const format of OUTPUT_FORMATS) if (format !== own) writer.discard(format, 'run');
+      writer.write(DIAGNOSTICS_STREAM, encoder.encode(`Warning: ${FAKE_MARKER}\n`));
+      writer.fail();
+      throw withRunOutputFailed(new Error('No sequence input was provided'));
     }
     // The counts file is accepted and recorded, not used: the fake searches nothing.
     const counts = request.windowMasker;
@@ -101,7 +115,8 @@ export class FakeEngine implements EngineGateway {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', ...(windowMasker === undefined ? {} : { windowMasker }) };
+    // Its warning goes to the diagnostics (stream 3), as without -logfile.
+    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', messages: 'diagnostics', ...(windowMasker === undefined ? {} : { windowMasker }) };
   }
 
   cancel(runId: string): void {
@@ -208,6 +223,14 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/** The output that the CLI's run of the argv writes: the argv's own -outfmt output, else the format of its number (0 without one). */
+function ownOutput(argv: readonly string[]): RunOutput {
+  if (customOutfmt(argv) !== undefined) return CUSTOM_OUTPUT;
+  const value = outfmtOption(argv)?.value.trim();
+  const number = value === undefined ? 0 : Number(value.split(/\s+/)[0]);
+  return number === 6 || number === 7 ? number : 0;
 }
 
 /** The program of a run: the first word of its argv. */

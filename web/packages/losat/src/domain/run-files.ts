@@ -19,6 +19,46 @@ export interface RunFile {
   readonly bytes: Uint8Array;
 }
 
+/**
+ * What a run prints in place of a search, as the command line does (ABI v2 §5, stream 11; the *start*
+ * field `prints`, §9): its help (`-h`, `-help`, `-help-full`, `--help`, and the XML of `-xmlhelp`), or its
+ * version (`-version`, `-version-full`, `-version-full-xml`, `-version-full-json`). Such a run needs no
+ * inputs and searches nothing. Line WQA's D14, 2026-11-20.
+ */
+export type PrintedKind = 'help' | 'version';
+
+/** Whether `value` is what a run prints (`PrintedKind`). */
+export function isPrintedKind(value: unknown): value is PrintedKind {
+  return value === 'help' || value === 'version';
+}
+
+/**
+ * Where messages of a run are, as the engine says (docs/web/abi_v2.md §5): where the run's messages go (its signal of
+ * stream 10, `RuntimeInfo.messages`), and where the error of an output that the run could not write is (its signal of
+ * stream 9). `diagnostics`, the run's diagnostics (stream 3, the CLI's standard error); `logfile`, the file of the run's
+ * -logfile (stream 8: TBLASTX writes the messages of its run there); `nowhere`, where -logfile names no file (TBLASTX's
+ * `-logfile ""` or `-logfile /dev/null`, which write them nowhere, as the CLI does). Line WQA's sweep, D7, 2026-11-20.
+ */
+export type MessagePlace = 'diagnostics' | 'logfile' | 'nowhere';
+export const MESSAGE_PLACES: readonly MessagePlace[] = Object.freeze(['diagnostics', 'logfile', 'nowhere']);
+
+/**
+ * Where the error of an output that a run could not write is (its signal of stream 9, ABI v2 §5): a place of messages, or
+ * `run`, the error that ended the run, for an output that a run which failed does not keep: the CLI's run of the argv does
+ * not write it (line WQA's sweep, D15, 2026-11-20).
+ */
+export type OutputPlace = MessagePlace | 'run';
+
+/** Whether `value` is the place of the error of an output (`OutputPlace`). */
+export function isOutputPlace(value: unknown): value is OutputPlace {
+  return value === 'run' || isMessagePlace(value);
+}
+
+/** Whether `value` is a place of messages of a run (`MessagePlace`). */
+export function isMessagePlace(value: unknown): value is MessagePlace {
+  return MESSAGE_PLACES.includes(value as MessagePlace);
+}
+
 const LOCAL_HEADER = 0x04034b50;
 const CENTRAL_HEADER = 0x02014b50;
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;

@@ -33,14 +33,6 @@ pub(crate) enum Constraint {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1003
-// ```c++
-// class CArgAllowGeneticCodeInteger : public CArgAllow
-// {
-// protected:
-//      /// Overloaded method from CArgAllow
-//      virtual bool Verify(const string& value) const {
-//          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
-// ```
 /// The genetic codes that `CArgAllowGeneticCodeInteger` allows.
 const GENETIC_CODES: [i32; 26] = [
     1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 33,
@@ -48,21 +40,7 @@ const GENETIC_CODES: [i32; 26] = [
 
 impl Constraint {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1242
-    // ```c++
-    //     if ( m_Constraint ) {
-    //         bool err = false;
-    //         try {
-    //             bool check = m_Constraint->Verify(value);
-    //             if (m_NegateConstraint == CArgDescriptions::eConstraintInvert) {
-    //                 err = check;
-    //             } else {
-    //                 err = !check;
-    //             }
-    //
-    //         } catch (...) {
-    //             err = true;
-    //         }
-    // ```
+    // The reader calls `Verify` inside a `try`: an exception counts as a refused value.
     /// `Verify(value)` of the constraint, on the value's text; an exception that NCBI's `Verify`
     /// throws (a value that its conversion does not read) is a value it does not allow.
     pub(crate) fn verify(self, value: &str) -> bool {
@@ -70,41 +48,15 @@ impl Constraint {
         let blast_double = || crate::ncbi_str::string_to_double(bytes).ok();
         match self {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4605-4609
-            // ```c++
-            // bool CArgAllow_Strings::Verify(const string& value) const
-            // {
-            //     TStrings::const_iterator it = m_Strings.find(value);
-            //     return it != m_Strings.end();
-            // }
-            // ```
+            // A lookup of the value in the set, with case.
             Constraint::Strings(values) | Constraint::StringSet(values) => values.contains(&value),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:111-113
-            // ```c++
-            //     virtual bool Verify(const string& value) const {
-            //         return NStr::StringToDouble(value) >= m_MinValue;
-            //     }
-            // ```
+            // BLAST's bounds read the value with `NStr::StringToDouble` (default flags), then
+            // compare it; a value it does not read throws.
             Constraint::AtLeast(min) => blast_double().is_some_and(|number| number >= min),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:136-138
-            // ```c++
-            //     virtual bool Verify(const string& value) const {
-            //         return NStr::StringToDouble(value) <= m_MaxValue;
-            //     }
-            // ```
             Constraint::AtMost(max) => blast_double().is_some_and(|number| number <= max),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:163-172
-            // ```c++
-            //     virtual bool Verify(const string& value) const {
-            //         double val = NStr::StringToDouble(value);
-            //         bool retval = false;
-            //         if ( !m_Inclusive ) {
-            //             retval = (val > m_MinValue && val < m_MaxValue);
-            //         } else {
-            //             retval = (val >= m_MinValue && val <= m_MaxValue);
-            //         }
-            //         return retval;
-            //     }
-            // ```
             Constraint::Between {
                 min,
                 max,
@@ -117,72 +69,26 @@ impl Constraint {
                 }
             }),
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
-            // ```c++
-            // bool CArgAllow_Doubles::Verify(const string& value) const
-            // {
-            //     double val = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
-            //     ITERATE( set< TInterval >, pi, m_MinMax) {
-            //         if (pi->first <= val && val<= pi->second) {
-            //             return true;
-            //         }
-            //     }
-            //     return false;
-            // }
-            // ```
+            // Read with `fDecimalPosixOrLocal`, then inside the closed interval.
             Constraint::Doubles { min, max } => {
                 crate::ncbi_str::string_to_double_posix_or_local(bytes)
                     .is_ok_and(|number| min <= number && number <= max)
             }
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
-            // ```c++
-            // bool CArgAllow_Int8s::Verify(const string& value) const
-            // {
-            //     Int8 val = s_StringToInt8(value);
-            //     ITERATE( set< TInterval >, pi, m_MinMax) {
-            //         if (pi->first <= val && val<= pi->second) {
-            //             return true;
-            //         }
-            //     }
-            //     return false;
-            // }
-            // ```
+            // Read with `s_StringToInt8`, then inside the closed interval.
             Constraint::Integers { min, max } => {
                 string_to_int8(value).is_ok_and(|number| min <= number && number <= max)
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222, 239
-            // ```c++
-            //     virtual bool Verify(const string& value) const {                        \
-            //         DataType value2check = String2DataTypeFn(value);                    \
-            //         ITERATE(set<DataType>, itr, m_AllowedValues) {                      \
-            //             if (*itr == value2check) {                                      \
-            //                 return true;                                                \
-            //             }                                                               \
-            //         }                                                                   \
-            //         return false;                                                       \
-            //     }                                                                       \
-            // ...
-            // DEFINE_CARGALLOW_SET_CLASS(CArgAllowIntegerSet, int, NStr::StringToInt);
-            // ```
+            // Read with `NStr::StringToInt`, then looked up in the set.
             Constraint::IntegerSet(values) => crate::ncbi_str::string_to_int(bytes, 0)
                 .is_ok_and(|number| values.contains(&number)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1002-1007
-            // ```c++
-            //      virtual bool Verify(const string& value) const {
-            //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
-            //          static const set<int> genetic_codes(gcs, gcs+sizeof(gcs)/sizeof(*gcs));
-            //          const int val = NStr::StringToInt(value);
-            //          return (genetic_codes.find(val) != genetic_codes.end());
-            //      }
-            // ```
+            // Read with `NStr::StringToInt`, then looked up among the genetic codes.
             Constraint::GeneticCode => crate::ncbi_str::string_to_int(bytes, 0)
                 .is_ok_and(|number| GENETIC_CODES.contains(&number)),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:85-88
-            // ```c++
-            //     virtual bool Verify(const string& value) const {
-            //         CFile fname(value);
-            //         return fname.GetName().size() < m_MaxLength;
-            //     }
-            // ```
+            // The length of the file name part of the path, below the maximum.
             Constraint::MaxFileNameLength(max) => {
                 u64::try_from(file_name_length(bytes)).is_ok_and(|length| length < u64::from(max))
             }
@@ -193,58 +99,18 @@ impl Constraint {
     pub(crate) fn usage(self) -> String {
         match self {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4612-4636
-            // ```c++
-            //     string str;
-            //     TStrings::const_iterator it = m_Strings.begin();
-            //     for (;;) {
-            //         str += "`";
-            //         str += *it;
-            //
-            //         ++it;
-            //         if (it == m_Strings.end()) {
-            //             str += "'";
-            //             if ( m_Strings.key_comp()("a", "A") ) {
-            //                 str += "  {case insensitive}";
-            //             }
-            //             break;
-            //         }
-            //         str += "', ";
-            //     }
-            //     return str;
-            // ```
+            // Each value in a backquote and a quote, joined by `, ` (the sets are case-sensitive,
+            // so no `{case insensitive}`).
             Constraint::Strings(values) => values
                 .iter()
                 .map(|value| format!("`{value}'"))
                 .collect::<Vec<_>>()
                 .join(", "),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:116-118
-            // ```c++
-            //     virtual string GetUsage(void) const {
-            //         return ">=" + NStr::DoubleToString(m_MinValue);
-            //     }
-            // ```
             Constraint::AtLeast(min) => format!(">={}", double_to_string(min)),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:141-143
-            // ```c++
-            //     virtual string GetUsage(void) const {
-            //         return "<=" + NStr::DoubleToString(m_MaxValue);
-            //     }
-            // ```
             Constraint::AtMost(max) => format!("<={}", double_to_string(max)),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:175-185
-            // ```c++
-            //     virtual string GetUsage(void) const {
-            //         string retval;
-            //         if ( !m_Inclusive ) {
-            //             retval = "(>" + NStr::DoubleToString(m_MinValue) + " and <"
-            //                 + NStr::DoubleToString(m_MaxValue) + ")";
-            //         } else {
-            //             retval = "(>=" + NStr::DoubleToString(m_MinValue) + " and =<"
-            //                 + NStr::DoubleToString(m_MaxValue) + ")";
-            //         }
-            //         return retval;
-            //     }
-            // ```
             Constraint::Between {
                 min,
                 max,
@@ -258,28 +124,9 @@ impl Constraint {
                 }
             }
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4833-4860
-            // ```c++
-            // string CArgAllow_Doubles::GetUsage(void) const
-            // {
-            //     if (m_MinMax.size() == 1) {
-            //         double x_min = m_MinMax.begin()->first;
-            //         double x_max = m_MinMax.begin()->second;
-            //         if (x_min == x_max) {
-            //             return NStr::DoubleToString(x_min);
-            //         } else if (x_min == kMin_Double && x_max != kMax_Double) {
-            //             return string("less or equal to ") + NStr::DoubleToString(x_max);
-            //         } else if (x_min != kMin_Double && x_max == kMax_Double) {
-            //             return string("greater or equal to ") + NStr::DoubleToString(x_min);
-            //         } else if (x_min == kMin_Double && x_max == kMax_Double) {
-            //             return kEmptyStr;
-            //         }
-            //     }
-            //     string usage;
-            //     ITERATE( set< TInterval >, pi, m_MinMax) {
-            //         ...
-            //             usage += NStr::DoubleToString(pi->first) + ".." + NStr::DoubleToString(pi->second);
-            // ```
-            // `kMin_Double` is `DBL_MIN`, the least positive normal number (ncbi_limits.h:143).
+            // One value, one open end, no end, or `min..max`, each number as `DoubleToString`
+            // writes it. `kMin_Double` is `DBL_MIN`, the least positive normal number
+            // (ncbi_limits.h:143).
             Constraint::Doubles { min, max } => {
                 let (low, high) = (min == f64::MIN_POSITIVE, max == f64::MAX);
                 match (min == max, low, high) {
@@ -295,25 +142,7 @@ impl Constraint {
                 }
             }
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4778-4794
-            // ```c++
-            // string CArgAllow_Integers::GetUsage(void) const
-            // {
-            //     if (m_MinMax.size() == 1) {
-            //         Int8 x_min = m_MinMax.begin()->first;
-            //         Int8 x_max = m_MinMax.begin()->second;
-            //         if (x_min == x_max) {
-            //             return NStr::Int8ToString(x_min);
-            //         } else if (x_min == kMin_Int && x_max != kMax_Int) {
-            //             return string("less or equal to ") + NStr::Int8ToString(x_max);
-            //         } else if (x_min != kMin_Int && x_max == kMax_Int) {
-            //             return string("greater or equal to ") + NStr::Int8ToString(x_min);
-            //         } else if (x_min == kMin_Int && x_max == kMax_Int) {
-            //             return kEmptyStr;
-            //         }
-            //     }
-            //     return CArgAllow_Int8s::GetUsage();;
-            // }
-            // ```
+            // As for `Doubles`, with the ends of `int` as the open ends; else
             // `CArgAllow_Int8s::GetUsage` of one interval that is not at the ends of `Int8`
             // (ncbiargs.cpp:4698-4726): `min..max`.
             Constraint::Integers { min, max } => {
@@ -327,31 +156,12 @@ impl Constraint {
                 }
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:224-231
-            // ```c++
-            //     virtual string GetUsage(void) const {                                   \
-            //         CNcbiOstrstream os;                                                 \
-            //         os << "Permissible values: ";                                       \
-            //         ITERATE(set<DataType>, itr, m_AllowedValues) {                      \
-            //             os << "'" << *itr << "' ";                                      \
-            //         }                                                                   \
-            //         return CNcbiOstrstreamToString(os);                                 \
-            //     }                                                                       \
-            // ```
+            // `Permissible values: ` and each value in quotes, each followed by a space.
             Constraint::StringSet(values) => permissible_values(values.iter()),
             Constraint::IntegerSet(values) => permissible_values(values.iter()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1010-1012
-            // ```c++
-            //      virtual string GetUsage(void) const {
-            //          return "values between: 1-6, 9-16, 21-31, 33";
-            //      }
-            // ```
             Constraint::GeneticCode => "values between: 1-6, 9-16, 21-31, 33".to_string(),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:91-93
-            // ```c++
-            //     virtual string GetUsage(void) const {
-            //         return "file name length < " + NStr::IntToString(m_MaxLength);
-            //     }
-            // ```
             Constraint::MaxFileNameLength(max) => format!("file name length < {max}"),
         }
     }
@@ -374,23 +184,6 @@ fn double_to_string(value: f64) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129
-// ```c++
-// // Allow autodetection among decimal and hex, but NOT octal, in case
-// // anyone's been relying on leading zeros being meaningless.
-// inline
-// Int8 s_StringToInt8(const string& value)
-// {
-//     try {
-//         return NStr::StringToInt8(value);
-//     } catch (const CStringException&) {
-//         if (NStr::StartsWith(value, "0x", NStr::eNocase)) {
-//             return NStr::StringToInt8(value, 0, 16);
-//         } else {
-//             throw;
-//         }
-//     }
-// }
-// ```
 /// `s_StringToInt8(value)`, NCBI's reading of an integer argument (`CArg_Int8`, `CArg_Integer`)
 /// and of `CArgAllow_Integers`: decimal, then, for a value that starts with `0x` or `0X`, base 16,
 /// whose exception is then the one thrown (`0x` alone reads 0).
@@ -410,44 +203,8 @@ pub(crate) fn string_to_int8(value: &str) -> Result<i64, crate::ncbi_exception::
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-312
-// ```c++
-// void CDirEntry::Reset(const string& path)
-// {
-//     m_Path = path;
-//     size_t len = path.length();
-//     // Root dir
-//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
-//         return;
-//     }
-//     // Disk name
-// #  if defined(DISK_SEPARATOR)
-//     if ( (len == 2 || len == 3) && (path[1] == DISK_SEPARATOR) ) {
-//         return;
-//     }
-// #  endif
-//     m_Path = DeleteTrailingPathSeparator(path);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-363
-// ```c++
-// void CDirEntry::SplitPath(const string& path, string* dir,
-//                           string* base, string* ext)
-// {
-//     // Get file name
-//     size_t pos = path.find_last_of(ALL_SEPARATORS);
-//     string filename = (pos == NPOS) ? path : path.substr(pos+1);
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
-// ```c++
-// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
-// {
-//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
-//     if (pos + 1 < path.length()) {
-//         return path.substr(0, pos + 1);
-//     }
-//     return path;
-// }
-// ```
 /// The length of `CFile(path).GetName()`: the text after the last separator once the trailing
 /// directory separators are removed (a path of one separator, or a disk name, keeps them). On Unix
 /// `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on Windows they are `/\`

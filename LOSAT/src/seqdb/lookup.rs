@@ -16,13 +16,6 @@ use super::{SeqDb, SeqDbError, SeqType};
 use crate::seqid::{label, ParsedSeqId};
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2724-2728
-// ```c++
-//     if ((! fits_in_four) && needs_four) {
-//         NCBI_THROW(CSeqDBException,
-//                    eArgErr,
-//                    "ID overflows range of specified type.");
-//     }
-// ```
 /// The exception of a version 4 lookup whose number does not fit 32 bits.
 pub const ID_OVERFLOWS: &str = "ID overflows range of specified type.";
 
@@ -123,46 +116,19 @@ impl IdLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1237-1246
-    // ```c++
-    //     if (m_LMDBSet.IsBlastDBVersion5()) {
-    //     	vector<int>  tmp;
-    //     	m_LMDBSet.AccessionToOids(acc, tmp);
-    //    	    for(unsigned int i=0; i < tmp.size(); i++) {
-    //    	    	int oid2 = tmp[i];
-    //             if (x_CheckOrFindOID(oid2, locked) && (tmp[i] == oid2)) {
-    //             	oids.push_back(tmp[i]);
-    //             }
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
-    // ```c++
-    // void CSeqDBLMDBSet::AccessionToOids(const string & acc, vector<TOid>  & oids)const
-    // {
-    // 	m_LMDBEntrySet[0]->AccessionToOids(acc, oids);
-    // 	vector <TOid> tmp;
-    // 	for(unsigned int i=1; i < m_LMDBEntrySet.size(); i++) {
-    // 		m_LMDBEntrySet[i]->AccessionToOids(acc, tmp);
-    // 		if(!tmp.empty()){
-    // 			oids.insert(oids.end(), tmp.begin(), tmp.end());
-    // 			tmp.clear();
-    // 		}
-    // 	}
-    // }
-    // ```
     /// Every OID of the key `acc` in a version 5 database: the LMDB files in the database's
     /// order, inside a file the order of LMDB's duplicates (`memcmp` of the 4 little-endian
     /// bytes). NCBI sets its OID list up first, so its check keeps the included OIDs.
     pub fn accession_to_oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
-        self.db.set_up_oid_list();
+        self.db.build_oid_list()?;
         let mut oids = Vec::new();
         for entry in &self.entries {
             for oid in entry.oids(acc)? {
-                if let Some(oid) = entry
-                    .database_oid(oid)
-                    .filter(|&oid| self.db.check_oid(oid))
-                {
-                    oids.push(oid);
+                if let Some(oid) = entry.database_oid(oid) {
+                    if self.db.check_oid(oid)? {
+                        oids.push(oid);
+                    }
                 }
             }
         }
@@ -170,26 +136,6 @@ impl IdLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1347-1361
-    // ```c++
-    // void CSeqDBImpl::AccessionsToOids(const vector<string>& accs, vector<blastdb::TOid>& oids)
-    // {
-    //     CHECK_MARKER();
-    //     oids.clear();
-    //     oids.resize(accs.size());
-    //     if (m_LMDBSet.IsBlastDBVersion5()) {
-    //     	m_LMDBSet.AccessionsToOids(accs,oids);
-    //     	CSeqDBLockHold locked(m_Atlas);
-    //     	for(unsigned int i=0; i < oids.size(); i++) {
-    //     		if(oids[i] == kSeqDBEntryNotFound) {
-    //     			continue;
-    //     		}
-    //     		blastdb::TOid oid2 = oids[i];
-    //     		if (!(x_CheckOrFindOID(oid2, locked) && (oids[i] == oid2))) {
-    //     			oids[i] = kSeqDBEntryNotFound;
-    //     		}
-    //     	}
-    //     }
-    // ```
     /// One OID for each of `accs` in a version 5 database (`None`: not found), the first
     /// duplicate of the key in the last LMDB file that has it, kept when NCBI's check keeps it
     /// (`SeqDb::check_oid`: NCBI does not set its OID list up first, so the check of the first
@@ -202,67 +148,17 @@ impl IdLookup<'_> {
     ) -> Result<(), SeqDbError> {
         entries_accessions_to_oids(&self.entries, accs, oids)?;
         for slot in oids.iter_mut() {
-            if slot.is_some_and(|oid| !self.db.check_oid(oid)) {
-                *slot = None;
+            if let Some(oid) = *slot {
+                if !self.db.check_oid(oid)? {
+                    *slot = None;
+                }
             }
         }
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1247-1275
-    // ```c++
-    //     else {
-    //         vector<int> vol_oids;
-    //
-    //         for(int vol_idx = 0; vol_idx < m_VolSet.GetNumVols(); vol_idx++) {
-    //             // Append any additional OIDs from this volume's indices.
-    //             m_VolSet.GetVol(vol_idx)->AccessionToOids(acc,
-    //                                                       vol_oids,
-    //                                                       locked);
-    //
-    //             if (vol_oids.empty()) {
-    //                 continue;
-    //             }
-    //
-    //             int vol_start = m_VolSet.GetVolOIDStart(vol_idx);
-    //
-    //             ITERATE(vector<int>, iter, vol_oids) {
-    //                 int oid1 = ((*iter) + vol_start);
-    //                 int oid2 = oid1;
-    //
-    //                 // Remove OIDs already found in OIDs.
-    //
-    //                 if (find(oids.begin(), oids.end(), oid1) != oids.end()) {
-    //                     continue;
-    //                 }
-    //
-    //                 // Filter out any oids not in the virtual oid bitmaps.
-    //
-    //                 if (x_CheckOrFindOID(oid2, locked) && (oid1 == oid2)) {
-    //                     oids.push_back(oid1);
-    //                 }
-    //             }
-    //
-    //             vol_oids.clear();
-    //         }
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1247-1279
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2791-2802
-    // ```c++
-    // void CSeqDBVol::AccessionToOids(const string         & acc,
-    //                                 vector<int>          & oids,
-    //                                 CSeqDBLockHold       & locked) const
-    // {
-    //     Int8   ident   (-1);
-    //     string str_id;
-    //     bool   simpler (false);
-    //
-    //     ESeqDBIdType id_type = SeqDB_SimplifyAccession(acc, ident, str_id, simpler);
-    //
-    //     x_StringToOids(acc, id_type, ident, str_id, simpler, oids);
-    //
-    // }
-    // ```
     /// Every OID of the user's id `acc` in a version 4 database, `simplified` its
     /// `SeqDB_SimplifyAccession` (which every volume computes alike): the volumes in order, in a
     /// volume the order of its ISAM (the lines of the string ISAM sort the OIDs of one key as
@@ -277,14 +173,13 @@ impl IdLookup<'_> {
         acc: &[u8],
         simplified: &SimplifiedAccession,
     ) -> Result<Option<Vec<u32>>, SeqDbError> {
-        self.db.set_up_oid_list();
+        self.db.build_oid_list()?;
         if simplified.id_type == SeqDbIdType::Oid {
             let oid = u32::try_from(simplified.num_id).ok();
-            return Ok(Some(
-                oid.filter(|&oid| self.db.check_oid(oid))
-                    .into_iter()
-                    .collect(),
-            ));
+            return Ok(Some(match oid {
+                Some(oid) if self.db.check_oid(oid)? => vec![oid],
+                _ => Vec::new(),
+            }));
         }
         let mut oids = Vec::new();
         for at in 0..self.db.volumes.len() {
@@ -295,12 +190,12 @@ impl IdLookup<'_> {
             }
             let vol_start = i64::from(self.db.volume_starts[at]);
             for oid in vol_oids {
-                let Some(oid) = u32::try_from(i64::from(oid) + vol_start)
-                    .ok()
-                    .filter(|&oid| self.db.check_oid(oid))
-                else {
+                let Ok(oid) = u32::try_from(i64::from(oid) + vol_start) else {
                     continue;
                 };
+                if !self.db.check_oid(oid)? {
+                    continue;
+                }
                 if !oids.contains(&oid) {
                     oids.push(oid);
                 }
@@ -310,65 +205,6 @@ impl IdLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2638-2722
-    // ```c++
-    //     switch(id_type) {
-    //     case eStringId:
-    //         x_OpenStrFile();
-    //         if (! m_IsamStr.Empty()) {
-    //             // Not simplified
-    //             vcheck = true;
-    //             m_IsamStr->StringToOids(str_id, oids, simpler, vcheck);
-    //             x_UnleaseStrFile();
-    //         }
-    //         break;
-    //
-    //     case ePigId:
-    //         // Converted to PIG type.
-    //         x_OpenPigFile();
-    //         if (! m_IsamPig.Empty()) {
-    //             int oid(-1);
-    //
-    //             if (m_IsamPig->PigToOid((int) ident, oid)) {
-    //                 oids.push_back(oid);
-    //             }
-    //             x_UnleasePigFile();
-    //         }
-    //         break;
-    //
-    //     case eGiId:
-    //         // Converted to GI type.
-    //         x_OpenGiFile();
-    //         if (! m_IsamGi.Empty()) {
-    //             int oid(-1);
-    //
-    //             if (m_IsamGi->IdToOid(ident, oid)) {
-    //                 oids.push_back(oid);
-    //             }
-    //             x_UnleaseGiFile();
-    //         }
-    //         break;
-    //
-    //     case eTiId:
-    //         // Converted to TI type.
-    //          x_OpenTiFile();
-    //         if (! m_IsamTi.Empty()) {
-    //             ...
-    //         }
-    //         else {
-    //         	x_OpenStrFile();
-    //         	if (m_IsamStr.NotEmpty()) {
-    //             	// Not every database with TIs has a TI index, so fall
-    //             	// back to a string comparison if the first attempt fails.
-    //             	//
-    //             	// 1. TI's don't have versions.
-    //             	// 2. Specify "adjusted" as true, because lookup of
-    //             	//    "gb|.." and similar tricks are not needed for TIs.
-    //         		m_IsamStr->StringToOids(acc, oids, true, vcheck);
-    //         		x_UnleaseStrFile();
-    //         	}
-    //         }
-    //         break;
-    // ```
     /// `CSeqDBVol::x_StringToOids` of the volume `at` without its final checks (the size of the
     /// number, then `x_CheckVersions`, which [`StringIsam::string_id_to_oids`] runs): the OIDs
     /// local to the volume. A volume with a trace-id ISAM (`.nti`, which makeblastdb never
@@ -435,18 +271,6 @@ impl IdLookup<'_> {
             },
             SeqDbIdType::Ti => {
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-223
-                // ```c++
-                // CSeqDBVol::x_OpenTiFile(void) const{
-                //     CFastMutexGuard mtx_gurad(m_MtxTi);
-                //     if (m_IsamTi.NotEmpty()) {
-                //     	m_IsamTi->AddReference();
-                //     }
-                //     else if (CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 't') &&
-                //              m_Idx->GetNumOIDs() != 0) {
-                //         m_IsamTi = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 't', eTiId);
-                //     }
-                // }
-                // ```
                 // The trace-id ISAM exists where `IndexExists` says so, as the string and PIG
                 // ISAMs (`isam::index_exists`: two regular files).
                 let index = with_extension(volume.base(), seqtype, "ti");
@@ -478,58 +302,12 @@ impl IdLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1190-1205
-    // ```c++
-    // bool CSeqDBImpl::GiToOidwFilterCheck(TGi gi, int & oid)
-    // {
-    //     CHECK_MARKER();
-    //     CSeqDBLockHold locked(m_Atlas);
-    //
-    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
-    //     	oid =-1;
-    //         if (m_VolSet.GetVol(i)->GiToOid(gi, oid, locked)) {
-    //            	oid += m_VolSet.GetVolOIDStart(i);
-    //             int oid0 = oid;
-    //             if (CheckOrFindOID(oid) && (oid==oid0)) {
-    //             	return true;
-    //             }
-    //         }
-    //     }
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1111-1122
-    // ```c++
-    // bool CSeqDBImpl::PigToOid(int pig, int & oid) const
-    // {
-    //     CHECK_MARKER();
-    //
-    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
-    //         if (m_VolSet.GetVol(i)->PigToOid(pig, oid)) {
-    //             oid += m_VolSet.GetVolOIDStart(i);
-    //             return true;
-    //         }
-    //     }
-    //
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2413-2422
-    // ```c++
-    // bool CSeqDBVol::PigToOid(int pig, int & oid) const
-    // {
-    // 	bool rv = false;
-    //     x_OpenPigFile();
-    //     if (m_IsamPig.NotEmpty()) {
-    //     	rv = m_IsamPig->PigToOid(pig, oid);
-    //     	x_UnleasePigFile();
-    //     }
-    //     return rv;
-    // }
-    // ```
     // A volume's ISAM sets `oid` to -1 when it does not hold the PIG (`x_IdentToOid`); a
     // volume without PIG files (`x_OpenPigFile` opens none for an empty volume) leaves it
-    // as it was, which in blastdbcmd is uninitialised (`CSeqDB::TOID oid;`). No list filters
-    // the OID.
+    // as it was, which in blastdbcmd is uninitialised (`oid` is declared without a value). No
+    // list filters the OID.
     /// The OID of the PIG `pig`: `Some(Some(oid))` from the first volume whose PIG file has
     /// it, `Some(None)` when a volume has PIG files and none holds it (NCBI's -1), `None` when
     /// no volume has PIG files (NCBI's OID is then never set).
@@ -560,25 +338,6 @@ impl IdLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1190-1206
-    // ```c++
-    // bool CSeqDBImpl::GiToOidwFilterCheck(TGi gi, int & oid)
-    // {
-    //     CHECK_MARKER();
-    //     CSeqDBLockHold locked(m_Atlas);
-    //
-    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
-    //     	oid =-1;
-    //         if (m_VolSet.GetVol(i)->GiToOid(gi, oid, locked)) {
-    //            	oid += m_VolSet.GetVolOIDStart(i);
-    //             int oid0 = oid;
-    //             if (CheckOrFindOID(oid) && (oid==oid0)) {
-    //             	return true;
-    //             }
-    //         }
-    //     }
-    //     return false;
-    // }
-    // ```
     // NCBI's callers in blastdbcmd (`x_GetOids`, `x_ProcessBatchEntry_NoDup`) read `oid`, not
     // the answer: where the last volume holds the GI and the check does not keep its OID, `oid`
     // is where `CheckOrFindOID` left it (the next OID of the list, the range's start, or the
@@ -603,7 +362,7 @@ impl IdLookup<'_> {
                 continue;
             };
             let mut oid = found;
-            if self.db.check_or_find_oid(&mut oid) && oid == found {
+            if self.db.check_or_find_oid(&mut oid)? && oid == found {
                 return Ok(Some(oid));
             }
             left = Some(oid);
@@ -709,22 +468,10 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:190-198
-    // ```c++
-    // CSeqDBVol::x_OpenStrFile(void) const{
-    //     CFastMutexGuard mtx_gurad(m_MtxStr);
-    //     if (m_IsamStr.NotEmpty()) {
-    //     	m_IsamStr->AddReference();
-    //     }
-    //     else if(CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 's') &&
-    //             m_Idx->GetNumOIDs() != 0) {
-    //         m_IsamStr = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 's', eStringId);
-    //     }
-    // }
-    // ```
-    // `x_OpenPigFile` (seqdbvol.cpp:136-145, quoted at `NumericIsam::open_pig_volume`) likewise;
+    // `x_OpenPigFile` (seqdbvol.cpp:136-145, cited at `NumericIsam::open_pig_volume`) likewise;
     // the GI ISAM's failure to open is caught (`NumericIsam::open_volume`). The constructor of an
     // ISAM whose files exist (regular files, `CFile::Exists`) throws `Error: Could not open input
-    // file` where one does not open (seqdbisam.cpp:1102-1171, quoted at `StringIsam::open`), at
+    // file` where one does not open (seqdbisam.cpp:1102-1171, cited at `StringIsam::open`), at
     // the first lookup that reaches the volume, which then fails on a file with NCBI's exception
     // (the prefetch's stop, `common::database::batch_prefetch`).
     /// Whether a lookup of a reported sequence's Seq-align id (`seqid_lookup`) may fail to open an
@@ -750,26 +497,6 @@ impl SeqDb {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2679-2696
-// ```c++
-// bool IsStringId(const CSeq_id & id)
-// {
-// 	 switch(id.Which()) {
-// 	    case CSeq_id::e_Gi:
-// 	    	return false;
-// 	    break;
-// 	    case CSeq_id::e_General:
-// 	    {
-// 	    	const CDbtag & dbt = id.GetGeneral();
-//             if (dbt.CanGetDb() && (dbt.GetDb() == "PIG")) {
-//             	return false;
-//             }
-// 	    }
-// 	    default:
-// 	    	return true;
-// 	    break;
-// 	 };
-// }
-// ```
 /// `IsStringId`: whether a version 5 database looks `id` up in its LMDB files (a `general` id
 /// other than `PIG` falls through to the default).
 fn is_string_id(id: &ParsedSeqId) -> bool {
@@ -782,22 +509,6 @@ fn is_string_id(id: &ParsedSeqId) -> bool {
 
 impl SeqidLookup<'_> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:903-916
-    // ```c++
-    // bool CSeqDB::SeqidToOid(const CSeq_id & seqid, int & oid) const
-    // {
-    //     ////m_Impl->Verify();
-    //     bool rv = false;
-    //
-    //     oid = -1;
-    //
-    //     vector<int> oids;
-    //     m_Impl->SeqidToOids(seqid, oids, false);
-    //
-    //     if (! oids.empty()) {
-    //         rv = true;
-    //         oid = oids[0];
-    //     }
-    // ```
     /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
     /// one whose Bioseq NCBI's BLAST database data loader serves for it
     /// (`CBlastDbDataLoader::x_GetOid`, bdbloader.cpp:393; the search's own database, so its
@@ -812,18 +523,6 @@ impl SeqidLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:178-190
-    // ```c++
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(true);
-    //     	kv.oid = oid;
-    //     	kv.saveToOidList = true;
-    //     	m_list.push_back(kv);
-    //     	string id_upper = kv.id;
-    //     	NStr::ToUpper(id_upper);
-    //     	if(kv.id != id_upper) {
-    //     		SKeyValuePair kv_u;
-    //     		kv_u.id = id_upper;
-    // ```
     // makeblastdb writes the key of a Seq-id other than a text, `pdb`, `pir` or `prf` id also in
     // upper case, and for a `pdb` id its molecule and the molecule in upper case
     // (writedb_lmdb.cpp:136-150), where NCBI's lookup reads the key as given: `lcl|abc` does not
@@ -852,23 +551,7 @@ impl SeqidLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-131
-    // ```c++
-    //     if(seqid->IsPir() || seqid->IsPrf()) {
-    //     	SKeyValuePair kv_pir;
-    //     	kv_pir.id = seqid->AsFastaString();
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:160-176
-    // ```c++
-    //     if(seqid->GetTextseq_Id() != NULL) {
-    //     	SKeyValuePair kv;
-    //     	kv.id = seqid->GetSeqIdString(false);
-    //     	kv.oid = oid;
-    //     	string id_v = seqid->GetSeqIdString(true);
-    //     	if( kv.id != id_v) {
-    //     		m_list.push_back(kv);
-    //     		SKeyValuePair kv_v;
-    //     		kv_v.id = id_v;
-    // ```
     // A text Seq-id's key has no upper-case copy: an accession's is in upper case
     // (`GetSeqIdString`, `seqid::label::content`), so the lookup finds every holder of it, but a
     // name alone and a `pir` or `prf` id's FASTA text (also its accession) are as written, and
@@ -949,7 +632,7 @@ impl SeqidLookup<'_> {
             Err(error)
                 if self.skip_unindexed
                     && error.ncbi_message().as_deref()
-                        == Some(super::tax_files::NO_ACCESSION_INFO) =>
+                        == Some(super::tax_files::NO_ACCESSION_INFO.as_bytes()) =>
             {
                 Ok(None)
             }
@@ -981,56 +664,6 @@ impl SeqidLookup<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459
-    // ```c++
-    // void CSeqDBImpl::SeqidToOids(const CSeq_id & seqid_in,
-    //                              vector<int>   & oids,
-    //                              bool            multi)
-    // {
-    //     ...
-    //     if (m_LMDBSet.IsBlastDBVersion5() && (!is_BL_ORD_ID)) {
-    //     	if(IsStringId(seqid_in)) {
-    //     		vector<int>  tmp;
-    //     		if(seqid_in.IsPir() || seqid_in.IsPrf()) {
-    //     			m_LMDBSet.AccessionToOids(seqid_in.AsFastaString(), tmp);
-    //     		}
-    //     		else {
-    //     			m_LMDBSet.AccessionToOids(seqid_in.GetSeqIdString(true), tmp);
-    //     		}
-    //     		for(unsigned int i=0; i < tmp.size(); i++) {
-    //     			int oid2 = tmp[i];
-    //     			if (x_CheckOrFindOID(oid2, locked) && (tmp[i] == oid2)) {
-    //     				oids.push_back(tmp[i]);
-    //     			}
-    //     		}
-    //     		return;
-    //     	}
-    //     }
-    //     ...
-    //     for(int vol_idx = 0; vol_idx < m_VolSet.GetNumVols(); vol_idx++) {
-    //        	// Append any additional OIDs from this volume's indices.
-    //        	m_VolSet.GetVol(vol_idx)->SeqidToOids(seqid, vol_oids, locked);
-    //
-    //        	if (vol_oids.empty()) {
-    //            	continue;
-    //        	}
-    //
-    //        	int vol_start = m_VolSet.GetVolOIDStart(vol_idx);
-    //
-    //        	ITERATE(vector<int>, iter, vol_oids) {
-    //            	int oid1 = ((*iter) + vol_start);
-    //            	int oid2 = oid1;
-    //
-    //            	// Filter out any oids not in the virtual oid bitmaps.
-    //
-    //            	if (x_CheckOrFindOID(oid2, locked) && (oid1 == oid2)) {
-    //                	oids.push_back(oid1);
-    //
-    //                	if (! multi) {
-    //                    	return;
-    //                	}
-    //            	}
-    //        	}
-    // ```
     /// Whether [`SeqidLookup::seqid_to_oids`] looks `seqid` up by its key in the LMDB files (a
     /// text id of a version 5 database but `gnl|BL_ORD_ID|n`), not by `SeqDB_SimplifyAccession`.
     fn keys_in_lmdb(&self, seqid: &ParsedSeqId) -> bool {
@@ -1070,8 +703,8 @@ impl SeqidLookup<'_> {
             }
             return self.lmdb_oids(&key);
         }
-        let simplified =
-            seqdb_simplify_seqid(seqid).map_err(|error| SeqDbError::NotFound(error.to_string()))?;
+        let simplified = seqdb_simplify_seqid(seqid)
+            .map_err(|error| SeqDbError::NotFound(error.to_string().into_bytes()))?;
         let mut fasta = Vec::new();
         label::fasta(seqid, &mut fasta);
         let mut oids = Vec::new();

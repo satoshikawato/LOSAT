@@ -6803,19 +6803,6 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80
-        // (SAM's one line per subject of an ungapped search, `-outfmt 17`)
-        // The Seq-aligns of an ungapped search (8, 9, 11, 12) are Dense-diags, which
-        // `report::serial::seqalign::write_seq_align_dendiag` writes (NCBI reference (598d8ae6):
-        // c++/src/algo/blast/api/blast_seqalign.cpp:1274-1311,
-        // `x_UngappedHSPToDenseDiag`); SAM's line of a subject that joins its HSPs (O4a-2) is
-        // not written yet.
-        if args.ungapped && choice.number == 17 {
-            anyhow::bail!(
-                "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                choice.number
-            );
-        }
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting

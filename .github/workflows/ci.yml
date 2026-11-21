@@ -89,10 +89,16 @@ jobs:
       # a table a test `include!`s) stay out of the published crate (`exclude` in LOSAT/Cargo.toml),
       # and every file the build reads stays in. Without cargo: the package list is Git's file list
       # less what `exclude` matches, as Cargo computes it (`cargo package --list` needs the registry).
+      # A unit test is a sibling `<stem>_tests.rs` file, never an inline `#[cfg(test)] mod x { ... }`
+      # of a packaged source file (`check_inline_test_modules.py --fix` moves it).
       - name: Crate test files
-        run: python3 LOSAT/tests/check_crate_test_files.py --root .
+        run: |
+          python3 LOSAT/tests/check_crate_test_files.py --root .
+          python3 LOSAT/tests/check_inline_test_modules.py --root .
       - name: Crate test-file check tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_crate_test_files.py'
+        run: |
+          python3 -m unittest discover -s LOSAT/tests -p 'test_check_crate_test_files.py'
+          python3 -m unittest discover -s LOSAT/tests -p 'test_check_inline_test_modules.py'
       # No NCBI counterpart: crates.io refuses a .crate file over 10 MiB, and publish-crate.yml uploads
       # the release's crate there. `cargo package --no-verify` packs what `cargo publish` would,
       # without the build.

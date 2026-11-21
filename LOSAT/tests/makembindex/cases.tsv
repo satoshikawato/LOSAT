@@ -62,3 +62,5 @@ titles_fa_idmap	-old_style_index true -input titles.fa -output o -idmap true -nm
 titles_db_idmap	-input titlesdb/t -idmap true -nmer 8
 titles_pdb_idmap	-input titlespdb/p -idmap true -nmer 8
 tx_idmap	-input txdb/tx -idmap true -nmer 8
+tt_idmap	-input ttdb/tt -idmap true -nmer 8
+tt_taxdb_idmap	BLASTDB=taxt5 -input ttdb/tt -idmap true -nmer 8

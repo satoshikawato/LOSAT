@@ -4,7 +4,7 @@
 //! none for a database without a valid query, the query blocks of LOSAT_X_BPQBLOCK (a call of
 //! `run_resolved_in_pool` per block), a database's blocks (`database::search_blocks`), a subject
 //! set on the pool (in LOSAT_X_BPSUBJRUN's runs or one task per subject), or the one-thread loop,
-//! with the culling writer of `-culling_limit` or with the collector (`run_preliminary`). The
+//! with the writer of `-culling_limit` or `-best_hit_*` or with the collector (`run_preliminary`). The
 //! function is the statements of `run_call` at its place, in their order: `run_call` calls it
 //! once, with the kernels and the hit lists, and its `?` passes the stage's errors on.
 //!
@@ -14,8 +14,8 @@
 //! (`preliminary_search_error`, `run_resolved_in_pool`, `x_block_input`, `PrelimCollector`,
 //! `update_blastp_preliminary_hit_lists`, the subjects' scratch, reference and result, the
 //! clocks, and for the parallel code `blastp_should_parallelize_stage`,
-//! `blastp_subject_diag_offsets` and the two merges of the subjects' results) and its sibling
-//! modules `culling`, `database`, `pssm_hooks`, `rps_hooks`, `x_lookup_ahead` and
+//! `blastp_subject_diag_offsets` and the two merges of the subjects' results, `PrelimFilter`) and
+//! its sibling modules `database`, `pssm_hooks`, `rps_hooks`, `x_lookup_ahead` and
 //! `x_subject_runs`.
 
 use std::ops::Range;
@@ -24,11 +24,11 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    blastp_timing_start, culling, database, preliminary_search_error, pssm_hooks, rps_hooks,
+    blastp_timing_start, database, preliminary_search_error, pssm_hooks, rps_hooks,
     run_resolved_in_pool, update_blastp_preliminary_hit_lists, x_block_input, x_lookup_ahead,
     BlastpPrelimValues, BlastpRanges, BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters,
     BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpSubjectSource, BlastpTiming,
-    PrelimCollector, PrelimOnly,
+    PrelimCollector, PrelimFilter, PrelimOnly,
 };
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -53,7 +53,8 @@ use crate::utils::threading::SearchPool;
 use {
     super::{
         blastp_should_parallelize_stage, blastp_subject_diag_offsets,
-        merge_blastp_subject_results_culled, merge_blastp_subject_results_in_order, x_subject_runs,
+        merge_blastp_subject_results_filtered, merge_blastp_subject_results_in_order,
+        x_subject_runs,
     },
     rayon::prelude::*,
 };
@@ -154,7 +155,7 @@ pub(super) fn run_preliminary_with<S, P>(
     subject_parameters: &P,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    culling: &mut Option<culling::PrelimCulling>,
+    prelim_filter: &mut Option<PrelimFilter>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<PrelimOutcome>
 where
@@ -203,7 +204,7 @@ where
         &process_own_subject,
         preliminary_hit_lists,
         x_compact_hit_lists,
-        culling,
+        prelim_filter,
         outputs,
     )
 }
@@ -213,8 +214,8 @@ where
 /// closures, `process_subject` with the setup's statistics and `process_own_subject` with each
 /// subject's own, which only a database's blocks read (`per_subject`); each branch calls the one
 /// it called in `run_call`. `preliminary_hit_lists` receive RPS-BLAST's final lists,
-/// `x_compact_hit_lists` the other searches' compact lists, and `culling` is the culling writer of
-/// `-culling_limit`, which `run_call` finishes. An error is the call's error: where a sequence file
+/// `x_compact_hit_lists` the other searches' compact lists, and `prelim_filter` is the writer of
+/// `-culling_limit` or `-best_hit_*`, which `run_call` finishes. An error is the call's error: where a sequence file
 /// cannot be read or RPS-BLAST's files fail, `preliminary_search_error` first writes to `outputs`
 /// what NCBI writes before that batch fails (the outfmt 0 prolog, the batch's reader messages, the
 /// reports of the unsearched batches before it), but a block of LOSAT_X_BPQBLOCK hands a read error
@@ -234,7 +235,7 @@ pub(super) fn run_preliminary<K, O>(
     process_own_subject: &O,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    culling: &mut Option<culling::PrelimCulling>,
+    prelim_filter: &mut Option<PrelimFilter>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<PrelimOutcome>
 where
@@ -398,7 +399,7 @@ where
             database,
             subjects,
             blastp_parallel_pool,
-            culling.as_mut(),
+            prelim_filter.as_mut(),
             x_compact_hit_lists,
         )
         .map_err(|error| match database {
@@ -522,14 +523,14 @@ where
         // (`process_own_subject`), chosen once here.
         macro_rules! search_database_blocks {
             ($process_subject:expr) => {
-                match culling.as_mut() {
-                    Some(culling) => database::search_blocks(
+                match prelim_filter.as_mut() {
+                    Some(filter) => database::search_blocks(
                         database,
                         blastp_parallel_pool,
                         window,
                         &new_scratch,
                         $process_subject,
-                        culling,
+                        filter,
                     ),
                     None => database::search_blocks(
                         database,
@@ -650,8 +651,8 @@ where
                 });
             }
             let merge_sort_start = blastp_timing_start(timing_enabled);
-            match culling.as_mut() {
-                Some(culling) => merge_blastp_subject_results_culled(culling, subject_results),
+            match prelim_filter.as_mut() {
+                Some(filter) => merge_blastp_subject_results_filtered(filter, subject_results),
                 None => merge_blastp_subject_results_in_order(
                     x_compact_hit_lists,
                     subject_results,
@@ -666,9 +667,9 @@ where
                 );
             }
         }
-    } else if let Some(culling) = culling.as_mut() {
-        // `-culling_limit`: the serial loop below with the culling writer in place of the
-        // collector, chosen once here so that the default loop is unchanged.
+    } else if let Some(filter) = prelim_filter.as_mut() {
+        // `-culling_limit` and `-best_hit_*`: the serial loop below with the option's writer in
+        // place of the collector, chosen once here so that the default loop is unchanged.
         let mut scratch =
             BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
         let mut subject_result = BlastpSubjectResult::new(0);
@@ -679,7 +680,7 @@ where
                 BlastpSubjectRef::of(&subjects[s_idx]),
                 &mut subject_result,
             );
-            culling.add(&mut subject_result);
+            filter.add(&mut subject_result);
         }
     } else {
         #[cfg(all(

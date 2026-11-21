@@ -73,6 +73,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
+| `-ungapped` | off | Search without gaps (with `-comp_based_stats 0`) |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
@@ -112,7 +113,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped` and `-use_sw_tback`.
+- `-use_sw_tback`.
+- With `-ungapped`, a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or a matrix file that NCBI BLAST+ finds.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
@@ -120,7 +122,7 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
 - A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
 - `-db_soft_mask` and `-db_hard_mask`.
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 
 ## Examples

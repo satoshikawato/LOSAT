@@ -252,20 +252,20 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-ungapped` | Refused. |
-| `-use_sw_tback` | Refused. |
+| `-use_sw_tback` | Refused. With `-ungapped`, NCBI crashes. |
+| `-ungapped` with a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or with a matrix file that NCBI BLAST+ finds (see [Environment](environment.md)) | Refused. NCBI aborts. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
-| A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
+| A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback, or with `-ungapped` the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-in_pssm` | See the next section. |
 
 <details>
 <summary>Rare inputs</summary>
 
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
 - In practice this happens with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap.
 - With `-window_size 0` (the one-hit word finder) and a low `-threshold`, LOSAT refuses the cases below.
 - Two gapped starts of one-hit alignments of negative length that lie at the end of their 5,000,000-letter part of a frame, or past it. NCBI never finishes on them.

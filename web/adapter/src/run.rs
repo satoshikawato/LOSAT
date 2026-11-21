@@ -3001,7 +3001,7 @@ mod tests {
     /// `LOSAT/tests/outfmt0_manifest.tsv`: id and argv, run from LOSAT/): every program in 5, 8, 9,
     /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
     /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, and SAM (17).
-    const FORMAT_ROWS: [(&str, &[&str]); 55] = [
+    const FORMAT_ROWS: [(&str, &[&str]); 56] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3334,6 +3334,21 @@ mod tests {
                 "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
                 "-subject_loc",
                 "2-470",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "x5.tblastn.ungapped_cbs0",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/of1/tnq.fa",
+                "-subject",
+                "tests/db_search/of1/tns.fa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
                 "-outfmt",
                 "5",
             ],

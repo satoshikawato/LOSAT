@@ -239,7 +239,7 @@ fn the_by_byte_decode_gives_the_reports_of_the_decode_by_base() {
 
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
 // reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
-// `BLAST Database error`, exit status 2.
+// `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
 fn database_arguments_are_checked_as_ncbi_checks_them() {
     let output = losat()
@@ -265,7 +265,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.starts_with(
-            "BLAST Database error: No alias or index file found for nucleotide database ["
+            "LOSAT database error: No alias or index file found for nucleotide database ["
         ),
         "{stderr}"
     );

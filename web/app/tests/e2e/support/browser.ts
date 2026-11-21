@@ -22,7 +22,7 @@ export const BUILD_HAS_ENGINE = REACTORS !== undefined;
  * Text in the stored outfmt 7 of the BLASTN search of startSearch: the engine's header, or
  * the FakeEngine's marker.
  */
-export const OUTFMT7_MARK = BUILD_HAS_ENGINE ? '# BLASTN 2.17.0+' : 'FAKE ENGINE OUTPUT';
+export const OUTFMT7_MARK = BUILD_HAS_ENGINE ? '# BLASTN (LOSAT ' : 'FAKE ENGINE OUTPUT';
 
 /** Opens a page of the site's origin that does not run the application. */
 export async function openProbe(context: BrowserContext): Promise<Page> {

@@ -584,7 +584,7 @@ describe('Coordinator', () => {
     const failed = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
     await waitFor(coordinator, failed, 'running');
     expect(held.has(failed)).toBe(true);
-    engine.fail(failed, 'BLAST engine error: x');
+    engine.fail(failed, 'LOSAT engine error: x');
     await waitFor(coordinator, failed, 'failed');
     expect(held.size).toBe(0);
     const cancelled = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
@@ -662,7 +662,7 @@ describe('Coordinator', () => {
   it("runs an argv that prints the command line's help or version without inputs, and keeps and saves its text", async () => {
     const engine = new ManualEngine();
     engine.startResult = startOf({ prints: 'version' });
-    engine.printed = new TextEncoder().encode('blastn: 2.17.0+\n');
+    engine.printed = new TextEncoder().encode('blastn: LOSAT 0.2.0\n');
     const { coordinator, saved } = setup(engine);
     const runId = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: ['-version'] })).runId!;
     const snapshot = viewOf(coordinator, runId)!.snapshot;
@@ -672,9 +672,9 @@ describe('Coordinator', () => {
     await waitFor(coordinator, runId, 'running');
     engine.finish(runId);
     await waitFor(coordinator, runId, 'completed');
-    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: 2.17.0+\n');
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: LOSAT 0.2.0\n');
     await coordinator.exportPrinted(runId);
-    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: 2.17.0+\n', type: 'text/plain' }]);
+    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: LOSAT 0.2.0\n', type: 'text/plain' }]);
     // NCBI's XML and JSON are saved as what they are (the bytes unchanged).
     for (const [word, kind, text, name, type] of [
       ['-xmlhelp', 'help', '<?xml version="1.0"?>\n<ncbi_application/>\n', 'help.xml', 'application/xml'],
@@ -714,11 +714,11 @@ describe('Coordinator', () => {
 
     const failed = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, failed, 'running');
-    engine.fail(failed, 'BLAST engine error: The average subject length is too short', [logFile('BLAST engine error: The average subject length is too short\n')]);
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', [logFile('LOSAT engine error: The average subject length is too short\n')]);
     await waitFor(coordinator, failed, 'failed');
     expect(viewOf(coordinator, failed)!.record).toMatchObject({
-      error: 'BLAST engine error: The average subject length is too short',
-      runFiles: [logFile('BLAST engine error: The average subject length is too short\n')],
+      error: 'LOSAT engine error: The average subject length is too short',
+      runFiles: [logFile('LOSAT engine error: The average subject length is too short\n')],
     });
 
     const plain = (await coordinator.enqueue(request)).runId!;
@@ -739,7 +739,7 @@ describe('Coordinator', () => {
     await coordinator.exportRunFile(failed, 0);
     expect(saved).toEqual([
       { fileName: 'losat-run1-blastn-19700101T000001Z.logfile.run.log', text: 'Warning: [tblastx] Examining 5 or more matches is recommended\n', type: 'text/plain' },
-      { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
+      { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'LOSAT engine error: The average subject length is too short\n', type: 'text/plain' },
     ]);
     await expect(coordinator.exportRunFile(plain, 0)).rejects.toThrow('the run has no such file');
   });
@@ -754,9 +754,9 @@ describe('Coordinator', () => {
     const warning = 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n';
     const failed = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, failed, 'running');
-    engine.fail(failed, 'BLAST engine error: The average subject length is too short', undefined, warning);
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', undefined, warning);
     await waitFor(coordinator, failed, 'failed');
-    expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'BLAST engine error: The average subject length is too short', diagnostics: warning });
+    expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'LOSAT engine error: The average subject length is too short', diagnostics: warning });
     expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
     // The run kept no output (none has bytes), so it is dropped as before version 7: only its record holds the warnings.
     await expect(data.readDiagnostics(failed)).rejects.toThrow();
@@ -766,20 +766,20 @@ describe('Coordinator', () => {
     // The rejection before the chunks and the `fail`: the data layer waits for them.
     const late = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, late, 'running');
-    engine.fail(late, 'BLAST engine error: The average subject length is too short', undefined, warning, true);
+    engine.fail(late, 'LOSAT engine error: The average subject length is too short', undefined, warning, true);
     await waitFor(coordinator, late, 'failed');
     expect(viewOf(coordinator, late)!.record).toMatchObject({ diagnostics: warning });
 
     // A failed run whose output ended with `fail` but holds no warning keeps none.
     const silent = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, silent, 'running');
-    engine.fail(silent, 'BLAST engine error: Empty CBlastQueryVector', undefined, '');
+    engine.fail(silent, 'LOSAT engine error: Empty CBlastQueryVector', undefined, '');
     await waitFor(coordinator, silent, 'failed');
     expect('diagnostics' in viewOf(coordinator, silent)!.record).toBe(false);
 
     const plain = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, plain, 'running');
-    engine.fail(plain, 'BLAST engine error: Empty CBlastQueryVector');
+    engine.fail(plain, 'LOSAT engine error: Empty CBlastQueryVector');
     await waitFor(coordinator, plain, 'failed');
     expect('diagnostics' in viewOf(coordinator, plain)!.record).toBe(false);
 
@@ -800,7 +800,7 @@ describe('Coordinator', () => {
     const { coordinator, data, saved } = setup(engine);
     const failed = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, failed, 'running');
-    engine.fail(failed, 'BLAST engine error: The average subject length is too short', undefined, 'Warning: one\n', false, { output: 0, text: 'BLASTN 2.17.0+\n\nDatabase: x\n' });
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', undefined, 'Warning: one\n', false, { output: 0, text: 'BLASTN 2.17.0+\n\nDatabase: x\n' });
     await waitFor(coordinator, failed, 'failed');
     const view = viewOf(coordinator, failed)!;
     expect(view.result).toMatchObject({ byteLengths: { 0: 28, 6: 0, 7: 0 }, hitCount: 0 });

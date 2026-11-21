@@ -97,8 +97,11 @@ fn assert_bytes(what: &str, got: &[u8], want: &[u8]) {
     }
 }
 
+/// NCBI's frozen bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8: the archive's
+/// `ident`, the SESSION line, rpsbproc's banner).
 fn frozen(path: &str) -> Vec<u8> {
-    fs::read(engine().join("tests/fixtures").join(path)).unwrap()
+    let ncbi = fs::read(engine().join("tests/fixtures").join(path)).unwrap();
+    losat::wording::losat_output_bytes(&ncbi).into_owned()
 }
 
 /// The search of a case: the program, its query and options, the frozen archive and XML of

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.70
+- Version: 1.71
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -304,11 +304,23 @@
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
   near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
   M4b-3; numbered after 1.68);
-  1.70 2026-11-16 (the read of a header record by NCBI's object stream reproduced, rule 2: a
+  1.70 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
+  of a Seq-id on which NCBI's accession guide posts a warning under the key, which NCBI posts again at
+  each read of the header that its cache does not answer; the rejection of 1.61 extended to an old
+  style `losat makembindex` index of a sequence whose every definition line the key erases;
+  dustmasker's `CUnassignedMember` error at such a sequence reproduced, rule 2; the rejection of a
+  definition line with bytes NCBI reads as '#' extended to the lines that the key or a list removes,
+  as NCBI's decoder writes its error for them before they are removed; the rejection of 1.56
+  extended to a reported RPS profile of a database of several volumes whose lines the key removes,
+  in the classes of 1.10 and 1.37; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.69; first 1.65, then 1.66, 1.68 and 1.69 at the merges of dev that brought
+  line RG item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67, then line NP's 1.68, then
+  line NP's 1.69);
+  1.71 2026-11-16 (the read of a header record by NCBI's object stream reproduced, rule 2: a
   definite length in the long form ends the value one byte per length byte after the first too
   early, and the bytes after the set are not read; line RG item T5d, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; written 2026-11-16 as 1.39, renumbered at the merges
-  with dev to 1.44, 1.46, 1.47, 1.50, 1.51, 1.52, 1.68 and then 1.70, numbered after 1.69)
+  with dev to 1.44, 1.46, 1.47, 1.50, 1.51, 1.52, 1.68, 1.70 and then 1.71, numbered after 1.70)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1292,7 +1304,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `T/t3/x2g/`: 1,880 cases of the X2g fixtures' inputs and of the X2g-1 probe P1's pairs, 1,662 of
   P1's 277 pairs with such HSPs, 18 of two queries; fixture rows `db.x2g.bx.of.*`).
 - The header record of a database sequence as NCBI's object stream reads it
-  (`CObjectIStreamAsnBinary`, `x_GetHdrAsn1`), version 1.70 (line RG item T5d): a constructed
+  (`CObjectIStreamAsnBinary`, `x_GetHdrAsn1`), version 1.71 (line RG item T5d): a constructed
   value with a definite length in the long form ends where NCBI's `ExpectIndefiniteLength` puts
   it, at the position after the first length byte plus the length (objistrasnb.inl:296 takes the
   stream position before `ReadLengthLong` reads the other length bytes):
@@ -2212,6 +2224,22 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`, `db.rps.1v.fo3.*`,
   `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`; for `OIDLIST` `db.ol.rps.rej.no2w`, `db.ol.rps.rej.only2w`,
   `db.ol.rtbn.rej.no2w` and `db.ol.rps.only2w.mts1.6`).
+- RPSBLAST and RPSTBLASTN over an alias file whose `OID_MASK_TYPE` removes a definition line of a
+  profile, in a database of several volumes (version 1.70, 2026-11-21, line RG item D1b-2,
+  Owner-delegated, the form above): NCBI searches the volumes bare (`rpsblast_local.cpp:380-399`),
+  so its Seq-aligns keep a profile that the key leaves without a line under its stored Seq-id,
+  while its formatter, over the `-db` name with the key, does not find it (probe xp3v of D1b-2,
+  profile `ref|XP_000102.1|` in the second of three volumes): outfmt 0 writes `XP_000102.1 Unknown`
+  and "Sequence with id XP_000102 no longer exists in database...alignment skipped" (exit status
+  0, the class of 1.10), and the default fields of outfmt 6, 7 and 10 stop with a null pointer
+  exception, exit status 255 (the class of 1.37). LOSAT refuses (exit 1, "a hit of the profile of
+  OID N whose definition lines the RPS-BLAST database's alias files' OID_MASK_TYPE removes, in a
+  database of several volumes ... is not supported by LOSAT's RPSBLAST") where such a profile is
+  among a query's reported profiles (the same cut as above, the Seq-ids of the stored headers);
+  past the cut it is NCBI's run, its HSPs counted in outfmt 7 (rows `db.om.rps.x3vc.*`). With one
+  volume NCBI searches the `-db` name, whose Seq-aligns leave such a profile out, and LOSAT does
+  the same (rows `db.om.rps.x.*`, `db.om.rtbn.x.*`; refusal rows `db.om.rps.rej.x3v`,
+  `db.om.rtbn.rej.x3v`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
   concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (2026-11-17, line RG
@@ -2303,6 +2331,18 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
   (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
   taxonomy lookup for it.
+- `losat makembindex -old_style_index true -iformat blastdb` of an alias file whose `OID_MASK_TYPE`
+  erases every definition line of a sequence (version 1.70, 2026-11-21, line RG item D1b-2,
+  Owner-delegated): `CSeqDBVol::GetBioseq` gives no Bioseq for it either (`seqdbvol.cpp:1362-1366`),
+  dereferenced as above (probe `mk_old_ntall` of D1b-2: exit status 3, a stack trace). LOSAT refuses
+  (exit 1) at that sequence; a new style index reads no alias key, as NCBI's. NCBI's dustmasker stops
+  at such a sequence with `CUnassignedMember::eGet` `Seq_entry.set` (exit status 3), which LOSAT
+  writes as NCBI does (rule 2); segmasker and the windowmasker masking step skip it, as NCBI's.
+- A sequence of a volume under an alias file's `OID_MASK_TYPE` with bit 0 set, one of whose Seq-ids
+  NCBI's accession guide posts a warning for (same version and line, Owner-delegated): NCBI
+  identifies the ids of the lines at each read of the header that its cache of filtered headers
+  does not answer (`seqdbvol.cpp:1977-1988`, 2006-2058) and posts the warning each time, so their
+  number follows that cache. LOSAT refuses (exit 1) where the sequence's lines are first read.
 
 - An alias file's `OIDLIST` file (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS D1b1-1 of line RG) that
   is empty: NCBI maps nothing and reads the 4-byte header through a null pointer (SIGSEGV, probe G5 of

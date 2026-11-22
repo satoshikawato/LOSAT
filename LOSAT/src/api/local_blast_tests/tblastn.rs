@@ -78,6 +78,7 @@ fn run(
         run_local_tblastn(
             tblastn_args(names.0, names.1, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             outputs,
         )
@@ -122,11 +123,18 @@ fn a_task_that_is_not_tblastns_is_refused() {
                 run_local_database_tblastn(
                     args,
                     &queries(&query),
+                    &crate::api::QueryEnd::Input,
                     ApplicationSettings::default(),
                     &mut outputs,
                 )
             } else {
-                run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
+                run_local_tblastn(
+                    args,
+                    &queries(&query),
+                    &crate::api::QueryEnd::Input,
+                    &subjects(&subject),
+                    &mut outputs,
+                )
             }
         };
         let error = format!("{:#}", result.expect_err(message));
@@ -361,7 +369,13 @@ fn unsupported_formats_fail_before_searching() {
             observer: None,
         };
         let args = tblastn_args(&query_name, &subject_name, &[]);
-        let result = run_local_tblastn(args, &queries, &subjects, &mut outputs);
+        let result = run_local_tblastn(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -402,6 +416,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let result = run_local_tblastn(
             tblastn_args(&query_name, &subject_name, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             &mut outputs,
         );
@@ -485,6 +500,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let result = run_local_tblastn(
                 tblastn_args("q", "s", &[]),
                 &queries,
+                &crate::api::QueryEnd::Input,
                 &subjects,
                 &mut outputs,
             );

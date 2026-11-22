@@ -70,7 +70,10 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 10 since a run prints the text that the command
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 11 since a query is read as the command line's
+/// query batches read it: the records before the reader's error, with the error (`reader_error` of
+/// *register*, *inputs* and *scan*), which a run meets in the record's batch (line WQA's D10,
+/// 2026-11-19); 10 since a run prints the text that the command
 /// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and
 /// the *start* field `prints` (line WQA's D14, 2026-11-20; version 9 is taken by another open
 /// branch); 8 since the index scan and `register` read as
@@ -87,7 +90,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    10
+    11
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -337,10 +340,10 @@ pub extern "C" fn losat_web2_scan_end(scanner: u32) -> i32 {
             .1
             .remove(&scanner)
             .ok_or_else(|| format!("unknown scanner {scanner}"))?;
-        let records = state
+        let scanned = state
             .finish()
             .map_err(|error| error.message().to_string())?;
-        emit(STREAM_RESPONSE, scan::to_json(&records).as_bytes());
+        emit(STREAM_RESPONSE, scan::to_json(&scanned).as_bytes());
         Ok(0)
     })
 }
@@ -439,7 +442,7 @@ pub unsafe extern "C" fn losat_web2_run(
         // A run that prints a text in place of a search reads no input, as the command line reads
         // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
         if run::prints(&argv).is_some() {
-            run::run(&argv, &[], &[])?;
+            run::run(&argv, &[], &losat::api::QueryEnd::Input, &[])?;
             return Ok(0);
         }
         store::with_inputs(
@@ -448,7 +451,7 @@ pub unsafe extern "C" fn losat_web2_run(
             subject_handle,
             &argv,
             run::data_loaders(&argv).ok(),
-            |queries, subjects| run::run(&argv, queries, subjects),
+            |queries, end, subjects| run::run(&argv, queries, end, subjects),
         )??;
         Ok(0)
     })

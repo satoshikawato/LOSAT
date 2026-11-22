@@ -1684,7 +1684,6 @@ fn every_filtering_alias_key_is_rejected() {
         "TAXIDLIST",
         "MEMB_BIT",
         "MASKLIST",
-        "OID_MASK_TYPE",
     ] {
         std::fs::write(
             dir.join("keyed.pal"),

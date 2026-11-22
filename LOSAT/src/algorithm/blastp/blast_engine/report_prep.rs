@@ -789,6 +789,7 @@ pub(super) fn refuse_unreportable(
         hit_lists,
         pairwise_hits,
         psi_found_before,
+        engine_counts,
         ..
     } = *prep;
     // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
@@ -935,17 +936,42 @@ pub(super) fn refuse_unreportable(
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
-    // rpsblast's BLAST XML (outfmt 5): the same collision of an entry's generated id with a query
-    // of its batch, where NCBI's XML takes the query's title for the entry (the archive,
-    // outfmt 11, is NCBI's bytes with it): refused here before any byte, for the reported
-    // entries only (`ListedTitles::refuse_generated_ids`; PS15a-1, followup
-    // `rps_lcl_query_title.md`). Outfmt 0, 6 and 7 are line RG item X7's.
+    // rpsblast's BLAST XML, XML2 and JSON (outfmt 5, 13 to 16): the same collision of an entry's
+    // generated id with a query of its batch, where NCBI's documents take the query's title for
+    // the entry (the archive, outfmt 11, and the Seq-annots, 8, 9 and 12, are NCBI's bytes with
+    // it): refused here before any byte, for the reported entries only
+    // (`ListedTitles::refuse_generated_ids`; PS15a-1 and PS15a-2, followup
+    // `rps_lcl_query_title.md`). Outfmt 0, 6, 7 and 10 are line RG item X7's.
     let rps_xml = args.rps_search.is_some()
         && format_plans
             .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml | BlastpReport::Xml2(_)));
+    // rpsblast's organism report (outfmt 18) and comma-separated values with a header line
+    // (outfmt 20) where NCBI's rows show what its formatter finds by such an id, the query
+    // (`TabularSpec::refuses_generated_id`, PS15a-2): refused as the documents above; a table of
+    // other fields, and the organism report of a profile without a taxid, are NCBI's bytes.
+    // The reports that can refuse (an HSP with identities, a profile with a taxid).
+    let rps_tables: Vec<&crate::report::tabular::TabularSpec> = if args.rps_search.is_some() {
+        format_plans
+            .iter()
+            .filter_map(|outfmt| match outfmt {
+                BlastpReport::CustomTabular(spec)
+                    if spec.refuses_generated_id(
+                        crate::blastinput::app::Program::Blastp,
+                        1,
+                        true,
+                    ) =>
+                {
+                    Some(*spec)
+                }
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if let (true, false, Some(titles)) = (
-        anchored_view.is_some() || rps_xml,
+        anchored_view.is_some() || rps_xml || !rps_tables.is_empty(),
         args.parse_deflines,
         listed_titles.as_ref(),
     ) {
@@ -972,7 +998,39 @@ pub(super) fn refuse_unreportable(
             titles.refuse_generated_ids(
                 hit_lists,
                 &scope_of,
+                |_, _, _| true,
                 crate::algorithm::common::database::XML_EFFECT,
+            )?;
+        }
+        if !rps_tables.is_empty() {
+            titles.refuse_generated_ids(
+                hit_lists,
+                &scope_of,
+                |query, list_index, subject| {
+                    let taxid = subject.first_source_taxid().is_some();
+                    let Some(Some(hit_list)) = hit_lists.get(query) else {
+                        return false;
+                    };
+                    hit_list.hsplist_array[list_index]
+                        .hsps
+                        .iter()
+                        .enumerate()
+                        .any(|(index_in_list, hsp)| {
+                            // The Seq-align's `num_ident` (`EngineCounts`).
+                            let num_ident = engine_counts.num_ident(
+                                (query as u32, list_index as u32, index_in_list as u32),
+                                hsp.num_ident,
+                            );
+                            rps_tables.iter().any(|spec| {
+                                spec.refuses_generated_id(
+                                    crate::blastinput::app::Program::Blastp,
+                                    num_ident,
+                                    taxid,
+                                )
+                            })
+                        })
+                },
+                crate::algorithm::common::database::TABLE_EFFECT,
             )?;
         }
         if anchored_view.is_some() {

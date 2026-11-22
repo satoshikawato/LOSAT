@@ -13,7 +13,7 @@ mod ncbi;
 
 use losat::web_adapter::ReaderConfig;
 
-pub use ncbi::NcbiScanner;
+pub use ncbi::{NcbiScanner, ReaderStop, Scanned};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanRecord {
@@ -32,13 +32,12 @@ pub struct ScanRecord {
     pub residue_counts: Box<[u64; 256]>,
 }
 
-/// Why a scan failed: the reader's error or its refusal, which the reading of the input with the
-/// same reader gives too, as the command line's reading of the file does.
+/// Why a scan failed: the reader's refusal, which the reading of the input with the same reader
+/// gives too, as the command line's reading of the file does. The reader's error (`CheckDataLine`)
+/// does not fail the scan: it ends the records before it (`Scanned::stop`, line WQA's D10,
+/// 2026-11-19).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanError {
-    /// The reader's error (`CheckDataLine`): NCBI's text, without the command line's
-    /// `BLAST query error: `.
-    Reader(String),
     /// The reader's refusal of the input in the command line's words: a first line that NCBI's
     /// data loaders would fetch as a Seq-id, or a record longer than LOSAT reads. `record` is the
     /// offset where the refused record starts; the records before it are whole.
@@ -49,7 +48,7 @@ impl ScanError {
     /// The message, as `scan_end` reports it.
     pub fn message(&self) -> &str {
         match self {
-            ScanError::Reader(message) | ScanError::Refused { message, .. } => message,
+            ScanError::Refused { message, .. } => message,
         }
     }
 }
@@ -74,24 +73,26 @@ impl Scanner {
         self.0.feed(chunk);
     }
 
-    /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(self) -> Result<Vec<ScanRecord>, ScanError> {
+    /// Ends the input and returns the records and the reader's error that ended them, or the
+    /// reader's refusal.
+    pub fn finish(self) -> Result<Scanned, ScanError> {
         self.0.finish()
     }
 }
 
 /// Scans a whole input at once with the reader `config`.
-pub fn scan_ncbi(input: &[u8], config: ReaderConfig) -> Result<Vec<ScanRecord>, ScanError> {
+pub fn scan_ncbi(input: &[u8], config: ReaderConfig) -> Result<Scanned, ScanError> {
     let mut scanner = NcbiScanner::new(config);
     scanner.feed(input);
     scanner.finish()
 }
 
-/// The *scan* response (docs/web/abi_v2.md §9).
-pub fn to_json(records: &[ScanRecord]) -> String {
+/// The *scan* response (docs/web/abi_v2.md §9): the records, and the reader's error that ended
+/// them (`reader_error`, line WQA's D10, 2026-11-19).
+pub fn to_json(scanned: &Scanned) -> String {
     use std::fmt::Write as _;
     let mut out = String::from("{\"records\":[");
-    for (index, record) in records.iter().enumerate() {
+    for (index, record) in scanned.records.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
@@ -123,6 +124,16 @@ pub fn to_json(records: &[ScanRecord]) -> String {
         }
         out.push_str("}}");
     }
-    out.push_str("]}");
+    out.push(']');
+    if let Some(stop) = &scanned.stop {
+        let _ = write!(
+            out,
+            ",\"reader_error\":{{\"offset\":{},\"defline\":{},\"message\":",
+            stop.offset, stop.defline
+        );
+        crate::json::string(&mut out, &stop.message);
+        out.push('}');
+    }
+    out.push('}');
     out
 }

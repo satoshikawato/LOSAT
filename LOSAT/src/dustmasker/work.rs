@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
-use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
@@ -287,9 +287,32 @@ fn database_failure(error: BdbError) -> Failure {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:292-296
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_entry_info.cpp:112-123
+// `CMaskBDBReader` gives an empty Seq-entry for an OID whose `GetBioseq` gives no Bioseq (no
+// letters, or every definition line erased by the alias files' `OID_MASK_TYPE`), and the object
+// manager's check of its choice throws on it: the run ends there, after the output of the earlier
+// sequences (probes dust_omnx_int and dust_ntall_fasta of line RG D1b-2, exit status 3).
+// windowmasker's masking skips such an entry (`windowmasker::work`); segmasker's too.
+const UNSET_SEQ_ENTRY: ThrowSite = ThrowSite {
+    file: "src/objmgr/seq_entry_info.cpp",
+    line: 119,
+    kind: "CUnassignedMember::eGet",
+    function: None,
+};
+
 impl SequenceSource for DatabaseSource {
     fn next_record(&mut self) -> Result<Option<Record>, Failure> {
         let record = self.reader.next_record().map_err(database_failure)?;
+        if record
+            .as_ref()
+            .is_some_and(|record| record.residues.is_empty())
+        {
+            return Err(Failure::Ncbi(NcbiException::new(
+                UNSET_SEQ_ENTRY,
+                "Seq_entry.set",
+            )));
+        }
         Ok(record.map(|record| Record {
             ids: record.ids,
             title: Some(record.title),

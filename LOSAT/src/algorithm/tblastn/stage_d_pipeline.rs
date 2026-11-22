@@ -384,6 +384,7 @@ pub(super) fn run_local_for_report_threads(
             &mut setup,
             None,
             Some(pool),
+            false,
         )?;
         let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
         Ok((
@@ -419,6 +420,7 @@ pub(super) fn x_run_local_for_report_in_pool(
         &mut setup,
         None,
         Some(pool),
+        false,
     )?;
     let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
     Ok((
@@ -1005,7 +1007,39 @@ fn run_local_search(
         &mut None,
         observer,
         None,
+        false,
     )
+}
+
+/// The set-up of a query batch without its search (`run_local_search_with_pool` up to the batch's
+/// `LocalBatchSetup`): the validity of each query's context, or the set-up's error
+/// (`SetupEngineError`: the average subject length, the hit-saving parameters). With a database the
+/// numbers are its own, and `subjects` may hold none. `tblastn_app::refused_batch_setup_error` sets up the
+/// records of a refused batch that are first in their scope with it (line WQA D10 round 5,
+/// 2026-11-20).
+pub(super) fn set_up_batch(
+    queries: &[Vec<u8>],
+    subjects: SubjectLetters<'_>,
+    profile: LocalStageDProfile<'_>,
+    compo_adjust_mode: BlastCompoAdjustMode,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+) -> Result<Vec<bool>> {
+    let mut setup = None;
+    run_local_search_with_pool(
+        queries,
+        subjects,
+        profile,
+        compo_adjust_mode,
+        do_sum_stats,
+        scoring,
+        &mut setup,
+        None,
+        None,
+        true,
+    )?;
+    let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
+    Ok(setup.query_validity)
 }
 
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
@@ -1095,6 +1129,7 @@ fn run_local_search_with_pool(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
+    setup_only: bool,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
         !queries.is_empty(),
@@ -1237,6 +1272,10 @@ fn run_local_search_with_pool(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
+    // The set-up alone (`set_up_batch`): no search.
+    if setup_only {
+        return Ok(Vec::new());
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:

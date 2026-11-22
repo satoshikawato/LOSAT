@@ -850,13 +850,6 @@ fn letters(buf: &[u8]) -> bool {
 /// `MAX_SENT_LEN` bytes).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
-#[cfg_attr(
-    target_arch = "wasm32",
-    expect(
-        clippy::needless_option_as_deref,
-        reason = "wasm32's `State::table` is an `Option<&Table>` (the native one holds a `Box`)"
-    )
-)]
 pub(super) unsafe fn two_hit_sent(
     q_full: &[u8],
     s_full: &[u8],

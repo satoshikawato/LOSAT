@@ -255,6 +255,12 @@ impl BlastpDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// The error of the preliminary search's first read of the sequences after a batch's set-up
+    /// checks, where a sequence file cannot be opened (`shared::sequence_file_read_error`).
+    pub(super) fn sequence_file_read_error(&self, program: &str) -> Option<anyhow::Error> {
+        shared::sequence_file_read_error(&self.db, program)
+    }
+
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`): the title (the name as given
     /// for an empty title), the date and the real totals, also with `-dbsize`.

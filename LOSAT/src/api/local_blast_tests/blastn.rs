@@ -73,7 +73,13 @@ impl Inputs {
             ReaderConfig::subject("BLASTN", false, true).with_defline(true),
         );
         run_formats(formats, observe, |outputs| {
-            run_local_blastn(self.args(extra), &queries, &subjects, outputs)
+            run_local_blastn(
+                self.args(extra),
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                outputs,
+            )
         })
     }
 }
@@ -128,7 +134,13 @@ fn unsupported_formats_fail_before_searching() {
             hits: None,
             observer: None,
         };
-        let result = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs);
+        let result = run_local_blastn(
+            inputs.args(&[]),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -171,7 +183,13 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
             hits: None,
             observer: None,
         };
-        let result = run_local_blastn(inputs.args(extra), &queries, &subjects, &mut outputs);
+        let result = run_local_blastn(
+            inputs.args(extra),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         (result, sinks, diagnostics)
     };
@@ -358,8 +376,14 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
             hits: None,
             observer: None,
         };
-        let error = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs)
-            .expect_err("a Subject_ title that NCBI cannot decode is rejected");
+        let error = run_local_blastn(
+            inputs.args(&[]),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        )
+        .expect_err("a Subject_ title that NCBI cannot decode is rejected");
         drop(outputs);
         let message = format!("{error:#}");
         assert!(
@@ -412,7 +436,13 @@ fn run_local_outputs(
             hits: None,
             observer: None,
         };
-        run_local_blastn(inputs.args(extra), &queries, &subjects, &mut outputs)
+        run_local_blastn(
+            inputs.args(extra),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        )
     };
     (sinks, diagnostics, result)
 }
@@ -460,7 +490,13 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                 hits: None,
                 observer: None,
             };
-            run_local_blastn(args, &queries, &subjects, &mut outputs)
+            run_local_blastn(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            )
         };
         assert_eq!(
             native_error(result),
@@ -534,7 +570,13 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 hits: None,
                 observer: None,
             };
-            run_local_blastn(args, &queries, &subjects, &mut outputs)
+            run_local_blastn(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            )
         };
         let error = format!("{:#}", result.expect_err(message));
         assert!(error.contains(message), "{message}: {error}");
@@ -560,6 +602,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
         crate::api::local_blast::run_local_database_blastn(
             args,
             &queries,
+            &crate::api::QueryEnd::Input,
             crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             &mut outputs,
         )
@@ -746,7 +789,13 @@ fn run_local_rejects_an_unknown_strand() {
             ReportOutputs::single("6", OutputSink::Writer(&mut sink), &mut diagnostics);
         let mut args = inputs.args(&[]);
         args.strand = strand.to_string();
-        let result = run_local_blastn(args, &queries, &subjects, &mut outputs);
+        let result = run_local_blastn(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         let error = result
             .expect_err("an unknown strand is an error")
@@ -816,7 +865,14 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                 hits: Some(&mut on_hits),
                 observer: Some(&mut extensions),
             };
-            run_local_blastn(args, &queries, &subjects, &mut outputs).unwrap();
+            run_local_blastn(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            )
+            .unwrap();
         }
         let search = validate(Program::Blastn, &["-task", task]).unwrap();
         let batches = run_batches(&search, ApiInputs::new(&queries, &subjects))
@@ -895,7 +951,13 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
             hits: None,
             observer: None,
         };
-        let result = run_local_blastn(args(), &queries, &subjects, &mut outputs);
+        let result = run_local_blastn(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         if alone {
             result.expect("outfmt 0 fails alone");
             let error = outputs.formats[1]

@@ -521,6 +521,8 @@ enum LineState {
 struct Builder {
     id: Vec<u8>,
     header_offset: u64,
+    /// Whether the record starts with a defline (`>`), not the input's first record without one.
+    defline: bool,
     sequence_offset: u64,
     /// The letters that the reader stores, a gap line's letters too.
     length: u64,
@@ -531,10 +533,11 @@ struct Builder {
 }
 
 impl Builder {
-    fn new(header_offset: u64, sequence_offset: u64) -> Self {
+    fn new(header_offset: u64, sequence_offset: u64, defline: bool) -> Self {
         Self {
             id: Vec::new(),
             header_offset,
+            defline,
             sequence_offset,
             length: 0,
             residues: 0,
@@ -589,6 +592,8 @@ struct Records {
     awaiting_sequence: bool,
     records: Vec<ScanRecord>,
     error: Option<ScanError>,
+    /// The reader's own error that ended the records.
+    stop: Option<ReaderStop>,
 }
 
 impl Records {
@@ -610,18 +615,39 @@ impl Records {
             awaiting_sequence: false,
             records: Vec::new(),
             error: None,
+            stop: None,
         }
     }
 
+    /// Whether the scan has ended: at a refusal, or at the reader's error.
+    fn halted(&self) -> bool {
+        self.error.is_some() || self.stop.is_some()
+    }
+
     fn fail(&mut self, error: ScanError) {
-        if self.error.is_none() {
+        if !self.halted() {
             self.error = Some(error);
+        }
+    }
+
+    /// The reader's error `message` on the current record: the records read before it are the
+    /// input's records, and the error ends them (`ReaderStop`).
+    fn stop(&mut self, message: String) {
+        if !self.halted() {
+            let (offset, defline) = self.current.as_ref().map_or((0, false), |current| {
+                (current.header_offset, current.defline)
+            });
+            self.stop = Some(ReaderStop {
+                offset,
+                defline,
+                message,
+            });
         }
     }
 
     /// One byte of the input, in the input's order, with its role.
     fn byte(&mut self, byte: u8, offset: u64, role: Role) {
-        if self.error.is_some() {
+        if self.halted() {
             return;
         }
         if matches!(role, Role::Content | Role::Delimiter) {
@@ -726,7 +752,7 @@ impl Records {
     fn start_headerless(&mut self) {
         if self.need_defline {
             self.need_defline = false;
-            self.current = Some(Builder::new(0, 0));
+            self.current = Some(Builder::new(0, 0, false));
         }
     }
 
@@ -744,7 +770,7 @@ impl Records {
                     self.close(current, self.line_start);
                 }
                 self.need_defline = false;
-                let mut current = Builder::new(self.line_start, self.line_start);
+                let mut current = Builder::new(self.line_start, self.line_start, true);
                 let mut title = Title::default();
                 for &byte in prefix.after(skip) {
                     title.byte(byte, &mut current.id);
@@ -831,7 +857,7 @@ impl Records {
 
     /// The end of the current line, if one is open.
     fn line_end(&mut self) {
-        if !std::mem::take(&mut self.in_line) || self.error.is_some() {
+        if !std::mem::take(&mut self.in_line) || self.halted() {
             return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
@@ -855,9 +881,9 @@ impl Records {
                 check: Some(check), ..
             } if !check.plausible() => {
                 let line = self.line_number;
-                self.fail(ScanError::Reader(format!(
+                self.stop(format!(
                     "CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
-                )));
+                ));
                 return;
             }
             LineState::Gap(line) => self.gap(&line),
@@ -885,9 +911,10 @@ impl Records {
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:428-432
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:203-208
     /// The end of the input (`total` bytes): the current record ends there; an input with
-    /// only white space and comment lines has no record.
-    fn finish(mut self, total: u64) -> Result<Vec<ScanRecord>, ScanError> {
-        if self.error.is_none() {
+    /// only white space and comment lines has no record. The reader's own error ends the records
+    /// before it (`ReaderStop`); the reader's refusals fail the scan.
+    fn finish(mut self, total: u64) -> Result<Scanned, ScanError> {
+        if !self.halted() {
             if let Some(mut current) = self.current.take() {
                 if self.awaiting_sequence {
                     current.sequence_offset = total;
@@ -897,7 +924,10 @@ impl Records {
         }
         match self.error {
             Some(error) => Err(error),
-            None => Ok(self.records),
+            None => Ok(Scanned {
+                records: self.records,
+                stop: self.stop,
+            }),
         }
     }
 }
@@ -936,6 +966,30 @@ fn seq_id_refusal(line: &[u8], config: ReaderConfig) -> Option<String> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
+/// The records of a scan, and the reader's own error that ended them (`CheckDataLine`): the
+/// command line's query batches search the records before it and end with the error in the batch
+/// that reads the record (line WQA's D10, 2026-11-19).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scanned {
+    pub records: Vec<ScanRecord>,
+    pub stop: Option<ReaderStop>,
+}
+
+/// The reader's error on the record after the records of a scan (`Scanned::stop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderStop {
+    /// The offset of the record that the reader fails on: its defline's `>` (0 for a first record
+    /// without a defline). The bytes from there on are read by no record.
+    pub offset: u64,
+    /// Whether that record starts with a defline. One without (the input's first line, read as
+    /// letters: a byte-order mark, a line of other text) cannot follow another input, whose last
+    /// record would read it (review M2, 2026-11-20).
+    pub defline: bool,
+    /// The reader's message (`CFastaReader: Near line …`).
+    pub message: String,
+}
+
 /// A streaming scan with the reader of a program's input (`config`: kind 1 for nucleotide
 /// input, 2 for protein input, NCBI's data loaders on or off).
 pub struct NcbiScanner {
@@ -954,16 +1008,17 @@ impl NcbiScanner {
     /// Scans the next chunk of the input.
     pub fn feed(&mut self, chunk: &[u8]) {
         for &byte in chunk {
-            if self.records.error.is_some() {
+            if self.records.halted() {
                 return;
             }
             self.lines.byte(byte, &mut self.records);
         }
     }
 
-    /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(mut self) -> Result<Vec<ScanRecord>, ScanError> {
-        if self.records.error.is_none() {
+    /// Ends the input and returns the records and the reader's error that ended them, or the
+    /// reader's refusal.
+    pub fn finish(mut self) -> Result<Scanned, ScanError> {
+        if !self.records.halted() {
             self.lines.finish(&mut self.records);
         }
         let total = self.lines.offset;

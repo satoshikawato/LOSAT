@@ -75,6 +75,7 @@ fn try_run(
         run_local_blastx(
             blastx_args(&inputs.query, &inputs.subject, extra),
             queries,
+            &crate::api::QueryEnd::Input,
             subjects,
             &mut outputs,
         )
@@ -114,6 +115,7 @@ impl Inputs {
             run_local_blastx(
                 blastx_args(&self.query, &self.subject, extra),
                 &queries,
+                &crate::api::QueryEnd::Input,
                 &subjects,
                 outputs,
             )
@@ -435,7 +437,13 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
                 hits: None,
                 observer: None,
             };
-            run_local_blastx(args, &queries, &subjects, &mut outputs)
+            run_local_blastx(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            )
         };
         let error = format!("{:#}", result.expect_err(message));
         assert!(error.contains(message), "{message}: {error}");
@@ -461,6 +469,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         crate::api::local_blast::run_local_database_blastx(
             args,
             &queries,
+            &crate::api::QueryEnd::Input,
             crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             &mut outputs,
         )

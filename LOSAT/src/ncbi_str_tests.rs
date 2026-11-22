@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::byte_search::tests::{search_needles, search_texts};
 
 // NCBI BLAST+ 2.17.0, probes of line RG D1a-3 (outfmt 0 prolog and epilog, blastdbcmd
 // `-info`) and the copy of `s_PrintBase10Uint8` in D/logs/survey_d1a3/sim/commas.c.
@@ -657,4 +658,63 @@ fn c_atoi_is_glibcs() {
     assert_eq!(c_atoi(b"-99999999999999999999"), 0);
     assert_eq!(c_atoi(b"-9223372036854775808"), 0);
     assert_eq!(c_atoi(b"-9223372036854775807"), 1);
+}
+
+/// `NStr::Replace` as dev had it before `find` (a slice compare at every byte), the reference
+/// of the tests.
+fn replace_by_windows(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
+    let mut dst = Vec::new();
+    let mut pos = 0;
+    while let Some(found) = src[pos..]
+        .windows(search.len())
+        .position(|window| window == search)
+    {
+        dst.extend_from_slice(&src[pos..pos + found]);
+        dst.extend_from_slice(replacement);
+        pos += found + search.len();
+    }
+    dst.extend_from_slice(&src[pos..]);
+    dst
+}
+
+#[test]
+fn replace_is_the_window_search() {
+    let texts = search_texts();
+    for search in search_needles() {
+        for replacement in [&b""[..], b"X", b"   ", b"a", b"aa", b"\\t"] {
+            for text in &texts {
+                let expected = replace_by_windows(text, &search, replacement);
+                let got = replace(text, &search, replacement);
+                assert_eq!(*got, expected, "{text:?} {search:?} {replacement:?}");
+                let unchanged = search == replacement || find(text, &search).is_none();
+                assert_eq!(
+                    matches!(got, Cow::Borrowed(_)),
+                    unchanged,
+                    "{text:?} {search:?} {replacement:?}"
+                );
+                let mut in_place = text.clone();
+                replace_in_place(&mut in_place, &search, replacement);
+                assert_eq!(in_place, expected, "{text:?} {search:?} {replacement:?}");
+            }
+        }
+    }
+}
+
+/// Occurrences from the left, at the ends, overlapping, and in a replacement (never read again).
+#[test]
+fn replace_takes_occurrences_from_the_left() {
+    let r = |src: &[u8], search: &[u8], replacement: &[u8]| {
+        replace(src, search, replacement).into_owned()
+    };
+    assert_eq!(r(b"", b"\\t", b"   "), b"");
+    assert_eq!(r(b"\\t", b"\\t", b"   "), b"   ");
+    assert_eq!(r(b"\\ta\\t", b"\\t", b"   "), b"   a   ");
+    assert_eq!(r(b"a\\\\tb", b"\\t", b"   "), b"a\\   b");
+    assert_eq!(r(b"aaa", b"aa", b"X"), b"Xa");
+    assert_eq!(r(b"aaaa", b"aa", b"a"), b"aa");
+    assert_eq!(r(b"abab", b"ab", b"abab"), b"abababab");
+    assert_eq!(r(b"x. [. [", b". [", b" ["), b"x [ [");
+    assert_eq!(r(b"a. . [b", b". [", b" ["), b"a.  [b");
+    assert_eq!(r(b"b\x01\x01\x01", b"\x01", b" "), b"b   ");
+    assert_eq!(r(b"a", b"ab", b"X"), b"a");
 }

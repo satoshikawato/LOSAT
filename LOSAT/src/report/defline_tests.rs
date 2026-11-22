@@ -486,7 +486,6 @@ fn the_last_byte_is_a_signed_char_and_protein_brackets_are_joined() {
         b"id \xff [x] y [z]"
     );
     assert_eq!(clean_and_compress(b"a. . [b", true).0, b"a.  [b");
-    assert_eq!(replace_in_place(b"x. [. [", b". [", b" ["), b"x [ [");
 }
 
 /// The facts of a database sequence without parsed Seq-ids whose source names `taxname`.

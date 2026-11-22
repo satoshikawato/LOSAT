@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.69
+- Version: 1.71
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -303,7 +303,12 @@
   search a sequence whose first mask runs to its end (in TBLASTN and TBLASTX, a reading frame whose
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
   near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
-  M4b-3; numbered after 1.68)
+  M4b-3; numbered after 1.68);
+  1.71 2026-11-22 (psiblast and tblastn `-in_pssm` of a PSSM in ASN.1 binary, line RG item D3c-3a:
+  the explicit rejections, rule 3, of a binary PSSM's string whose length passes the end of the
+  file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are missing or
+  whose number is not its Seq-inst's `length`, on which NCBI crashes; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.70, line RG item D1b-2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2013,6 +2018,26 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   of eight (`tokens[8]`), `TestFormatPhrapAce`'s tokens of an `AS` line of fewer than three
   (`values[1]`, `values[2]`; NCBI 2.17.0 crashes on both, exit status 139) and `TestFormatFasta`'s
   search for `|` past a test buffer of 10 bytes or fewer.
+
+  Since version 1.71 (line RG item D3c-3a, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07) LOSAT also reads a PSSM in ASN.1 binary as NCBI's reader does
+  (`CObjectIStreamAsnBinary`, through the same type table and frames as the text), and refuses
+  (exit 1) two more cases there. A string whose length passes the end of the file and is 1 GiB to
+  2^47 bytes: NCBI's reader reserves the length before it reads the bytes
+  (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`), which succeeds or fails by the
+  host's memory and overcommit (NCBI's probe host: `Unrecognized format for PSSM`, exit status 1);
+  below 1 GiB LOSAT writes NCBI's end-of-file answer, from 2^47 bytes `BLAST ran out of memory`
+  (exit status 4), the bounds of 1.52. A query whose letters are missing or whose number is not
+  the `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than
+  its Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form
+  before): NCBI 2.17.0's psiblast ends by a signal on a binary PSSM whose query of 30 letters
+  states the length 255 (SIGSEGV) or 4,294,967,295 (SIGABRT). Not a rule-3 item but a refusal:
+  with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps in a
+  delay buffer and reads again only while it writes them, where that read posts a message or
+  fails (NCBI reports it in the middle of the file it writes; not ported). Tests:
+  `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
+  `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
+  `db.ber.ps.*` and `db.ber.tbn.*`.
 
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided

@@ -353,7 +353,7 @@ These refusals apply to every search program that reads databases.
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
-| `-in_pssm` with a binary or XML PSSM | Refused. |
+| `-in_pssm` with an XML PSSM | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
@@ -378,6 +378,8 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM whose columns' largest scores add up to 2^30 or more. Every PSSM of fewer than 19,800 columns passes.
 - A query whose letters give no Karlin-Altschul parameters. NCBI crashes.
 - A PSSM without a query, and query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
+- A query without letters, or whose number of letters is not the `length` of its Seq-inst. NCBI crashes on it (seen with the lengths 255 and 4,294,967,295 for 30 letters).
+- A PSSM in ASN.1 binary form that ends inside a string whose length asks for 1 GiB or more and less than 2^47 bytes. Whether NCBI's allocation succeeds depends on the host's memory; at 2^47 bytes or more, NCBI's `BLAST ran out of memory` (exit status 4) is written, as in NCBI.
 - A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, malformed BitMagic data of a Seq-table, reads past a Packed-seg's vectors, and integer overflows. BitMagic data is decoded as NCBI decodes it; refused are the data that NCBI reads past (such as empty or cut data), decodes with undefined behaviour (such as an XOR block or a write past BitMagic's blocks) or from memory it did not write, and a GAP block that is not one where NCBI's scalar, SSE2 and SSE4.2 builds decode it or answer a row of it differently.
 - Also two Seq-ids of one location (a feature's, a Seq-table's or a Seq-table row's) with different messages that NCBI orders by address; a Seq-table of more than 10,000,000 rows; a Std-seg of more than 1,000,000 rows; and XML and JSON reports of an untitled query whose annotations hold features.
 - An error about the query's annotations, or a Seq-id twice in the entry. Two Seq-ids count as one when NCBI's object manager takes them as one: equal ones, and ones that differ only where NCBI does not look, such as the case of letters, GenBank, EMBL or DDBJ for an accession alone, or PDB's `chain` and `chain-id`.
@@ -387,7 +389,8 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-out_pssm`, a PSSM of frequency ratios only without `rpsdbparams`. NCBI cannot write its matrix name.
 - With `-out_ascii_pssm`, a PSSM whose information content comes without the other columns of NCBI's long ASCII form.
 - With `-out_ascii_pssm`, a PSSM query with a residue that its coding does not have. NCBI prints its letter from memory it never set.
-- A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text is read as NCBI reads it.
+- With `-out_pssm`, a PSSM in ASN.1 binary form whose author names (`Auth-list` `names`, which NCBI reads again only when it writes them) give a message or an error when they are read again.
+- A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text and ASN.1 binary are read as NCBI reads them.
 
 </details>
 

@@ -46,7 +46,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 
 `-in_pssm FILE` replaces `-query` and searches with a position-specific scoring matrix, as NCBI's PSI-TBLASTN does. `-in_pssm -` reads the PSSM from the standard input. The report header says `PSITBLASTN`.
 
-- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes. [psiblast](psiblast.md) describes what it accepts. A binary or XML PSSM, or a compressed file, is refused.
+- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, or in its ASN.1 binary form. [psiblast](psiblast.md) describes what it accepts. An XML PSSM, or a compressed file, is refused.
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.

@@ -4526,10 +4526,8 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it

@@ -10,7 +10,6 @@ import contextlib
 import importlib.util
 import io
 import itertools
-import re
 import sys
 import tempfile
 import unittest
@@ -535,23 +534,47 @@ class StatementTest(unittest.TestCase):
 
 
 class SettingSpanTest(unittest.TestCase):
-    """`SETTING_SPAN_RE` reads the same strings as its earlier form, in time linear in the span."""
+    """`SETTING_SPAN_RE` reads the settings that `setting` below spells out, in time linear in the span."""
 
-    EARLIER = re.compile(r"^(?:[\w.\[\]-]*=[^\s=]*\s*)+$")
+    @staticmethod
+    def setting(text: str) -> bool:
+        """A name, then `=` and a value for each `=`; a value holds no space or `=`, and spaces after it
+        come before the next name (letters, digits, `_`, `.`, `[`, `]`, `-`) or at the end."""
 
-    def test_the_same_strings_as_the_earlier_form(self) -> None:
+        def name(part: str) -> bool:
+            return all(c.isalnum() or c in "_.[]-" for c in part)
+
+        parts = text.split("=")
+        if len(parts) < 2 or not name(parts[0]):
+            return False
+        for part in parts[1:-1]:
+            spaces = next((i for i, c in enumerate(part) if c.isspace()), None)
+            if spaces is not None and not name(part[spaces:].lstrip()):
+                return False
+        return not any(c.isspace() for c in parts[-1].rstrip())
+
+    def test_the_settings_and_nothing_else(self) -> None:
         letters = ("a", "-", "+", "=", " ")
         for length in range(7):
             for parts in itertools.product(letters, repeat=length):
                 text = "".join(parts)
-                self.assertEqual(
-                    bool(checker.SETTING_SPAN_RE.match(text)), bool(self.EARLIER.match(text)), repr(text)
-                )
-        for text in ("-evalue=10", "a=1 b=2", "x[0]=y.z", "a=1 +b=2", "a b=1", "=", "a=b=c"):
-            self.assertEqual(bool(checker.SETTING_SPAN_RE.match(text)), bool(self.EARLIER.match(text)), text)
+                self.assertEqual(bool(checker.SETTING_SPAN_RE.match(text)), self.setting(text), repr(text))
+        for text, expected in (
+            ("-evalue=10", True),
+            ("a=1 b=2", True),
+            ("x[0]=y.z", True),
+            ("a=b=c", True),
+            ("=", True),
+            ("a=1 +b=2", False),
+            ("a b=1", False),
+            ("a=1 b", False),
+        ):
+            self.assertEqual(bool(checker.SETTING_SPAN_RE.match(text)), expected, text)
+            self.assertEqual(self.setting(text), expected, text)
 
     def test_a_long_span_that_does_not_match_ends(self) -> None:
-        # The earlier form took about 0.4 s at 20 repeats and four times as long for each 2 more.
+        # A form in which a value and the next name could split the same letters took about 0.4 s at 20
+        # repeats and four times as long for each 2 more (CodeQL py/redos, alert 49).
         self.assertIsNone(checker.SETTING_SPAN_RE.match("=" + "-=" * 5000 + " +="))
 
 

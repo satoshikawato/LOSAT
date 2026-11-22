@@ -373,6 +373,10 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 /// before that record, as the CLI's reader does there (line WQA's D13, 2026-11-20). A subject
 /// without records ends the run with NCBI's `Empty CBlastQueryVector` before the query is read, as
 /// it ends the CLI (`register` registers it, and the run gives the error).
+///
+/// A run of `-db` (`run::searches_database`) has no subject input: its subject bytes must be empty,
+/// the query is read alone (with the ids of its deflines and the argv's data loaders), and the subject handle is 0, with `null`
+/// for the subject in the JSON (line WQA D12a, 2026-11-20).
 pub fn register_inputs(
     words: &[&str],
     query: &[u8],
@@ -383,6 +387,10 @@ pub fn register_inputs(
     // records are read as the program of the arguments reads them (with a search strategy of
     // another program that the argv's runs, the strategy's).
     let owner = Program::parse(words.first().copied().unwrap_or(""))?;
+    let database = crate::run::searches_database(words);
+    if database && !subject.is_empty() {
+        return Err("a run of -db has no subject input: give no subject bytes".to_string());
+    }
     let data_loaders = crate::run::data_loaders(words)?;
     // An argv with `-import_search_strategy` takes the inputs that the strategy carries and the
     // argv does not override (`Supplied`), in place of the bytes that the host gives for them (it
@@ -417,10 +425,19 @@ pub fn register_inputs(
         let bytes = if role == ROLE_QUERY { query } else { subject };
         scan::scan_ncbi(bytes, reader_config(program, role, data_loaders))
     };
-    let subject_scan = scan(ROLE_SUBJECT);
-    if subject_scan
-        .as_ref()
-        .is_ok_and(|scanned| scanned.records.is_empty() && scanned.stop.is_none())
+    // A database is read by the run, not here: its subject scan is empty and is not checked.
+    let subject_scan = if database {
+        Ok(scan::Scanned {
+            records: Vec::new(),
+            stop: None,
+        })
+    } else {
+        scan(ROLE_SUBJECT)
+    };
+    if !database
+        && subject_scan
+            .as_ref()
+            .is_ok_and(|scanned| scanned.records.is_empty() && scanned.stop.is_none())
     {
         return Err(empty_query_vector());
     }
@@ -452,7 +469,8 @@ pub fn register_inputs(
     check_scan("subject", &subject_scan, &subjects, &QueryEnd::Input)?;
     let run: Vec<String> = words.iter().map(|word| word.to_string()).collect();
     let mut store = store().lock().expect("input store");
-    let (query_handle, subject_handle) = (store.next_handle()?, store.next_handle()?);
+    let query_handle = store.next_handle()?;
+    let subject_handle = if database { 0 } else { store.next_handle()? };
     let mut response = String::from("{\"query\":");
     let shown = |role: u32| Some((role, reader_of(program, role).1));
     write_records(
@@ -464,19 +482,24 @@ pub fn register_inputs(
         shown(ROLE_QUERY),
     );
     response.push_str(",\"subject\":");
-    write_records(
-        &mut response,
-        subject_handle,
-        &subject_scan.records,
-        &subjects,
-        &QueryEnd::Input,
-        shown(ROLE_SUBJECT),
-    );
+    if database {
+        response.push_str("null");
+    } else {
+        write_records(
+            &mut response,
+            subject_handle,
+            &subject_scan.records,
+            &subjects,
+            &QueryEnd::Input,
+            shown(ROLE_SUBJECT),
+        );
+    }
     response.push('}');
-    for (handle, role, records, end) in [
+    let inputs = [
         (query_handle, ROLE_QUERY, queries, query_end),
         (subject_handle, ROLE_SUBJECT, subjects, QueryEnd::Input),
-    ] {
+    ];
+    for (handle, role, records, end) in inputs.into_iter().filter(|(handle, ..)| *handle != 0) {
         store.entries.insert(
             handle,
             Registered {
@@ -562,6 +585,9 @@ pub fn release(handle: u32) -> Result<(), String> {
 /// records read with them off, which may hold a first line that its reader refuses as a Seq-id
 /// (line WQA's D13 and D16, 2026-11-20); `None` where the argv's start fails, which fails the run.
 /// `work` takes the query's end with its records (`Registered::end`).
+///
+/// A run of `-db` (`run::searches_database`) takes the subject handle 0: the engine reads the
+/// database, and `work` gets no subject records (line WQA D12a, 2026-11-20).
 pub fn with_inputs<R>(
     program: Program,
     query: u32,
@@ -570,11 +596,22 @@ pub fn with_inputs<R>(
     data_loaders: Option<bool>,
     work: impl FnOnce(&[FastaRecord], &QueryEnd, &[FastaRecord]) -> R,
 ) -> Result<R, String> {
+    let database = crate::run::searches_database(words);
+    if database && subject != 0 {
+        return Err(format!(
+            "a run of -db takes no subject handle: give 0, not {subject}"
+        ));
+    }
     let mut store = store().lock().expect("input store");
-    for (handle, role, name) in [
+    let roles = [
         (query, ROLE_QUERY, "query"),
         (subject, ROLE_SUBJECT, "subject"),
-    ] {
+    ];
+    // A run of -db has no subject (handle 0, checked above); its query is checked as any query.
+    for &(handle, role, name) in roles
+        .iter()
+        .filter(|(_, role, _)| !(database && *role == ROLE_SUBJECT))
+    {
         let entry = store
             .entries
             .get(&handle)
@@ -594,7 +631,13 @@ pub fn with_inputs<R>(
         }
     }
     let read_for = |handle: u32| store.entries[&handle].run.as_deref();
-    let read_together = match (read_for(query), read_for(subject)) {
+    // A run of -db has the query's reading only: as its subject, the query's.
+    let subject_read = if database {
+        read_for(query)
+    } else {
+        read_for(subject)
+    };
+    let read_together = match (read_for(query), subject_read) {
         (None, None) if crate::run::inputs_together(words) => {
             return Err(
                 "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
@@ -610,24 +653,34 @@ pub fn with_inputs<R>(
         }
     };
     let whole = !read_together && crate::run::writes_archive(words);
+    let handles: &[u32] = if database {
+        &[query]
+    } else {
+        &[query, subject]
+    };
     if whole {
-        set_sources(&mut store, [query, subject], true);
+        set_sources(&mut store, handles, true);
     }
+    let subjects: &[FastaRecord] = if database {
+        &[]
+    } else {
+        &store.entries[&subject].records
+    };
     let result = work(
         &store.entries[&query].records,
         &store.entries[&query].end,
-        &store.entries[&subject].records,
+        subjects,
     );
     if whole {
-        set_sources(&mut store, [query, subject], false);
+        set_sources(&mut store, handles, false);
     }
     Ok(result)
 }
 
 /// Gives every record of `handles` a source with its kept defline (`give`), or takes the sources
 /// back.
-fn set_sources(store: &mut Store, handles: [u32; 2], give: bool) {
-    for handle in handles {
+fn set_sources(store: &mut Store, handles: &[u32], give: bool) {
+    for &handle in handles {
         let entry = store.entries.get_mut(&handle).expect("a registered handle");
         let mut kept = entry.deflines.iter().peekable();
         for (index, record) in entry.records.iter_mut().enumerate() {

@@ -1326,12 +1326,12 @@ entries that reach another sequence)". Line NP item M4b-3b.
     reference scan), the second at the window plus its margin below its start, where no entry
     reaches its hits; the thread's table stays as the sequence before it left it (review 3 of
     M4b-3b, H1). The scans of the other sequences, and every search without `-db_hard_mask`, are
-    unchanged. BLASTX searches a query batch in units of at most 10,002 letters (BLASTX's default
-    batch), which give the batch's rows where the walk keeps no sequence apart; where it keeps one
-    apart, BLASTX searches the whole batch as one unit, as NCBI does
-    (`blastx::query_setup::unit_ranges`, `HardStarts::keeps_apart`; item M4b-3b2, decision 57 of
-    line NP's series M, 2026-11-23, Owner-delegated), since the rows of a query there depend on its
-    place in the batch.
+    unchanged. BLASTX searches a query batch in units that end at the first query that brings them
+    to 10,002 letters (BLASTX's default batch), which give the batch's rows where the walk keeps no
+    sequence apart; where it keeps one apart, BLASTX searches the whole batch as one unit, as NCBI
+    does (`blastx::query_setup::unit_ranges`, `HardStarts::keeps_apart`; item M4b-3b2, decision 57
+    of line NP's series M, 2026-11-23, Owner-delegated), since the rows of a query there depend on
+    its place in the batch.
     So the rows of each sequence are NCBI's one-thread rows of it, for the same query file and
     batches, in the same database with the letters of every other sequence replaced by letters that
     no query word hits (the lengths and masks, and so NCBI's offsets and statistics, stay the
@@ -1375,9 +1375,10 @@ entries that reach another sequence)". Line NP item M4b-3b.
       (BLASTP 1, BLASTX 10), so LOSAT, which starts B on such a table at -98, writes NCBI's
       one-thread bytes of `ov_lk` there (fix round 2 of M4b-3b).
     - `ov_atha` (40 TAIR10 proteins whose seg masks overlap): 6 of them reach another sequence in
-      the one-hit scan (3 below their start, 3 past their end); its near input, a spacer of 357 `X`
-      at each of the six boundaries, gives NCBI's own bytes of `ov_atha` in every run (BLASTP and
-      BLASTX; the default, `-evalue 1000`, `-window_size 0`, `-ungapped`; 1 and 4 threads).
+      the one-hit scan (3 below their start, 3 past their end); for the query `qova` (`qova.faa`,
+      `qova.fna`) its near input, a spacer of 357 `X` at each of the six boundaries, gives NCBI's own
+      bytes of `ov_atha` in every run (BLASTP and BLASTX; the default, `-evalue 1000`,
+      `-window_size 0`, `-ungapped`; 1 and 4 threads).
     - `lk400` (200 pairs of A then B, BLASTP `-window_size 0`, `M/m4b3b/NOTES_M4B3B.md`): at 1 thread
       two runs gave B's identical row in 0 of 200 pairs and A's in 200 of 200; at 4 threads three runs
       gave B's in 5, 6 and 3 of 200 and A's in 197, 196 and 200, every run another md5.
@@ -1734,9 +1735,10 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   an index file of no bytes and of a header field past the last page are in the list below.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
-  `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
-  conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
-  matches.
+  `hard_ranges[n]` for the last subject chunk (n the number of hard ranges, one past the
+  last: `hard_ranges[1]` for a sequence without masks; `blast_engine.c:221-276, 579-580`), the
+  out-of-range `double` to `Int4` conversion (INT_MIN), and the catch in
+  `BlastSetupPreliminarySearchEx` that never matches.
 - `losat blastn -use_index true` with a MegaBLAST index of only some database volumes (version
   1.74, 2026-11-22, line RG item D5b-3, Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07). NCBI keeps an index volume's seeds while a search thread may still need them and

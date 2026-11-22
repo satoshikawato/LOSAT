@@ -152,14 +152,23 @@ fn a_reader_batch_is_one_unit_only_where_a_unit_cannot_give_its_rows() {
         skipped: None,
     };
     let records = [record(4000), record(4000), record(4000), record(100)];
-    let subjects: super::super::subjects::Subjects<'_> = (&records[..1]).into();
-    // `-subject` (no database): the units of `batch_ranges`.
+    // The units of `batch_ranges` (the third query brings the first to 10002 letters), and the
+    // whole batch where a sequence is kept apart or with `-use_sw_tback`.
+    for (name, whole) in [("ov_th10", true), ("ov_e3", true), ("ov_e3c", false)] {
+        let db = open(name);
+        let options = masked(MaskKind::Hard);
+        let want = if whole { vec![0..4] } else { vec![0..3, 3..4] };
+        assert_eq!(unit_ranges(&records, &options, Some(&db)), want, "{name}");
+        assert_eq!(searches_batch_whole(&options, Some(&db)), whole, "{name}");
+    }
+    // `-subject` (no database): the units.
     assert_eq!(
-        unit_ranges(&records, &masked(MaskKind::Hard), subjects),
+        unit_ranges(&records, &masked(MaskKind::Hard), None),
         vec![0..3, 3..4]
     );
     let mut sw = super::super::stage_c_tests::options();
     sw.use_sw_tback = true;
-    assert_eq!(unit_ranges(&records, &sw, subjects), vec![0..4]);
-    assert!(unit_ranges(&[], &sw, subjects).is_empty());
+    assert_eq!(unit_ranges(&records, &sw, None), vec![0..4]);
+    assert!(searches_batch_whole(&sw, None));
+    assert!(unit_ranges(&[], &sw, None).is_empty());
 }

@@ -33,9 +33,9 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
     }]
 }
 
-/// A reader batch (any `BATCH_SIZE`) is split into units of at most 10002 letters, as a run
-/// without `BATCH_SIZE` batches its queries; the last unit is marked, and the units cover the
-/// batch in order.
+/// A reader batch (any `BATCH_SIZE`) is split into units that end at the first query that brings
+/// them to 10002 letters, as a run without `BATCH_SIZE` batches its queries; the last unit is
+/// marked, and the units cover the batch in order; each takes one place in the flow.
 #[test]
 fn a_reader_batch_is_split_into_units_of_10002_letters() {
     let batch = [4000, 4000, 4000, 100, 10002, 5, 20000, 1]
@@ -53,11 +53,32 @@ fn a_reader_batch_is_split_into_units_of_10002_letters() {
         [false, false, false, true]
     );
     assert_eq!(units[1].queries().len(), 2);
-    // A reader batch of at most 10002 letters (the default, or a smaller `BATCH_SIZE`) is
-    // one unit.
+    // A reader batch whose last query is the first to bring it to 10002 letters (the default,
+    // or a smaller `BATCH_SIZE`) is one unit.
     let small = XUnit::split(&batch[..3], &options, subjects, false);
     assert_eq!(small.len(), 1);
     assert!(small[0].last);
+    assert!(units.iter().chain(&small).all(|unit| unit.places == 1));
+}
+
+/// A reader batch searched whole (`query_setup::searches_batch_whole`, here `-use_sw_tback`) is
+/// one unit that takes the places of the units the split would make of it in the flow
+/// (`XUnit::places`, line NP item M4b-3b fix round 6); a batch the split leaves whole takes one.
+#[test]
+fn a_reader_batch_searched_whole_takes_the_places_of_its_units() {
+    let batch = [4000, 4000, 4000, 100, 10002, 5, 20000, 1]
+        .map(record)
+        .to_vec();
+    let mut options = super::super::stage_c_tests::options();
+    options.use_sw_tback = true;
+    let subjects: Subjects<'_> = (&batch[..1]).into();
+    let whole = XUnit::split(&batch, &options, subjects, false);
+    assert_eq!(whole.len(), 1);
+    assert_eq!(whole[0].range, 0..8);
+    assert!(whole[0].last);
+    assert_eq!(whole[0].places, 4);
+    let small = XUnit::split(&batch[..3], &options, subjects, false);
+    assert_eq!((small.len(), small[0].places), (1, 1));
 }
 
 /// A unit whose phase 1 did not end with a preparation (it failed) is prepared again with

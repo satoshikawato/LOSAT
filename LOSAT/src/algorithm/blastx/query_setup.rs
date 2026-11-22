@@ -74,27 +74,34 @@ pub const BATCH_SIZE: usize = 10002;
 /// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
 pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
-/// The search units of a reader batch (`records`, NCBI's query batch, searched against
-/// `subjects`): parts of at most `BATCH_SIZE` letters (`batch_ranges`), or the whole batch where a
-/// unit cannot give NCBI's result of the batch alone: with `-use_sw_tback`, and where the
-/// `-db_hard_mask` walk keeps a database sequence apart (`keeps_sequences_apart`). NCBI's
-/// Smith-Waterman redo keeps state over the whole query batch, which a unit cannot see alone:
-/// the status of the batch's last redone match, the heap of its first query, and, in e-value
-/// mode, the heaps that a window's query context indexes among the batch's queries
-/// (`runtime::kappa_batch`). No NCBI counterpart of its own: LOSAT's units are its own
-/// scheduling (`native.rs`, `XUnit`).
+/// The search units of a reader batch (`records`, NCBI's query batch, searched against the
+/// database `db`, `None` for `-subject`): parts that end at the first query that brings them to
+/// `BATCH_SIZE` letters (`batch_ranges`), or the whole batch where a part cannot give NCBI's
+/// result of the batch alone (`searches_batch_whole`). No NCBI counterpart of its own: LOSAT's
+/// units are its own scheduling (`native.rs`, `XUnit`).
 pub(crate) fn unit_ranges(
     records: &[FastaRecord],
     options: &ResolvedOptions,
-    subjects: super::subjects::Subjects<'_>,
+    db: Option<&crate::seqdb::SeqDb>,
 ) -> Vec<std::ops::Range<usize>> {
-    if !records.is_empty()
-        && (options.use_sw_tback || keeps_sequences_apart(options, subjects.seqdb()))
-    {
+    if !records.is_empty() && searches_batch_whole(options, db) {
         vec![0..records.len()]
     } else {
         batch_ranges(records, BATCH_SIZE)
     }
+}
+
+/// Whether BLASTX searches each reader batch of a search of `db` (`None`: `-subject`) as one
+/// unit (`unit_ranges`): with `-use_sw_tback`, and where the `-db_hard_mask` walk keeps a database
+/// sequence apart (`keeps_sequences_apart`). NCBI's Smith-Waterman redo keeps state over the whole
+/// query batch, which a unit cannot see alone: the status of the batch's last redone match, the
+/// heap of its first query, and, in e-value mode, the heaps that a window's query context indexes
+/// among the batch's queries (`runtime::kappa_batch`).
+pub(crate) fn searches_batch_whole(
+    options: &ResolvedOptions,
+    db: Option<&crate::seqdb::SeqDb>,
+) -> bool {
+    options.use_sw_tback || keeps_sequences_apart(options, db)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291

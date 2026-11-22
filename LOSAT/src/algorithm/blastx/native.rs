@@ -608,11 +608,12 @@ fn run_inner(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:217-218
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
     // The letters of a reader / report batch: `BATCH_SIZE` when it is set, else 10002. The
-    // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
-    // large a reader batch is: a reader batch is split into units that are searched as the
-    // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched; where a unit cannot give the batch's rows alone it is the whole reader batch
-    // (`query_setup::unit_ranges`). (`batch_size` is read above, for the reads before the search.)
+    // search itself keeps units that end at the first query that brings them to 10002 letters
+    // (`BATCH_SIZE` the constant), however large a reader batch is: a reader batch is split into
+    // units that are searched as the batches of a run without `BATCH_SIZE` are, and its report is
+    // written when its last unit is searched; where a unit cannot give the batch's rows alone it
+    // is the whole reader batch (`query_setup::unit_ranges`). (`batch_size` is read above, for the
+    // reads before the search.)
     let batch_size = batch_size?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -1772,13 +1773,14 @@ pub(super) fn run_query_batches(
                 let x_failed = std::cell::Cell::new(false);
                 let mut pending = ReaderBatchResults::default();
                 let x_wave = pool.threads() * 4;
-                // A unit of more than two search units' letters ends in a query that is longer than
-                // one: it is searched with the pool inside, never queued with others. The query
-                // is split into chunks that use the pool when it is the only query of its reader
-                // batch; in a reader batch of several queries (NCBI splits none) its subjects use
-                // the pool. Measured (2 queries of 280 kb, `BATCH_SIZE=1000000`, 4 and 35
-                // subjects, 8 and 16 threads): 0.10-0.16 s, against 0.17-0.26 s for the same
-                // queries split.
+                // A unit of more than two search units' letters (one long query, a reader batch
+                // whose last query is long, or a reader batch searched whole) is searched with the
+                // pool inside, never queued with others, and so is a unit of several places
+                // (`XUnit::places`). A query is split into chunks that use the pool when it is the
+                // only query of its reader batch; in a unit of several queries (NCBI splits none)
+                // its subjects use the pool. Measured (2 queries of 280 kb, `BATCH_SIZE=1000000`,
+                // 4 and 35 subjects, 8 and 16 threads): 0.10-0.16 s, against 0.17-0.26 s for the
+                // same queries split.
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };
@@ -1817,9 +1819,11 @@ pub(super) fn run_query_batches(
                     // `flow_bound(K)` are unwritten (blastx/x_bx_mem.rs).
                     let x_cap =
                         super::search::x_bx_mem::flow_unit_cap(pool, options, search_subjects);
-                    let (x_bound, x_lookahead, x_max_live) = match x_cap {
-                        Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k),
-                        None => (x_wave, pool.threads(), usize::MAX),
+                    // The places (`XUnit::places`) searched at a time: K with the cap, else the
+                    // threads, at one place a thread.
+                    let (x_bound, x_lookahead, x_max_live, x_max_places) = match x_cap {
+                        Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k, k),
+                        None => (x_wave, pool.threads(), usize::MAX, pool.threads()),
                     };
                     let x_ahead =
                         x_cap.is_some() && super::search::x_bx_mem::prepares_batches_ahead();
@@ -1827,6 +1831,7 @@ pub(super) fn run_query_batches(
                     x_bound,
                     x_lookahead,
                     x_max_live,
+                    x_max_places,
                     &mut *read,
                     // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): in the capped
                     // flow a reader batch of one unit is prepared by a task of its own before
@@ -1841,7 +1846,7 @@ pub(super) fn run_query_batches(
                     },
                     &|unit: &XUnit, alone: bool| {
                         let queries = unit.queries();
-                        let large = x_cap.is_some() || alone || x_large(queries);
+                        let large = x_cap.is_some() || alone || unit.places > 1 || x_large(queries);
                         crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                         if large {
                             let _x_live = x_cap
@@ -1934,7 +1939,7 @@ pub(super) fn run_query_batches(
                                     // is split into chunks, otherwise its subjects use the
                                     // pool); a short one is one serial job.
                                     let queries = unit.queries();
-                                    let searched = if x_large(queries) {
+                                    let searched = if unit.places > 1 || x_large(queries) {
                                         super::runtime::x_search_unit_in_pool(
                                             queries,
                                             search_subjects,
@@ -2003,11 +2008,11 @@ pub(super) fn run_query_batches(
                         if queries.is_empty() {
                             return Err(engine("Empty CBlastQueryVector"));
                         }
-                        // The reader batch is queued as its units (at most 10002 letters
-                        // each), which are searched as the batches of a run without
+                        // The reader batch is queued as its units (`XUnit::split`), which are
+                        // searched as the batches of a run without
                         // `BATCH_SIZE` are; its report is written at its last unit.
                         for unit in x_split(queries) {
-                            let large = x_large(unit.queries());
+                            let large = unit.places > 1 || x_large(unit.queries());
                             let events = {
                                 let mut events = x_events.borrow_mut();
                                 events.push(XEvent::Batch(unit));
@@ -2231,8 +2236,9 @@ fn reader_batch_skipped(results: &mut [BatchResults]) {
 }
 
 // No NCBI counterpart: how LOSAT schedules the search of a reader batch (NCBI's query batch,
-// `BATCH_SIZE` letters). The search keeps units of at most 10002 letters (`batch_ranges` with
-// the constant), whatever `BATCH_SIZE` is (the reader batch is one unit with `-use_sw_tback` and
+// `BATCH_SIZE` letters). The search keeps units that end at the first query that brings them to
+// 10002 letters (`batch_ranges` with the constant), whatever `BATCH_SIZE` is (the reader batch is
+// one unit with `-use_sw_tback` and
 // where the `-db_hard_mask` walk keeps a database sequence apart, `query_setup::unit_ranges`:
 // there a unit cannot give the batch's rows alone): the flow and the waves schedule the units as
 // they scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
@@ -2249,6 +2255,11 @@ struct XUnit {
     batch: std::sync::Arc<Vec<FastaRecord>>,
     range: std::ops::Range<usize>,
     last: bool,
+    /// The places the unit takes in the flow (`x_flow`): the search units that `batch_ranges`
+    /// makes of its letters, more than one only for a reader batch of more than one such unit
+    /// searched whole (`query_setup::searches_batch_whole`), whose search holds a lookup table, a
+    /// preparation and the workers' diagonal tables of all its letters; 1 for every other unit.
+    places: usize,
     /// Phase 1 of the unit's reader batch when the batch has several units (or, in the capped batch
     /// flow, `LOSAT_X_BXCAPFILL`, is the unit itself), and the unit's place in it. `None`: the unit
     /// is the whole reader batch and prepares itself when it is searched.
@@ -2317,9 +2328,9 @@ impl XUnit {
     /// shared by them. A batch of several units gets its phase 1 (`prepare_now`, or the flow's
     /// tasks), which its units' searches take; with `ahead` (the capped batch flow,
     /// `LOSAT_X_BXCAPFILL`) a batch of one unit of at most two search units' letters gets one too
-    /// (the flow's task, without a shape). A longer batch (one long query) prepares itself when it
-    /// is searched, as before: preparations held ahead are bounded by letters, not only by the
-    /// flow's count of unwritten batches.
+    /// (the flow's task, without a shape). A longer batch (one long query, or a reader batch
+    /// searched whole) prepares itself when it is searched, as before: preparations held ahead are
+    /// bounded by letters, not only by the flow's count of unwritten batches.
     fn split(
         queries: &[FastaRecord],
         options: &super::args::ResolvedOptions,
@@ -2327,8 +2338,14 @@ impl XUnit {
         ahead: bool,
     ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
-        let ranges = super::query_setup::unit_ranges(&batch, options, subjects);
+        let db = subjects.seqdb();
+        let ranges = super::query_setup::unit_ranges(&batch, options, db);
         let count = ranges.len();
+        let places = if count == 1 && super::query_setup::searches_batch_whole(options, db) {
+            super::query_setup::batch_ranges(&batch, BATCH_SIZE).len()
+        } else {
+            1
+        };
         let ahead = ahead
             && count == 1
             && batch.iter().map(|q| q.sequence.len()).sum::<usize>() <= 2 * BATCH_SIZE;
@@ -2349,6 +2366,7 @@ impl XUnit {
                 batch: std::sync::Arc::clone(&batch),
                 range,
                 last: index + 1 == count,
+                places,
                 prep: prep
                     .as_ref()
                     .map(|prep| (std::sync::Arc::clone(prep), index)),
@@ -2512,6 +2530,7 @@ fn x_flow(
     bound: usize,
     lookahead: usize,
     max_live: usize,
+    max_places: usize,
     read: &mut QueryBatchReader<'_>,
     split: &dyn Fn(&[FastaRecord]) -> Vec<XUnit>,
     prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
@@ -2542,10 +2561,11 @@ fn x_flow(
     }
     // Units read and not yet spawned (the newest `lookahead` until the end of the input), in
     // reader order, and the number spawned and not yet searched (at most `max_live`; a unit that
-    // waits for its reader batch's phase 1 is spawned).
+    // waits for its reader batch's phase 1 is spawned) with their places (`XUnit::places`).
     struct XHeld {
         batches: VecDeque<(usize, XUnit)>,
         live: usize,
+        places: usize,
         ended: bool,
         // The writing ended (at the end, at an error, or at a panic it raises again): spawn no more.
         stopped: bool,
@@ -2554,6 +2574,7 @@ fn x_flow(
         held: std::sync::Mutex<XHeld>,
         lookahead: usize,
         max_live: usize,
+        max_places: usize,
         search: &'f (dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
@@ -2566,8 +2587,13 @@ fn x_flow(
         }
 
         // Spawns the held units beyond the newest `lookahead` (all of them at the end of the
-        // input, then searched alone) while fewer than `max_live` are spawned and unsearched. A
-        // unit of a reader batch whose phase 1 has not ended is searched when it ends.
+        // input, then searched alone) while fewer than `max_live` are spawned and unsearched,
+        // and a unit of several places (`XUnit::places`) while its places and those of the
+        // spawned and unsearched units are at most `max_places`, or none is spawned: a reader
+        // batch searched whole takes the places of the units the split would make of it, so
+        // that the letters searched at a time stay those of the split's units (one place each),
+        // and one of more places than `max_places` is searched with no other unit. A unit of a
+        // reader batch whose phase 1 has not ended is searched when it ends.
         fn release<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2577,8 +2603,19 @@ fn x_flow(
                 let next = {
                     let mut held = self.held();
                     let keep = if held.ended { 0 } else { self.lookahead };
-                    if !held.stopped && held.batches.len() > keep && held.live < self.max_live {
+                    let fits = held.batches.front().is_some_and(|(_, unit)| {
+                        unit.places <= 1
+                            || held.places == 0
+                            || held.places + unit.places <= self.max_places
+                    });
+                    if !held.stopped
+                        && held.batches.len() > keep
+                        && held.live < self.max_live
+                        && fits
+                    {
                         held.live += 1;
+                        let places = held.batches.front().map_or(1, |(_, unit)| unit.places);
+                        held.places += places;
                         let alone = held.ended;
                         held.batches
                             .pop_front()
@@ -2615,6 +2652,7 @@ fn x_flow(
                 let mut held = self.held();
                 if held.stopped {
                     held.live -= 1;
+                    held.places -= unit.places;
                     return;
                 }
             }
@@ -2623,7 +2661,11 @@ fn x_flow(
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     (self.search)(&unit, alone)
                 }));
-                self.held().live -= 1;
+                {
+                    let mut held = self.held();
+                    held.live -= 1;
+                    held.places -= unit.places;
+                }
                 // The receiver is gone only when the run already ended at an error.
                 let _ = sender.send((index, searched));
                 self.release(scope, &sender);
@@ -2636,11 +2678,13 @@ fn x_flow(
         held: std::sync::Mutex::new(XHeld {
             batches: VecDeque::new(),
             live: 0,
+            places: 0,
             ended: false,
             stopped: false,
         }),
         lookahead,
         max_live,
+        max_places,
         search,
     };
     // Marks the writing ended when the scope's body returns or unwinds, before the scope waits
@@ -2742,8 +2786,8 @@ fn x_flow(
                 if queries.is_empty() {
                     return Err(engine("Empty CBlastQueryVector"));
                 }
-                // The reader batch enters the flow as its units (at most 10002 letters each),
-                // each as a batch of a run without `BATCH_SIZE` does; the bound counts units. A
+                // The reader batch enters the flow as its units (`XUnit::split`), each as a
+                // batch of a run without `BATCH_SIZE` does; the bound counts units. A
                 // reader batch of several units (in the capped flow with LOSAT_X_BXCAPFILL, every
                 // reader batch) is prepared first (phase 1) by one task per unit,
                 // beside the searches of the batches before it, while this thread reads on: the

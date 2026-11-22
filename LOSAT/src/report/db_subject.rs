@@ -1319,18 +1319,29 @@ impl ParsedSubject {
     }
 
     /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and
-    /// its title: `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix` (`Unknown`
-    /// where NCBI's `HtmlDecode` throws), after two spaces where `gi|N|` was written.
+    /// its title (`description_line`).
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
+        let (start, title, _) = self.description_line(protein);
+        (start, title)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1585-1613
+    /// The outfmt 0 description line: the start (`description_id` of `GetDisplayIds`' id) and the
+    /// title, `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix`, after two spaces
+    /// where `gi|N|` was written; and whether it is the line of NCBI's `catch`
+    /// (`x_GetDeflineInfo`): where the title throws (NCBI's `HtmlDecode` cannot decode it), the
+    /// `catch` keeps the Seq-align id and `Unknown` (`thrown_description`; line RG T4a2 review O1:
+    /// `>gi|777|ref|XP_000009.1| ...` with `-subject -parse_deflines` shows `gi|777 Unknown`).
+    pub fn description_line(&self, protein: bool) -> (Vec<u8>, Defline, bool) {
+        let Ok(mut title) = self.bioseq_title(protein, true) else {
+            let (start, title) = self.thrown_description();
+            return (start, title, true);
+        };
         let (start, wrote_gi) = self.description_id();
-        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
-            text: b"Unknown".to_vec(),
-            reads_past_end: false,
-        });
         if wrote_gi {
             title.text.splice(0..0, *b"  ");
         }
-        (start, title)
+        (start, title, false)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1576-1604

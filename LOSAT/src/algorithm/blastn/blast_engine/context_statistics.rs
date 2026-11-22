@@ -178,7 +178,13 @@ fn karlin_blocks<const UNGAPPED: bool>(
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if prolog_with_report(format, output_format) {
-                    write_format_prolog(format, output_format, intro, shown)?;
+                    write_format_prolog(
+                        format,
+                        output_format,
+                        intro,
+                        shown,
+                        &mut *outputs.diagnostics,
+                    )?;
                 }
             }
             return Err(karlin_error(&message, empty_queries));

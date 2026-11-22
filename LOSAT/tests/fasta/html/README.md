@@ -49,3 +49,12 @@ lowercase run meet; copied byte for byte from the probe's inputs; the query `pq 
 - `nq_d2_touch.fna`, `nq_d2_over3.fna`, `nq_d2_over6.fna`: blastx and tblastx queries (the back translation alone), a 15 nt run
   that starts at the nucleotide after the SEG mask of frame +1, overlaps it by 3 nt, by 6 nt.
 - `nq_d2_dusttouch.fna`, `ns_d2_dust.fna`: blastn query with a lowercase run starting one past DUST's mask, and its subject.
+
+Fix round 1 of line RG T4a2 (2026-11-23; copied byte for byte from the review's and the fix's probe inputs):
+- `pq_unk.faa`, `ps_unk.faa` (review a, F3): one query, and three `-subject` records of which the first title,
+  `ref|XP_000001.1| bad \x81 title one`, has a byte that NCBI's title decoding cannot place (the description row
+  `Unknown`: NCBI's catch, with `-parse_deflines`). `ps_unk_gi.faa` (O1): the same with the ids
+  `gi|777|ref|XP_000009.1|` and `lcl|loc_bad` on undecodable titles. `nq_unk.fna`, `ns_unk.fna`: blastn's, with
+  `ref|NM_000009.1|`.
+- `pq_warn.faa` (B1): the first query of `pq_spec.faa`, a query of 30 `X` (NCBI's Karlin-Altschul warning on stderr)
+  and the first query's letters again, so that two queries with hits come around a query's warning.

@@ -582,8 +582,9 @@ pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::R
 }
 
 /// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
-/// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references
-/// (`ReferenceRegistry::read`) and NCBI's formatter registry (`InitConfig::read`:
+/// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references and
+/// of each query's description table and alignments (`FormatterNcbirc::read`) and NCBI's
+/// formatter registry (`InitConfig::read`:
 /// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
 /// its formats (`html_format_check`), so that LOSAT's refusal of the file comes before the first
 /// byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
@@ -602,14 +603,14 @@ pub(crate) fn html_links(
     }
     let lower = program.name().to_ascii_lowercase();
     // The prolog's references read `./.ncbirc` before the first id link reads InitConfig's file.
-    let references = crate::report::formatter_registry::ReferenceRegistry::read(&lower)
+    let ncbirc = crate::report::formatter_registry::FormatterNcbirc::read(&lower)
         .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
     let registry = crate::report::formatter_registry::InitConfig::read(&lower)
         .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
     Ok(Some(std::sync::Arc::new(
         crate::report::html_ids::HtmlLinks {
             registry,
-            references,
+            ncbirc,
             db_name: database.unwrap_or_default().as_bytes().to_vec(),
             // `m_IsDbNa`: the subjects of BLASTN, TBLASTN and TBLASTX are nucleotide sequences.
             nucleotide: matches!(

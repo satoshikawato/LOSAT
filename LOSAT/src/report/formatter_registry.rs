@@ -5,13 +5,15 @@
 //! touches this read).
 //!
 //! The organism report (outfmt 18, `report::tax_report`) reads `[TAX_BROWSER] BLASTFMTUTIL` and
-//! `[BLASTFMTUTIL] PROTOCOL` here. NCBI's `-html` forms read the same file for the references'
-//! scheme (`CBlastFormatUtil::BlastPrintReference`, `report::reference::write_reference`); the
-//! `[LOCAL_ID]` links read another one, through `CAlignFormatUtil::InitConfig`: the file that
-//! `FMTCFG` names (default `.ncbirc`) in the current directory, else the one under `$NCBI`
-//! (line RG, item T4a).
-
-use std::io::Write;
+//! `[BLASTFMTUTIL] PROTOCOL` here. NCBI's `-html` pairwise report reads the same file for the
+//! references' scheme (`CBlastFormatUtil::BlastPrintReference`, `report::reference::write_reference`)
+//! and again at the start of each query's description table and of its alignments
+//! (`FormatterNcbirc`); the `[LOCAL_ID]` links read another one, through
+//! `CAlignFormatUtil::InitConfig`: the file that `FMTCFG` names (default `.ncbirc`) in the current
+//! directory, else the one under `$NCBI` (line RG, item T4a). The reads of `-html` have no effect
+//! here: what each writes to the run's diagnostics is data (`FormatterNcbirc::posts`,
+//! `InitConfig::call_posts`), which the report's writer writes where NCBI's read comes in the report
+//! (`report::html_ids::HtmlPost`).
 
 use crate::blastinput::ncbi_registry::RegistryRead;
 
@@ -170,7 +172,7 @@ fn init_config_path(
 
 /// What a read of a registry file of NCBI's formatter found: `InitConfig`'s file
 /// (`CAlignFormatUtil::m_Reg`, static in NCBI: one per run) or the `./.ncbirc` of the `-html`
-/// references (`ReferenceRegistry`).
+/// pairwise report (`FormatterNcbirc`).
 #[derive(Debug, Default)]
 enum ConfigFile {
     /// No file: `m_Reg` stays null and NCBI looks again at each call (a run's files and
@@ -192,6 +194,26 @@ enum ConfigFile {
 }
 
 impl ConfigFile {
+    /// What each read of the file writes to the run's diagnostics (`registry_posts`; nothing
+    /// without a file).
+    fn posts(&self) -> &[u8] {
+        match self {
+            ConfigFile::Absent => &[],
+            ConfigFile::Read { posts, .. } | ConfigFile::Throws { posts, .. } => posts,
+        }
+    }
+
+    /// The registry of a read (`None`: no file), or for a file whose read throws its exception as
+    /// the report's I/O error (`NcbiException::into_io_error`: NCBI's application ends with it,
+    /// exit status 255).
+    fn registry(&self) -> std::io::Result<Option<&RegistryRead>> {
+        match self {
+            ConfigFile::Absent => Ok(None),
+            ConfigFile::Read { registry, .. } => Ok(Some(registry)),
+            ConfigFile::Throws { exception, .. } => Err(exception.clone().into_io_error()),
+        }
+    }
+
     /// The read of the file `path` of `bytes` while `program` (in lower case) runs, into a file
     /// layer as `CNcbiRegistry`'s constructor reads a stream (`read_cwd_ncbirc`). `Err(what)`
     /// for a file that LOSAT refuses (completing `the registry file <path> ...`): one that
@@ -215,20 +237,28 @@ impl ConfigFile {
     }
 }
 
-/// `./.ncbirc` as NCBI's `-html` references read it: `CBlastFormatUtil::BlastPrintReference`
-/// makes a registry of the file for each reference it writes and takes `[BLASTFMTUTIL] PROTOCOL`
-/// from it (`protocol`). Read once at the program's setup, with the run's other `-html` data
-/// (`html_ids::HtmlLinks`, `blastinput::app::html_links`), so that LOSAT's refusals of the file come
-/// before the first byte; each reference then has the effects of its own read: the posts of the
-/// read, and for a file whose read throws the exception, which ends the prolog after the version
-/// line (line RG T4 probes `bp.di.f0.rc_bad.h`, `rc_bad_dontuse.h`: exit status 255). The
-/// default is the run without the file.
+/// `./.ncbirc` as NCBI's `-html` pairwise report reads it: `CBlastFormatUtil::BlastPrintReference`
+/// makes a registry of the file for each reference of the prolog and takes `[BLASTFMTUTIL]
+/// PROTOCOL` from it (`protocol`), and each query with hits reads it again where its description
+/// table starts (`CShowBlastDefline::x_InitDeflineTable`, also with `-num_descriptions 0`) and where
+/// its alignments start (`CDisplaySeqalign::x_InitAlignParams`, where an alignment is shown). Read
+/// once at the program's setup, with the run's other `-html` data (`html_ids::HtmlLinks`,
+/// `blastinput::app::html_links`), so that LOSAT's refusals of the file come before the first byte;
+/// each of NCBI's reads then has the effects of its own: the posts of the read (`posts`, which the
+/// report's writer writes at the read's place, `html_ids::HtmlPost::Ncbirc`), and for a file whose
+/// read throws the exception after them (`read`), which ends the prolog after the version line
+/// (line RG T4 probes `bp.di.f0.rc_bad.h`, `rc_bad_dontuse.h`: exit status 255). The default is the
+/// run without the file. NCBI BLAST+ 2.17.0 with a file that sets an entry twice (line RG T4a2 fix
+/// round 1, `T/t4/fix1` probe `bp2`): two posts for blastp's references, then per query with hits
+/// one at its table and one at its alignments.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-105
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1882-1885
 #[derive(Debug, Default)]
-pub(crate) struct ReferenceRegistry(ConfigFile);
+pub(crate) struct FormatterNcbirc(ConfigFile);
 
-impl ReferenceRegistry {
+impl FormatterNcbirc {
     /// The read of `./.ncbirc` of the current directory for a run of `program` (in lower case, as
     /// NCBI's posts name it); no file is the default (a file that does not open: the stream
     /// fails, and the registry is empty, as `read_cwd_ncbirc` takes it). `Err(what)` for a file
@@ -244,53 +274,50 @@ impl ReferenceRegistry {
             return Ok(Self::default());
         };
         ConfigFile::of(program, ".ncbirc".into(), &bytes)
-            .map(ReferenceRegistry)
+            .map(FormatterNcbirc)
             .map_err(|what| {
                 format!(
-                    "the registry file ./.ncbirc {what}, which NCBI BLAST+'s -html references read; this is not supported by LOSAT"
+                    "the registry file ./.ncbirc {what}, which NCBI BLAST+'s -html reports read; this is not supported by LOSAT"
                 )
             })
     }
 
-    /// The scheme of one reference's PubMed link (`httpProt`): the file's `[BLASTFMTUTIL]
-    /// PROTOCOL` (`protocol`: an empty value counts as set), `https:` without the file. The read
-    /// of each reference writes the posts of the read to `diagnostics` (standard error); a file
-    /// whose read throws throws at each reference (the exception as the report's I/O error,
-    /// `NcbiException::into_io_error`: NCBI's application ends with it, exit status 255).
-    pub(crate) fn protocol(&self, diagnostics: &mut dyn Write) -> std::io::Result<&[u8]> {
-        match &self.0 {
-            ConfigFile::Absent => Ok(super::reference::DEFAULT_PROTOCOL),
-            ConfigFile::Read {
-                registry, posts, ..
-            } => {
-                if !posts.is_empty() {
-                    diagnostics.write_all(posts)?;
-                    diagnostics.flush()?;
-                }
-                Ok(protocol(Some(registry)))
-            }
-            ConfigFile::Throws { posts, exception } => {
-                diagnostics.write_all(posts)?;
-                diagnostics.flush()?;
-                Err(exception.clone().into_io_error())
-            }
-        }
+    /// What each of NCBI's reads of the file writes to the run's diagnostics (standard error)
+    /// before it gives its registry or throws (`registry`).
+    pub(crate) fn posts(&self) -> &[u8] {
+        self.0.posts()
+    }
+
+    /// The registry that each read makes (`None` without the file), or the exception of a file
+    /// whose read throws, after its posts (`posts`).
+    pub(crate) fn registry(&self) -> std::io::Result<Option<&RegistryRead>> {
+        self.0.registry()
+    }
+
+    /// The scheme of one reference's PubMed link (`httpProt`) after the reference's read
+    /// (`registry`): the file's `[BLASTFMTUTIL] PROTOCOL` (`protocol`: an empty value counts as
+    /// set), `https:` without the file.
+    pub(crate) fn protocol(&self) -> std::io::Result<&[u8]> {
+        Ok(protocol(self.registry()?))
     }
 }
 
 /// The registry of NCBI's id links with `-html` (`CAlignFormatUtil::InitConfig`, `m_Reg`,
 /// `m_Protocol`, `m_geturl_debug_flag`): one per run, made only with `-html` (`InitConfig::read`,
 /// which reads the file at once so that LOSAT's refusals come before the first byte), and used
-/// where NCBI first calls `InitConfig`: at the first id URL of the report (`map_protocol`,
-/// `local_id_url`), never by the organism report. The effects of a read, the posts, the
-/// `GETURL_DEBUG` line and the exception of a malformed file, happen at that call, as in NCBI
-/// (line RG T4 probes `env_geturl`, `cfg.*`: a malformed file fails only with hits, rc 255).
+/// where NCBI calls `InitConfig`: at each id URL of the report (`map_protocol`, `local_id_url`),
+/// never by the organism report. The effects of a call, the posts and the `GETURL_DEBUG` line of
+/// the run's first (`call_posts`) and the exception of a malformed file at every call, happen at
+/// the id URL's place in the report, as in NCBI (line RG T4 probes `env_geturl`, `cfg.*`: a
+/// malformed file fails only with hits, rc 255): the exception is the call's result, the text is
+/// written by the report's writer where the call comes in the report (`html_ids::HtmlPost`).
 #[derive(Debug)]
 pub(crate) struct InitConfig {
     file: ConfigFile,
     /// `GETURL_DEBUG` is set (to any value, the empty one too).
     debug: bool,
-    /// Whether the first call has written the posts and the `GETURL_DEBUG` line of a `Read`.
+    /// Whether the report has written the posts and the `GETURL_DEBUG` line of a `Read`, those of
+    /// the run's first call (`call_posts`).
     reported: std::sync::atomic::AtomicBool,
 }
 
@@ -346,38 +373,42 @@ impl InitConfig {
         })
     }
 
-    /// `InitConfig()` where `m_Reg` is null, then `m_Reg`: the registry (`None`: no file). The
-    /// first call writes the posts of the read and, with `GETURL_DEBUG`, `REGISTRY: <path>` to
-    /// `diagnostics`; a file whose read throws posts and throws at every call (the exception as
-    /// the report's I/O error, `NcbiException::into_io_error`: NCBI's application then ends with
-    /// it, exit status 255).
-    fn registry(&self, diagnostics: &mut dyn Write) -> std::io::Result<Option<&RegistryRead>> {
+    /// `InitConfig()` where `m_Reg` is null, then `m_Reg`: the registry (`None`: no file), or for a
+    /// file whose read throws its exception at every call (as the report's I/O error,
+    /// `NcbiException::into_io_error`: NCBI's application then ends with it, exit status 255).
+    fn registry(&self) -> std::io::Result<Option<&RegistryRead>> {
+        self.file.registry()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
+    /// What one call of `InitConfig` (an id URL, `map_protocol`) writes, where the report reaches
+    /// it: the posts of the read, to the run's diagnostics, and with `GETURL_DEBUG` the line
+    /// `REGISTRY: <path>`, which NCBI writes to the process's standard error itself, not as a post
+    /// (`QueryWarnings::html_stderr_line`: with tblastx's `-logfile` the posts go to the file and
+    /// the line stays on the terminal). The first call of the run that reads a file writes both,
+    /// later calls nothing (`m_Reg` is set); a file whose read throws posts at every call (before
+    /// its exception, `registry`). The report's writer asks it in the report's order, so the first
+    /// call is the report's first id URL also where the parts of the report are formatted on
+    /// threads (`x_pairwise_par::write_parallel`).
+    pub(crate) fn call_posts(&self) -> (Vec<u8>, Vec<u8>) {
         match &self.file {
-            ConfigFile::Absent => Ok(None),
-            ConfigFile::Read {
-                path,
-                registry,
-                posts,
-            } => {
-                if !self
+            ConfigFile::Absent => Default::default(),
+            ConfigFile::Read { path, posts, .. } => {
+                if self
                     .reported
                     .swap(true, std::sync::atomic::Ordering::Relaxed)
                 {
-                    diagnostics.write_all(posts)?;
-                    if self.debug {
-                        diagnostics.write_all(b"REGISTRY: ")?;
-                        diagnostics.write_all(path.as_encoded_bytes())?;
-                        diagnostics.write_all(b"\n")?;
-                    }
-                    diagnostics.flush()?;
+                    return Default::default();
                 }
-                Ok(Some(registry))
+                let mut line = Vec::new();
+                if self.debug {
+                    line.extend_from_slice(b"REGISTRY: ");
+                    line.extend_from_slice(path.as_encoded_bytes());
+                    line.push(b'\n');
+                }
+                (posts.clone(), line)
             }
-            ConfigFile::Throws { posts, exception } => {
-                diagnostics.write_all(posts)?;
-                diagnostics.flush()?;
-                Err(exception.clone().into_io_error())
-            }
+            ConfigFile::Throws { posts, .. } => (posts.clone(), Vec::new()),
         }
     }
 
@@ -387,12 +418,8 @@ impl InitConfig {
     /// kind (probes `cfg.*.{L,A,D}.h`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3661-3671
-    pub(crate) fn map_protocol(
-        &self,
-        url: &[u8],
-        diagnostics: &mut dyn Write,
-    ) -> std::io::Result<Vec<u8>> {
-        let registry = self.registry(diagnostics)?;
+    pub(crate) fn map_protocol(&self, url: &[u8]) -> std::io::Result<Vec<u8>> {
+        let registry = self.registry()?;
         Ok(map_template(url, "protocol", protocol(registry)))
     }
 
@@ -412,9 +439,8 @@ impl InitConfig {
         label: &[u8],
         database: &[u8],
         taxid: i32,
-        diagnostics: &mut dyn Write,
     ) -> std::io::Result<Vec<u8>> {
-        let registry = self.registry(diagnostics)?;
+        let registry = self.registry()?;
         let tool_url = registry
             .and_then(|read| read.last_value("LOCAL_ID", "TOOL_URL"))
             .unwrap_or_default();
@@ -424,7 +450,7 @@ impl InitConfig {
         let url = map_template(&url, "cssInf", b"");
         let url = map_template(&url, "title", label);
         let url = map_template(&url, "target", b"");
-        self.map_protocol(&url, diagnostics)
+        self.map_protocol(&url)
     }
 }
 

@@ -5721,7 +5721,10 @@ fn post_process_hits_and_write(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut format_warnings = (warning_lines.is_some()
             || later.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                report.html.is_some(),
+            )
             || output_format
                 .tabular_spec()
                 .is_some_and(|spec| spec.looks_up_every_taxid()))
@@ -9429,7 +9432,13 @@ fn write_pairwise_prologs(
             _ => false,
         };
         if writes_prolog {
-            write_format_prolog(format, output_format, intro, shown)?;
+            write_format_prolog(
+                format,
+                output_format,
+                intro,
+                shown,
+                &mut *outputs.diagnostics,
+            )?;
         }
     }
     Ok(())
@@ -9442,6 +9451,7 @@ fn write_format_prolog(
     output_format: BlastnOutputFormat,
     intro: BlastnIntro,
     shown: &ShownSubjects,
+    diagnostics: &mut dyn std::io::Write,
 ) -> Result<()> {
     if output_format.is_pairwise() {
         let mut writer = format.sink.open()?;
@@ -9454,7 +9464,10 @@ fn write_format_prolog(
             i64::from(shown.num_seqs),
             shown.total_letters,
             shown.database.as_ref(),
-            shown.html_links.as_deref(),
+            shown
+                .html_links
+                .as_deref()
+                .map(|links| (links, diagnostics)),
         )?;
         writer.flush()?;
     } else if let Some(kind) = output_format.xml2_kind() {

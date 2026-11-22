@@ -527,9 +527,7 @@ where
     let read = read_program(&tokens, |word| command.find_subcommand(word).is_some())
         .and_then(|word| command.find_subcommand(word))
         .map(|program| program.get_name().to_string());
-    let command = with_html_help_place(with_toolkit_file_args(command, |name| {
-        Some(name) == read.as_deref()
-    }));
+    let command = with_toolkit_file_args(command, |name| Some(name) == read.as_deref());
     // NCBI's application reads its own toolkit words before the program's arguments; the
     // argument reader gets the words that are left (`ncbi_environment::preparse`).
     if let Some(program) = tokens
@@ -749,6 +747,20 @@ where
             translated.push(format!("--{name}").into());
         }
     }
+    // The order of the options is read only where clap renders a program's help (`-help`, `-h`,
+    // `-help-full`, `-xmlhelp`'s stop, all `--help` or `-h` here): only then is `-html` given its
+    // place (`with_html_help_place`), so a run that renders no help does no work for it (line RG
+    // T4a2 review S1).
+    let help_command;
+    let command = if translated
+        .iter()
+        .any(|word| word == "--help" || word == "-h")
+    {
+        help_command = with_html_help_place(command.clone());
+        &help_command
+    } else {
+        &command
+    };
     let mut matches = match command.clone().try_get_matches_from(&translated) {
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
@@ -1457,7 +1469,8 @@ fn with_toolkit_file_args(
 /// NCBI BLAST+ 2.17.0's `-help` lists it (`-line_length`, `-html`, `-sorthits`). The field order
 /// of a program's options gives the other places; `-line_length` and `-sorthits` come from the
 /// one `FormattingArgs` that psiblast and rpsblast flatten in too, which have no `-html`, so the
-/// place is given here: the options listed after `-line_length` move down by one.
+/// place is given here: the options listed after `-line_length` move down by one. Only clap's
+/// help reads the order, so `parse_command` calls this only for a command line that asks for help.
 fn with_html_help_place(mut command: clap::Command) -> clap::Command {
     let names: Vec<String> = command
         .get_subcommands()

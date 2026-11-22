@@ -3,10 +3,10 @@
 //! report's `-html` data that they read (`HtmlLinks`, `HtmlReport`). Reached only with `-html`:
 //! the plain report never classifies an id here.
 
-use std::io::{self, Write};
+use std::io;
 use std::sync::Arc;
 
-use super::formatter_registry::{map_template, InitConfig, ReferenceRegistry};
+use super::formatter_registry::{map_template, FormatterNcbirc, InitConfig};
 use crate::report::db_subject::ParsedSubject;
 use crate::seqdb::Oid;
 use crate::seqid::label;
@@ -20,14 +20,45 @@ use crate::seqid::rank::{find_best, text_score};
 /// byte; outfmt 18 takes no links); the `-db` text as NCBI keeps
 /// it (`CBlastFormat::m_DbName`, `NStr::TruncateSpaces` of `-db`; empty for `-subject`), the
 /// `<@db_name@>` of a local id's link; whether the database holds nucleotides (`m_IsDbNa`); and
-/// the `./.ncbirc` of the prolog's reference links (`ReferenceRegistry`, read at the same setup;
-/// `pairwise::write_prolog`).
+/// the `./.ncbirc` that the prolog's references and each query's description table and alignments
+/// read (`FormatterNcbirc`, read at the same setup; `pairwise::write_prolog`, `HtmlPost`).
 #[derive(Debug)]
 pub struct HtmlLinks {
     pub(crate) registry: InitConfig,
     pub(crate) db_name: Vec<u8>,
     pub(crate) nucleotide: bool,
-    pub(crate) references: ReferenceRegistry,
+    pub(crate) ncbirc: FormatterNcbirc,
+}
+
+impl HtmlLinks {
+    /// What NCBI's read `post` writes, asked by the report's writer where the read comes in the
+    /// report: the posts to the run's diagnostics (standard error, or the caller's diagnostics in
+    /// the library API), and the line that NCBI writes to the process's standard error itself
+    /// (empty but for `InitConfig`'s `REGISTRY:`): the posts of a read of `./.ncbirc`
+    /// (`FormatterNcbirc::posts`), or those of a call of `InitConfig` (`InitConfig::call_posts`:
+    /// the run's first call, or each call of a file whose read throws).
+    pub(crate) fn posts_of(&self, post: HtmlPost) -> (std::borrow::Cow<'_, [u8]>, Vec<u8>) {
+        match post {
+            HtmlPost::Ncbirc => (std::borrow::Cow::Borrowed(self.ncbirc.posts()), Vec::new()),
+            HtmlPost::InitConfig => {
+                let (posts, line) = self.registry.call_posts();
+                (std::borrow::Cow::Owned(posts), line)
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086 (cited at `QueryWarnings`)
+/// A read of NCBI's formatter registries in a `-html` pairwise report, which writes to the run's
+/// diagnostics at its place among the report's bytes (`HtmlLinks::posts_of`; NCBI posts on `cerr`,
+/// which flushes the report written before, `query_warnings::ReportPlace`): `./.ncbirc` at the
+/// start of a query's description table or of its alignments (`FormatterNcbirc`), or `InitConfig`
+/// at an id URL (`id_url`). The writers that format parts of the report into buffers keep these
+/// as data, so that each is written in the report's order (`x_pairwise_par`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HtmlPost {
+    Ncbirc,
+    InitConfig,
 }
 
 /// The `-html` data of one pairwise report (`PairwiseConfig::html`; `None` is the plain report):
@@ -53,21 +84,32 @@ impl HtmlReport {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:459-494
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1590-1613
     /// The link (`sdl->id_url`, empty for none) and the score link (`sdl->score_url`) of the
     /// description row of rank `rank` (from 1, NCBI's `blast_rank`) for the subject of index
     /// `s_idx`, `parsed` when it has parsed Seq-ids: the link of its Bioseq's ids (`GetIDUrl`
     /// with the handle of the Seq-align id) with the display id's label (`GetLabel`, `eContent`) as
     /// the accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a
-    /// `-subject` record `lcl|Subject_<s_idx + 1>`. The registry's posts, its `GETURL_DEBUG` line
-    /// and its exception go to standard error at the first link of the run (`id_url`).
+    /// `-subject` record `lcl|Subject_<s_idx + 1>`. A row of NCBI's `catch` (`caught`: the title
+    /// of its subject or its load throws, `pairwise::DescriptionLabel::caught`) links the Bioseq's
+    /// ids with the label of the Seq-align id as the accession, its GI and taxid 0, and has no
+    /// score link. The
+    /// link calls `InitConfig` (`id_url`, which adds its `HtmlPost` to `posts`); the registry's
+    /// exception is the error.
     pub(crate) fn description_links(
         &self,
         parsed: Option<&ParsedSubject>,
         s_idx: u32,
         rank: usize,
+        caught: bool,
+        posts: &mut Vec<HtmlPost>,
     ) -> io::Result<(Vec<u8>, Vec<u8>)> {
         let own;
         let (ids, display, gi, taxid) = match parsed {
+            Some(subject) if caught => {
+                let id = subject.alignment_id();
+                (subject.bioseq_ids(), id, id.gi().unwrap_or(0), 0)
+            }
             Some(subject) => match subject.description_ids() {
                 Some((display, gi)) => {
                     let taxid = match display {
@@ -92,9 +134,11 @@ impl HtmlReport {
             place: LinkPlace::Description,
             taxid,
         };
-        let link = id_url(ids, &info, &self.links, &mut io::stderr())?;
+        let link = id_url(ids, &info, &self.links, posts)?;
         let mut score = Vec::new();
-        score_link(gi, &accession, &mut score);
+        if !caught {
+            score_link(gi, &accession, &mut score);
+        }
         Ok((link, score))
     }
 
@@ -115,15 +159,24 @@ impl HtmlReport {
 
 /// The `-html` data of one subject's alignment heading (`x_PrintDefLine`): the report's
 /// (`HtmlReport`), the subject's index `s_idx` and the heading's rank `rank` (NCBI's `m_cur_align`,
-/// from 1: `QueryGroup::heading_rank`), the `blast_rank` of its links.
+/// from 1: `QueryGroup::heading_rank`), the `blast_rank` of its links; and the reads of the
+/// registries that the heading's links make (`posts`, `HtmlPost`), which its writer takes
+/// (`take_posts`) and writes before the heading's lines.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HtmlHeading<'a> {
     pub(crate) report: &'a HtmlReport,
     pub(crate) s_idx: u32,
     pub(crate) rank: usize,
+    pub(crate) posts: &'a std::cell::RefCell<Vec<HtmlPost>>,
 }
 
 impl HtmlHeading<'_> {
+    /// The reads of the registries that the heading's links made since the last take
+    /// (`HtmlPost`), in order: its writer writes them before the heading's lines.
+    pub(crate) fn take_posts(&self) -> Vec<HtmlPost> {
+        std::mem::take(&mut *self.posts.borrow_mut())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2413-2449
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2209-2221, 2265-2271
     /// The id of one line of the heading after its `>` or space: the link of the id list `ids` (a
@@ -155,7 +208,7 @@ impl HtmlHeading<'_> {
             place: LinkPlace::Heading,
             taxid,
         };
-        let link = id_url(ids, &info, &self.report.links, &mut io::stderr())?;
+        let link = id_url(ids, &info, &self.report.links, &mut self.posts.borrow_mut())?;
         out.extend_from_slice(&link);
         id_text(out);
         if !link.is_empty() {
@@ -269,12 +322,8 @@ fn has_text_seq_id(ids: &[ParsedSeqId]) -> bool {
 /// The Entrez link of a Textseq-id, `pdb` or patent id (`GetIDUrlGen` :3788-3798, without
 /// templates: `acc` again, then `cssInf` and `target` empty). The ENTREZ template has no `gi`
 /// tag, so the GI is not needed. `s_MapCommonUrlParams` ends with the registry's `MapProtocol`
-/// (`InitConfig::map_protocol`), whose first call of the run reads the registry.
-fn entrez_url(
-    info: &SeqUrlInfo<'_>,
-    links: &HtmlLinks,
-    diagnostics: &mut dyn Write,
-) -> io::Result<Vec<u8>> {
+/// (`InitConfig::map_protocol`).
+fn entrez_url(info: &SeqUrlInfo<'_>, links: &HtmlLinks) -> io::Result<Vec<u8>> {
     let (db, mol): (&[u8], &str) = if info.nucleotide {
         (b"nucleotide", "nucl")
     } else {
@@ -289,7 +338,7 @@ fn entrez_url(
     url = map_template(&url, "blast_rank", info.rank.to_string().as_bytes());
     url = map_template(&url, "rid", rid(info.place));
     url = map_template(&url, "acc", info.accession);
-    url = links.registry.map_protocol(&url, diagnostics)?;
+    url = links.registry.map_protocol(&url)?;
     url = map_template(&url, "acc", info.accession);
     url = map_template(&url, "cssInf", b"");
     Ok(map_template(&url, "target", b""))
@@ -309,17 +358,19 @@ fn rid(place: LinkPlace) -> &'static [u8] {
 /// link of a `gnl|TI|n` best id; the registry's `[LOCAL_ID] TOOL_URL` with its tags filled
 /// (`InitConfig::local_id_url`, no `<a`) for a local best id (`Subject_N` too); else nothing
 /// (empty). The applications set no templates, so the WGS branch (only with `useTemplates`) is
-/// never taken. `MapProtocol` ends every kind, so the registry is read at the first id of the run
-/// whatever its kind: its posts and the `GETURL_DEBUG` line go to `diagnostics` (standard error)
-/// then, and a malformed file's exception is the `io::Error` of every call (§1.9 of SURVEY_T4).
+/// never taken. `MapProtocol` ends every kind, so every id URL calls `InitConfig`
+/// (`HtmlPost::InitConfig`, added to `posts`, whose text the report's writer writes at the URL's
+/// place: the posts and the `GETURL_DEBUG` line of the run's first call), and a malformed file's
+/// exception is the `io::Error` of every call (§1.9 of SURVEY_T4).
 pub fn id_url(
     ids: &[ParsedSeqId],
     info: &SeqUrlInfo<'_>,
     links: &HtmlLinks,
-    diagnostics: &mut dyn Write,
+    posts: &mut Vec<HtmlPost>,
 ) -> io::Result<Vec<u8>> {
+    posts.push(HtmlPost::InitConfig);
     let url = if has_text_seq_id(ids) {
-        entrez_url(info, links, diagnostics)?
+        entrez_url(info, links)?
     } else {
         match find_best(ids, text_score) {
             Some(best @ ParsedSeqId::General(dbtag)) if dbtag.db.eq_ignore_ascii_case(b"TI") => {
@@ -335,17 +386,14 @@ pub fn id_url(
                 // `MapProtocol`.
                 let mut id_string = Vec::new();
                 label::content(local, true, &mut id_string);
-                return links.registry.local_id_url(
-                    &id_string,
-                    &links.db_name,
-                    info.taxid,
-                    diagnostics,
-                );
+                return links
+                    .registry
+                    .local_id_url(&id_string, &links.db_name, info.taxid);
             }
             _ => Vec::new(),
         }
     };
-    links.registry.map_protocol(&url, diagnostics)
+    links.registry.map_protocol(&url)
 }
 
 /// The label of a description row's display id (`GetLabel`, `eContent`; showdefline.cpp:463-464):

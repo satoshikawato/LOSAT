@@ -1976,7 +1976,9 @@ fn write_pairwise_prologs(
                             None => records.iter().map(|r| r.seq().len() as i64).sum(),
                         },
                         None,
-                        args.html_links.as_deref(),
+                        args.html_links.as_deref().map(|links| {
+                            (links, &mut *outputs.diagnostics as &mut dyn std::io::Write)
+                        }),
                     )?
                 }
                 ShownSubjects::Database { pairwise, .. } => {
@@ -1987,7 +1989,9 @@ fn write_pairwise_prologs(
                         0,
                         0,
                         Some(pairwise),
-                        args.html_links.as_deref(),
+                        args.html_links.as_deref().map(|links| {
+                            (links, &mut *outputs.diagnostics as &mut dyn std::io::Write)
+                        }),
                     )?
                 }
             }
@@ -2346,7 +2350,10 @@ fn write_tblastx_outputs(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
             || later.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                args.html_links.is_some(),
+            )
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()

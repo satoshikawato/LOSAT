@@ -21,7 +21,7 @@ use super::{
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
-use crate::report::query_warnings::SubjectReadHook;
+use crate::report::query_warnings::{no_places, ReportHook, ReportPlace};
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -72,7 +72,7 @@ pub(crate) fn write_psiblast_round_report(
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::super::query_warnings::QueryWarnings<'_>>,
     prolog: bool,
     round: ReportRound<'_>,
 ) -> io::Result<()> {
@@ -87,7 +87,7 @@ pub(crate) fn write_psiblast_round_report(
             false,
             false,
             false,
-            config.html_links(),
+            super::html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
         )?;
         match database {
             Some(database) => write_blast_database_header(writer, database)?,
@@ -120,7 +120,6 @@ pub(crate) fn write_psiblast_round_report(
         loads,
         round,
     };
-    let mut warnings = warnings;
     for (q_idx, query_hits) in query_range.zip(&hits_by_query) {
         // The query's warnings come before its preamble, after the report written so far
         // (`QueryWarnings::before_query`).
@@ -133,13 +132,16 @@ pub(crate) fn write_psiblast_round_report(
         // NCBI loads each subject that the query's batch did not prefetch at its description
         // line, or one the table does not show at its alignment's heading
         // (`QueryWarnings::subject_read`).
-        let mut read = |s_idx: u32, writer: &mut io::BufWriter<RoundWriter<'_>>| match warnings
-            .as_deref_mut()
-        {
-            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
-            None => Ok(()),
+        let mut place = |place: ReportPlace, writer: &mut io::BufWriter<RoundWriter<'_>>| {
+            crate::report::x_pairwise_par::at_place(
+                warnings.as_deref_mut(),
+                None,
+                q_idx,
+                place,
+                writer,
+            )
         };
-        sections.head(writer, q_idx, group.as_ref(), &mut read)?;
+        sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             // An aligned subject's load may end the run where the view's answer says
             // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
@@ -150,7 +152,7 @@ pub(crate) fn write_psiblast_round_report(
                 |s_idx| sections.thrown(s_idx),
             );
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
-                read(s_idx, &mut *writer)?;
+                place(ReportPlace::Load(s_idx), &mut *writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
             }
             if let Some((_, exception)) = end {
@@ -229,7 +231,7 @@ impl RoundSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        read: SubjectReadHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         writeln!(writer, "Results from round {}", self.round.number)?;
@@ -264,7 +266,7 @@ impl RoundSections<'_> {
             return Ok(());
         };
         match self.round.found_before {
-            Some(found_before) => self.write_two_part_table(writer, group, found_before, read)?,
+            Some(found_before) => self.write_two_part_table(writer, group, found_before, place)?,
             None => write_description_table(
                 writer,
                 &group.subject_order[..group.subject_order.len().min(report.num_descriptions)],
@@ -274,7 +276,7 @@ impl RoundSections<'_> {
                 // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502).
                 None,
                 |s_idx| self.label(group, s_idx),
-                read,
+                place,
                 // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`): the plain table.
                 None,
             )?,
@@ -299,7 +301,7 @@ impl RoundSections<'_> {
         writer: &mut W,
         group: &QueryGroup<'_>,
         found_before: &[bool],
-        read: SubjectReadHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let [repeated, new] = crate::report::x_pairwise_par::two_part_lines(
             group.hsps(),
@@ -311,9 +313,9 @@ impl RoundSections<'_> {
                     .unwrap_or(false)
             },
         );
-        self.write_part(writer, group, &repeated, true, &mut *read)?;
+        self.write_part(writer, group, &repeated, true, &mut *place)?;
         writeln!(writer)?;
-        self.write_part(writer, group, &new, false, read)?;
+        self.write_part(writer, group, &new, false, place)?;
         writeln!(writer)
     }
 
@@ -329,7 +331,7 @@ impl RoundSections<'_> {
         group: &QueryGroup<'_>,
         part: &[(u32, Vec<&PairwiseHit>)],
         repeat_pass: bool,
-        read: SubjectReadHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let rows: Vec<(u32, &PairwiseHit, f64)> = part
             .iter()
@@ -378,7 +380,7 @@ impl RoundSections<'_> {
         writeln!(writer)?;
         for (s_idx, best, _) in &rows {
             // Each line loads its subject (`write_description_table`).
-            read(*s_idx, writer)?;
+            place(ReportPlace::Load(*s_idx), writer)?;
             self.label(group, *s_idx).write_cut(writer)?;
             writeln!(
                 writer,
@@ -410,6 +412,7 @@ impl RoundSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
                 None,
+                &mut no_places,
                 |_, _, _| unreachable!("a skipped alignment is written by its line"),
             );
         }
@@ -436,6 +439,7 @@ impl RoundSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
                 None,
+                &mut no_places,
                 |writer, hit, _| {
                     write_hsp_info(writer, hit, config)?;
                     // psiblast refuses `-html`: the rows have no spans.
@@ -454,6 +458,7 @@ impl RoundSections<'_> {
             &group.subject_hit_indices[&s_idx],
             0..hsps,
             None,
+            &mut no_places,
             |writer, hit, _| {
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, None, config)

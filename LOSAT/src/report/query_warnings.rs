@@ -346,9 +346,26 @@ fn reads_of(reads: &[QueryReads], query: usize) -> &[SubjectRead] {
 /// formats into a buffer, marked at the buffer's length.
 pub type SubjectReadHook<'r, W> = &'r mut dyn FnMut(u32, &mut W) -> io::Result<()>;
 
-/// A [`SubjectReadHook`] that writes nothing (the tests of the writers).
-#[cfg(test)]
-pub fn no_subject_reads<W>(_subject: u32, _writer: &mut W) -> io::Result<()> {
+/// A place of a pairwise report (outfmt 0 to 4) where NCBI writes to the run's diagnostics between
+/// the report's bytes, after the report written before it (`cerr`, tied to `cout`): the load of a
+/// subject (`Load`: its read's text, `QueryWarnings::subject_read`) or, with `-html`, a read of
+/// NCBI's formatter registries (`Html`: `report::html_ids::HtmlPost`, whose text the run's
+/// `-html` links give, `HtmlLinks::posts_of`). The writers call their `ReportHook` at each, in the
+/// report's order; one that formats into a buffer keeps them with their offsets
+/// (`x_pairwise_par::format_piece`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReportPlace {
+    Load(u32),
+    Html(crate::report::html_ids::HtmlPost),
+}
+
+/// The pairwise writers' call at each `ReportPlace` of a query's report, with the report written so
+/// far (`x_pairwise_par::at_place`, or a writer's own marks).
+pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
+
+/// A [`ReportHook`] that writes nothing: of a writer without `-html` that reads no subject
+/// through it (psiblast's headings), and of the tests of the writers.
+pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())
 }
 
@@ -770,6 +787,11 @@ fn write_reads(
     })
 }
 
+/// The error of a `-html` pairwise report that posts on the diagnostics without the run's warnings
+/// (`report_posts` gives them to every such report): LOSAT's internal error, not a silent loss.
+pub const HTML_POSTS_WITHOUT_WARNINGS: &str =
+    "LOSAT internal error: a -html report posts on the diagnostics, but its format writes no warnings";
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-759
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
 /// Whether the writer of a report of format `format` posts on the run's diagnostics while it
@@ -779,9 +801,11 @@ fn write_reads(
 /// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
 /// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
 /// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
-/// `serial::seqalign::write_query_to`). A writer that posts without warnings is LOSAT's internal
-/// error (`write_hit_posts`), not a silent loss.
-pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> bool {
+/// `serial::seqalign::write_query_to`), and the pairwise report of a run with `-html` (`html`: the
+/// posts of its reads of NCBI's formatter registries, `ReportPlace::Html`). A writer that posts
+/// without warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not
+/// a silent loss.
+pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: bool) -> bool {
     use crate::blastinput::app::ReportFormat;
     matches!(
         format,
@@ -796,7 +820,7 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> boo
                 | ReportFormat::AsnBinary
                 | ReportFormat::JsonSeqalign
         )
-    )
+    ) || (html && format == Some(ReportFormat::Pairwise))
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).
@@ -855,6 +879,25 @@ impl<'a> QueryWarnings<'a> {
     pub fn end_run(&mut self) {
         if let Some(cursor) = self.reads.as_mut() {
             cursor.end_run();
+        }
+    }
+
+    /// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report
+    /// (`ReportPlace::Html`), to the sink after the report written so far (`report`) is flushed.
+    pub fn html_post(&mut self, text: &[u8], report: &mut dyn Write) -> io::Result<()> {
+        write_after(report, &mut *self.sink, text)
+    }
+
+    /// Writes `line`, what NCBI's formatter writes to the process's standard error itself in a
+    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post), after the report written so
+    /// far (`report`) is flushed: to the terminal where the run's messages follow `-logfile`
+    /// (tblastx: `ncbi_environment::terminal_stderr`, the standard error before the command line
+    /// made it the file; NCBI's posts go to the file, its own line to the terminal), else to the
+    /// sink with the posts. A library call's messages have no terminal of their own: the sink.
+    pub fn html_stderr_line(&mut self, line: &[u8], report: &mut dyn Write) -> io::Result<()> {
+        match crate::blastinput::ncbi_environment::terminal_stderr() {
+            Some(mut terminal) => write_after(report, &mut terminal, line),
+            None => write_after(report, &mut *self.sink, line),
         }
     }
 

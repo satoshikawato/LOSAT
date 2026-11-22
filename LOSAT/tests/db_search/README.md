@@ -2503,4 +2503,8 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   `$NCBI` directory: `[LOCAL_ID]` `TOOL_URL`), and the malformed files, whose first line `this line has no equals sign`
   NCBI's registry refuses: `bad/.ncbirc` (the run directory's), `ncbibad/.ncbirc` (a `$NCBI` directory's),
   `fmtbad/bad.rc` (the file that `FMTCFG=bad.rc` names in the run directory) and `ncbifmt/bad.rc` (the same in a `$NCBI`
-  directory); `fmtcfg/other.rc` is a valid file named by `FMTCFG=other.rc`.
+  directory); `fmtcfg/other.rc` is a valid file named by `FMTCFG=other.rc`. Two files that NCBI's registry reads with a
+  post on stderr at each read (line RG T4a2 fix 1, B1: the references', the description table's and the alignments'
+  reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
+  `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
+  survey T2's `bom` file).

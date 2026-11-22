@@ -725,7 +725,10 @@ pub(super) fn render(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
             || later.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                tabular.html.is_some(),
+            )
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))

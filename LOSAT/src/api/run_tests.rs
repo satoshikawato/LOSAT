@@ -217,3 +217,100 @@ fn the_html_links_reach_outfmt_0_in_any_place() {
         );
     }
 }
+
+/// The variable that makes `html_posts_child` run (`html_posts_reach_the_diagnostics`), and the
+/// formats of its calls (`0`, or `6,0`).
+const HTML_POSTS_CHILD: &str = "LOSAT_TEST_HTML_POSTS_CHILD";
+
+// Line RG T4a2 review B3: a `-html` report's reads of `./.ncbirc` post on the call's diagnostics
+// (`Outcome::diagnostics`), not on the process's standard error, also where the report is the
+// call's second format. A `./.ncbirc` with a repeated key posts at each read: NCBI BLAST+ 2.17.0
+// reads it at each reference of the prolog, at the description table and at the alignments of
+// each query with hits, and its id links' `InitConfig` reads it once (merged probes
+// `T/t4/fix1/merged/{bp_nd0,bn_mb,bx,tn,tx}.ncbi`: blastp 2 references, the others 1). A later
+// format's posts follow its program's rule for the lines of a later format's writer
+// (`ReportOutputs::later_warnings`): the diagnostics, and in BLASTX the format's receiver, which
+// `run_collect` does not give (so none). The file is read in the current directory, which a child
+// process of this test binary gets (the tests do not change their own).
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn html_posts_reach_the_diagnostics() {
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-html-posts-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join(".ncbirc"),
+        b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n",
+    )
+    .unwrap();
+    for formats in ["0", "6,0"] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "api::run::tests::html_posts_child",
+                "--exact",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(HTML_POSTS_CHILD, formats)
+            .env_remove("GETURL_DEBUG")
+            .env_remove("FMTCFG")
+            .env_remove("NCBI")
+            .current_dir(&directory)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(stdout.contains("html posts checked"), "{stdout}");
+        // Nothing of the posts went to the process's standard error.
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("PROTOCOL"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// The child of `html_posts_reach_the_diagnostics`: without `HTML_POSTS_CHILD` it does nothing.
+#[test]
+fn html_posts_child() {
+    let Some(formats) = std::env::var_os(HTML_POSTS_CHILD) else {
+        return;
+    };
+    let formats = formats.into_string().unwrap();
+    let formats: Vec<&str> = formats.split(',').collect();
+    for (program, references) in [
+        (Program::Blastn, 1),
+        (Program::Blastp, 2),
+        (Program::Blastx, 1),
+        (Program::Tblastn, 1),
+        (Program::Tblastx, 1),
+    ] {
+        let (query, subject) = self_pair(program);
+        let search = validate(program, &["-html"]).unwrap();
+        let outcome = run_collect(&search, Inputs::new(&query, &subject), &formats).unwrap();
+        let post = format!(
+            "Warning: (110.8) [{}] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3\n",
+            program.name().to_ascii_lowercase()
+        );
+        // The references, `InitConfig`, the query's description table and its alignments.
+        let posts = if program == Program::Blastx && formats.len() > 1 {
+            0
+        } else {
+            references + 3
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&outcome.diagnostics),
+            post.repeat(posts),
+            "{program} {formats:?}"
+        );
+    }
+    println!("html posts checked");
+}

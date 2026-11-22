@@ -7551,7 +7551,9 @@ fn write_pairwise_prologs(
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
-                args.html.as_deref(),
+                args.html
+                    .as_deref()
+                    .map(|links| (links, &mut *outputs.diagnostics as &mut dyn Write)),
             )?;
             writer.flush()?;
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
@@ -7690,6 +7692,13 @@ fn write_reports_without_queries(
                         .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
                 };
+                // No query writes warnings; an `-html` prolog's references post on the
+                // diagnostics (`pairwise::html_with_diagnostics`).
+                let mut warnings = crate::report::query_warnings::QueryWarnings::of_posts(
+                    &[],
+                    None,
+                    &mut *outputs.diagnostics,
+                );
                 write_blastp_pairwise_report(
                     &[],
                     &mut writer,
@@ -7703,7 +7712,7 @@ fn write_reports_without_queries(
                     None,
                     pairwise_database.as_ref(),
                     None,
-                    None,
+                    Some(&mut warnings),
                     true,
                     true,
                     None,
@@ -10744,7 +10753,10 @@ fn run_call(
         let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
             || own.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                args.html.is_some(),
+            )
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)

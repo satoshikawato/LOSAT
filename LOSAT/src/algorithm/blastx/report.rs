@@ -1457,7 +1457,10 @@ pub(crate) fn write_prolog(
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
-            options.html.as_deref(),
+            match options.html.as_deref() {
+                Some(links) => Some((links, &mut *diagnostics)),
+                None => None,
+            },
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning

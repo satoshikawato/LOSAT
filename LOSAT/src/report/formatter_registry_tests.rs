@@ -87,44 +87,39 @@ fn the_local_id_url_and_the_debug_line_are_ncbis() {
     // `bp.s.f0.rc_localid.h`) and `GETURL_DEBUG=1` (`bp.di.f0.env_geturl.h`: one line).
     let ncbirc = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
     let config = InitConfig::of("blastp", Some((".ncbirc".into(), ncbirc.to_vec())), true).unwrap();
-    let mut err = Vec::new();
     assert_eq!(
-        config.local_id_url(b"s3_local_identifier", b"../../../t2/db/ps_ids", 9606, &mut err).unwrap(),
+        config.local_id_url(b"s3_local_identifier", b"../../../t2/db/ps_ids", 9606).unwrap(),
         b"http://local.example/s3_local_identifier?db=..%2F..%2F..%2Ft2%2Fdb%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifier"
     );
     assert_eq!(
-        config.local_id_url(b"Subject_1", b"", 0, &mut err).unwrap(),
+        config.local_id_url(b"Subject_1", b"", 0).unwrap(),
         b"http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1"
     );
     assert_eq!(
-        config.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
+        config.map_protocol(b"<@protocol@>//x").unwrap(),
         b"https://x"
     );
-    assert_eq!(err, b"REGISTRY: .ncbirc\n");
+    // The run's first call writes the debug line, the others nothing (`call_posts`, which the
+    // report's writer asks at each id URL in the report's order).
+    assert_eq!(
+        config.call_posts(),
+        (Vec::new(), b"REGISTRY: .ncbirc\n".to_vec())
+    );
+    assert_eq!(config.call_posts(), Default::default());
     // Without a file: no URL, no line (`env_geturl_none`); `PROTOCOL` of the file, an empty one
     // too, else `https:`.
     let none = InitConfig::of("blastp", None, true).unwrap();
-    let mut err = Vec::new();
-    assert_eq!(
-        none.local_id_url(b"Subject_1", b"", 0, &mut err).unwrap(),
-        b""
-    );
-    assert_eq!(
-        none.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
-        b"https://x"
-    );
-    assert!(err.is_empty());
+    assert_eq!(none.local_id_url(b"Subject_1", b"", 0).unwrap(), b"");
+    assert_eq!(none.map_protocol(b"<@protocol@>//x").unwrap(), b"https://x");
+    assert_eq!(none.call_posts(), Default::default());
     let empty = InitConfig::of(
         "blastp",
         Some(("f".into(), b"[blastfmtutil]\nprotocol=\n".to_vec())),
         false,
     )
     .unwrap();
-    assert_eq!(
-        empty.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
-        b"//x"
-    );
-    assert!(err.is_empty());
+    assert_eq!(empty.map_protocol(b"<@protocol@>//x").unwrap(), b"//x");
+    assert_eq!(empty.call_posts(), Default::default());
     assert!(InitConfig::of(
         "blastp",
         Some(("f".into(), b"[NCBI]\n.Inherits=g\n".to_vec())),
@@ -144,9 +139,10 @@ fn a_malformed_init_config_file_throws_at_each_id() {
         true,
     )
     .unwrap();
-    let mut err = Vec::new();
     for _ in 0..2 {
-        let error = config.map_protocol(b"<@protocol@>", &mut err).unwrap_err();
+        // Each call posts the read's posts (none for this file) and throws.
+        assert_eq!(config.call_posts(), Default::default());
+        let error = config.map_protocol(b"<@protocol@>").unwrap_err();
         let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
         // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
@@ -157,8 +153,7 @@ fn a_malformed_init_config_file_throws_at_each_id() {
             ))
         );
     }
-    assert!(config.local_id_url(b"Subject_1", b"", 0, &mut err).is_err());
-    assert!(err.is_empty());
+    assert!(config.local_id_url(b"Subject_1", b"", 0).is_err());
 }
 
 #[test]

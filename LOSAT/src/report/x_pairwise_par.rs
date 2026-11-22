@@ -71,7 +71,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, OnceLock};
 
 use super::pairwise::PairwiseHit;
-use super::query_warnings::{QueryWarnings, SubjectReadHook};
+use super::query_warnings::{QueryWarnings, ReportHook, ReportPlace};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::utils::threading::SearchPool;
 
@@ -103,6 +103,18 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ));
     (PARALLEL && on() && pool.enabled() && pool.threads() > 1).then_some(pool)
+}
+
+/// How many alignment headings NCBI's display starts for one subject of a query
+/// (`QueryGroup::heading_rank`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HeadingStarts {
+    /// One heading, for the subject's first alignment.
+    Once,
+    /// One for each alignment: the heading's title cannot be made, so each alignment tries it.
+    EachAlignment,
+    /// None: the subject's load throws before its heading is started.
+    Never,
 }
 
 /// One query's hits by subject, as the serial writers group them: the subjects in the order of
@@ -163,25 +175,26 @@ impl<'h> QueryGroup<'h> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1929, 2307
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1929, 1955-1981, 2307
     /// The rank of subject `s_idx`'s alignment heading (NCBI's `m_cur_align`, the `blast_rank` of
-    /// its `-html` links, from 1 for each query): `x_PrintDefLine` counts each heading it starts,
-    /// which is once for a subject and once for each alignment of a subject whose heading throws
-    /// (`throws`: its title cannot be made; NCBI tries again at each alignment, as
-    /// `write_hsps_or_skips` notes). The ranks are made once, at the first call (only `-html`
-    /// headings call it); a heading that the registry fails throws in every subject, so it shows
-    /// no rank.
-    pub(crate) fn heading_rank(&self, s_idx: u32, throws: impl Fn(u32) -> bool) -> usize {
+    /// its `-html` links, from 1 for each query): `x_PrintDefLine` counts each heading it starts
+    /// (`starts`): once for a subject, once for each alignment of a subject whose heading throws
+    /// (its title cannot be made; NCBI tries again at each alignment, as `write_hsps_or_skips`
+    /// notes), and never for a subject whose load throws (the display's load of the alignment's
+    /// subject fails before the heading is started; line RG T4a2 review N1). The ranks are made
+    /// once, at the first call (only `-html` headings call it); a heading that the registry fails
+    /// throws in every subject, so it shows no rank.
+    pub(crate) fn heading_rank(&self, s_idx: u32, starts: impl Fn(u32) -> HeadingStarts) -> usize {
         let ranks = self.heading_ranks.get_or_init(|| {
             let mut started = 0;
             self.subject_order
                 .iter()
                 .map(|&subject| {
                     let rank = started + 1;
-                    started += if throws(subject) {
-                        self.subject_hits[&subject].len()
-                    } else {
-                        1
+                    started += match starts(subject) {
+                        HeadingStarts::Once => 1,
+                        HeadingStarts::EachAlignment => self.subject_hits[&subject].len(),
+                        HeadingStarts::Never => 0,
                     };
                     (subject, rank)
                 })
@@ -581,19 +594,22 @@ pub(crate) trait QuerySections: Sync {
     fn sort(&self) -> (super::hit_sort::ReportSort, bool);
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
-    /// `None`), or the description table and the blank line after it; `read` before each
-    /// description line, where NCBI loads its subject (`QueryWarnings::subject_read`).
+    /// `None`), or the description table and the blank line after it; `place` at each
+    /// `ReportPlace` of it: before each description line, where NCBI loads its subject
+    /// (`ReportPlace::Load`), and with `-html` the reads of NCBI's formatter registries
+    /// (`ReportPlace::Html`).
     fn head<W: Write>(
         &self,
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        read: SubjectReadHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()>;
 
     /// The alignments of the HSPs `part` of subject `s_idx` of the query (`group`), the
     /// subject's heading with its first HSP: the parts of `0..` its HSPs in order write the
-    /// subject's alignments.
+    /// subject's alignments; `place` at the `-html` reads of NCBI's formatter registries that the
+    /// heading's links make (`ReportPlace::Html`, before the heading's bytes).
     fn subject<W: Write>(
         &self,
         writer: &mut W,
@@ -601,7 +617,22 @@ pub(crate) trait QuerySections: Sync {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()>;
+
+    /// The run's `-html` links (`PairwiseConfig::html_links`), whose reads of NCBI's formatter
+    /// registries write their posts (`HtmlLinks::posts_of`); `None` (the default) for the plain
+    /// report.
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        None
+    }
+
+    /// Whether subject `s_idx`'s Seq-align id is a local id (`ParsedSubject::alignment_id_is_local`),
+    /// which `GetDbType` does not load before the `-html` alignments read `./.ncbirc`
+    /// (`alignments_start`); `false` by default.
+    fn alignment_id_is_local(&self, _s_idx: u32) -> bool {
+        false
+    }
 
     /// The report's view (`PairwiseView`), which says what the report does after a subject whose
     /// lookup throws (`alignment_end`): every program gives its own (review 3 of line DBID
@@ -754,6 +785,72 @@ pub(super) fn end_here(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1881-1885
+/// The start of the alignment of aligned subject `s_idx` at position `position` of the query's
+/// alignments, at its `place`s, before its heading (after `end_here`): its load
+/// (`ReportPlace::Load`); before the first alignment, with `-html`, the read of `./.ncbirc` that
+/// `x_InitAlignParams` makes after `GetDbType` loads the first alignment's subject, before that
+/// load where its Seq-align id is local (`GetDbType` does not load it; its heading does).
+fn alignment_start<S: QuerySections, W: Write>(
+    sections: &S,
+    position: usize,
+    s_idx: u32,
+    writer: &mut W,
+    place: ReportHook<'_, W>,
+) -> io::Result<()> {
+    if position > 0 || sections.html_links().is_none() {
+        return place(ReportPlace::Load(s_idx), writer);
+    }
+    let ncbirc = ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc);
+    if sections.alignment_id_is_local(s_idx) {
+        place(ncbirc, writer)?;
+        place(ReportPlace::Load(s_idx), writer)
+    } else {
+        place(ReportPlace::Load(s_idx), writer)?;
+        place(ncbirc, writer)
+    }
+}
+
+/// What the report of query `query` writes to the run's diagnostics at `place`, after the report
+/// written so far (`writer`, flushed first): a load's text (`QueryWarnings::subject_read`) or what
+/// a `-html` read of NCBI's formatter registries posts (`HtmlLinks::posts_of` of the run's
+/// `links`). A report without warnings has no load texts; one that posts without them is LOSAT's
+/// internal error (`query_warnings::HTML_POSTS_WITHOUT_WARNINGS`).
+pub(crate) fn at_place<W: Write>(
+    warnings: Option<&mut QueryWarnings<'_>>,
+    links: Option<&super::html_ids::HtmlLinks>,
+    query: usize,
+    place: ReportPlace,
+    writer: &mut W,
+) -> io::Result<()> {
+    match place {
+        ReportPlace::Load(s_idx) => match warnings {
+            Some(warnings) => warnings.subject_read(query, s_idx, writer),
+            None => Ok(()),
+        },
+        ReportPlace::Html(post) => {
+            let Some((posts, line)) = links.map(|links| links.posts_of(post)) else {
+                return Ok(());
+            };
+            if posts.is_empty() && line.is_empty() {
+                return Ok(());
+            }
+            let Some(warnings) = warnings else {
+                return Err(io::Error::other(
+                    super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
+                ));
+            };
+            if !posts.is_empty() {
+                warnings.html_post(&posts, writer)?;
+            }
+            if !line.is_empty() {
+                warnings.html_stderr_line(&line, writer)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// The serial writer: each query's warnings and parts on `writer`, in order.
 fn write_serial<S: QuerySections, W: Write>(
     writer: &mut W,
@@ -773,12 +870,13 @@ fn write_serial<S: QuerySections, W: Write>(
         let group = QueryGroup::for_sections(query_hits, subject_titles, sections);
         // NCBI loads each subject that the query's batch did not prefetch at its description
         // line, or one the table does not show at its alignment's heading
-        // (`QueryWarnings::subject_read`).
-        let mut read = |s_idx: u32, writer: &mut W| match warnings.as_deref_mut() {
-            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
-            None => Ok(()),
+        // (`QueryWarnings::subject_read`); with `-html` its formatter reads its registries
+        // (`ReportPlace::Html`).
+        let links = sections.html_links();
+        let mut place = |place: ReportPlace, writer: &mut W| {
+            at_place(warnings.as_deref_mut(), links, q_idx, place, writer)
         };
-        sections.head(writer, q_idx, group.as_ref(), &mut read)?;
+        sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             if sections.merges_alignments() {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
@@ -791,7 +889,7 @@ fn write_serial<S: QuerySections, W: Write>(
                 if !aligned.is_empty() {
                     for (position, &s_idx) in aligned.iter().enumerate() {
                         end_here(end, position)?;
-                        read(s_idx, &mut *writer)?;
+                        place(ReportPlace::Load(s_idx), &mut *writer)?;
                         sections.merged_subject(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
@@ -804,9 +902,16 @@ fn write_serial<S: QuerySections, W: Write>(
                     group.aligned(sections.num_alignments()).iter().enumerate()
                 {
                     end_here(end, position)?;
-                    read(s_idx, &mut *writer)?;
+                    alignment_start(sections, position, s_idx, &mut *writer, &mut place)?;
                     let hsps = group.subject_hits[&s_idx].len();
-                    sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
+                    sections.subject(
+                        writer,
+                        probe.as_deref_mut(),
+                        group,
+                        s_idx,
+                        0..hsps,
+                        &mut place,
+                    )?;
                 }
             }
             sections.foot(writer, q_idx)?;
@@ -1004,9 +1109,9 @@ fn pieces<S: QuerySections>(
 }
 
 /// One piece into its own buffer, by the serial writer's calls; with the places in the buffer
-/// where the serial writer reads a subject (`QueryWarnings::subject_read`; only when `marks`),
-/// what a failed call left in the buffer (the serial writer has written it before the error)
-/// and the error.
+/// where the serial writer writes to the diagnostics (`ReportPlace`, `at_place`; only when
+/// `marks`), what a failed call left in the buffer (the serial writer has written it before the
+/// error) and the error.
 fn format_piece<S: QuerySections>(
     sections: &S,
     group: Option<&QueryGroup<'_>>,
@@ -1014,10 +1119,10 @@ fn format_piece<S: QuerySections>(
     marks: bool,
 ) -> Formatted {
     let mut buffer = Vec::new();
-    let mut reads: Vec<(usize, u32)> = Vec::new();
-    let mut mark = |s_idx: u32, buffer: &mut Vec<u8>| {
+    let mut places: Vec<(usize, ReportPlace)> = Vec::new();
+    let mut mark = |place: ReportPlace, buffer: &mut Vec<u8>| {
         if marks {
-            reads.push((buffer.len(), s_idx));
+            places.push((buffer.len(), place));
         }
         Ok(())
     };
@@ -1037,9 +1142,9 @@ fn format_piece<S: QuerySections>(
                 if from < to {
                     if from == 0 {
                         end_here(end, position)?;
-                        mark(s_idx, &mut buffer)?;
+                        alignment_start(sections, position, s_idx, &mut buffer, &mut mark)?;
                     }
-                    sections.subject(&mut buffer, None, group, s_idx, from..to)?;
+                    sections.subject(&mut buffer, None, group, s_idx, from..to, &mut mark)?;
                 }
             }
             Ok(())
@@ -1049,7 +1154,7 @@ fn format_piece<S: QuerySections>(
             let end = alignment_end(sections, group);
             for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
                 end_here(end, position)?;
-                mark(s_idx, &mut buffer)?;
+                mark(ReportPlace::Load(s_idx), &mut buffer)?;
                 sections.merged_subject(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)
@@ -1058,7 +1163,7 @@ fn format_piece<S: QuerySections>(
     })();
     Formatted {
         buffer,
-        reads,
+        places,
         result,
     }
 }
@@ -1066,9 +1171,29 @@ fn format_piece<S: QuerySections>(
 /// A piece formatted into its own buffer (`format_piece`).
 struct Formatted {
     buffer: Vec<u8>,
-    /// Where the serial writer reads a subject: the buffer's length then and the subject.
-    reads: Vec<(usize, u32)>,
+    /// Where the serial writer writes to the diagnostics: the buffer's length then and the place.
+    places: Vec<(usize, ReportPlace)>,
     result: io::Result<()>,
+}
+
+impl Formatted {
+    /// Writes the piece of query `query` to `writer` with what the serial writer writes to the
+    /// diagnostics at its places, after the bytes before each (`at_place`).
+    fn write<W: Write>(
+        &self,
+        query: usize,
+        writer: &mut W,
+        mut warnings: Option<&mut QueryWarnings<'_>>,
+        links: Option<&super::html_ids::HtmlLinks>,
+    ) -> io::Result<()> {
+        let mut written = 0;
+        for &(at, place) in &self.places {
+            writer.write_all(&self.buffer[written..at])?;
+            written = at;
+            at_place(warnings.as_deref_mut(), links, query, place, writer)?;
+        }
+        writer.write_all(&self.buffer[written..])
+    }
 }
 
 /// `f` of every item, in order: on `pool`, or in order on this thread without threads (where
@@ -1157,14 +1282,17 @@ fn write_parallel_with<S: QuerySections, W: Write>(
                 to += 1;
             }
             let chunk = &planned[at..to];
-            // The pieces of a query whose reads write texts mark where the serial writer reads
-            // its subjects; the texts are written there (`QueryWarnings::subject_read`).
+            // The pieces of a query whose reads write texts, and of a `-html` report, mark where
+            // the serial writer writes to the diagnostics; the texts are written there
+            // (`at_place`).
+            let links = sections.html_links();
             let marked: Vec<bool> = chunk
                 .iter()
                 .map(|piece| {
-                    warnings
-                        .as_deref()
-                        .is_some_and(|warnings| warnings.reads_with_texts(piece.query))
+                    links.is_some()
+                        || warnings
+                            .as_deref()
+                            .is_some_and(|warnings| warnings.reads_with_texts(piece.query))
                 })
                 .collect();
             let indexed: Vec<(Piece, bool)> = chunk.iter().copied().zip(marked).collect();
@@ -1177,13 +1305,7 @@ fn write_parallel_with<S: QuerySections, W: Write>(
                         warnings.before_query(piece.query, &mut *writer)?;
                     }
                 }
-                super::query_warnings::write_marked(
-                    &formatted.buffer,
-                    &formatted.reads,
-                    piece.query,
-                    &mut *writer,
-                    warnings.as_deref_mut(),
-                )?;
+                formatted.write(piece.query, &mut *writer, warnings.as_deref_mut(), links)?;
                 formatted.result?;
             }
             chunks += 1;

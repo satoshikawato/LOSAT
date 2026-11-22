@@ -155,7 +155,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
         // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
-        // the `-html` registries, `formatter_registry::ReferenceRegistry` in the prolog and
+        // the `-html` registries, `formatter_registry::FormatterNcbirc` in the prolog and
         // `InitConfig` at the first id link) is `CATCH_ALL`'s `CException` report, exit status 255
         // (`cli::exit_on_native_error`), not a failed write.
         error

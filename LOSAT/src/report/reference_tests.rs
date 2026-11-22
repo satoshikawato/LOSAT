@@ -1,5 +1,5 @@
 use super::*;
-use crate::report::formatter_registry::ReferenceRegistry;
+use crate::report::formatter_registry::FormatterNcbirc;
 
 /// The references of `kPublication` hold `keyword` and its PubMed URL holds `pubmed_id`
 /// (`s_DoTestReference`).
@@ -107,13 +107,12 @@ fn the_html_free_text_writes_the_entity_as_a() {
 
 /// The references of `program`'s prolog, under `html` as a run without `./.ncbirc` writes them.
 fn prolog_references(html: bool, program: &str, megablast: bool) -> String {
-    let registry = ReferenceRegistry::default();
+    let ncbirc = FormatterNcbirc::default();
     let mut out = Vec::new();
     let mut err = Vec::new();
     write_prolog_references(
         &mut out,
-        html.then_some(&registry),
-        &mut err,
+        html.then_some((&ncbirc, &mut err as &mut dyn std::io::Write)),
         program,
         megablast,
         false,
@@ -270,7 +269,7 @@ e&list_uids=9254694&dopt=Citation\">Reference</a>:</b>"
 #[test]
 fn each_html_reference_reads_ncbirc_again() {
     let file = b"[BLASTFMTUTIL]\nPROTOCOL=ftp:\nPROTOCOL=http:\n";
-    let registry = ReferenceRegistry::of("blastp", Some(file.to_vec())).unwrap();
+    let ncbirc = FormatterNcbirc::of("blastp", Some(file.to_vec())).unwrap();
     let read = crate::blastinput::ncbi_registry::read_registry(
         file,
         crate::blastinput::ncbi_registry::Layer::SystemWide,
@@ -280,7 +279,7 @@ fn each_html_reference_reads_ncbirc_again() {
     assert!(!posts.is_empty());
     let mut out = Vec::new();
     let mut err = Vec::new();
-    write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false, false).unwrap();
+    write_prolog_references(&mut out, Some((&ncbirc, &mut err)), "blastp", false, false).unwrap();
     assert_eq!(err, posts.repeat(2));
     let out = String::from_utf8(out).unwrap();
     assert_eq!(
@@ -289,9 +288,7 @@ fn each_html_reference_reads_ncbirc_again() {
     );
     // The plain references read no file.
     let mut plain = Vec::new();
-    let mut err = Vec::new();
-    write_prolog_references(&mut plain, None, &mut err, "blastp", false, false).unwrap();
-    assert!(err.is_empty());
+    write_prolog_references(&mut plain, None, "blastp", false, false).unwrap();
     assert_eq!(
         String::from_utf8(plain).unwrap(),
         prolog_references(false, "blastp", false)
@@ -305,7 +302,7 @@ fn each_html_reference_reads_ncbirc_again() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-99
 #[test]
 fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
-    let registry = ReferenceRegistry::of(
+    let ncbirc = FormatterNcbirc::of(
         "blastp",
         Some(b"this line has no equals sign\n[BLASTFMTUTIL]\nPROTOCOL=http:\n".to_vec()),
     )
@@ -313,7 +310,7 @@ fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let error =
-        write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false, false)
+        write_prolog_references(&mut out, Some((&ncbirc, &mut err)), "blastp", false, false)
             .unwrap_err();
     assert!(out.is_empty());
     assert!(err.is_empty());
@@ -327,10 +324,10 @@ fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
     );
     // The plain references do not read the file.
     let mut plain = Vec::new();
-    write_prolog_references(&mut plain, None, &mut err, "blastp", false, false).unwrap();
+    write_prolog_references(&mut plain, None, "blastp", false, false).unwrap();
     assert!(!plain.is_empty());
-    assert!(ReferenceRegistry::of("blastp", Some(b"[NCBI]\n.Inherits=g\n".to_vec())).is_err());
-    assert!(ReferenceRegistry::of("blastp", None).is_ok());
+    assert!(FormatterNcbirc::of("blastp", Some(b"[NCBI]\n.Inherits=g\n".to_vec())).is_err());
+    assert!(FormatterNcbirc::of("blastp", None).is_ok());
 }
 
 #[test]

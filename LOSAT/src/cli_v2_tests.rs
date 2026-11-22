@@ -1592,19 +1592,24 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
 // `-html` right after `-line_length` (`cli::with_html_help_place`).
 #[test]
 fn help_lists_html_right_after_line_length() {
+    // `-html` gets its place only where the help is rendered (line RG T4a2 review S1): every
+    // help word of the five programs.
     for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
-        let error = parse(program, &["-help"]).unwrap_err();
-        let help = crate::cli::render_message(&error);
-        let at = |option: &str| {
-            help.find(&format!("\n      {option}"))
-                .unwrap_or_else(|| panic!("{program}: {option}"))
-        };
-        let (line_length, html, sorthits) = (at("-line_length "), at("-html\n"), at("-sorthits "));
-        assert!(line_length < html && html < sorthits, "{program}");
-        assert!(
-            !help[line_length + 1..html].contains("\n      -"),
-            "{program}"
-        );
+        for word in ["-help", "-help-full", "-h", "--help"] {
+            let error = parse(program, &[word]).unwrap_err();
+            let help = crate::cli::render_message(&error);
+            let at = |option: &str| {
+                help.find(&format!("\n      {option}"))
+                    .unwrap_or_else(|| panic!("{program} {word}: {option}"))
+            };
+            let (line_length, html, sorthits) =
+                (at("-line_length "), at("-html\n"), at("-sorthits "));
+            assert!(line_length < html && html < sorthits, "{program} {word}");
+            assert!(
+                !help[line_length + 1..html].contains("\n      -"),
+                "{program} {word}"
+            );
+        }
     }
 }
 

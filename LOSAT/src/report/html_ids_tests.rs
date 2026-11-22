@@ -39,9 +39,10 @@ fn url(ids: &[ParsedSeqId], rank: usize, nucleotide: bool, place: LinkPlace) -> 
         place,
         taxid: 0,
     };
-    let mut err = Vec::new();
-    let url = id_url(ids, &info, &links(None, b""), &mut err).unwrap();
-    assert!(err.is_empty());
+    let mut posts = Vec::new();
+    let url = id_url(ids, &info, &links(None, b""), &mut posts).unwrap();
+    // Each id URL calls `InitConfig` (`HtmlPost::InitConfig`).
+    assert_eq!(posts, [HtmlPost::InitConfig]);
     text(url)
 }
 
@@ -56,7 +57,7 @@ fn links(file: Option<&[u8]>, db: &[u8]) -> HtmlLinks {
         .unwrap(),
         db_name: db.to_vec(),
         nucleotide: false,
-        references: Default::default(),
+        ncbirc: Default::default(),
     }
 }
 
@@ -140,24 +141,24 @@ fn local_id_template_tags() {
         place: LinkPlace::Description,
         taxid: 9606,
     };
-    let mut err = Vec::new();
+    let mut posts = Vec::new();
     let db = links(Some(file), b"../../../t2/db/ps_ids");
     assert_eq!(
-        text(id_url(&local, &info, &db, &mut err).unwrap()),
+        text(id_url(&local, &info, &db, &mut posts).unwrap()),
         "http://local.example/s3_local_identifier?db=..%2F..%2F..%2Ft2%2Fdb%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifier"
     );
     let subject = ids("lcl|Subject_1");
     let info = SeqUrlInfo { taxid: 0, ..info };
     assert_eq!(
-        text(id_url(&subject, &info, &links(Some(file), b""), &mut err).unwrap()),
+        text(id_url(&subject, &info, &links(Some(file), b""), &mut posts).unwrap()),
         "http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1"
     );
     // Without the template a local id has no link.
     assert_eq!(
-        text(id_url(&subject, &info, &links(None, b""), &mut err).unwrap()),
+        text(id_url(&subject, &info, &links(None, b""), &mut posts).unwrap()),
         ""
     );
-    assert!(err.is_empty());
+    assert_eq!(posts, [HtmlPost::InitConfig; 3]);
 }
 
 // D5: the description rows' links and score links of the ids that the formatter makes for a
@@ -168,7 +169,9 @@ fn local_id_template_tags() {
 fn description_links_of_the_row_ids() {
     let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
     let row = |report: &HtmlReport, parsed: Option<&ParsedSubject>, s_idx: u32, rank: usize| {
-        let (link, score) = report.description_links(parsed, s_idx, rank).unwrap();
+        let (link, score) = report
+            .description_links(parsed, s_idx, rank, false, &mut Vec::new())
+            .unwrap();
         (text(link), text(score))
     };
     let oids = [0, 2, 10].map(crate::seqdb::Oid::of_unrestricted);
@@ -202,6 +205,34 @@ fn description_links_of_the_row_ids() {
             "<a href=#A12345>".into()
         )
     );
+}
+
+// F3 and O1 of line RG T4a2 review a: the row of NCBI's `catch` (the record's title cannot be
+// decoded) names the Seq-align id (`gi|777`, not the display id `XP_000009.1`), links it and has
+// no score link (NCBI BLAST+ 2.17.0, `blastp -subject us4.faa -parse_deflines -html`, probe
+// `T/t4/fix1/out/unk4h`).
+#[test]
+fn the_catch_row_links_the_seq_align_id_without_a_score_link() {
+    let believed = crate::blastinput::fasta_reader::believed::BelievedIds::new(
+        ids("gi|777|ref|XP_000009.1|"),
+        crate::report::archive::bioseq::SeqLocStrand::Unknown,
+    );
+    let record = ParsedSubject::of_record(&believed, b"bad \x81 title one");
+    let (start, title, caught) = record.description_line(true);
+    assert!(caught);
+    assert_eq!(text(start), "gi|777 ");
+    assert_eq!(text(title.text), "Unknown");
+    let records = HtmlReport::new(&Arc::new(links(None, b"")), []);
+    let mut posts = Vec::new();
+    let (link, score) = records
+        .description_links(Some(&record), 0, 1, true, &mut posts)
+        .unwrap();
+    assert_eq!(
+        text(link),
+        "<a title=\"Show report for 777\" href=\"https://www.ncbi.nlm.nih.gov/protein/777?report=genbank&log$=prottop&blast_rank=1&RID=\" >"
+    );
+    assert!(score.is_empty());
+    assert_eq!(posts, [HtmlPost::InitConfig]);
 }
 
 #[test]
@@ -245,10 +276,12 @@ fn heading(report: &HtmlReport, lines: &[(&str, &str)], rank: usize) -> String {
         })
         .collect();
     let subject = ParsedSubject::new(crate::seqid::DeflineSet { deflines }).unwrap();
+    let posts = std::cell::RefCell::new(Vec::new());
     let html = HtmlHeading {
         report,
         s_idx: 0,
         rank,
+        posts: &posts,
     };
     text(subject.heading(true, false, Some(html)).unwrap().unwrap())
 }
@@ -332,13 +365,16 @@ TI:12345</a><a name=TI:12345></a> trace subject\n"
     // the registry's `[LOCAL_ID] TOOL_URL`).
     let start = |report: &HtmlReport, s_idx: u32| {
         let mut out = Vec::new();
-        HtmlHeading {
+        let posts = std::cell::RefCell::new(Vec::new());
+        let html = HtmlHeading {
             report,
             s_idx,
             rank: 1,
-        }
-        .unparsed_start(&mut out)
-        .unwrap();
+            posts: &posts,
+        };
+        html.unparsed_start(&mut out).unwrap();
+        // The heading's one id link calls `InitConfig` once.
+        assert_eq!(html.take_posts(), [HtmlPost::InitConfig]);
         text(out)
     };
     assert_eq!(start(&report, 0), "><a name=BL_ORD_ID:0></a> ");
@@ -365,13 +401,15 @@ fn a_registry_that_throws_skips_the_heading() {
         .unwrap(),
         db_name: Vec::new(),
         nucleotide: false,
-        references: Default::default(),
+        ncbirc: Default::default(),
     };
     let report = HtmlReport::new(&Arc::new(bad), []);
+    let posts = std::cell::RefCell::new(Vec::new());
     let html = HtmlHeading {
         report: &report,
         s_idx: 0,
         rank: 1,
+        posts: &posts,
     };
     let subject = ParsedSubject::new(crate::seqid::DeflineSet {
         deflines: vec![crate::seqid::BlastDefline {

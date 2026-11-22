@@ -1604,8 +1604,8 @@ fn write_alignment_with_sequences<W: Write>(
     )
 }
 
-/// The rows' masks of a report's HSPs under `-html` (`HspMasks` by HSP, NCBI's
-/// `alnRoInfo->masked_regions` of each HSP's rows): `query_anchored::output_seq` puts each mask
+/// The rows' masks of a report's HSPs under `-html` (`HspMasks` by HSP, the masked regions of
+/// NCBI's row information of each HSP): `query_anchored::output_seq` puts each mask
 /// of a row's line in NCBI's span. The rows' builders keep them only then (the rows hold the
 /// masks' letters in lower case in every report, and `PairwiseHit` holds no list: the plain
 /// report reads none). `masks[i]` is that of HSP `first + i` of the run's hits (`HspIndex`);
@@ -3983,7 +3983,7 @@ impl DescriptionLabel {
         }
     }
 
-    /// The `-html` label (`write_cut` with `eHtml`): the link `link` (`sdl->id_url`), the id
+    /// The `-html` label (`write_cut` with `eHtml`): the link `link` (the line's id URL), the id
     /// text, `</a>` after a link, then the cut title `HTMLEncode`d; the cut and the padding count
     /// the raw bytes (`line_length`).
     ///

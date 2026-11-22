@@ -85,17 +85,16 @@ impl HtmlReport {
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:459-494
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1590-1613
-    /// The link (`sdl->id_url`, empty for none) and the score link (`sdl->score_url`) of the
-    /// description row of rank `rank` (from 1, NCBI's `blast_rank`) for the subject of index
-    /// `s_idx`, `parsed` when it has parsed Seq-ids: the link of its Bioseq's ids (`GetIDUrl`
-    /// with the handle of the Seq-align id) with the display id's label (`GetLabel`, `eContent`) as
-    /// the accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a
-    /// `-subject` record `lcl|Subject_<s_idx + 1>`. A row of NCBI's `catch` (`caught`: the title
-    /// of its subject or its load throws, `pairwise::DescriptionLabel::caught`) links the Bioseq's
-    /// ids with the label of the Seq-align id as the accession, its GI and taxid 0, and has no
-    /// score link. The
-    /// link calls `InitConfig` (`id_url`, which adds its `HtmlPost` to `posts`); the registry's
-    /// exception is the error.
+    /// The link (the description line's id URL, empty for none) and the score link (its score URL)
+    /// of the description row of rank `rank` (from 1, NCBI's `blast_rank`) for the subject of index
+    /// `s_idx`, `parsed` when it has parsed Seq-ids: the link of its Bioseq's ids (`GetIDUrl` with
+    /// the handle of the Seq-align id) with the display id's label (`GetLabel`, `eContent`) as the
+    /// accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a `-subject`
+    /// record `lcl|Subject_<s_idx + 1>`. A row of NCBI's `catch` (`caught`: the title of its
+    /// subject or its load throws, `pairwise::DescriptionLabel::caught`) links the Bioseq's ids
+    /// with the label of the Seq-align id as the accession, its GI and taxid 0, and has no score
+    /// link. The link calls `InitConfig` (`id_url`, which adds its `HtmlPost` to `posts`); the
+    /// registry's exception is the error.
     pub(crate) fn description_links(
         &self,
         parsed: Option<&ParsedSubject>,

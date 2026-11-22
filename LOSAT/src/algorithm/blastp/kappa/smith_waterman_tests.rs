@@ -233,7 +233,7 @@ fn two_copies_give_two_alignments_in_ncbis_list_order() {
     let matrix = run.matrix.as_ref().unwrap();
     let rows: Vec<[i32; 28]> = query
         .iter()
-        .map(|&q| matrix.scores[usize::from(q)])
+        .map(|&q| matrix.scores()[usize::from(q)])
         .collect();
     assert_eq!(
         first.score,

@@ -1453,3 +1453,47 @@ fn nibs_pairs_adjacent_codes() {
         );
     }
 }
+
+/// The tables a composition-adjusted matrix keeps (`build_tables28`, `XTablesCell`) hold, for each
+/// row residue, the bytes the kernels' per-row build writes for the matrix as `Scores::Rows28`, and
+/// its largest score; a matrix with a row the per-row build refuses has none.
+#[test]
+fn matrix_tables_match_the_per_row_build() {
+    let mut rng = Rng(0x7AB5_0028_1C3D_9E01);
+    let (mut kept, mut refused) = (0usize, 0usize);
+    for round in 0..400 {
+        let mut m = [[0i32; 28]; 28];
+        for row in m.iter_mut() {
+            for v in row.iter_mut() {
+                *v = rng.below(400) as i32 - 200;
+            }
+        }
+        if round % 4 == 3 {
+            // one score above the 16-bit tables' range (`MAX_M`), or one far below it (clamped)
+            let (a, b) = (rng.below(28) as usize, rng.below(28) as usize);
+            m[a][b] = if rng.below(2) == 0 { MAX_M + 1 } else { i32::MIN };
+        }
+        let rows = Scores::Rows28(&m);
+        let mut want = [0u8; 32 * TAB];
+        let fits = (0..28).all(|q| build_row_table(&rows, q, &mut want[q * TAB..(q + 1) * TAB]));
+        let cell = XTablesCell::default();
+        match cell.get(&m) {
+            Some(t) => {
+                assert!(fits, "round {round}: tables for a matrix the per-row build refuses");
+                assert_eq!(t.data[..], want[..], "round {round}");
+                assert_eq!(Some(t.max), max_score(&rows), "round {round}");
+                // the same tables at the next call
+                assert!(core::ptr::eq(cell.get(&m).unwrap(), t));
+                kept += 1;
+            }
+            None => {
+                assert!(!fits, "round {round}: no tables for a matrix the per-row build takes");
+                refused += 1;
+            }
+        }
+        // a copy builds its own tables, with the same bytes
+        let copy = cell.clone();
+        assert_eq!(copy.get(&m).map(|t| &t.data[..]), cell.get(&m).map(|t| &t.data[..]));
+    }
+    assert!(kept > 250 && refused > 30, "kept {kept} refused {refused}");
+}

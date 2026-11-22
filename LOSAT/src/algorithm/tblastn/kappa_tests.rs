@@ -598,7 +598,7 @@ fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
     for (row, cells) in matrix[2..].chunks_exact(BLASTAA_SIZE).enumerate() {
         for (col, value) in cells.iter().enumerate() {
             assert_eq!(
-                adjusted.adjusted_matrix.scores[row][col],
+                adjusted.adjusted_matrix.scores()[row][col],
                 value.parse::<i32>().unwrap(),
                 "code32 matrix {row},{col}"
             );
@@ -1345,7 +1345,7 @@ fn kappa_traceback_matches_ncbi_saved_inputs_and_edit_scripts() {
                     scores[row][col] = value.parse().unwrap();
                 }
             }
-            let adjusted = AdjustedProteinMatrix { scores };
+            let adjusted = AdjustedProteinMatrix::new(scores);
             let query_data = BlastCompoSequenceData::from_ncbistdaa(&decode(query[2]));
             let subject_data = BlastCompoSequenceData::from_ncbistdaa(&decode(subject[2]));
             assert_eq!(query_data.length, enter[6].parse().unwrap());

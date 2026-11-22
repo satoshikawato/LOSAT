@@ -759,10 +759,35 @@ impl BlastCompositionWorkspace {
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1025-1151
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdjustedProteinMatrix {
-    pub scores: [[i32; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
+    scores: [[i32; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
+    // No NCBI counterpart: the SIMD X-drop kernels' lookup tables of `scores` (`x_tables`); the
+    // field is private so that the scores never change after the matrix is made.
+    x_tables: crate::utils::xdrop_simd::XTablesCell,
 }
 
 impl AdjustedProteinMatrix {
+    /// The matrix with these scores.
+    pub fn new(scores: [[i32; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET]) -> Self {
+        Self {
+            scores,
+            x_tables: Default::default(),
+        }
+    }
+
+    /// The scores, `scores()[query residue][subject residue]`.
+    #[inline]
+    pub fn scores(&self) -> &[[i32; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET] {
+        &self.scores
+    }
+
+    /// No NCBI counterpart: the lookup tables of the SIMD X-drop kernels for this matrix, built at
+    /// the first call and kept with the matrix (`XTablesCell`); `None` where a score is outside
+    /// the kernels' 16-bit tables. It does not change any value NCBI computes.
+    #[inline]
+    pub(crate) fn x_tables(&self) -> Option<&crate::utils::xdrop_simd::StaticTables> {
+        self.x_tables.get(&self.scores)
+    }
+
     #[inline]
     pub fn score(&self, query_residue: u8, subject_residue: u8) -> i32 {
         self.scores[query_residue as usize][subject_residue as usize]
@@ -1523,7 +1548,7 @@ fn scores_std_alphabet_round(
         rounded[index][E_STOP_CHAR] = matrix_info.start_matrix[index][E_STOP_CHAR];
         rounded[E_STOP_CHAR][index] = matrix_info.start_matrix[E_STOP_CHAR][index];
     }
-    AdjustedProteinMatrix { scores: rounded }
+    AdjustedProteinMatrix::new(rounded)
 }
 
 // No NCBI counterpart: reads LOSAT_X_ADJMEMO_STATS once; it does not change any value NCBI computes.
@@ -2484,7 +2509,7 @@ fn build_scaled_square_matrix(
         rounded[index][25] = matrix_info.start_matrix[index][25];
         rounded[25][index] = matrix_info.start_matrix[25][index];
     }
-    AdjustedProteinMatrix { scores: rounded }
+    AdjustedProteinMatrix::new(rounded)
 }
 
 fn get_matrix_score_probs(

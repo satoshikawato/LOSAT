@@ -819,12 +819,11 @@ fn test_blast_gapped_alignment_with_traceback_skips_right_extension_after_left_f
 fn test_traceback_contiguous_rows_reused_scratch_matches_fresh() {
     // No NCBI counterpart: the test reads scalar-kernel scratch rows, so it calls the scalar
     // port (`align_ex_protein_scalar`) directly; the SIMD kernel writes no such rows.
-    let mut adjusted = AdjustedProteinMatrix {
-        scores: [[-3; 28]; 28],
-    };
-    for i in 1..28 {
-        adjusted.scores[i][i] = 2;
+    let mut scores = [[-3; 28]; 28];
+    for (i, row) in scores.iter_mut().enumerate().skip(1) {
+        row[i] = 2;
     }
+    let adjusted = AdjustedProteinMatrix::new(scores);
     let mut scratch = GapAlignScratch::new();
     let mut saw_offset = false;
     let mut saw_gap = false;
@@ -1335,7 +1334,7 @@ fn wide_lanes_give_the_scalar_ports_results() {
             *v = if b > -100 { 150 * b } else { b };
         }
     }
-    let adjusted = AdjustedProteinMatrix { scores };
+    let adjusted = AdjustedProteinMatrix::new(scores);
     let matrix = BlastpScoreMatrix::Adjusted(&adjusted);
     let (gap_open, gap_extend) = (11 * 150, 150);
     let mut state = 0x2545_F491u32;

@@ -381,6 +381,73 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+/// The lookup planes of every row of a 28x28 matrix: for each row residue the bytes that the
+/// kernels' per-row build (`build_row_table`, or the 256-bit `build_row` where those kernels run)
+/// writes for a `Scores::Rows28` matrix, and the matrix's largest score (`max_score`). `None` where
+/// a row is outside the 16-bit tables; the kernels then build each row from the matrix as before.
+fn build_tables28(m: &[[i32; 28]; 28]) -> Option<Box<StaticTables>> {
+    let mut t = Box::new(StaticTables {
+        data: [0u8; 32 * TAB],
+        max: i32::MIN,
+    });
+    #[cfg(target_arch = "x86_64")]
+    let wide = if x_avx2::available() {
+        // SAFETY: AVX2 was detected at run time (`available`).
+        Some(unsafe { x_avx2::build_rows28(m, &mut t.data) })
+    } else {
+        None
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    let wide: Option<bool> = None;
+    let ok = wide.unwrap_or_else(|| {
+        let scores = Scores::Rows28(m);
+        (0..28).all(|q| build_row_table(&scores, q, &mut t.data[q * TAB..(q + 1) * TAB]))
+    });
+    if !ok {
+        return None;
+    }
+    t.max = m.iter().flat_map(|row| row.iter().copied()).max()?;
+    Some(t)
+}
+
+/// No NCBI counterpart: the lookup tables (`build_tables28`) of the 28x28 matrix that holds this
+/// cell, built at the first SIMD X-drop call with the matrix and kept until the matrix is dropped,
+/// so that the calls of one matrix share them instead of each call building the rows it reads
+/// (LOSAT_X_BPADJTABS). The holder never changes its scores after it is made and passes only its
+/// own scores to `get`, so the tables stay those of its scores. A copy of the holder starts with an
+/// empty cell, and the cell takes no part in comparisons. It does not change any value NCBI
+/// computes.
+#[derive(Default)]
+pub(crate) struct XTablesCell(std::sync::OnceLock<Option<Box<StaticTables>>>);
+
+impl XTablesCell {
+    /// The tables of `m`, built at the first call; `None` where `build_tables28` gives none.
+    pub(crate) fn get(&self, m: &[[i32; 28]; 28]) -> Option<&StaticTables> {
+        self.0.get_or_init(|| build_tables28(m)).as_deref()
+    }
+}
+
+impl Clone for XTablesCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for XTablesCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for XTablesCell {}
+
+impl std::fmt::Debug for XTablesCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("XTablesCell")
+    }
+}
+
 // No NCBI counterpart: `Rows` and the only code that sets its fields.
 mod rows {
     /// No NCBI counterpart (memory placement only): a row of the vector kernels whose first

@@ -474,9 +474,9 @@ fn translated_redo_core_uses_ncbi_hard_seg_mode2_inputs() {
         let matrix = adjusted.unwrap();
         assert_eq!(
             (
-                matrix.scores[1][1],
-                matrix.scores[1][16],
-                matrix.scores[22][22]
+                matrix.scores()[1][1],
+                matrix.scores()[1][16],
+                matrix.scores()[22][22]
             ),
             (149, -28, 202)
         );

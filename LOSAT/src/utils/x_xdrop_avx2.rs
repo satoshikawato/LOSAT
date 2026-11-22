@@ -424,6 +424,19 @@ unsafe fn build_row(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
     true
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+/// `build_row` for every row residue of a 28x28 matrix into `out` (row `q` at `q * TAB`), the
+/// tables a composition-adjusted matrix keeps (`XTablesCell`); false where `build_row` is.
+///
+/// # Safety
+/// `available()` must be true.
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn build_rows28(m: &[[i32; 28]; 28], out: &mut [u8]) -> bool {
+    let scores = Scores::Rows28(m);
+    // SAFETY: AVX2 (the caller's contract); `build_row` checks that each slice holds `TAB` bytes.
+    (0..28).all(|q| unsafe { build_row(&scores, q, &mut out[q * TAB..(q + 1) * TAB]) })
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:554-557,566-576
 /// The column residues `s.get(k)` (`*b_ptr`) for `k` in `sc.sb_filled..to` into the lane buffer,
 /// with the fence and bad-residue bookkeeping of the 128-bit kernels (first column of each).

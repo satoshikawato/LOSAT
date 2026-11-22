@@ -116,7 +116,7 @@ fn blastp_score_row_for_query<const BLOSUM62: bool>(
         Some(blosum62_ncbistdaa_score_row(query_residue as usize))
     } else {
         match score_matrix {
-            BlastpScoreMatrix::Adjusted(matrix) => Some(&matrix.scores[query_residue as usize]),
+            BlastpScoreMatrix::Adjusted(matrix) => Some(&matrix.scores()[query_residue as usize]),
             _ => None,
         }
     }
@@ -921,6 +921,14 @@ fn x_standard_tables(
         .as_deref()
 }
 
+// No NCBI counterpart: reads the strict-set switch LOSAT_X_BPADJTABS once (on: a composition-adjusted
+// matrix gives the SIMD kernel the lookup tables it keeps for all its calls; off: each call builds
+// the rows it reads from the matrix); it does not change any value NCBI computes.
+fn x_bpadjtabs() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPADJTABS"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:839-850
 // Selects the score source for the SIMD kernel: the same matrix rows (BLOSUM62, composition-
 // adjusted, or standard) that the scalar port reads.
@@ -935,7 +943,21 @@ fn with_x_scores<R>(
             t: x_blosum62_tables(),
             n: 28,
         }),
-        BlastpScoreMatrix::Adjusted(m) => run(&Scores::Rows28(&m.scores)),
+        BlastpScoreMatrix::Adjusted(m) => {
+            // LOSAT_X_BPADJTABS: the tables the matrix keeps for every call with it
+            // (`AdjustedProteinMatrix::x_tables`), else each call builds the rows it reads
+            let tables = if x_bpadjtabs() {
+                let t = m.x_tables();
+                crate::utils::xreach::x_reach!("LOSAT_X_BPADJTABS", t.is_some());
+                t
+            } else {
+                None
+            };
+            run(&match tables {
+                Some(t) => Scores::Tables { t, n: 28 },
+                None => Scores::Rows28(m.scores()),
+            })
+        }
         BlastpScoreMatrix::Standard(matrix) => {
             let f = move |q: u8, s: u8| standard_score(matrix, q, s);
             run(&match x_standard_tables(matrix) {

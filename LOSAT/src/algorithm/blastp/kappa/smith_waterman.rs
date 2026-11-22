@@ -195,7 +195,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         rows.rows.extend(
             query
                 .iter()
-                .map(|&letter| matrix.scores[usize::from(letter)]),
+                .map(|&letter| matrix.scores()[usize::from(letter)]),
         );
         let rows = &*rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264

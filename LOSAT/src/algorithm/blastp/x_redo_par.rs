@@ -699,7 +699,7 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 ///   has a heap that is not filled to its cutoff: such a heap receives no insert any more;
 /// - its query's heap can be filled by then: it holds `n` now and gains at most one list per match
 ///   of the query that the replay redoes before this one, so the query's next
-///   `heapThreshold - n` matches of the window cannot be ended.
+///   `heapThreshold` minus `n` matches of the window cannot be ended.
 ///
 /// With `SW` (the Smith-Waterman redo) and `carry` (the replay before stopped at a deferred heap
 /// test answered TRUE), the window starts with the carried matches: those whose test is TRUE for
@@ -975,15 +975,16 @@ fn x_redo_match<P>(
 /// before` is below the threshold (the first condition at the replay: only this query's matches
 /// insert into its heap, each at most one list, and an insert at or past the threshold leaves `n`).
 ///
-/// Certain FALSE: the test without its side effect says FALSE on the window's start, so `n >=
-/// heapThreshold`, `e > ecutoff`, `e >= worstEvalue` and the candidate is not better than the root
-/// (`compo_heap_record_compare`, E-value, then score, then subject index). A later insert keeps `n`
-/// at or past the threshold. It either adds a list while every kept E-value and the new one are
-/// within the cutoff (so the root's E-value, the new worst, is within it and below `e`), or replaces
-/// the root by a better record and restores the heap (the new root is not worse than the old one, so
-/// the worst E-value does not grow and the candidate is not better than the new root), or changes
-/// nothing. Each case keeps all four conditions, so the test stays FALSE up to the replay
-/// (`hsp.rs`, `test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false`).
+/// Certain FALSE: the test without its side effect says FALSE on the window's start, so `n` is at
+/// least `heapThreshold`, `e` is above `ecutoff` and at least `worstEvalue`, and the candidate is
+/// not better than the root (`compo_heap_record_compare`, E-value, then score, then subject index).
+/// A later insert keeps `n` at or past the threshold. It either adds a list while every kept
+/// E-value and the new one are within the cutoff (so the root's E-value, the new worst, is within
+/// it and below `e`), or replaces the root by a better record and restores the heap (the new root
+/// is not worse than the old one, so the worst E-value does not grow and the candidate is not
+/// better than the new root), or changes nothing. Each case keeps all four conditions, so the test
+/// stays FALSE up to the replay (`hsp_tests.rs`,
+/// `test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false`).
 fn x_sw_heap_test(
     heap: &BlastCompoHeap,
     before: usize,

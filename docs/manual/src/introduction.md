@@ -26,6 +26,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
 | Databases and masks | [`makembindex`](programs/makembindex.md) | Builds the MegaBLAST index of a nucleotide database. |
+| Databases and masks | [`makeprofiledb`](programs/makeprofiledb.md) | Builds a profile database for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files. |
 | Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).

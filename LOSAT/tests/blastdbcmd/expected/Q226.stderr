@@ -1,0 +1,20 @@
+Error: [blastdbcmd] Entry not found: PROT10
+Error: [blastdbcmd] Skipped prot10
+Error: [blastdbcmd] Entry not found: S00007
+Error: [blastdbcmd] Skipped S00007
+Error: [blastdbcmd] Entry not found: 0008123A
+Error: [blastdbcmd] Skipped 0008123A
+Error: [blastdbcmd] Entry not found: LOCUS17
+Error: [blastdbcmd] Skipped LOCUS17
+Error: [blastdbcmd] Entry not found: TEST_HUMAN
+Error: [blastdbcmd] Skipped TEST_HUMAN
+Error: [blastdbcmd] Entry not found: A0A000_YEAST
+Error: [blastdbcmd] Skipped A0A000_YEAST
+Error: [blastdbcmd] Entry not found: 1414
+Error: [blastdbcmd] Skipped gi|1414
+Error: [blastdbcmd] Entry not found: 1414
+Error: [blastdbcmd] Skipped 1414
+Error: [blastdbcmd] Invalid filtering algorithm ID: 21
+Error: [blastdbcmd] Skipped P99999
+Error: [blastdbcmd] Entry not found: NOSUCH9
+Error: [blastdbcmd] Skipped NOSUCH9

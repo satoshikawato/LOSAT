@@ -19,6 +19,7 @@ use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::api::QueryEnd;
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 use crate::report::tabular::SubjectFetch;
 
 /// Whether `error` may fail one batch, after the reports of the batches before, rather than the
@@ -157,6 +158,7 @@ fn refused_batch_setup_error(
         subject_set,
         engine_positives,
         culling_limit: resolved.culling_limit,
+        best_hit: resolved.best_hit,
         subject_besthit: resolved.subject_besthit,
         pssm: None,
         fetch_excluded: None,
@@ -1429,21 +1431,38 @@ fn write_first_batch_prologs(
 // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
 // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
 // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-// sort by e-value here is NCBI's after the pipes, where it sorts.
+// sort by e-value here is NCBI's after the pipes, where it sorts. `-best_hit_overhang` /
+// `-best_hit_score_edge` run NCBI's best hit pipe there instead (hspfilter_besthit.c:520-539),
+// with the preliminary hit list size of the search (`compo_adjust_mode`: the batch's composition
+// mode, as the preliminary stage's).
 fn filter_final_hitlists(
     batch_results: &mut [super::stage_d_results::KappaResultHitList],
     queries: &[Vec<u8>],
     resolved: &ResolvedTblastnArgs,
+    compo_adjust_mode: BlastCompoAdjustMode,
     sorts_results: bool,
 ) -> Result<()> {
     if resolved.max_hsps > 0
         || resolved.query_cov_hsp_perc > 0.0
         || resolved.culling_limit > 0
+        || resolved.best_hit.is_some()
         || resolved.subject_besthit
     {
+        let best_hit = resolved.best_hit.map(|params| {
+            (
+                params,
+                super::stage_d_pipeline::preliminary_hitlist_size(
+                    resolved.hitlist_size,
+                    compo_adjust_mode,
+                ),
+            )
+        });
         for (hitlist, query) in batch_results.iter_mut().zip(queries) {
             if resolved.culling_limit > 0 {
                 hitlist.cull(resolved.culling_limit, query.len())?;
+            }
+            if let Some((params, prelim_size)) = best_hit {
+                hitlist.best_hit(params, prelim_size)?;
             }
             if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
                 hitlist.filter_results(resolved.max_hsps, resolved.query_cov_hsp_perc, query.len());
@@ -1889,6 +1908,7 @@ fn search(
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
+                best_hit: resolved.best_hit,
                 subject_besthit: resolved.subject_besthit,
                 pssm: pssm.as_deref(),
                 fetch_excluded: fetch_excluded.as_ref(),
@@ -1947,6 +1967,7 @@ fn search(
                             subject_set,
                             engine_positives,
                             culling_limit: resolved.culling_limit,
+                            best_hit: resolved.best_hit,
                             subject_besthit: resolved.subject_besthit,
                             pssm: pssm.as_deref(),
                             fetch_excluded: fetch_excluded.as_ref(),
@@ -2020,6 +2041,7 @@ fn search(
                 &mut batch_results,
                 &query_seqs[range.clone()],
                 &resolved,
+                compo_adjust_mode,
                 subject_set.sorts_results(),
             )?;
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI

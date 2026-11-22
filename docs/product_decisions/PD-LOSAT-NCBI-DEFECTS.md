@@ -2793,7 +2793,7 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     same batch followed by 5 x N queries without a hit (N the batch's query
     count; each `CCCCGGGGAACC` twelve times), every context of the batch's queries indexes a heap
     in the array, and the heap of a query without a hit is empty. The added queries write no row
-    in outfmt 6, and no byte in a batch that fails. In all 8 cases of the evidence in which NCBI's
+    in outfmt 6, and no byte in a batch that fails. In all 9 cases of the evidence in which NCBI's
     padded run ends (exit status 0 or 3), LOSAT's run of the input as is equals it, at 1, 4 and 8
     threads; where NCBI's run as is ends with the same rows in every run (exit status 3 twice,
     exit status 0 once), the padded run equals it. The redo's early termination
@@ -2807,13 +2807,15 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     has 5,600 letters); LOSAT splits such a query as NCBI does as is. Where the padded batch reaches the clean-up crash of
     1.30's class (its last redone match fails after its first query kept one), NCBI crashes with the
     pads too, and LOSAT refuses the batch (rule 3, the 1.74 entry above).
-    Evidence: the `ncbi` rows `db.x4b2.past.*.pad.*` of
+    Evidence: the `ncbi` rows `db.x4b2.past.*.pad.*` and `db.x4b2.bh.false.pad.6` of
     `LOSAT/tests/db_search_manifest/blastx.x4b2.tsv` hold NCBI's runs of the padded inputs
     (`LOSAT/tests/fasta/x4b2/*_pad.fna`, `LOSAT/tests/db_search/x4b2/make_x4b2.py`), and the rows
-    `db.x4b2.past.*` without `.pad` take them as the expectation of the inputs as is (`ncbi-near:`,
+    `db.x4b2.past.*` without `.pad` and `db.x4b2.bh.false.6` take them as the expectation of the
+    inputs as is (`ncbi-near:`,
     `LOSAT/tests/db_search_fixtures.py`): one query with hits in frames -1, -2 and -3, with
     `-subject` and `-db`, two one-query batches of `BATCH_SIZE=1`, NCBI's default batch of two
-    queries of 5,000 and 5,600 letters, and batches that fail. Unit tests
+    queries of 5,000 and 5,600 letters, batches that fail, and the three queries of the best-hit
+    inputs with `-best_hit_overhang` against `-db bh3p`, on which NCBI crashes as is. Unit tests
     `a_context_past_the_batch_tests_an_empty_heap` (`LOSAT/src/algorithm/blastx/results_boundary_tests.rs`) and
     `a_heap_test_past_the_batch_reads_an_empty_heap` (`LOSAT/tests/blastx_sw_tback.rs`).
 

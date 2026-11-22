@@ -22,9 +22,11 @@ use crate::seqdb::{
     BlockMasks, BlockRange, ColumnBlock, MaskBlock, SeqDb, SeqDbError, SeqType, SequenceBlock,
 };
 use crate::seqid::DeflineSet;
+use crate::utils::std_shuffle::{shuffle, Mt19937};
 
-/// The bytes of the sequence file read at a time: a block of one volume, at least one
-/// sequence (`SeqDb::next_block`).
+/// The bytes of the sequence file read at a time in the input's order: a block of one volume,
+/// at least one sequence (`SeqDb::next_block`). In the order of `-randomize` the next sequence is
+/// anywhere, and a block is the one sequence.
 const BLOCK_BYTES: u64 = 1 << 20;
 
 /// Why the copy of a database stopped.
@@ -140,8 +142,7 @@ pub(crate) struct RawSequence<'s> {
     pub(crate) column_blobs: Vec<Vec<u8>>,
 }
 
-/// `CRawSeqDBSource` over the input database `db` (all the names of `-in`), without
-/// `-randomize`.
+/// `CRawSeqDBSource` over the input database `db` (all the names of `-in`).
 pub(crate) struct RawSeqDbSource<'a> {
     db: &'a SeqDb,
     /// `m_MaskIds` and `m_MaskIdMap`: each algorithm id of the input
@@ -149,8 +150,11 @@ pub(crate) struct RawSeqDbSource<'a> {
     masks: Vec<(i32, i32)>,
     /// `m_ColumnNames`: the titles of the input's columns (`ListColumns`).
     columns: Vec<Vec<u8>>,
-    /// `m_Oid`: the ordinal id of the next sequence (`CheckOrFindOID` walks the OIDs the input's
-    /// alias files include, which are LOSAT's ordinal ids).
+    /// `m_RandomOids` of `-randomize`: the ordinal ids in the order of the copy (`CheckOrFindOID`
+    /// walks the OIDs the input's alias files include, which are LOSAT's ordinal ids); `None` for
+    /// the input's order.
+    order: Option<Vec<u32>>,
+    /// `m_Oid`: the place of the next sequence in the walk, its ordinal id in the input's order.
     next: u32,
     /// The block read and its sequences.
     block: Option<(BlockRange, SequenceBlock)>,
@@ -158,9 +162,26 @@ pub(crate) struct RawSeqDbSource<'a> {
     mask_blocks: Vec<MaskBlock>,
     /// The blobs of the block, one per column of `columns`.
     column_blocks: Vec<ColumnBlock>,
-    /// The volume of the last sequence with mask data whose volume does not know the only
-    /// algorithm of the input (`RawSeqDbSource::next`).
-    unknown_algorithm_volume: Option<usize>,
+    /// NCBI's memory of its last lookup of a volume's id of an algorithm.
+    last_lookup: VolAlgoMemory,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
+/// `CSeqDB_IdRemapper::GetVolAlgo`'s memory: the volume and the algorithm (its place in the
+/// input's list) asked last, and whether that volume knows that algorithm. The question is
+/// kept before the lookup, which may fail; the id found is kept only when it does not.
+#[derive(Default)]
+struct VolAlgoMemory(Option<(usize, usize, bool)>);
+
+impl VolAlgoMemory {
+    /// The lookup of the algorithm `algorithm` in the volume `volume`, which knows it or not
+    /// (`known`): `true` when NCBI answers from its memory with the id of another lookup (the
+    /// same question as the last one, which failed).
+    fn reads_a_kept_id(&mut self, volume: usize, algorithm: usize, known: bool) -> bool {
+        let kept = !known && self.0 == Some((volume, algorithm, false));
+        self.0 = Some((volume, algorithm, known));
+        kept
+    }
 }
 
 impl<'a> RawSeqDbSource<'a> {
@@ -171,9 +192,18 @@ impl<'a> RawSeqDbSource<'a> {
     // algorithm other than `other` is its program's name followed by the input's id ("dust11"),
     // so that an algorithm of the input registers apart from the same one of `-mask_data`, which
     // registered before; `other`'s name is its id, and its description is not passed on.
+    //
+    // With `-randomize` the copy walks the OIDs the input includes in the order `std::shuffle`
+    // leaves them with a `std::mt19937` seeded with `time(nullptr)` (`crate::utils::std_shuffle`;
+    // the number of OIDs that ends NCBI's list is the end of the walk here).
     /// The constructor: registers the masking algorithms of `db` on the output `outdb`, in the
-    /// order of their ids, and lists the columns of `db`.
-    pub(crate) fn new(db: &'a SeqDb, outdb: &mut BuildDatabase<'_>) -> Result<Self, RawCopyError> {
+    /// order of their ids, lists the columns of `db` and, with `-randomize`, shuffles the order
+    /// of the copy with the seed `randomize` (`time(nullptr)` modulo 2^32).
+    pub(crate) fn new(
+        db: &'a SeqDb,
+        outdb: &mut BuildDatabase<'_>,
+        randomize: Option<u32>,
+    ) -> Result<Self, RawCopyError> {
         let algorithms = db.mask_algorithms()?;
         let mut masks = Vec::new();
         for id in algorithms.ids() {
@@ -188,15 +218,21 @@ impl<'a> RawSeqDbSource<'a> {
             masks.push((id, output_id));
         }
         let columns = db.column_titles()?;
+        let order = randomize.map(|seed| {
+            let mut order: Vec<u32> = (0..db.num_seqs()).collect();
+            shuffle(&mut order, &mut Mt19937::new(seed));
+            order
+        });
         Ok(Self {
             db,
             mask_blocks: masks.iter().map(|_| MaskBlock::default()).collect(),
             column_blocks: columns.iter().map(|_| ColumnBlock::default()).collect(),
             masks,
             columns,
+            order,
             next: 0,
             block: None,
-            unknown_algorithm_volume: None,
+            last_lookup: VolAlgoMemory::default(),
         })
     }
 
@@ -224,7 +260,8 @@ impl<'a> RawSeqDbSource<'a> {
             }
         }
         self.block = None;
-        let mut range = self.db.next_block(ordinal, BLOCK_BYTES).ok_or_else(|| {
+        let bytes = if self.order.is_some() { 0 } else { BLOCK_BYTES };
+        let mut range = self.db.next_block(ordinal, bytes).ok_or_else(|| {
             SeqDbError::Range(format!(
                 "ordinal id {ordinal} is outside the database ({} sequences)",
                 self.db.num_seqs()
@@ -260,16 +297,23 @@ impl<'a> RawSeqDbSource<'a> {
     // The volume of a sequence with mask data may not know an algorithm of the database: NCBI's
     // lookup of the volume's id then fails and the sequence has no ranges of it. The lookup keeps
     // the last volume and algorithm it was asked for, and the volume's id it found for them, and
-    // answers a repeated question from that memory without asking again. With two algorithms or
-    // more the questions alternate, so every failed lookup is asked again; with one, the second
-    // sequence with mask data in such a volume reads the ranges of the id remembered from
-    // another lookup, which LOSAT refuses.
+    // answers a repeated question from that memory without asking again; a failed lookup keeps
+    // the question and the id found before it. With two algorithms or more the questions
+    // alternate, so every failed lookup is asked again; with one, a sequence with mask data whose
+    // volume was the last one asked, and failed, reads the ranges of the id remembered from
+    // another lookup, which LOSAT refuses. (In the input's order that is the second sequence
+    // with mask data in such a volume; with `-randomize`, unless a sequence with mask data of
+    // another volume came between them.)
     /// `GetNext`: the next sequence of the input, `None` after the last.
     pub(crate) fn next(&mut self) -> Result<Option<RawSequence<'_>>, RawCopyError> {
-        let ordinal = self.next;
-        if ordinal >= self.db.num_seqs() {
-            return Ok(None);
-        }
+        let ordinal = match &self.order {
+            Some(order) => match order.get(self.next as usize) {
+                Some(&ordinal) => ordinal,
+                None => return Ok(None),
+            },
+            None if self.next < self.db.num_seqs() => self.next,
+            None => return Ok(None),
+        };
         self.next += 1;
         let range = self.block_of(ordinal)?;
         let i = (ordinal - range.first_ordinal) as usize;
@@ -288,19 +332,20 @@ impl<'a> RawSeqDbSource<'a> {
         let mut masks = Vec::with_capacity(self.masks.len());
         for k in 0..self.masks.len() {
             let offsets = match self.mask_blocks[k].ranges(vol_oid) {
-                Ok(BlockMasks::Ranges(ranges)) => ranges.to_vec(),
+                Ok(BlockMasks::NoMaskData) => Vec::new(),
+                Ok(BlockMasks::Ranges(ranges)) => {
+                    self.last_lookup.reads_a_kept_id(range.volume, k, true);
+                    ranges.to_vec()
+                }
                 Ok(BlockMasks::AlgorithmNotInVolume) => {
-                    if self.masks.len() == 1 {
-                        if self.unknown_algorithm_volume == Some(range.volume) {
-                            return Err(WriteDbError::Unsupported(format!(
-                                "OID {} of the input database: its volume does not know the \
-                                 database's only masking algorithm, and NCBI then reads the \
-                                 masks of an algorithm id it kept from another sequence",
-                                self.db.oid(ordinal).get()
-                            ))
-                            .into());
-                        }
-                        self.unknown_algorithm_volume = Some(range.volume);
+                    if self.last_lookup.reads_a_kept_id(range.volume, k, false) {
+                        return Err(WriteDbError::Unsupported(format!(
+                            "OID {} of the input database: its volume does not know the \
+                             database's only masking algorithm, and NCBI then reads the masks \
+                             of an algorithm id it kept from another sequence",
+                            self.db.oid(ordinal).get()
+                        ))
+                        .into());
                     }
                     Vec::new()
                 }

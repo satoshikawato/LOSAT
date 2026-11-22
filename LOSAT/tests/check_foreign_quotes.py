@@ -516,7 +516,12 @@ NAME_SPAN_RE = re.compile(
 )
 VALUE_SPAN_RE = re.compile(r"^-?(?:0x[0-9a-fA-F]+|\d[\d_]*(?:\.\d+)?(?:[eE][-+]?\d+)?)[a-zA-Z]*$|^\"\"$")
 PATH_SPAN_RE = re.compile(r"^[\w.+<>*-]*(?:/[\w.+<>*|-]+)+/?(?::[\d,-]+)?$")
-SETTING_SPAN_RE = re.compile(r"^(?:[\w.\[\]-]*=[^\s=]*\s*)+$")
+# A setting or a row of them (`-evalue=10`, `a=1 b=2`): names and values joined by `=`; a value holds
+# no space or `=`, and spaces after it come before the next name or at the end. The same strings as
+# `^(?:[\w.\[\]-]*=[^\s=]*\s*)+$`, written so that no two parts take the same letter: there a value and
+# the next name could split `-` between them, so a span that does not match took time exponential in
+# its `=` (CodeQL py/redos, alert 49).
+SETTING_SPAN_RE = re.compile(r"^[\w.\[\]-]*=(?:[^\s=]*(?:\s+[\w.\[\]-]*)?=)*[^\s=]*\s*$")
 COMMAND_SPAN_RE = re.compile(
     r"(?:^|\s)--?[a-z][\w-]*(?:\s|$|=)|^(?:cargo|python3?|git|gh|ssh|losat|blast\w*|makeblastdb|npm"
     r"|bash|sh|cd|ls|env|export|make|rustc|perf|time|valgrind)\b(?!\s*\()|^[A-Z][A-Z0-9_]*=\S*(?:\s|$)"

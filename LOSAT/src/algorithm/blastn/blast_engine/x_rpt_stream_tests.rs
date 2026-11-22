@@ -49,6 +49,7 @@ fn args(extra: &[&str]) -> BlastnArgs {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let mut argv = vec!["test", "-query", "q", "-subject", "s"];
     argv.extend_from_slice(extra);
     crate::cli::try_parse_from::<Options, _, _>(argv)

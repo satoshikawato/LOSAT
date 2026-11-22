@@ -1,0 +1,5 @@
+rec1
+>rec4
+|
+AB000001.1
+lcl|rec2 extra words

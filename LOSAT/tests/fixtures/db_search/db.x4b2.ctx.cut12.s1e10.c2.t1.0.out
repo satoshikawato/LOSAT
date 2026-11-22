@@ -1,0 +1,225 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa).
+           2 sequences; 284 total letters
+
+
+
+Query= f2_cut12 A + tks_M letters 22-33 in frame +2
+
+Length=37
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 10000000000
+
+
+Query= qok1_nt qok1 in frame +1
+
+Length=372
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sok1 BDT63546.1 of PajaWSV                                            250     4e-66
+
+
+> sok1 BDT63546.1 of PajaWSV
+Length=124
+
+ Score = 250 bits (638),  Expect = 4e-66, Method: Compositional matrix adjust.
+ Identities = 123/124 (99%), Positives = 123/124 (99%), Gaps = 0/124 (0%)
+ Frame = +1
+
+Query  1    WATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG  180
+             ATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG
+Sbjct  1    MATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG  60
+
+Query  181  MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT  360
+            MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT
+Sbjct  61   MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT  120
+
+Query  361  TRLK  372
+            TRLK
+Sbjct  121  TRLK  124
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 10000000000
+
+
+Query= nohit02 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit03 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit04 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit05 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit06 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit07 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit08 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit09 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit10 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit11 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa).
+    Posted date:  Unknown
+  Number of letters in database: 284
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

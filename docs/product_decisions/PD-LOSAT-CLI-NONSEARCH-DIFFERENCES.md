@@ -1,8 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.27 (pending: the Owner's review of exception 2's sentence on memory with more than 64 threads, line EB's pull
-  request, and of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.27 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -57,7 +56,9 @@
   standing instruction 2026-09-29, restated 2026-10-07); 1.27 2026-11-22 (exception 2: the memory
   LOSAT uses with more than 64 threads where NCBI's does not grow with `-num_threads`, recorded
   as a known difference for the v0.2.0 release on the Owner's choice of 2026-11-22, line EB,
-  EB DECISIONS 55; the text is pending the Owner's review)
+  EB DECISIONS 55; the Owner approved its text the same day, with no words: at 22:55 JST the
+  Owner pressed "Ready for review" on pull request #1484, which its description named as the
+  Owner's decision on the text)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and

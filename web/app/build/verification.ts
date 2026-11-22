@@ -121,6 +121,8 @@ function* outfmt0Records(text: string): Iterable<Comparison> {
     if (row.contract !== '' && row.contract !== 'approved_db_gencode_deviation') continue;
     const extra = row.extra_args ?? '';
     if (hasQuote(extra)) continue;
+    // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web checks keep to the plain rows.
+    if (split(extra).includes('-html')) continue;
     const task = row.task ?? '';
     yield { program: row.program ?? '', words: [...(task === '' ? [] : ['-task', task]), ...split(extra)], format: row.outfmt === '' ? '0' : (row.outfmt ?? '') };
   }

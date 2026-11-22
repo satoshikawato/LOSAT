@@ -261,14 +261,112 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertNotIn("CHUNK_SIZE", env)
         # a token of another name is an argument (and is not silently dropped)
         self.assertFalse(db_fixtures.is_env_token("-evalue"))
-        self.assertFalse(db_fixtures.is_env_token("NCBI=1"))
+        self.assertFalse(db_fixtures.is_env_token("NCBI_CONFIG_PATH=/x"))
+        self.assertFalse(db_fixtures.is_env_token("NCBI"))  # a name without `=` is a word of the argv
+        # the variables of the `-html` formatter's configuration and of NCBI's registry files
+        for token in ("FMTCFG=fmt.cfg", "NCBI=tests/db_search/html/ncbi", "GETURL_DEBUG=1", "NCBI_DONT_USE_NCBIRC=1"):
+            self.assertTrue(db_fixtures.is_env_token(token), token)
+        # the run directory: neither an environment variable nor an argument
+        row = {"extra_args": "cwd=tests/x FMTCFG=fmt.cfg -html", "db": "d", "query": "q", "outfmt": "0"}
+        self.assertFalse(db_fixtures.is_env_token("cwd=tests/x"))
+        self.assertTrue(db_fixtures.is_cwd_token("cwd=tests/x"))
+        self.assertNotIn("cwd=tests/x", db_fixtures.search_argv(row))
+        self.assertNotIn("cwd", db_fixtures.row_env(row, {}))
+        self.assertEqual(db_fixtures.row_env(row, {})["FMTCFG"], "fmt.cfg")  # a name in the run directory
+
+    def test_a_cwd_row_names_its_paths_relative_to_its_run_directory(self):
+        row = {"row_id": "db.html.x", "db": "tests/db_search/ids/prot tests/seqdb/db/swiss",
+               "query": "tests/db_search/ids/ids_q.faa", "outfmt": "0",
+               "extra_args": "cwd=tests/db_search/html/rc BLASTDB=tests/seqdb/taxdb/of18 NCBI=tests/db_search/html/n "
+                             "FMTCFG=fmt.cfg -html"}
+        self.assertEqual(db_fixtures.run_dir(row), "tests/db_search/html/rc")
+        self.assertEqual(db_fixtures.row_cwd(row), db_fixtures.ENGINE / "tests/db_search/html/rc")
+        self.assertEqual(db_fixtures.search_argv(row),
+                         ["-db", "../../ids/prot ../../../seqdb/db/swiss", "-query", "../../ids/ids_q.faa", "-html",
+                          "-outfmt", "0"])
+        env = db_fixtures.row_env(row, {"PATH": "/bin"})
+        self.assertEqual((env["BLASTDB"], env["NCBI"], env["FMTCFG"]), ("../../../seqdb/taxdb/of18", "../n", "fmt.cfg"))
+        subject = {**row, "db": "subject:tests/fasta/outfmt0/s.faa"}
+        self.assertEqual(db_fixtures.search_argv(subject)[:2], ["-subject", "../../../fasta/outfmt0/s.faa"])
+        # the empty db cell stays `-db ""`; a row without the token keeps its paths and runs in LOSAT/
+        self.assertEqual(db_fixtures.search_argv({**row, "db": ""})[:2], ["-db", ""])
+        plain = {**row, "extra_args": "BLASTDB=tests/seqdb/taxdb/of18 NCBI=tests/n -html"}
+        self.assertEqual(db_fixtures.search_argv(plain)[:4],
+                         ["-db", "tests/db_search/ids/prot tests/seqdb/db/swiss", "-query", "tests/db_search/ids/ids_q.faa"])
+        self.assertEqual(db_fixtures.row_env(plain, {})["NCBI"], "tests/n")
+        self.assertEqual(db_fixtures.row_cwd(plain), db_fixtures.ENGINE)
+
+    def test_a_cwd_row_takes_only_what_it_can_rebase(self):
+        row = {"row_id": "db.html.x", "db": "tests/d", "query": "tests/q.faa", "outfmt": "0", "extra_args": "cwd=tests/r"}
+        for change in ({"query": "pssm:tests/p.asn"}, {"query": "pssm-gz:tests/p.asn.gz"}, {"query": "stdin:empty"},
+                       {"db": "rps-gz:rps_m"}, {"files": "xinclude"}, {"extra_args": "cwd=tests/r -seqidlist tests/l.txt"},
+                       {"extra_args": "cwd=tests/r cwd=tests/s"}, {"extra_args": "cwd="}, {"extra_args": "cwd=/abs"}):
+            with self.assertRaises(SystemExit, msg=str(change)):
+                db_fixtures.search_argv({**row, **change})
+        # every cwd= row of the manifest is one the runner takes, and its directory exists
+        for r in db_fixtures.read_manifest()[1]:
+            directory = db_fixtures.run_dir(r)
+            if directory is not None:
+                self.assertTrue((db_fixtures.ENGINE / directory).is_dir(), r["row_id"])
+
+    def test_the_library_skips_the_rows_that_set_the_process_settings(self):
+        # The formatter's settings of the process (the run directory's .ncbirc and FMTCFG file, $NCBI,
+        # GETURL_DEBUG, NCBI_DONT_USE_NCBIRC) are not what a library call reads (LOSAT/src/api/mod.rs:78-86):
+        # `check --library` skips such a row before it runs anything (the LOSAT path does not exist).
+        row = {"row_id": "db.html.x", "program": "blastp", "kind": "ncbi", "db": "tests/d", "query": "tests/q.faa",
+               "outfmt": "0", "covers": "", "rc": "0", "stdout_sha256": "", "stdout_bytes": "", "stderr_sha256": ""}
+        missing = Path("/nonexistent/library_command_line")
+        for extra in ("cwd=tests/db_search -html", "FMTCFG=fmt.cfg -html", "NCBI=tests/n -html", "GETURL_DEBUG=1 -html",
+                      "NCBI_DONT_USE_NCBIRC=1 -html"):
+            self.assertTrue(db_fixtures.process_settings({**row, "extra_args": extra}), extra)
+            self.assertEqual(db_fixtures.check_row({**row, "extra_args": extra}, missing, 1, {}, library=True),
+                             ("library-skip", ""), extra)
+        for extra in ("-html", "BLASTDB=tests/seqdb/taxdb/of18 BATCH_SIZE=1 -html"):
+            self.assertFalse(db_fixtures.process_settings({**row, "extra_args": extra}), extra)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in programs are shell scripts")
+    def test_freeze_and_check_run_a_cwd_row_in_its_directory(self):
+        # NCBI's stand-in (freeze) and LOSAT's (check) print their directory, argv and variables: the same bytes,
+        # so the row is `same`, and the bytes show the run directory and the paths relative to it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()  # the directory as the stand-in's `pwd` prints it
+            engine, bin_dir, frozen = root / "LOSAT", root / "bin", root / "frozen"
+            (engine / "tests/db_search/html/rc").mkdir(parents=True)
+            bin_dir.mkdir()
+            show = 'printf "%s|" "$(pwd)" "$@" "${FMTCFG-}" "${NCBI-}" "${BLASTDB-}"\n'
+            (bin_dir / "blastp").write_text("#!/bin/sh\n" + show)
+            (bin_dir / "losat").write_text("#!/bin/sh\nshift\n" + show)  # `losat blastp ...`
+            for script in bin_dir.iterdir():
+                script.chmod(0o755)
+            row = {"row_id": "db.html.cwd", "program": "blastp", "kind": "ncbi", "db": "tests/db_search/ids/prot",
+                   "query": "tests/db_search/ids/ids_q.faa", "outfmt": "0", "covers": "", "rc": "", "stdout_sha256": "",
+                   "stdout_bytes": "", "stderr_sha256": "",
+                   "extra_args": "cwd=tests/db_search/html/rc NCBI=tests/db_search/html FMTCFG=fmt.cfg -html"}
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                    unittest.mock.patch.object(db_fixtures, "ENGINE", engine), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")), 0)
+                self.assertEqual(db_fixtures.check_row(row, bin_dir / "losat", 1, {"PATH": os.environ["PATH"]}),
+                                 ("same", ""))
+                expected = (f"{engine / 'tests/db_search/html/rc'}|-db|../../ids/prot|-query|../../ids/ids_q.faa|-html|"
+                            "-outfmt|0|-num_threads|1|fmt.cfg|..||")
+                self.assertEqual((frozen / "db.html.cwd.out").read_text(), expected)
+                # LOSAT/.ncbirc would change every row: both commands refuse to start
+                (engine / ".ncbirc").write_text("[BLAST]\n")
+                with self.assertRaises(SystemExit):
+                    db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
+                with self.assertRaises(SystemExit):
+                    db_fixtures.check(argparse.Namespace(losat=bin_dir / "losat"))
 
     def test_clean_env_drops_what_changes_a_result_and_seals_home(self):
         dirty = {"PATH": "/bin", "HOME": "/home/someone", "USERPROFILE": "C:/Users/someone",
                  "NCBI_CONFIG__BLAST__BLASTDB": "/x", "NCBI_CONFIG_PATH": "/y", "NCBI": "/z",
                  "BLASTDB": "/d", "BLAST_USE_NCBI_ENV": "yes", "LOSAT_X_SOMETHING": "1",
                  "BATCH_SIZE": "1", "CHUNK_SIZE": "2", "OLD_FSC": "1", "BL2SEQ_LEGACY": "1", "LANG": "C",
-                 "ADAPTIVE_CBS": "1", "CTOOLKIT_COMPATIBLE": ""}
+                 "ADAPTIVE_CBS": "1", "CTOOLKIT_COMPATIBLE": "", "FMTCFG": "fmt.cfg", "GETURL_DEBUG": "1",
+                 "NCBI_DONT_USE_NCBIRC": "1"}
         clean = db_fixtures.clean_env(dirty, "/empty/home")
         self.assertEqual(clean, {"PATH": "/bin", "HOME": "/empty/home", "USERPROFILE": "/empty/home",
                                  "LANG": "C"})

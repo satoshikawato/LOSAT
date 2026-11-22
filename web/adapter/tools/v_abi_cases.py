@@ -150,6 +150,10 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         if row.get("files") and not files:
             continue
         argv = run_oracle.search_argv(row)
+        # `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web checks keep to
+        # the plain rows.
+        if "-html" in argv:
+            continue
         # A hit list of 0 (-num_alignments 0) fails the CLI's outfmt 6 and 7 while the Web run
         # succeeds with the error on stream 3 (abi_v2.md §5, §7), so there is no native output of
         # those formats to compare: the adapter's tests cover the row (run.rs).

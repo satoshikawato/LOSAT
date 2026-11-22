@@ -4177,7 +4177,7 @@ mod tests {
 
     /// The rows of NCBI's frozen outputs (`LOSAT/tests/outfmt0_manifest.tsv`) for which `keep(program,
     /// format number, files column)` holds, as (fixture id, argv): the arguments of
-    /// `run_oracle.search_argv` (none of the rows taken here quotes a value).
+    /// `run_oracle.search_argv` (none of the rows taken here quotes a value); never a row with `-html`.
     fn manifest_rows(keep: impl Fn(&str, &str, &str) -> bool) -> Vec<(String, Vec<String>)> {
         manifest_rows_with(|program, number, files, _| keep(program, number, files))
     }
@@ -4214,6 +4214,14 @@ mod tests {
                 field("files"),
                 field("extra_args"),
             ) {
+                continue;
+            }
+            // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web
+            // checks keep to the plain rows.
+            if field("extra_args")
+                .split_whitespace()
+                .any(|word| word == "-html")
+            {
                 continue;
             }
             let extra = field("extra_args");

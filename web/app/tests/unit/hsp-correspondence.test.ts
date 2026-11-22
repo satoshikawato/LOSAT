@@ -69,6 +69,8 @@ function fixtures(): Map<string, Fixture[]> {
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;
+    // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web checks keep to the plain rows.
+    if (words.includes('-html')) continue;
     const stream = ({ '': 0, '0': 0, '6': 6, '7': 7 } as const)[row['outfmt'] ?? ''];
     const fixture: Fixture = {
       id: row['fixture_id']!,

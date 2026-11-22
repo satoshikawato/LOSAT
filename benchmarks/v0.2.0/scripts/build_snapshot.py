@@ -2,11 +2,12 @@
 """Build frozen benchmark snapshot tables in benchmarks/v0.2.0/snapshot/ from measured TSV/JSON outputs.
 
 Every input path is an argument (defaults: the v0.2.0 runs on the release candidate 93ca2f652).
-metadata.json records the sha256 of every input file read and the LOSAT build of each source:
---losat-commit for the standard grid and its extension (psiblast, rpsblast, rpstblastn, utilities,
-thread and size scaling), the `build` field of toolmt.json (downstream tools at the tool's thread
-count, cold-cache and core_nt rows), <dt-dir>/<tag>_sha.txt (downstream tools at one thread) and the
-`commit` column of the WebAssembly CSV.
+metadata.json records the sha256 of every input file read, paired `-db` parity from
+<ext-dir>/bp_db_parity.tsv (backing the `subject_vs_db` rows for `bp` and `bpff`), and the LOSAT
+build of each source: --losat-commit for the standard grid and its extension (psiblast, rpsblast,
+rpstblastn, utilities, thread and size scaling), the `build` field of toolmt.json (downstream tools
+at the tool's thread count, cold-cache and core_nt rows), <dt-dir>/<tag>_sha.txt (downstream tools
+at one thread), and the `commit` column of the WebAssembly CSV.
 """
 
 from __future__ import annotations
@@ -110,11 +111,9 @@ def sanitize_input_key(path: Path, base: Path) -> str:
 
 
 def collect_input_checksums(paths: list[Path], base: Path) -> dict[str, str]:
-    """Validate input paths against base, reject missing/unreadable files and duplicate keys, and hash them."""
+    """Validate input paths against base, reject duplicate keys or unreadable files, and hash them."""
     checksums: dict[str, str] = {}
     for p in paths:
-        if not p.is_file():
-            sys.exit(f"missing input file: {p}")
         key = sanitize_input_key(p, base)
         if key in checksums:
             sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
@@ -125,6 +124,11 @@ def collect_input_checksums(paths: list[Path], base: Path) -> dict[str, str]:
     return checksums
 
 
+def row_sha16(row: dict[str, str]) -> str:
+    """Read and strip the sha16 column from a benchmark row (empty if missing)."""
+    return (row.get("sha16") or "").strip()
+
+
 def require_single_sha16(values: list[str], context: str) -> str:
     """Ensure all rounds in an arm report one identical, non-empty sha16."""
     cleaned = {(v or "").strip() for v in values}
@@ -133,6 +137,44 @@ def require_single_sha16(values: list[str], context: str) -> str:
     if len(cleaned) != 1:
         sys.exit(f"sha16 differs across rounds for {context}: {sorted(cleaned)}")
     return next(iter(cleaned))
+
+
+def validate_bp_db_parity(rows: list[dict[str, str]], path: Path) -> list[dict[str, str]]:
+    """Validate bp_db_parity.tsv rows for bp and bpff before writing outputs."""
+    if not rows:
+        sys.exit(f"empty bp_db_parity provenance file: {path}")
+    seen: set[str] = set()
+    validated: list[dict[str, str]] = []
+    for row in rows:
+        if None in row:
+            sys.exit(f"malformed row in {path}: {row}")
+        cid = (row.get("case") or "").strip()
+        if not cid:
+            sys.exit(f"missing or empty case in {path}: {row}")
+        if cid in seen:
+            sys.exit(f"duplicate case {cid!r} in {path}")
+        seen.add(cid)
+        lo_sha = (row.get("losat_db_sha16") or "").strip()
+        nc_sha = (row.get("ncbi_db_sha16") or "").strip()
+        if not lo_sha or not nc_sha:
+            sys.exit(f"missing or empty db sha16 for {cid} in {path}: {row}")
+        equal = (row.get("equal") or "").strip()
+        expected_equal = "yes" if lo_sha == nc_sha else "no"
+        if equal != expected_equal:
+            sys.exit(
+                f"inconsistent equal field for {cid} in {path}: "
+                f"got {equal!r}, expected {expected_equal!r}"
+            )
+        normalized = dict(row)
+        normalized["case"] = cid
+        normalized["losat_db_sha16"] = lo_sha
+        normalized["ncbi_db_sha16"] = nc_sha
+        normalized["equal"] = equal
+        validated.append(normalized)
+    missing = [cid for cid in ("bp", "bpff") if cid not in seen]
+    if missing:
+        sys.exit(f"missing required bp_db_parity row(s) {missing} in {path}")
+    return validated
 
 
 def parse_disk_bytes(inputs_ext: dict[str, dict[str, str]], inp_key: str) -> int:
@@ -184,13 +226,19 @@ def make_standard_row(
     lo_w_min = min(x[0] for x in lo_list)
     lo_w_max = max(x[0] for x in lo_list)
     lo_m = statistics.median(x[1] for x in lo_list)
-    lo_sha = {x[2] for x in lo_list}
-    if len(lo_sha) != 1:
-        sys.exit(f"LOSAT sha differs across rounds for {cid} t={th}: {lo_sha}")
+    lo_sha16 = require_single_sha16([x[2] for x in lo_list], f"standard {cid} LOSAT t={th}")
+    lo_sha = {lo_sha16}
 
     nc_w = statistics.median(x[0] for x in nc_list) if nc_list else None
     nc_m = statistics.median(x[1] for x in nc_list) if nc_list else None
-    nc_sha = {x[2] for x in nc_list}
+    nc_sha = {(x[2] or "").strip() for x in nc_list}
+    if nc_list and "" in nc_sha:
+        sys.exit(f"missing or empty sha16 for standard {cid} NCBI t={th}")
+    cleaned_n1_sha: set[str] | None = None
+    if ncbi_n1_sha is not None:
+        cleaned_n1_sha = {(v or "").strip() for v in ncbi_n1_sha}
+        if not cleaned_n1_sha or "" in cleaned_n1_sha:
+            sys.exit(f"missing or empty NCBI 1-thread sha16 for {cid} t={th}")
     v0_w = statistics.median(x[0] for x in v0_list) if v0_list else ""
     v0_m = round(statistics.median(x[1] for x in v0_list), 2) if v0_list else ""
 
@@ -201,8 +249,8 @@ def make_standard_row(
         ncbi_runs = 1
     elif subject_vs_db:
         parity = "subject_vs_db"
-    elif ncbi_n1_sha is not None and th == 16 and lo_sha != nc_sha:
-        parity = "same_as_ncbi_n1" if lo_sha == ncbi_n1_sha else "diff"
+    elif cleaned_n1_sha is not None and th == 16 and lo_sha != nc_sha:
+        parity = "same_as_ncbi_n1" if lo_sha == cleaned_n1_sha else "diff"
     elif lo_sha != nc_sha:
         parity = "diff"
 
@@ -225,7 +273,7 @@ def make_standard_row(
         "mem_reduction": round(nc_m / lo_m, 4) if nc_m else "",
         "losat_runs": len(lo_list),
         "ncbi_runs": ncbi_runs,
-        "losat_sha16": next(iter(lo_sha)),
+        "losat_sha16": lo_sha16,
         "ncbi_sha16": ",".join(sorted(nc_sha)),
         "parity": parity,
         "query_desc": qdesc,
@@ -314,7 +362,7 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> list[dict[str, ob
             if row["case"] in wanted.get(tag, set()) and row.get("rc", "0") != "0":
                 sys.exit(f"{tag} rc != 0: {row}")
             g[(row["case"], row["arm"])].append(float(row["wall_s"]))
-            s[(row["case"], row["arm"])].append((row.get("sha16") or "").strip())
+            s[(row["case"], row["arm"])].append(row_sha16(row))
         dt_cache[tag] = g
         dt_meta[tag] = s
 
@@ -458,7 +506,7 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"J2 n16 rc != 0: {r}")
         j_n16[(r["case"], r["arm"])].append(
-            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
         )
 
     j_n1: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
@@ -471,7 +519,7 @@ def main() -> int:
             if int(r["rc"]) != 0:
                 sys.exit(f"J2 n1 rc != 0: {r}")
             j_n1[(r["case"], r["arm"])].append(
-                (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+                (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
             )
 
     ext_n0: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
@@ -481,7 +529,7 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"ext n0 rc != 0: {r}")
         ext_n0[(r["case"], int(r["threads"]), r["arm"])].append(
-            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, (r.get("sha16") or "").strip(), parse_rss_anon_mib(r))
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
         )
 
     ext_n1: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
@@ -491,7 +539,7 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"ext n1 rc != 0: {r}")
         ext_n1[(r["case"], int(r["threads"]), r["arm"])].append(
-            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
         )
 
     # 2. standard_workloads.tsv (12 modes x 2 thread counts x {losat, ncbi})
@@ -703,9 +751,7 @@ def main() -> int:
     for r in read_tsv(ext_inputs_path):
         in_rows.append({"source": "bench_v020_ext", **r})
 
-    bp_par = read_tsv(ext_bp_path)
-    if not bp_par:
-        sys.exit(f"empty bp_db_parity provenance file: {ext_bp_path}")
+    bp_par = validate_bp_db_parity(read_tsv(ext_bp_path), ext_bp_path)
     toolmt_builds = sorted({str(r.get("build", "")) for r in json.loads(args.toolmt.read_text(encoding="utf-8"))} - {""})
     wasm_commits = sorted({str(r["commit"]) for r in wasm_rows})
     dt_builds = {}

@@ -108,7 +108,7 @@ impl InputFile {
     }
 
     /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
-    /// (`m_Ios = &cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// (`m_Ios` points to `cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
     /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
     /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
     pub(crate) fn is_standard_input(&self) -> bool {

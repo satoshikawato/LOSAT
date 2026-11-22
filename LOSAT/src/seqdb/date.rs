@@ -58,10 +58,11 @@ const MONTH_ABBR: [&[u8; 3]; 12] = [
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:97-99
 const DAYS_IN_MONTH: [u32; 12] = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-/// How `CTime::CTime(const string&, const CTimeFormat&)` fails for the BLAST database format.
+/// How the `CTime` constructor from a string and a `CTimeFormat` fails for the BLAST database
+/// format.
 ///
 /// The two exception classes derive from `CCoreException` separately, so
-/// `catch(CStringException &)` in `CSeqDBImpl::GetDate` catches only the first.
+/// the handler of `CStringException` in `CSeqDBImpl::GetDate` catches only the first.
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:4499
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:2074
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,10 +145,10 @@ impl Time {
 
     /// `*self > *t` of `CTime::operator>`.
     ///
-    /// `tmp.ToTime(GetTimeZone())` changes nothing because both times are `eLocal`
-    /// (`ToTime` converts only `if (GetTimeZone() != tz)`), and `Second()` and `NanoSecond()`
-    /// are zero on both sides. An empty time (all fields zero, from an empty string) is
-    /// compared by the same fields and is never later than a valid one.
+    /// `tmp.ToTime` to the zone `GetTimeZone()` changes nothing because both times are `eLocal`
+    /// (`ToTime` converts only when `GetTimeZone()` differs from `tz`), and `Second()` and
+    /// `NanoSecond()` are zero on both sides. An empty time (all fields zero, from an empty string)
+    /// is compared by the same fields and is never later than a valid one.
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:2137-2162
     fn is_later_than(&self, t: &Time) -> bool {
         (self.year, self.month, self.day, self.hour, self.min)
@@ -191,13 +192,14 @@ fn check_range(value: i64, what: &str, min: i64, max: i64, line: u32) -> Result<
     Ok(())
 }
 
-/// `CTime t(text, CSeqDB::kBlastDbDateFormat)`: the fields of the time, or the exception.
+/// `CTime` built from `text` and `CSeqDB::kBlastDbDateFormat`: the fields of the time, or the
+/// exception.
 ///
 /// The `const char*` format converts to `CTimeFormat` with `fDefault` flags, which `SetFormat`
-/// turns into `fFormat_Simple | fMatch_Strict`: every format character can be a format
-/// symbol, white space is matched (not ignored), and neither a short string nor a short
-/// format is accepted. `x_Init` runs with `err_action = eErr_Throw`, and its own
-/// `catch (const CException&)` rethrows in that mode.
+/// turns into the flags `fFormat_Simple` and `fMatch_Strict`: every format character can be a
+/// format symbol, white space is matched (not ignored), and neither a short string nor a short
+/// format is accepted. `x_Init` runs with `err_action` set to `eErr_Throw`, and its own
+/// handler of `CException` rethrows in that mode.
 // NCBI reference (598d8ae6): c++/include/corelib/ncbitime.hpp:209,472-474,1199-1200
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:361-371
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1017-1029
@@ -217,7 +219,7 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
     let mut is_format_space = false;
 
     // `format_matched` is false when the loop stops at a `break`, that is, when NCBI leaves
-    // its loop with `*fff != '\0'`.
+    // its loop with the format pointer `fff` not at the terminating zero.
     let format_matched = 'format: {
         for &f in fmt.as_bytes() {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:545,549-578
@@ -328,11 +330,11 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
         time.hour = (time.hour + 12) & 0x1F;
     }
 
-    // NCBI skips trailing white space here only `if (isspace(*sss) && is_format_space)`.
-    // That condition is never true for this format: the format ends in the symbol `P`, so a
-    // completed loop leaves `is_format_space` false, and no `break` above is taken with both
-    // a white-space character at `sss` and `is_format_space` true. Trailing white space is
-    // therefore "too long".
+    // NCBI skips trailing white space here only when `isspace` holds for `*sss` and
+    // `is_format_space` is set. That condition is never true for this format: the format ends in
+    // the symbol `P`, so a completed loop leaves `is_format_space` false, and no `break` above is
+    // taken with both a white-space character at `sss` and `is_format_space` true. Trailing white
+    // space is therefore "too long".
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:857-859,863-872
     if !format_matched {
         return Err(ParseFailure::time(
@@ -423,9 +425,10 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
 // The ISO 8601 form is `Y-M-DTh:m:s` (ncbitime.cpp:398, `eISO8601_DateTimeSec`); the
 // stored date has no seconds. An empty date is the empty time, written as the empty
 // string. The constructor has checked the time a date string gives (`IsValid`).
-/// `CTime(date, "b d, Y  H:m P").AsString(eISO8601_DateTimeSec)`, the `last-updated` of
-/// `blastdbcmd -metadata`: `YYYY-MM-DDThh:mm:00`. `Err` with NCBI's message where the
-/// constructor throws (`CTimeException`, or `CStringException` for a number without digits).
+/// `CTime` of `date` in the format `"b d, Y  H:m P"`, then `AsString` as `eISO8601_DateTimeSec`,
+/// the `last-updated` of `blastdbcmd -metadata`: `YYYY-MM-DDThh:mm:00`. `Err` with NCBI's message
+/// where the constructor throws (`CTimeException`, or `CStringException` for a number without
+/// digits).
 pub fn iso8601_date_time(date: &str) -> Result<String, String> {
     match iso8601(date) {
         Ok(text) => Ok(text),

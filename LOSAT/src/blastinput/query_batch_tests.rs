@@ -518,7 +518,8 @@ fn batch_size_strings_are_read_as_ncbis_string_to_int() {
         ("007", 7),
         ("2147483647", i32::MAX),
         ("-2147483648", i32::MIN),
-        // NCBI reads up to a NUL (`while (char ch = str[pos])`, c++/src/corelib/ncbistr.cpp:841).
+        // NCBI reads up to a NUL (a loop over the `char` at each `str[pos]`,
+        // c++/src/corelib/ncbistr.cpp:841).
         ("12\u{0}x", 12),
     ] {
         assert_eq!(

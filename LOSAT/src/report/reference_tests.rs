@@ -67,7 +67,7 @@ fn every_publication_has_one_www_url() {
         Publication::IndexedMegablast,
         Publication::DeltaBlast,
     ];
-    // The publications before the sentinel, in the enum's order (`static_cast<EPublication>(i)`).
+    // The publications before the sentinel, in the enum's order (the index cast to `EPublication`).
     for (index, publication) in publications.iter().enumerate() {
         assert_eq!(*publication as usize, index);
     }
@@ -80,7 +80,7 @@ fn every_publication_has_one_www_url() {
         text.push_str(publication.pubmed_url());
         text.push_str(">Get abstract</a><br>\n");
     }
-    // `text.find(kToken, i)` from one past each match: overlapping matches count.
+    // `text.find` of `kToken` from `i`, one past each match: overlapping matches count.
     let occurrences = (0..text.len())
         .filter(|&at| text[at..].starts_with("www"))
         .count();
@@ -106,7 +106,7 @@ fn the_html_free_text_writes_the_entity_as_a() {
 
 fn prolog_references(html: bool, protocol: &[u8], program: &str, megablast: bool) -> String {
     let mut out = Vec::new();
-    write_prolog_references(&mut out, html, protocol, program, megablast).unwrap();
+    write_prolog_references(&mut out, html, protocol, program, megablast, false).unwrap();
     String::from_utf8(out).unwrap()
 }
 

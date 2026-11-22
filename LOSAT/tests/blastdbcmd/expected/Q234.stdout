@@ -1,0 +1,48 @@
+Bioseq ::= {
+  id {
+    genbank {
+      accession "AB311001",
+      version 1
+    }
+  },
+  descr {
+    title "",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A000000A1803080A4803080A1801A0841423331313030310000A3
+8002010100000000000000000000A280020100000000003080A0801A000000A1803080A4803080
+A1801A0841423331313030320000A38002010100000000000000000000A28002030186A2000000
+000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Bacillus sp.",
+        common "",
+        db {
+          {
+            db "taxon",
+            tag id 100002
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 660,
+    seq-data ncbi2na '3834A3020FEB4A39F3BD6160FFF8C3AE3EDBDFADFF4EBE931738C578
+0AFA3F383B3964E001B020EA7FDE0E7E9315E173005AD36F74FB8DBCFB3FFFEB4E7FD63D6ACEDD
+3396FFB596AEBAE05B79DB4853E70FF0EFCC0DCFBFFCFB4FA3B7EBB5BB1458F39F79F75A7AC5ED
+24FA8FBBC0FE003B3DB82FCFF7964C5DF39D6EA3BD26FFFFF03A8F7DCEED33B39CE83A3968CEBE
+38DE6C00C04920EB4E3EDBFEFFDB9DE14582F58E'H
+  }
+}

@@ -104,7 +104,7 @@ fn normalize_path(path: &str) -> String {
 // directory is the C library's (wasi-libc's `getcwd`), which the command sets
 // from the `PWD` that its host gives (`cli::main_entry`) and which is `/`
 // when the host gives none.
-/// `CDirEntry::CreateAbsolutePath(dbname)`.
+/// `CDirEntry::CreateAbsolutePath` of `dbname`.
 fn create_absolute_path(dbname: &str) -> String {
     // `NormalizePath` leaves no separator at the end of a path that is not a
     // root, so `-out sub/` names the database `sub` on every platform.
@@ -123,7 +123,7 @@ fn create_absolute_path(dbname: &str) -> String {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:776-788
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716
-/// `CDirEntry::CreateAbsolutePath(dbname)` on Unix, where the current
+/// `CDirEntry::CreateAbsolutePath` of `dbname` on Unix, where the current
 /// directory is `cwd` (`None` when it cannot be read: `GetCwd` gives "").
 /// `ConcatPath` cuts the C spaces at the ends of both parts (a tab at the end
 /// of `-out` is not in the database's name; makeblastdb refuses a name with a
@@ -176,7 +176,7 @@ fn dir_entry_path(path: &str) -> &str {
 // is false unless the registry sets it (ncbifile.cpp:161; LOSAT refuses a
 // registry that does, `crate::blastinput::ncbi_environment`), so the new
 // directory gets exactly that mode, whatever the umask.
-/// `s_DirCreate(path, fCreate_Default, mode)`: makes one directory; `true`
+/// `s_DirCreate` of `path` with `fCreate_Default` and `mode`: makes one directory; `true`
 /// also when it is there already.
 fn dir_create(path: &str) -> bool {
     match std::fs::create_dir(path) {
@@ -202,7 +202,7 @@ fn dir_create(path: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4106-4139,4165-4186
 // `CDirEntry::Exists` is true for an entry of any type, a link that leads
 // nowhere included (`GetType()` without following links).
-/// `CDir(dir).CreatePath()`: makes the directory `dir` and its missing
+/// `CreatePath` of the `CDir` of `dir`: makes the directory `dir` and its missing
 /// parents, after the path was made absolute and normalized without
 /// following links (`a/b/../c` is `a/c`: `a/b` is not made).
 fn create_path(dir: &str) -> bool {
@@ -253,18 +253,18 @@ fn create_path(dir: &str) -> bool {
 // directory "is created" (it exists), `nodir/..` does not resolve, and
 // makeblastdb stops with the write-permission message.
 //
-// On Unix LOSAT asks the question of `euidaccess(path, W_OK)` (`check_access_write`): a
-// path that does not resolve and a directory that exists and cannot be written to (by
-// its mode, an ACL, a read-only file system) both stop it here, before the log. On
+// On Unix LOSAT asks the question of `euidaccess` for write access to `path`
+// (`check_access_write`): a path that does not resolve and a directory that exists and cannot be
+// written to (by its mode, an ACL, a read-only file system) both stop it here, before the log. On
 // Windows NCBI reads the effective rights of the directory's ACL
-// (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops here only for a
-// path that does not resolve, and for a directory it cannot write to it goes on, writes
-// the log header and fails when it creates the first file of the first volume, with the
-// system's message for that file and the same exit status 255.
-// The library is built with `-DNCBI_MODULE=BLASTDB` (Makefile.writedb.lib:15), so the
-// report names the function `BLASTDB::ncbi::CBuildDatabase::CreateDirectories`; the error code
-// `eOutputFileError` has no name of its own (`CMultisourceException::GetErrCodeString` names
-// `eArg` only, multisource_util.hpp:66-72) and prints as `eInvalid`.
+// (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops here only for a path that
+// does not resolve, and for a directory it cannot write to it goes on, writes the log header and
+// fails when it creates the first file of the first volume, with the system's message for that file
+// and the same exit status 255. The library is built with `-DNCBI_MODULE=BLASTDB`
+// (Makefile.writedb.lib:15), so the report names the function
+// `BLASTDB::ncbi::CBuildDatabase::CreateDirectories`; the error code `eOutputFileError` has no name
+// of its own (`CMultisourceException::GetErrCodeString` names `eArg` only,
+// multisource_util.hpp:66-72) and prints as `eInvalid`.
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/multisource_util.hpp:65-72
 const CREATE_PATH_FAILED: ThrowSite = create_directories_site(1063);
 /// `s_FixBioseqDeltas`' throw for a protein delta (`CBuildDatabase::past_seq_pos`).
@@ -276,7 +276,7 @@ const PROTEIN_DELTA: ThrowSite = ThrowSite {
 };
 const NO_WRITE_ACCESS: ThrowSite = create_directories_site(1069);
 
-/// The throws of `AddSequences(IRawSequenceSource &)` for raw data it cannot add
+/// The throws of `AddSequences` of an `IRawSequenceSource` for raw data it cannot add
 /// (`CMultisourceException::eArg`).
 const fn raw_data_site(line: u32) -> ThrowSite {
     ThrowSite {
@@ -287,7 +287,7 @@ const fn raw_data_site(line: u32) -> ThrowSite {
     }
 }
 
-/// The exception of `AddSequences(IRawSequenceSource &)` for raw data it cannot add, thrown at
+/// The exception of `AddSequences` of an `IRawSequenceSource` for raw data it cannot add, thrown at
 /// `line` of build_db.cpp.
 fn raw_data_error(line: u32, message: &str) -> WriteDbError {
     WriteDbError::Exception(NcbiException::new(raw_data_site(line), message))
@@ -351,18 +351,18 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1735-1748
-/// `CDirEntry::CheckAccess(fWrite)` of the path as it was given: `euidaccess(path,
-/// F_OK | W_OK)`. glibc's `euidaccess` calls `access(path, mode)` when the process's real
-/// and effective user and group ids are equal, and LOSAT makes that call (`F_OK` is 0).
-/// For a set-user-ID or set-group-ID process glibc compares the mode bits with the
-/// effective ids instead; `access` asks with the real ids there.
+/// `CDirEntry::CheckAccess` for `fWrite` of the path as it was given: `euidaccess` of
+/// the path with `F_OK` and `W_OK`. glibc's `euidaccess` calls `access` with the same mode when
+/// the process's real and effective user and group ids are equal, and LOSAT makes that call (`F_OK`
+/// is 0). For a set-user-ID or set-group-ID process glibc compares the mode bits with the effective
+/// ids instead; `access` asks with the real ids there.
 #[cfg(unix)]
 fn check_access_write(path: &str) -> bool {
     rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1722-1732
-/// `CDirEntry::CheckAccess(fWrite)` without the rights of the ACL (see
+/// `CDirEntry::CheckAccess` for `fWrite` without the rights of the ACL (see
 /// `create_directories`): only whether the path resolves.
 #[cfg(not(unix))]
 fn check_access_write(path: &str) -> bool {
@@ -371,7 +371,7 @@ fn check_access_write(path: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2641
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2647-2656
-/// `SeqDB_GetFileExtensions(is_protein, extn, eBDB_Version4)` without the
+/// `SeqDB_GetFileExtensions` for version 4 (`eBDB_Version4`) without the
 /// letter of the molecule.
 pub(crate) const VOLUME_EXTENSIONS: [&str; 20] = [
     "al", "in", "hr", "sq", "ni", "nd", "si", "sd", "pi", "pd", "js", "aa", "ab", "ac", "og", "hi",
@@ -425,7 +425,7 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
         Err(_) => (Vec::new(), Vec::new()),
     };
 
-    // `CFile(fname).Remove()` is `CDirEntry::Remove(eRecursive)` (`super::dir_entry`): a
+    // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive` (`super::dir_entry`): a
     // directory of the name is removed with its contents, a symbolic link is removed and its
     // target kept.
     let mut num_files_removed = 0;
@@ -458,7 +458,7 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
     Ok(num_files_removed != 0)
 }
 
-/// `ostream << double` with the default format (six significant digits,
+/// The stream output of a `double` with the default format (six significant digits,
 /// `%g`): the seconds of the "Adding sequences" line.
 fn format_seconds(value: f64) -> String {
     if value == 0.0 || !value.is_finite() {
@@ -570,7 +570,7 @@ impl<'a> BuildDatabase<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
-    /// `RegisterMaskingAlgorithm(program, options, name)`: see
+    /// `RegisterMaskingAlgorithm` of a program, its options and a name: see
     /// [`WriteDb::register_mask_algorithm`].
     pub fn register_masking_algorithm(
         &mut self,
@@ -585,7 +585,7 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1596-1607
     // The first argument of this overload is the id of `-mask_id` (the call
     // in makeblastdb.cpp:966 passes `id_list[i], desc_list[i], opts`).
-    /// `RegisterMaskingAlgorithm(id, description, options)`: see
+    /// `RegisterMaskingAlgorithm` of an id, a description and options: see
     /// [`WriteDb::register_mask_algorithm_id`].
     pub fn register_masking_algorithm_id(
         &mut self,
@@ -674,7 +674,7 @@ impl<'a> BuildDatabase<'a> {
     // The FASTA source applies `s_FixBioseqDeltas` before it hands a
     // sequence over; its errors arrive as errors of the source. A record past
     // NCBI's 32-bit length comes without data and meets it here (`past_seq_pos`).
-    /// `AddSequences(IBioseqSource &)`: `true` when a sequence was added.
+    /// `AddSequences` of an `IBioseqSource`: `true` when a sequence was added.
     fn add_sequences<R: Read>(
         &mut self,
         source: &mut FastaBioseqSource<R>,
@@ -845,8 +845,9 @@ impl<'a> BuildDatabase<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1278-1286
-    /// `SetLeafTaxIds(taxids, true)`: the leaf taxids of a copied database's definition lines
-    /// (`raw_source::scan_leaf_tax_ids`), which the copy adds to a line's own.
+    /// `SetLeafTaxIds` of `taxids` with the second argument true: the leaf taxids of a copied
+    /// database's definition lines (`raw_source::scan_leaf_tax_ids`), which the copy adds to a
+    /// line's own.
     pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) {
         let _ = writeln!(self.log, "Keep Leaf Taxids: T");
         self.leaf_tax_ids = taxids;
@@ -894,7 +895,7 @@ impl<'a> BuildDatabase<'a> {
     //
     // Unlike `add_fasta`, an error does not end the build: makeblastdb leaves it open, and its
     // writer is closed when it is destroyed (`close_at_destruction`).
-    /// `AddSequences(IRawSequenceSource &)`: copies the sequences of `source`, then logs their
+    /// `AddSequences` of an `IRawSequenceSource`: copies the sequences of `source`, then logs their
     /// count when there were any. `warn` gets the writer's diagnostics as they are posted.
     pub(crate) fn add_raw_sequences(
         &mut self,
@@ -1100,13 +1101,13 @@ impl<'a> BuildDatabase<'a> {
     // LOSAT's refusal of masks whose order NCBI takes from memory addresses (`address_order`)
     // comes here, when the build would otherwise succeed: after a close that did not fail, in an
     // `EndBuild` without `erase`. It ends the build as an error of NCBI's build ends it
-    // (`EndBuild(true)` in `AddFasta`, build_db.cpp:1415-1417): the files that `ListFiles` names
-    // are removed, which leaves what NCBI leaves after its error at the last sequence (nothing in
-    // version 4; the `.nos`, `.not`, `.ntf` and `.nto` files in version 5). The other refusal
-    // raised inside the build, `mask_data`'s column that is created too late, comes from
-    // `SetMaskData` inside `AddFasta` and so ends the build in the same way. A build that ends
-    // with an error (`erase`, a failed close) reports that error and drops the refusal: NCBI's
-    // order never reaches a file there.
+    // (`EndBuild` with `erase` true in `AddFasta`, build_db.cpp:1415-1417): the files that
+    // `ListFiles` names are removed, which leaves what NCBI leaves after its error at the last
+    // sequence (nothing in version 4; the `.nos`, `.not`, `.ntf` and `.nto` files in version 5).
+    // The other refusal raised inside the build, `mask_data`'s column that is created too late,
+    // comes from `SetMaskData` inside `AddFasta` and so ends the build in the same way. A build
+    // that ends with an error (`erase`, a failed close) reports that error and drops the refusal:
+    // NCBI's order never reaches a file there.
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
     /// removes its files. `Ok(false)` when no volume was created. `warn`
     /// takes the diagnostics of the close. A pending refusal of LOSAT (`address_order`) is
@@ -1127,7 +1128,7 @@ impl<'a> BuildDatabase<'a> {
             let _ = writeln!(self.log, "No volumes were created.");
             success = false;
         } else if erase {
-            // `CFile(*iterf).Remove()`: `CDirEntry::Remove(eRecursive)`.
+            // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
             for file in &files {
                 let _ = dir_entry::remove(Path::new(file));
             }
@@ -1139,8 +1140,9 @@ impl<'a> BuildDatabase<'a> {
         if close_error.is_some() {
             self.output_db.destroy_after_failed_close();
         }
-        // `NCBI_RETHROW(*close_exception, CWriteDBException, eArgErr, close_exception->GetMsg())`:
-        // an exception of the close becomes a creation error with its message only (no report).
+        // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
+        // message of the close exception: an exception of the close becomes a creation error with
+        // its message only (no report).
         match close_error {
             Some(
                 WriteDbError::Creation(message)

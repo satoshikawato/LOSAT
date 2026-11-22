@@ -49,7 +49,7 @@
 //!    alphabet (`x_lut_direct.rs` header). The backbone index of s fixes its residues (5 bits
 //!    each; a word with a residue of 32 or more is not indexed, blast_lookup.c:117-120), so the
 //!    list read at the first offset of E_g(s) is the list the reference reads at the first offset
-//!    of E(s) (blast_aalookup.c:490 `w = query + offset_list[2]`), and a memoised list is that
+//!    of E(s) (blast_aalookup.c:490, where `w` is `query` plus `offset_list[2]`), and a memoised list is that
 //!    list again.
 //! 5. The fill pass of group g appends, for s ascending with E_g(s) not empty and w in T(s),
 //!    E_g(s) to cell w: by items 1-4 the entries of the filtered full chain in the same order (a
@@ -167,7 +167,7 @@ impl XPairLutQuery {
     // The query preparation of `build_ncbi_lookup` -> `build_ncbi_lookup_for_profile` (BLOSUM62,
     // LOOKUP_WORD_LENGTH, the same bounds and ideal parameters), by the reference function. The
     // table itself is not built here.
-    /// The prepared query `build_ncbi_lookup(queries, threshold, _, check_ideal)` builds its
+    /// The prepared query that `build_ncbi_lookup` (given `queries`, `threshold` and `check_ideal`) builds its
     /// table from. `None` when the direct builder does not apply (the preconditions of
     /// `x_build_direct`: diagnostics mode, or a backbone index wider than 16 bits).
     pub(crate) fn x_prepare(

@@ -292,7 +292,7 @@ impl<'b> XmlEncoder<'b, true> {
     }
 
     /// One document of a root type of the ASN.1 module `module` written as the archive is
-    /// (`os << MSerial_Xml << object`): dustmasker's `Seq-loc` (`NCBI-Seqloc`) and
+    /// (`os` takes `MSerial_Xml` and then `object`): dustmasker's `Seq-loc` (`NCBI-Seqloc`) and
     /// `Blast-db-mask-info` (`NCBI-BlastDL`).
     pub fn ncbi_object(out: &'b mut Vec<u8>, module: &'static str) -> Self {
         Self::new(out, Piece::NcbiObject, module)
@@ -439,7 +439,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:556-572
     /// (The strings are UTF-8, `m_StringEncoding`'s default, objostrxml.cpp:81, and the stream
-    /// US-ASCII, `SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:502, :786,
+    /// US-ASCII, `SetEncoding` with `eEncoding_Ascii`, blastxml_format.cpp:502, :786,
     /// blastxml2_format.cpp:721, :733.) A decoded NUL (`C0 80`) writes nothing and the string
     /// goes on.
     ///
@@ -698,7 +698,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
-    /// (`SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
+    /// (`SetEncoding` with `eEncoding_Ascii`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
     /// `SetDefaultDTDFilePrefix`, :789.)
     fn begin_document(&mut self, type_name: &str) {
         if self.piece == Piece::Xml2Document {
@@ -1017,8 +1017,8 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         }
     }
 
-    /// `WriteDouble`: `WriteDouble2(data, DBL_DIG)`, `NStr::DoubleToStringPosix(data, 15)`
-    /// (`real::write_xml_double`).
+    /// `WriteDouble`: `WriteDouble2` of `data` with `DBL_DIG`, `NStr::DoubleToStringPosix` of
+    /// `data` with 15 (`real::write_xml_double`).
     fn real(&mut self, value: f64) {
         if OBJECT && self.pending_elem {
             self.open_element();

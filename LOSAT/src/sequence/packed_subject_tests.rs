@@ -114,8 +114,9 @@ fn every_form_is_the_one_made_from_the_letters() {
         assert_eq!(out, ncbi4na);
         store.blastna_into(&mut out);
         assert_eq!(out, encode_iupac_to_blastna(&seq));
-        // The letters' ncbi4na codes resolved by `CRandom(length)`, as letters, the way the
-        // live TBLASTN subject translation (`x_subject_ncbi2na`) resolves a record's letters.
+        // The letters' ncbi4na codes resolved by a `CRandom` made with `length`, as letters, the
+        // way the live TBLASTN subject translation (`x_subject_ncbi2na`) resolves a record's
+        // letters.
         store.resolved_letters_into(&mut out);
         let resolved: Vec<u8> = crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
             .iter()

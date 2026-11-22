@@ -7,9 +7,9 @@
 //!
 //! Only the default `FastWriteDouble` branches exist here (a registry or environment value that
 //! turns it off is rejected by the callers, outfmt-20261019 DECISIONS 13). The digits come from
-//! 80-bit x87 `long double` arithmetic on NCBI's x86-64 build; `crate::utils::x87` reproduces it, so
-//! no `f64` formatting of the Rust standard library is involved and every platform prints the
-//! same bytes.
+//! 80-bit x87 extended-precision arithmetic on NCBI's x86-64 build; `crate::utils::x87` reproduces
+//! it, so no `f64` formatting of the Rust standard library is involved and every platform prints
+//! the same bytes.
 
 use crate::utils::x87::X87;
 
@@ -17,10 +17,10 @@ use crate::utils::x87::X87;
 /// object streams passes to the digit generator.
 pub const DBL_DIG: u32 = 15;
 
-/// The `long double` literals of `DoubleToString_Ecvt` (`__NLG(1.e<n>)`): `(n, significand,
-/// unbiased exponent)` of the 80-bit value gcc gives the literal `1.e<n>L` (correct rounding to
-/// 64 significand bits, ties to even). Each entry is checked by exact big-integer arithmetic in
-/// `real_tests.rs`.
+/// The 80-bit extended-precision literals of `DoubleToString_Ecvt` (`__NLG` of `1.e<n>`):
+/// `(n, significand, unbiased exponent)` of the 80-bit value gcc gives the literal `1.e<n>L`
+/// (correct rounding to 64 significand bits, ties to even). Each entry is checked by exact
+/// big-integer arithmetic in `real_tests.rs`.
 const LONG_DOUBLE_POW10: [(i32, u64, i32); 71] = [
     (-256, 0xC031_4325_637A_193A, -851),
     (-240, 0xD560_5FCD_CF32_E1D7, -798),
@@ -95,7 +95,7 @@ const LONG_DOUBLE_POW10: [(i32, u64, i32); 71] = [
     (256, 0xAA7E_EBFB_9DF9_DE8E, 850),
 ];
 
-/// `__NLG(1.e<n>)`. Used only in constant items, so a missing entry is a compile error.
+/// `__NLG` of `1.e<n>`. Used only in constant items, so a missing entry is a compile error.
 const fn ld(n: i32) -> X87 {
     let mut i = 0;
     while i < LONG_DOUBLE_POW10.len() {
@@ -108,7 +108,7 @@ const fn ld(n: i32) -> X87 {
     panic!("no long double literal 1e<n> in LONG_DOUBLE_POW10");
 }
 
-/// `__NLG(1.e<n>)` / `NCBI_CONST_LONGDOUBLE(1e<n>)` for an `n` of `LONG_DOUBLE_POW10` (the
+/// `__NLG` / `NCBI_CONST_LONGDOUBLE` of `1e<n>` for an `n` of `LONG_DOUBLE_POW10` (the
 /// literals of `NStr::StringToDoublePosix` are among them: `1e-15` to `1e15`, and the multiples
 /// of 16 up to 256 of either sign). `None` for another `n`.
 pub(crate) fn long_double_pow10(n: i32) -> Option<X87> {
@@ -278,12 +278,13 @@ fn s_ncbi_append_int2str(
     buffer_end + 1
 }
 
-/// `NStr::DoubleToString_Ecvt(val, precision, buffer, bufsize, &dec, &sign)` for a finite
-/// `val` (NCBI's scaling loop never ends for an infinity; its writers test NaN and infinity
-/// first). The buffer is the external one (`bufsize > 20`, as every serial caller passes).
+/// `NStr::DoubleToString_Ecvt` of `val` and `precision` (with a buffer of `bufsize`, and the
+/// decimal point and the sign as outputs) for a finite `val` (NCBI's scaling loop never ends for an
+/// infinity; its writers test NaN and infinity first). The buffer is the external one
+/// (`bufsize` above 20, as every serial caller passes).
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2447-2654 (quoted piece by piece
-/// below; `__NLG` = `NCBI_CONST_LONGDOUBLE`, a `long double` literal)
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2447-2654 (followed piece by piece
+/// below; `__NLG` = `NCBI_CONST_LONGDOUBLE`, an 80-bit literal)
 pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     assert!(
         val.is_finite(),
@@ -497,9 +498,9 @@ pub fn double_to_string_ecvt(val: f64, precision: u32) -> EcvtDigits {
     out
 }
 
-/// `NStr::DoubleToStringPosix(val, precision, buffer, bufsize)` appended to `out`, for a
-/// finite `val`. (NCBI throws when `bufsize < precision + 8`; `out` grows instead, and the
-/// serial callers pass 64- and 512-byte buffers with precision 15.)
+/// `NStr::DoubleToStringPosix` of `val` and `precision` (with a buffer of `bufsize`) appended to
+/// `out`, for a finite `val`. (NCBI throws when `bufsize` is less than `precision` plus 8; `out`
+/// grows instead, and the serial callers pass 64- and 512-byte buffers with precision 15.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2658-2681
 pub fn double_to_string_posix(val: f64, precision: u32, out: &mut Vec<u8>) {
@@ -590,7 +591,7 @@ fn put_int4(out: &mut Vec<u8>, v: i32) {
     out.extend_from_slice(&b[pos..]);
 }
 
-/// `CObjectOStreamAsn::WriteDouble(data)` (ASN.1 text, outfmt 8 and 11): `{ m, 10, e }` with
+/// `CObjectOStreamAsn::WriteDouble` of `data` (ASN.1 text, outfmt 8 and 11): `{ m, 10, e }` with
 /// `DBL_DIG` digits, appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:175-221
@@ -627,8 +628,8 @@ pub fn write_asn_text_double(data: f64, out: &mut Vec<u8>) {
     out.extend_from_slice(b" }");
 }
 
-/// `CObjectOStreamJson::WriteDouble2` refuses NaN and infinities (`ThrowError(fInvalidData,
-/// ...)`, a `CSerialException`).
+/// `CObjectOStreamJson::WriteDouble2` refuses NaN and infinities (`ThrowError` with `fInvalidData`
+/// and a message, a `CSerialException`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JsonDoubleError {
     /// "invalid double: not a number"
@@ -647,8 +648,8 @@ impl JsonDoubleError {
     }
 }
 
-/// `CObjectOStreamJson::WriteDouble(data)` (outfmt 12, 13, 15): `DoubleToStringPosix(data,
-/// DBL_DIG)` appended to `out`.
+/// `CObjectOStreamJson::WriteDouble` of `data` (outfmt 12, 13, 15): `DoubleToStringPosix` of `data`
+/// and `DBL_DIG`, appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:205-225
 pub fn write_json_double(data: f64, out: &mut Vec<u8>) -> Result<(), JsonDoubleError> {
@@ -662,8 +663,8 @@ pub fn write_json_double(data: f64, out: &mut Vec<u8>) -> Result<(), JsonDoubleE
     Ok(())
 }
 
-/// `CObjectOStreamXml::WriteDouble(data)` with the default scientific real format (outfmt 5,
-/// 14, 16): `DoubleToStringPosix(data, DBL_DIG)` appended to `out`.
+/// `CObjectOStreamXml::WriteDouble` of `data` with the default scientific real format (outfmt 5,
+/// 14, 16): `DoubleToStringPosix` of `data` and `DBL_DIG`, appended to `out`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:661-713
 /// (`m_RealFmt` starts as `eRealScientificFormat`, objostrxml.cpp:80; the special-case write

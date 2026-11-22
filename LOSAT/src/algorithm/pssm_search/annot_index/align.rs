@@ -9,7 +9,7 @@ use super::view::V;
 use super::{Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 
-/// Std-seg's `dim` above which NCBI's rows depend on the machine's memory (`hrmaps.resize(dim)`
+/// Std-seg's `dim` above which NCBI's rows depend on the machine's memory (`hrmaps.resize`
 /// allocates `dim` maps; line RG D3-1 `om/SPEC.md` §10 Q2).
 const STD_DIM_LIMIT: u64 = 1_000_000;
 
@@ -28,7 +28,7 @@ fn at(list: V<'_>, index: usize) -> i64 {
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:563-846 (`x_ProcessAlign`, quoted per
 // segment type below)
-/// `x_ProcessAlign(rows, align)`: the rows of `align` added to `rows`, with NCBI's warnings
+/// `x_ProcessAlign`: the rows of `align` added to `rows`, with NCBI's warnings
 /// (`Warning: (1207.<n>)`); the alignments of a `disc` in order, from a list on the heap (to any
 /// depth the reader read).
 pub(super) fn process_align<'v>(
@@ -79,7 +79,8 @@ pub(super) fn process_align<'v>(
     }
 }
 
-/// `hrmaps.resize(size)` that only grows (the callers' `if (hrmaps.size() < dim)`).
+/// A resize of `hrmaps` to `size` that only grows (the callers' test that `hrmaps` has fewer
+/// than `dim` entries).
 fn grow(rows: &mut Vec<HandleRangeMap>, size: usize) {
     if rows.len() < size {
         rows.resize_with(size, HandleRangeMap::default);
@@ -206,7 +207,8 @@ fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:651-678
 // A negative `dim` is a `size_t` above `max_size()`: `resize` throws libstdc++'s
-// `std::length_error("vector::_M_default_append")`, which `CATCH_ALL` reports (probe `a20`).
+// `std::length_error` with the text "vector::_M_default_append", which `CATCH_ALL` reports (probe
+// `a20`).
 fn std_seg(
     handles: &mut LiveHandles,
     rows: &mut Vec<HandleRangeMap>,
@@ -229,7 +231,7 @@ fn std_seg(
         let mut lookups = Vec::new();
         loc_ci_ranges(loc, &mut ranges, &mut lookups)?;
         // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1420-1426 (the iterator
-        // looks up the handle of every part when it is made, and `AddRange(id, ...)` looks it up
+        // looks up the handle of every part when it is made, and `AddRange` of the id looks it up
         // again; the iterator's handles go with it, after the location's rows)
         for id in lookups {
             Handle::look_up_in_iterator(id, handles);
@@ -249,7 +251,7 @@ fn std_seg(
 // `null`, `empty` (and not set) skipped, `whole` the whole range, `int`, `pnt`, `packed-int`,
 // `packed-pnt` (one id and strand), `mix`, `equiv` (every part), `bond` (a, then b), and the
 // exception above for any other)
-/// The ranges of `CSeq_loc_CI(loc)`: Seq-id, range and strand (`unknown` when not set); and the
+/// The ranges of `CSeq_loc_CI` of `loc`: Seq-id, range and strand (`unknown` when not set); and the
 /// Seq-ids its construction looks up (`x_SetId`: one for each part, one for a `packed-pnt`). The
 /// parts of a `mix` or `equiv` are walked in order from a list on the heap.
 fn loc_ci_ranges<'a>(
@@ -382,7 +384,7 @@ fn packed_seg(
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:727-778
-// `resize(2)` also cuts rows that a Seq-align before it in the same `disc` made.
+// The resize to 2 rows also cuts rows that a Seq-align before it in the same `disc` made.
 fn spliced_seg(handles: &mut LiveHandles, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) {
     rows.truncate(2);
     grow(rows, 2);

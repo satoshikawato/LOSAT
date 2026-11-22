@@ -789,9 +789,9 @@ pub(crate) fn pssm_gapped_alignment_with_traceback<R: PssmRows>(
     }
 }
 
-/// The rows of a PSSM as `ALIGN_EX` reads them from `query_offset = queryStart - 1`
-/// (`s_SWFindFinalEndsUsingXdrop`): its row `a_index` (from 1) is the PSSM's row `start + a_index
-/// - 1`.
+/// The rows of a PSSM as `ALIGN_EX` reads them from a `query_offset` of one less than
+/// `queryStart` (`s_SWFindFinalEndsUsingXdrop`): its row `a_index` (from 1) is the PSSM's row
+/// `start + a_index - 1`.
 struct RowsFrom<'r, R> {
     rows: &'r R,
     start: usize,
@@ -814,10 +814,10 @@ impl<R: PssmRows> PssmRows for RowsFrom<'_, R> {
 /// rectangle that ends at `(query_end, match_end)` (both included), its X-drop doubled up to two
 /// times while the score stays below the Smith-Waterman `score`, and the edit script of the last
 /// try (`Blast_PrelimEditBlockToGapEditScript` of an empty left part). `subject` is NCBI's
-/// `subject->data - 1`: the letters after one sentinel byte.
+/// `subject->data` less one: the letters after one sentinel byte.
 ///
-/// NCBI's `gap_x_dropoff *= 2` overflows `Int4` above 2^30 (undefined behavior); the doubled value
-/// is kept here as its mathematical value, which saturates at `i32::MAX` without a change:
+/// NCBI's doubling of `gap_x_dropoff` overflows `Int4` above 2^30 (undefined behavior); the doubled
+/// value is kept here as its mathematical value, which saturates at `i32::MAX` without a change:
 /// `ALIGN_EX` compares it with differences of `Int4` scores only.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:844-883

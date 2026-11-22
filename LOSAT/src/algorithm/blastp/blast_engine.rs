@@ -1158,7 +1158,7 @@ impl BlastpSumStats {
         }
     }
 
-    /// `cutoff_score = MIN(new_cutoff, cutoff_score)` for each valid context.
+    /// Sets `cutoff_score` to the smaller of `new_cutoff` and `cutoff_score` for each valid context.
     pub(super) fn lower_hit_cutoffs(
         &self,
         contexts: &[QueryContext],
@@ -2308,7 +2308,7 @@ fn write_blastp_outfmt7_header<W: Write>(
         version_str
     )?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1297-1298
-    // psiblast's tabular reports carry their round (`x_PrintTabularReport(results, itr_num)`,
+    // psiblast's tabular reports carry their round (`x_PrintTabularReport` of `results` and `itr_num`,
     // blast_format.cpp:1458): 1, or the round of the round driver (`psi_round`).
     if let Some(iteration) = iteration {
         writeln!(writer, "# Iteration: {iteration}")?;
@@ -3462,8 +3462,9 @@ fn build_pairwise_hits(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
-            // The linked set's size with psiblast's `-sum_stats true` (`Expect(n)` of the
-            // alignment, showalign.cpp:3595-3598); an HSP outside a set has no "sum_n" score.
+            // The linked set's size with psiblast's `-sum_stats true` (the number in parentheses
+            // after the alignment's `Expect`, showalign.cpp:3595-3598); an HSP outside a set has
+            // no "sum_n" score.
             sum_n: (num > 1).then_some(num),
             subject_stored_gaps,
             query_stored_gaps,
@@ -4513,7 +4514,7 @@ fn read_cli_subjects(
         },
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+    // `Reset` of `m_Subjects` with a new `blast::CObjMgr_QueryFactory` of `subjects` (blast_args.cpp:2557)
     // fails for a subject input without records.
     if subjects.records.is_empty() {
         return Err(app::empty_subjects_error());
@@ -6749,7 +6750,7 @@ fn search(
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
-        // A reader at the end of its input reads no batch (`!input.End()`): the reports of
+        // A reader at the end of its input reads no batch (its `End()` is true): the reports of
         // no query (an empty pipe, or `-query -` after `-subject -`).
         write_reports_without_queries(&args, subject_source, subject_label, outputs)?;
     }
@@ -7554,7 +7555,7 @@ fn write_reports_without_queries(
         .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
-        // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
+        // of line alone: `m_Outfile` gets `m_BlastXMLIncremental->m_SerialXmlEnd` and `endl`, with the
         // end of the document empty (blast_format.cpp:2242-2243).
         // The archive writes one document per batch: none without a query batch.
         if blastp_seqalign_format(format.outfmt).is_some() || blastp_is_archive(format.outfmt) {
@@ -9767,7 +9768,7 @@ fn run_call(
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
     // updated as the subjects came; `-best_hit_*`: `s_BlastHSPBestHitFinal` from the best hit
-    // lists (hspfilter_besthit.c:190-221; `besthit.rs`). A query chunk's lists leave below as the
+    // lists (hspfilter_besthit.c:194-231; `besthit.rs`). A query chunk's lists leave below as the
     // collector's do.
     if let Some(filter) = prelim_filter.take() {
         filter.finish(&mut x_compact_hit_lists);

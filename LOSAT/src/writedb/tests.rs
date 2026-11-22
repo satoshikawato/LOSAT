@@ -1160,15 +1160,15 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
     assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
 }
 
-/// makeblastdb removes the names of an existing database with `CFile(name).Remove()`, which
-/// removes a directory with its contents (`CDirEntry::Remove(eRecursive)`), and gives a volume
-/// file its final name with `CDirEntry::Rename(fRF_Overwrite)`, which removes what is there the
-/// same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08, cases
-/// `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
-/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the
-/// log say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or
-/// at the volume name `db.pin` (no database is found there; the rename removes it) is gone and
-/// the build ends normally. A symbolic link at `db.pdb` is removed and its target kept.
+/// makeblastdb removes the names of an existing database with `Remove` of a `CFile`, which
+/// removes a directory with its contents (`CDirEntry::Remove` with `eRecursive`), and gives a
+/// volume file its final name with `CDirEntry::Rename` with `fRF_Overwrite`, which removes what is
+/// there the same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08,
+/// cases `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
+/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the log
+/// say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or at the
+/// volume name `db.pin` (no database is found there; the rename removes it) is gone and the build
+/// ends normally. A symbolic link at `db.pdb` is removed and its target kept.
 #[test]
 fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
     let tail = "Maximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in \

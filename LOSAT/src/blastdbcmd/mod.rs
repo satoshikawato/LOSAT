@@ -12,6 +12,7 @@
 //! reader reads it, as one database (`SeqDb::open_in`).
 
 mod args;
+mod bioseq;
 mod fasta;
 mod format;
 mod letters;

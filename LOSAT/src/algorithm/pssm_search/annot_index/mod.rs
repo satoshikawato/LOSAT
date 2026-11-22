@@ -421,13 +421,14 @@ impl Indexer<'_> {
         Ok(())
     }
 
-    /// `ERR_POST_X(n, "Empty region in " << GetDescription() << " " << MSerial_AsnText <<
-    /// object)` of an empty region of `object` (`event`, not a table row: `map_location`): before
-    /// the stream failed, a message with the TSE's memory address (`CTSE_Info::GetDescription`,
-    /// tse_info.cpp:2049-2056), refused. After it, the post's header and what the failed stream
-    /// gets of the object's ASN.1 text (`asn_types::write::failed_stream_text`: the text without
-    /// its last end of line, or its start where NCBI's buffer of 4096 bytes first flushed), whose
-    /// write throws (`Stop::FailedWrite`; `om/SPEC.md` §3 rule 3).
+    /// `ERR_POST_X` (subcode `n`) of "Empty region in ", `GetDescription()`, a space and the
+    /// ASN.1 text (`MSerial_AsnText`) of `object`, for an empty region of `object` (`event`, not a
+    /// table row: `map_location`): before the stream failed, a message with the TSE's memory
+    /// address (`CTSE_Info::GetDescription`, tse_info.cpp:2049-2056), refused. After it, the post's
+    /// header and what the failed stream gets of the object's ASN.1 text
+    /// (`asn_types::write::failed_stream_text`: the text without its last end of line, or its start
+    /// where NCBI's buffer of 4096 bytes first flushed), whose write throws (`Stop::FailedWrite`;
+    /// `om/SPEC.md` §3 rule 3).
     fn empty_region(&mut self, event: Event, object: V<'_>) -> Stop {
         if !self.muted {
             return Stop::Refuse(Refusal::EmptyRegion);
@@ -456,21 +457,22 @@ impl Indexer<'_> {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (cited at
     // `index_feature`), 1048-1080 and 1119-1150 (a table's location and a table row's location:
-    // the same loop with `ERR_POST_X(7, ...)` and `ERR_POST_X(8, "Empty region in "
-    // <<GetDescription()<< " Seq-table row "<<row)`)
+    // the same loop with `ERR_POST_X` of subcode 7, and of subcode 8 that posts "Empty region in ",
+    // `GetDescription()`, " Seq-table row " and the row)
     // Each Seq-id of the map in NCBI's order (`HandleRangeMap::ncbi_order`): its overlapping range,
     // or for a circular one its two ranges, mapped (`x_map`); an empty one posts "Empty region"
     // (`empty_region`: refused before the stream failed, a memory address; after it the object's
     // ASN.1 text, which ends the run), except for a table row after the stream failed, whose post
     // is its header alone, `Error: (1204.8)`. Where NCBI's order is that of memory addresses
-    // (Seq-ids of one `m_Packed`: `m_Info < handle.m_Info`, seq_id_handle.hpp:207, cited at
-    // `HandleRangeMap::ncbi_order`), the order changes the messages only when an empty Seq-id's
-    // post and another's "Failed to parse location" (`Error: (1204.6)`) are in one group: refused
-    // (`om/` cases `s_o09_tie_gi5_acc5_u` and `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn
-    // wrote a row's in different orders; in another kind of annotation the 1204.6 message comes
-    // before the object's text, or the run stops on the empty region before it). Any other
-    // messages of a group are the same in every order (the 1204.6 messages differ only by how
-    // many came before, the object's text is that of the object, not of a Seq-id).
+    // (Seq-ids of one `m_Packed`: by `m_Info`, the lower address first,
+    // seq_id_handle.hpp:207, cited at `HandleRangeMap::ncbi_order`), the order changes the messages
+    // only when an empty Seq-id's post and another's "Failed to parse location" (`Error: (1204.6)`)
+    // are in one group: refused (`om/` cases `s_o09_tie_gi5_acc5_u` and
+    // `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn wrote a row's in different orders; in
+    // another kind of annotation the 1204.6 message comes before the object's text, or the run
+    // stops on the empty region before it). Any other messages of a group are the same in every
+    // order (the 1204.6 messages differ only by how many came before, the object's text is that of
+    // the object, not of a Seq-id).
     fn map_location(
         &mut self,
         map: &HandleRangeMap,
@@ -516,7 +518,7 @@ impl Indexer<'_> {
     // The message stops at `s.rdbuf()`, which fails the stream (`ncbi_exception::
     // main_diag_failbit`). `mapper.Map` of a null handle (a table row without a Seq-id) asks
     // `CSeq_id_Handle::HaveMatchingHandles()` of it: `CCoreException::eNullPtr` (`Stop::NullPointer`).
-    /// `x_Map(range, handle)`: `None` is a null handle.
+    /// `x_Map` of `range` and `handle`: `None` is a null handle.
     fn x_map(&mut self, range: Range, handle: Option<Handle>) -> Result<(), Stop> {
         if range.is_empty() {
             self.post(Severity::Error, "1204.6", b"Failed to parse location of ");

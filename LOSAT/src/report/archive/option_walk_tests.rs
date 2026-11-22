@@ -894,6 +894,18 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &["-culling_limit", "2"],
             &[After("SegFilteringHicut", "Culling", "Integer(2)")],
         ),
+        // Recorded where `-culling_limit` is, the overhang before the score edge (NCBI BLAST+
+        // 2.17.0, line NP O6a-3's strategy probe `tn_pssm.ss`).
+        (
+            "best_hit_overhang",
+            &["-best_hit_overhang", "0.2"],
+            &[After("SegFilteringHicut", "BestHitOverhang", "Real(0.2)")],
+        ),
+        (
+            "best_hit_score_edge",
+            &["-best_hit_score_edge", "0.3"],
+            &[After("SegFilteringHicut", "BestHitScoreEdge", "Real(0.3)")],
+        ),
         // Recorded where `-culling_limit` is (NCBI BLAST+ 2.17.0, line NP O6b's strategy probe
         // `tn_pssm_on.ss`).
         (
@@ -911,6 +923,14 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             "ungapped",
             &["-ungapped"],
             &[At("UngappedMode", "Boolean(true)")],
+        ),
+        // `SetSmithWatermanMode` after `SetPSITblastnDefaults` (blast_args.cpp:885); with a PSSM
+        // query the run refuses it at the first match (`tblastn::match_redo::sw_pssm_refusal`),
+        // and a search without hits runs.
+        (
+            "use_sw_tback",
+            &["-use_sw_tback"],
+            &[At("SmithWatermanMode", "Boolean(true)")],
         ),
     ];
     walk(&App {

@@ -23,7 +23,7 @@ fn expected_data_size(line: &[u8]) -> Scan<usize> {
     let start = string_to_int(tokens[0], 0).map_err(|_| ScanFailure::Failed)?;
     if tokens.len() == 2 {
         let end = string_to_int(tokens[1], 0).map_err(|_| ScanFailure::Failed)?;
-        // `endOffset - startOffset + 1` in `int`, stored as `size_t`.
+        // `endOffset` less `startOffset` plus 1, in `int`, stored as `size_t`.
         let size = end.wrapping_sub(start).wrapping_add(1);
         return Ok(size as i64 as usize);
     }

@@ -11,22 +11,24 @@
 //! `cfg(test)`) is the reference of the unit test below.
 //!
 //! Why the result is the same. The pair `(s, base)` is subject position `p = 4 * s + 3 - base`
-//! (`base = 3 - p % 4`, and `NCBI2NA_UNPACK_BASE(ch, base)` is the base at `p`):
+//! (`base` is 3 minus `p` modulo 4, and `NCBI2NA_UNPACK_BASE` of `ch` and `base` is the base at
+//! `p`):
 //!
-//! - Left. `start` / `remainder` stand for position `max(s_off - q_off, 0)`, and
-//!   `(s > start) || (s == start && base < remainder)` is "the position is above it". Each step
-//!   moves one position down before it reads, from `s_off`, so the loop takes at most
-//!   `s_off - max(s_off - q_off, 0) = min(q_off, s_off)` steps; step `i` (from 1) reads subject
-//!   position `s_off - i` and query offset `q_off - i`.
-//! - Right. `sf` / `remainder` stand for position `s_off + min(q_avail, s_avail)` (`q_avail <
-//!   s_avail` picks `s_off + q_avail`, else `subject->length = s_off + s_avail`), and
-//!   `s < sf || (s == sf && base > remainder)` is "the position is below it". Each step reads and
-//!   then moves one position up, from `s_off`, so the loop takes at most `min(q_avail, s_avail)`
-//!   steps; step `i` (from 0) reads subject position `s_off + i` and query offset `q_off + i`.
+//! - Left. `start` / `remainder` stand for position `max(s_off - q_off, 0)`, and the loop's test
+//!   (`s` above `start`, or equal to it with `base` below `remainder`) is "the position is above
+//!   it". Each step moves one position down before it reads, from `s_off`, so the loop takes at
+//!   most `s_off - max(s_off - q_off, 0) = min(q_off, s_off)` steps; step `i` (from 1) reads
+//!   subject position `s_off - i` and query offset `q_off - i`.
+//! - Right. `sf` / `remainder` stand for position `s_off + min(q_avail, s_avail)` (`q_avail`
+//!   below `s_avail` picks `s_off + q_avail`, else `subject->length`, which is `s_off` plus
+//!   `s_avail`), and the loop's test (`s` below `sf`, or equal to it with `base` above
+//!   `remainder`) is "the position is below it". Each step reads and then moves one position up,
+//!   from `s_off`, so the loop takes at most `min(q_avail, s_avail)` steps; step `i` (from 0)
+//!   reads subject position `s_off + i` and query offset `q_off + i`.
 //!
 //! This module runs those counts as plain counted loops and reads the base at `p` as
-//! `(byte[p / 4] >> (2 * (3 - p % 4))) & 3`, with the C tests (`sum > 0`, then `sum < X` /
-//! `sum < X_current`) and updates in the C order on the same `i32` values, so every step, every
+//! `(byte[p / 4] >> (2 * (3 - p % 4))) & 3`, with the C tests (`sum` above 0, then `sum` below `X`
+//! / `X_current`) and updates in the C order on the same `i32` values, so every step, every
 //! exit and the four results are the C ones. The query offsets stay in `0..q_len` within the
 //! counts, so the ported loops' `q_idx == 0` / `q_idx >= q_len` exits (which never fire) are not
 //! needed, and the query letters are BLASTNA codes (`< 16`), so the matrix cell
@@ -65,7 +67,7 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     // 913-917 and 1755-1759)
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
-    // Such a walk can pass two of the query's sentinels (BLASTNA 15, `INT4_MIN / 2` against
+    // Such a walk can pass two of the query's sentinels (BLASTNA 15, half of `INT4_MIN` against
     // every base, blast_stat.c:1124-1127): NCBI's `Int4` sums then wrap in its x86-64 build, and
     // LOSAT's sums wrap the same way (the line's decision 22: x86-64's two's complement), also in
     // a build with overflow checks.

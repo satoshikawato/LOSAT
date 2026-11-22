@@ -52,8 +52,9 @@ pub struct AsnTextError {
 /// What NCBI throws for an [`AsnTextError`]: the place of the throw and the form of its message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NcbiThrow {
-    /// `ThrowError(flag, message)` of the object stream (`ThrowError1`, objistr.cpp:828-853): a
-    /// `CSerialException` whose message is the stream's position, `line N: `, then the error's.
+    /// `ThrowError` of the object stream with a flag and a message (`ThrowError1`,
+    /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position,
+    /// `line N: `, then the error's.
     Stream(ThrowSite),
     /// `NCBI_THROW` of a `CSerialException` with the error's message as it is (the values of an
     /// enumerated type: `FindValue`, `FindName`).
@@ -81,7 +82,7 @@ const FORMAT_ERROR: &str = "CSerialException::eFormatError";
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243 (cited at the module and at
 // `Reader::skip_white_space`)
-/// `SkipWhiteSpace`'s `ThrowError(fEOF, e.what())` ([`NcbiThrow::WhiteSpaceEof`]).
+/// `SkipWhiteSpace`'s `ThrowError` with `fEOF` and `e.what()` ([`NcbiThrow::WhiteSpaceEof`]).
 pub(crate) const SKIP_WHITE_SPACE_EOF: ThrowSite = asn_site(
     239,
     "CSerialException::eEOF",
@@ -153,7 +154,7 @@ pub(crate) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
     function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
 };
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
-// file: `NCBI_THROW(CEofException,eEof,m_Error)`, the error "end of file")
+// file: `NCBI_THROW` of a `CEofException` with `eEof` and `m_Error`, the error "end of file")
 /// The `CEofException` of NCBI's input buffer at the end of the input: what `SkipWhiteSpace`
 /// quotes ([`SKIP_WHITE_SPACE_EOF`]).
 pub(crate) const FILL_BUFFER_EOF: ThrowSite = ThrowSite {
@@ -662,7 +663,7 @@ impl<S: AsnSource> Reader<S> {
         self.src.bytes(range)
     }
 
-    /// `SkipEndOfLine(c)` after the end-of-line byte `c` was taken.
+    /// `SkipEndOfLine` of `c` after the end-of-line byte `c` was taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     pub(crate) fn skip_end_of_line(&mut self, c: u8) {
         self.line += 1;
@@ -770,7 +771,7 @@ impl<S: AsnSource> Reader<S> {
                     }
                 }
                 Some(b'-') => match self.src.byte_at(pos + 1) {
-                    // The end of the text after a `-`: `PeekChar(1)` fails at the `-`.
+                    // The end of the text after a `-`: `PeekChar` one byte ahead fails at the `-`.
                     None => break,
                     Some(b'-') => match self.comment_at(pos + 2) {
                         Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
@@ -831,7 +832,7 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `SkipEndOfLine(c)` at `pos`, after the end-of-line byte `c`, without its line count:
+    /// `SkipEndOfLine` of `c` at `pos`, after the end-of-line byte `c`, without its line count:
     /// the position after the complement of `c` when it follows.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     #[inline]
@@ -843,7 +844,7 @@ impl<S: AsnSource> Reader<S> {
         pos
     }
 
-    /// `Expect(c, true)`.
+    /// `Expect` of `c`, with its flag true.
     pub(crate) fn expect(&mut self, c: u8) -> Result<()> {
         self.pos = self.expect_at(self.pos, c)?;
         Ok(())
@@ -870,8 +871,8 @@ impl<S: AsnSource> Reader<S> {
         )
     }
 
-    /// `ScanEndOfId(is_id)` at the current byte: the byte, then the identifier bytes and the `-`
-    /// before one; empty when `is_id` is false. Returns the positions of the identifier.
+    /// `ScanEndOfId` with `is_id` at the current byte: the byte, then the identifier bytes and the
+    /// `-` before one; empty when `is_id` is false. Returns the positions of the identifier.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:276-290
     pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Result<Range<usize>> {
         let start = self.pos;
@@ -882,7 +883,7 @@ impl<S: AsnSource> Reader<S> {
         Ok(start..self.pos)
     }
 
-    /// `ScanEndOfId(true)` at `start`: the end of the identifier that starts there.
+    /// `ScanEndOfId` with `true` at `start`: the end of the identifier that starts there.
     #[inline]
     fn end_of_id_at(&mut self, start: usize) -> Result<usize> {
         let mut pos = start + 1;
@@ -903,8 +904,8 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())`: a member or variant name, bare (from a lower-case letter)
-    /// or between `[` and `]` on one line (the positions of the text between them).
+    /// `ReadMemberId` after `SkipWhiteSpace`: a member or variant name, bare (from a lower-case
+    /// letter) or between `[` and `]` on one line (the positions of the text between them).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-363
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:394-397
     // An id in brackets that starts with a digit names the member or variant by its tag
@@ -919,7 +920,7 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())`, a name or a tag (`member_id_range`).
+    /// `ReadMemberId` after `SkipWhiteSpace`, a name or a tag (`member_id_range`).
     pub(crate) fn member_or_tag(&mut self) -> Result<MemberId> {
         let (pos, id) = self.member_or_tag_at(self.pos)?;
         self.pos = pos;
@@ -975,7 +976,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadFileHeader`: the type name before `::=` (empty when there is none), the `::=` taken.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:292-313,709-721
-    // A type name in brackets stops before its `]` (`SkipChars(i)`), so the `::=` test that
+    // A type name in brackets stops before its `]` (`SkipChars` by `i`), so the `::=` test that
     // follows always fails.
     pub(crate) fn file_header(&mut self) -> Result<Range<usize>> {
         let c = self.skip_white_space()?;
@@ -1007,11 +1008,12 @@ impl<S: AsnSource> Reader<S> {
         Ok(id)
     }
 
-    /// `ReadTypeId(SkipWhiteSpace())` (cited at `file_header`), as `ReadOtherPointer` reads the
-    /// type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
+    /// `ReadTypeId` after `SkipWhiteSpace` (cited at `file_header`), as `ReadOtherPointer` reads
+    /// the type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
     /// otherwise), or the text between `[` and `]` on one line, which NCBI takes without its last
-    /// byte (`CTempString(ptr + 1, i - 2)`), leaving the `]` unread (`SkipChars(i)`). `None` for
-    /// `[]`, whose length `i - 2` is `(size_t)-1`.
+    /// byte (a `CTempString` that starts at `ptr` plus 1 and is `i` less 2 bytes long), leaving
+    /// the `]` unread (`SkipChars` by `i`). `None` for `[]`, whose length, `i` less 2, wraps to the
+    /// largest `size_t`.
     pub(crate) fn type_id(&mut self) -> Result<Option<Range<usize>>> {
         let c = self.skip_white_space()?;
         if c != b'[' {
@@ -1318,7 +1320,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `ReadPointerType`: `NULL`, `@` or `:` (taken), or the value of the declared type (nothing
-    /// taken), after `SkipWhiteSpace` (`PeekChar(true)`).
+    /// taken), after `SkipWhiteSpace` (`PeekChar` with `true`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1606-1630
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:161-164
     pub(crate) fn pointer_type(&mut self) -> Result<PointerType> {
@@ -1496,7 +1498,7 @@ impl<S: AsnSource> Reader<S> {
     /// PSSM reader, `asn_types::read`, and the mask reader, `writedb::mask_info`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
-    // at `string`; its `catch ( CEofException& )` calls `UnendedString`)
+    // at `string`; its `catch` of a `CEofException` calls `UnendedString`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1093-1155
     // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163: `valid` stays 0;
     // the fix is `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`, objistr.cpp:302.)

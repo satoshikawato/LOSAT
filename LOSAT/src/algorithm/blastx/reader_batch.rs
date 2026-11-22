@@ -18,9 +18,9 @@ use std::{ops::Range, sync::Arc};
 pub(crate) struct ReaderBatchShape {
     /// NCBI's `num_queries` of the batch: with more than one the batch is not split.
     pub(crate) query_count: usize,
-    /// `contexts[last_context].query_offset + query_length` of the concatenated batch.
+    /// `contexts[last_context].query_offset` plus `query_length`, of the concatenated batch.
     pub(crate) concatenated_length: usize,
-    /// `last_context + 1` of the batch.
+    /// One more than `last_context`, of the batch.
     pub(crate) contexts: usize,
     /// Whether a context of the batch has residues, and the batch's empty queries: the setup of
     /// a batch without a valid context fails with one message per empty query
@@ -71,7 +71,7 @@ impl PreparedQueryBatch {
         }
     }
 
-    /// `last_context + 1` of the batch NCBI searches.
+    /// One more than `last_context`, of the batch NCBI searches.
     pub(crate) fn batch_context_count(&self) -> usize {
         match &self.reader_shape {
             Some(shape) => shape.contexts,

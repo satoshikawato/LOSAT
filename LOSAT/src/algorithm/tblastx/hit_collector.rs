@@ -28,7 +28,8 @@
 //!
 //! With `-culling_limit` NCBI's culling writer replaces the collector (`setup_factory.cpp:330-341`);
 //! the batch's HSPs are then kept until its end and culled query by query
-//! (`report::culled_hit_order`), as before.
+//! (`report::culled_hit_order`), as before. With `-best_hit_overhang` or `-best_hit_score_edge`
+//! NCBI's best hit writer replaces it (`besthit::BestHitWriter`), filled in the same OID order.
 
 use std::collections::BTreeMap;
 
@@ -36,7 +37,10 @@ use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_hits::trim_by_max_hsps;
 
+use crate::core::hspfilter_besthit::BestHitParams;
+
 use super::args::TblastxArgs;
+use super::besthit::BestHitWriter;
 use super::blast_engine::TblastxHsp;
 use super::report::{self, HitFilters};
 
@@ -99,21 +103,9 @@ impl QueryLists {
         }
     }
 
-    /// Subject `oid`'s HSPs of query `q_idx`, in the order of the subject's list (the state
-    /// after linking): sorted by score, reaped by query coverage (`-qcov_hsp_perc`; a list left
-    /// empty is not added), then `Blast_HitListUpdate` on the query's hit list.
-    pub(super) fn add(
-        &mut self,
-        q_idx: u32,
-        oid: u32,
-        mut hsps: Vec<TblastxHsp>,
-        filters: &HitFilters<'_>,
-    ) {
-        hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
-        let context_lengths = filters.context_lengths(q_idx);
-        if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
-            return;
-        }
+    /// Subject `oid`'s HSPs of query `q_idx` (`subject_list`): `Blast_HitListUpdate` on the
+    /// query's hit list.
+    pub(super) fn add(&mut self, q_idx: u32, oid: u32, hsps: Vec<TblastxHsp>) {
         let index = q_idx as usize;
         if self.lists.len() <= index {
             self.lists.resize_with(index + 1, || None);
@@ -157,10 +149,29 @@ impl QueryLists {
     }
 }
 
+/// Subject `oid`'s HSPs of query `q_idx` as NCBI's preliminary stage writes them, in the order
+/// of the subject's list (the state after linking): sorted by score and reaped by query coverage
+/// (`-qcov_hsp_perc`); `None` when none is left (NCBI writes no empty list).
+pub(super) fn subject_list(
+    q_idx: u32,
+    mut hsps: Vec<TblastxHsp>,
+    filters: &HitFilters<'_>,
+) -> Option<Vec<TblastxHsp>> {
+    hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+    let context_lengths = filters.context_lengths(q_idx);
+    if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
+        return None;
+    }
+    Some(hsps)
+}
+
 /// What the batch's search holds in place of NCBI's collector or culling writer.
 enum Lists {
     /// The queries' hit lists (the default).
     Collector(QueryLists),
+    /// `-best_hit_overhang` / `-best_hit_score_edge`: NCBI's best hit writer, whose `finish`
+    /// runs the pipe after the traceback (`besthit`).
+    BestHit(BestHitWriter),
     /// `-culling_limit`: the batch's HSPs after the e-value reap, for `report::culled_hit_order`.
     Culling(Vec<TblastxHsp>),
 }
@@ -176,12 +187,12 @@ pub(crate) struct HitCollector {
     query_cov_hsp_perc: f64,
     /// `-subject_besthit` (`HitFilters::subject_besthit`).
     subject_besthit: bool,
-    /// The batch's queries' nucleotide lengths, read by the coverage reap and the culling
-    /// (empty when neither applies).
+    /// The batch's queries' nucleotide lengths, read by the coverage reap, the culling and the
+    /// best hit filter (empty when none applies).
     query_lengths: Vec<usize>,
     /// `-evalue`: an HSP above it is removed before the lists.
     evalue_threshold: f64,
-    /// Whether NCBI's traceback sorts the results at its end (`BlastSeqSrcGetTotLen > 0`:
+    /// Whether NCBI's traceback sorts the results at its end (a positive `BlastSeqSrcGetTotLen`:
     /// `SubjectSetNumbers::link_total`).
     sorts_results: bool,
     /// The OID the lists take next, and the subjects past it that have come (`push`).
@@ -200,7 +211,8 @@ impl HitCollector {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319
         let culling_limit = args.culling_limit();
         let query_cov_hsp_perc = args.qcov_hsp_perc.unwrap_or(0.0);
-        let query_lengths = if culling_limit > 0 || query_cov_hsp_perc > 0.0 {
+        let best_hit = args.best_hit();
+        let query_lengths = if culling_limit > 0 || query_cov_hsp_perc > 0.0 || best_hit.is_some() {
             queries.iter().map(|query| query.seq().len()).collect()
         } else {
             Vec::new()
@@ -215,6 +227,26 @@ impl HitCollector {
         )
         .sorting_results(sorts_results)
         .with_subject_besthit(args.subject_besthit)
+        .with_best_hit(best_hit)
+    }
+
+    /// The collector with NCBI's best hit writer in place of its HSP collector when `best_hit`
+    /// is given (`-best_hit_overhang`, `-best_hit_score_edge`; never with `-culling_limit`,
+    /// which the parser refuses). `query_lengths` must then be the queries' nucleotide lengths.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:305-329
+    pub(super) fn with_best_hit(self, best_hit: Option<BestHitParams>) -> Self {
+        match best_hit {
+            Some(params) if self.culling_limit <= 0 => Self {
+                lists: Lists::BestHit(BestHitWriter::new(
+                    params,
+                    self.hitlist_size,
+                    &self.query_lengths,
+                )),
+                ..self
+            },
+            _ => self,
+        }
     }
 
     /// The collector with `-subject_besthit` (`HitCollector::subject_besthit`).
@@ -300,7 +332,7 @@ impl HitCollector {
         let oid = u32::try_from(oid).expect("TBLASTX subject index out of range");
         match &mut self.lists {
             Lists::Culling(all) => all.extend(hits),
-            Lists::Collector(lists) => {
+            lists => {
                 let filters = HitFilters {
                     max_hsps: self.max_hsps,
                     query_cov_hsp_perc: self.query_cov_hsp_perc,
@@ -317,7 +349,14 @@ impl HitCollector {
                     while let Some(hsp) = hits.next_if(|hsp| hsp.hit.q_idx == q_idx) {
                         list.push(hsp);
                     }
-                    lists.add(q_idx, oid, list, &filters);
+                    let Some(list) = subject_list(q_idx, list, &filters) else {
+                        continue;
+                    };
+                    match lists {
+                        Lists::Collector(lists) => lists.add(q_idx, oid, list),
+                        Lists::BestHit(writer) => writer.add(q_idx, oid, list),
+                        Lists::Culling(_) => unreachable!("the culling lists take every HSP above"),
+                    }
                 }
             }
         }
@@ -338,6 +377,7 @@ impl HitCollector {
         };
         match self.lists {
             Lists::Collector(lists) => lists.finish(&filters, self.sorts_results),
+            Lists::BestHit(writer) => writer.finish(&filters, self.sorts_results),
             Lists::Culling(hits) => report::culled_hit_order(
                 hits,
                 self.hitlist_size,

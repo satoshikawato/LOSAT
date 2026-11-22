@@ -360,17 +360,25 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    for extra in [
-        &["-gilist", "ids.gil"][..],
-        &["-remote"],
-        &["-use_sw_tback"],
-    ] {
+    for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
         let error = crate::cli::render_message(&parse(extra).unwrap_err());
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806,885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // `-use_sw_tback` is a flag that sets the Smith-Waterman traceback, with every
+    // `-comp_based_stats` (the redo runs with mode 0 too).
+    for cbs in ["0", "1", "2", "3"] {
+        let args = parse(&["-use_sw_tback", "-comp_based_stats", cbs]).unwrap();
+        check_options(&args).unwrap();
+        let resolved = args.resolve().unwrap();
+        assert!(resolved.use_sw_tback, "{cbs}");
+    }
+    assert!(!parse(&[]).unwrap().resolve().unwrap().use_sw_tback);
+    assert!(parse(&["-use_sw_tback", "true"]).is_err());
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
@@ -563,4 +571,35 @@ fn the_x_drops_reach_the_search_or_ncbis_errors() {
             .unwrap();
         assert!(check_search_limits(&resolved).is_ok());
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328,3341-3346
+// `-best_hit_overhang` / `-best_hit_score_edge`: above 0 and below 0.5, the one not given takes
+// 0.1, neither given is no filter, and `-culling_limit` excludes both (NCBI refuses the command
+// line; LOSAT's parser too).
+#[test]
+fn best_hit_options_are_read_as_ncbi_reads_them() {
+    use crate::core::hspfilter_besthit::BestHitParams;
+    let best_hit = |extra: &[&str]| parse(extra).unwrap().resolve().unwrap().best_hit;
+    assert_eq!(best_hit(&[]), None);
+    assert_eq!(
+        best_hit(&["-best_hit_overhang", "0.25"]),
+        Some(BestHitParams {
+            overhang: 0.25,
+            score_edge: 0.1
+        })
+    );
+    assert_eq!(
+        best_hit(&["-best_hit_score_edge", "0.05", "-best_hit_overhang", "0.3"]),
+        Some(BestHitParams {
+            overhang: 0.3,
+            score_edge: 0.05
+        })
+    );
+    for value in ["0", "0.5", "-0.1", "nan", "x"] {
+        assert!(parse(&["-best_hit_overhang", value]).is_err(), "{value}");
+        assert!(parse(&["-best_hit_score_edge", value]).is_err(), "{value}");
+    }
+    assert!(parse(&["-culling_limit", "1", "-best_hit_overhang", "0.1"]).is_err());
+    assert!(parse(&["-culling_limit", "0", "-best_hit_score_edge", "0.1"]).is_err());
 }

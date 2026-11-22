@@ -101,7 +101,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
     })
 }
 
-/// `s_BuildSeqMasker( lstat )`: the masker made from the counts file `name`, or its error.
+/// `s_BuildSeqMasker` of `lstat`: the masker made from the counts file `name`, or its error.
 fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:99-109
     let params = MaskerParams::default();

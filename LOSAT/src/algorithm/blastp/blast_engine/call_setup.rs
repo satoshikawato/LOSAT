@@ -1160,7 +1160,7 @@ pub(super) fn prelim_cutoffs(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
-    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
     let prelim_evalue = if gapped_gumbel.is_some() {
         blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
     } else {
@@ -1195,7 +1195,7 @@ pub(super) fn subject_parameters<'s>(
     // (`stats::setup::subject_eff_lengths`) and, through the setup's own `blastp_prelim_cutoffs`,
     // the hit-saving cutoffs of `BlastHitSavingParametersUpdate` with the subject's length and a
     // composition-based statistics of 0 (no stretch of the
-    // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
+    // e-value: `params->prelim_evalue` is `evalue`, blast_parameters.c:868, 937-938), and the
     // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
     // hit-saving cutoff before the sum statistics lower it, `cutoff_score_max`; the X-drops keep
     // their initial values, `x_dropoff_init` is not 0). With psiblast's `-sum_stats true` the

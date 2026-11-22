@@ -83,7 +83,7 @@ impl Fail {
     }
 }
 
-/// `ThrowError(flag, message)` of NCBI's object stream at `site` (`ThrowError1`,
+/// `ThrowError` of NCBI's object stream with a flag and a message, at `site` (`ThrowError1`,
 /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
 /// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`. It returns the
 /// [`Fail`], not an `R`: the path that calls it ends there (`return Err(throw_error(..))`), so
@@ -342,7 +342,7 @@ pub(crate) trait Input {
     /// (the first byte peeked at: an empty input is NCBI's `CEofException`).
     fn read_file_header(&mut self) -> R<Option<Vec<u8>>>;
     fn begin_class(&mut self) -> R<()>;
-    /// `BeginClassMember(classType, pos)`: the next member of `items`, searched from `pos` on,
+    /// `BeginClassMember` of the class type and `pos`: the next member of `items`, searched from `pos` on,
     /// or `None` at the end of the class.
     fn begin_member(&mut self, items: &(impl Items + ?Sized), pos: usize) -> R<Option<usize>>;
     fn end_member(&mut self) -> R<()>;
@@ -381,7 +381,7 @@ pub(crate) trait Input {
     /// An OCTET STRING (`ReadBytes` of a `vector<char>`), `SkipByteBlock`.
     fn read_octets(&mut self) -> R<Vec<u8>>;
     fn skip_octets(&mut self) -> R<()>;
-    /// `ReadEnum(values)` (which `SkipEnum` calls too): the value (`CEnumeratedTypeInfo::ReadEnum`
+    /// `ReadEnum` of the enum's `values` (which `SkipEnum` calls too): the value (`CEnumeratedTypeInfo::ReadEnum`
     /// adds its line to an error).
     fn read_enum(&mut self, values: &(impl EnumItems + ?Sized)) -> R<i32>;
     /// `ReadPointerType()`, where NCBI reads a `CRef<>` that is empty at that moment: a `NULL` is
@@ -503,7 +503,7 @@ impl<S: AsnSource> TextInput<S> {
         }
     }
 
-    /// `ThrowError(fFormatError, message)` of the text stream at `site`.
+    /// `ThrowError` with `fFormatError` and a message, of the text stream at `site`.
     #[cold]
     #[inline(never)]
     fn throw(&self, site: ThrowSite, message: impl AsRef<[u8]>) -> Fail {
@@ -515,7 +515,7 @@ impl<S: AsnSource> TextInput<S> {
     // (The members and variants have the automatic tags 0, 1, ... in module order. Their names
     // start with a lower case letter, so `GetAltItemIndex`, which looks up the name with an upper
     // case first letter, finds nothing: `Biomol` is no member, c21 of SURVEY_D3.)
-    /// `ReadMemberId(SkipWhiteSpace())` and the member or variant it names among `items`,
+    /// `ReadMemberId` of what `SkipWhiteSpace` returns, and the member or variant it names among `items`,
     /// searched from `pos` on; one that is not there is an error (`UnexpectedMember`, which lists
     /// them all). `choice`: an empty name is `BeginChoiceVariant`'s error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
@@ -524,7 +524,7 @@ impl<S: AsnSource> TextInput<S> {
         let member = self.r.member_or_tag().map_err(|e| self.fail(e))?;
         let (id, found) = match member {
             MemberId::Tag(digits) => {
-                // `NStr::StringToInt(id)` of the tag's digits: a number that does not fit is its
+                // `NStr::StringToInt` of `id`, the tag's digits: a number that does not fit is its
                 // `CStringException` (NCBI 2.17.0: `[3x]`, `[99999999999]`, probe e03, e07).
                 let id = self.r.bytes(digits);
                 let tag = string_to_int(id, 0).map_err(Fail::exception)?;
@@ -548,7 +548,7 @@ impl<S: AsnSource> TextInput<S> {
         }
     }
 
-    /// `UnexpectedMember(id, items)` of the members or variants `items`.
+    /// `UnexpectedMember` of `id` and the items, of the members or variants `items`.
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, id: &[u8], items: &(impl Items + ?Sized)) -> Fail {
@@ -573,7 +573,7 @@ impl<S: AsnSource> TextInput<S> {
         c.map_err(|e| self.fail(e))
     }
 
-    /// `Expect(c, true)`.
+    /// `Expect` of `c` with `true`.
     fn expect(&mut self, c: u8) -> R<()> {
         let result = self.r.expect(c);
         result.map_err(|e| self.fail(e))
@@ -821,7 +821,7 @@ impl<S: AsnSource> Input for TextInput<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
     // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:123-160 (`FindValue`, `FindName`;
     // their reports name no function)
-    /// `ReadEnum(values)`: a lower-case name of the list, or a number (one of the list for an
+    /// `ReadEnum` of the enum's `values`: a lower-case name of the list, or a number (one of the list for an
     /// ENUMERATED).
     fn read_enum(&mut self, values: &(impl EnumItems + ?Sized)) -> R<i32> {
         let word = self.r.enum_word();
@@ -858,7 +858,7 @@ impl<S: AsnSource> Input for TextInput<S> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1643-1646
     /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of
-    /// `(size_t)-1` bytes that `CTempString::operator string` asks for: `std::length_error`.
+    /// the largest `size_t` count of bytes (-1 cast to `size_t`) that `CTempString::operator string` asks for: `std::length_error`.
     fn read_other_pointer(&mut self) -> R<Vec<u8>> {
         let id = self.r.type_id();
         match id.map_err(|e| self.fail(e))? {

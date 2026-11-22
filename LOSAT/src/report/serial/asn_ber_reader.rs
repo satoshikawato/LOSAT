@@ -12,7 +12,7 @@
 //! (`80`); a definite length is accepted as well (`USE_DEF_LEN`).
 //!
 //! Each object of a file is read by an object stream of its own in NCBI (`s_ReadObject` of
-//! makeblastdb, `in >> MSerial_AsnBinary >> object`): the positions of its reports (`byte N`) and
+//! makeblastdb, the stream read as `MSerial_AsnBinary` into the object): the positions of its reports (`byte N`) and
 //! its data limits count from the object's first byte (`BerReader::new_object`).
 
 use super::asn_input::{
@@ -92,7 +92,7 @@ const UNEXPECTED_MEMBER: ThrowSite = asnb_site(
     Some("ncbi::CObjectIStreamAsnBinary::UnexpectedMember"),
 );
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1448-1473
-// (`ThrowError(fUnknownValue, ...)`: `ThrowError1` has no case for the flag, whose `default` is
+// (`ThrowError` with `fUnknownValue`: `ThrowError1` has no case for the flag, whose `default` is
 // `eIoError`, objistr.cpp:828-852.)
 const BEGIN_BYTES: ThrowSite = asnb_site(
     1470,
@@ -101,9 +101,9 @@ const BEGIN_BYTES: ThrowSite = asnb_site(
 );
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:60-151
-/// `MakeTagByte(eUniversal, eConstructed, 0)`.
+/// `MakeTagByte` of `eUniversal`, `eConstructed` and 0.
 pub(crate) const UNIVERSAL_CONSTRUCTED: u8 = 0x20;
-/// `MakeTagByte(eContextSpecific, eConstructed, 0)`: a member or variant `[n]` is `0xa0 | n`.
+/// `MakeTagByte` of `eContextSpecific`, `eConstructed` and 0: a member or variant `[n]` is `0xa0 | n`.
 pub(crate) const CONTEXT_CONSTRUCTED: u8 = 0xa0;
 const CLASS_AND_CONSTRUCTED_MASK: u8 = 0xe0;
 /// `eLongTag`: the tag number bits of a first tag byte, all set when the number follows.
@@ -117,16 +117,16 @@ const TAG_REAL: u8 = 0x09;
 pub(crate) const TAG_ENUMERATED: u8 = 0x0a;
 pub(crate) const TAG_UTF8_STRING: u8 = 0x0c;
 pub(crate) const TAG_VISIBLE_STRING: u8 = 0x1a;
-/// `MakeTagByte(eUniversal, eConstructed, eSequence)`: the first byte of a SEQUENCE and of a
+/// `MakeTagByte` of `eUniversal`, `eConstructed` and `eSequence`: the first byte of a SEQUENCE and of a
 /// SEQUENCE OF.
 pub(crate) const TAG_SEQUENCE: u8 = 0x30;
-/// `MakeTagByte(eApplication, ePrimitive, eInteger)`, which `ExpectIntegerTag` also takes.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eInteger`, which `ExpectIntegerTag` also takes.
 pub(crate) const TAG_APPLICATION_INTEGER: u8 = 0x42;
-/// `MakeTagByte(eApplication, ePrimitive, eStringStore)`.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eStringStore`.
 pub(crate) const TAG_STRING_STORE: u8 = 0x41;
-/// `MakeTagByte(eApplication, ePrimitive, eObjectReference)`: the object index of `@n`.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eObjectReference`: the object index of `@n`.
 const TAG_OBJECT_REFERENCE: u8 = 0x5e;
-/// `MakeTagByte(eApplication, eConstructed, eLongTag)`: a class name follows, then its value.
+/// `MakeTagByte` of `eApplication`, `eConstructed` and `eLongTag`: a class name follows, then its value.
 const TAG_OTHER_POINTER: u8 = 0x7f;
 /// The tag numbers of SEQUENCE (and SEQUENCE OF) and SET OF.
 pub(crate) const SEQUENCE_NUMBER: i32 = 16;
@@ -330,7 +330,7 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:138-156,167-199
-    /// `PeekTag(first_tag_byte, class, constructed)`: the tag number of a tag of that class and
+    /// `PeekTag` of the first tag byte, the class and the form: the tag number of a tag of that class and
     /// form.
     #[inline(always)]
     pub(crate) fn peek_tag_of_class(&mut self, class_and_constructed: u8) -> R<i32> {
@@ -341,7 +341,7 @@ impl<S: AsnSource> BerReader<S> {
         self.peek_tag()
     }
 
-    /// `UnexpectedTagClassByte(first_tag_byte, expected_class_byte)`.
+    /// `UnexpectedTagClassByte` of the first tag byte and the expected class byte.
     #[cold]
     #[inline(never)]
     fn unexpected_tag_class_byte(&self, first: u8, class_and_constructed: u8) -> Fail {
@@ -357,7 +357,7 @@ impl<S: AsnSource> BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:171-178
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:158-185,209-217
-    /// `ExpectTag(class, constructed, value)`.
+    /// `ExpectTag` of the class, the form and the value.
     #[inline(always)]
     pub(crate) fn expect_tag(&mut self, class_and_constructed: u8, value: i32) -> R<()> {
         let tag = self.peek_tag_of_class(class_and_constructed)?;
@@ -367,7 +367,7 @@ impl<S: AsnSource> BerReader<S> {
         Ok(())
     }
 
-    /// `UnexpectedTagValue(tag_class, tag, tag_value)`. The class was checked (universal or
+    /// `UnexpectedTagValue` of the tag class, the tag and the tag value. The class was checked (universal or
     /// context specific): no "Application " or "Private " before the number.
     #[cold]
     #[inline(never)]
@@ -430,7 +430,7 @@ impl<S: AsnSource> BerReader<S> {
             // fails with "EndOfContentsByte expected" on such an item (checked on the
             // `long_len_*` cases of the mask fixtures).
             //
-            // The sum is `Int8 + size_t`: computed in 64 unsigned bits, it wraps, and is stored in
+            // The sum is an `Int8` added to a `size_t`: computed in 64 unsigned bits, it wraps, and is stored in
             // the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is then an
             // indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one ends the
             // members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_* fixtures).
@@ -519,7 +519,7 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:374-379
-    /// `UnexpectedSysTagByte(byte)`: the tag at the current position is not `byte`.
+    /// `UnexpectedSysTagByte` of `byte`: the tag at the current position is not `byte`.
     #[cold]
     #[inline(never)]
     fn unexpected_sys_tag_byte(&self, got: u8, byte: u8) -> Fail {
@@ -533,7 +533,7 @@ impl<S: AsnSource> BerReader<S> {
         )
     }
 
-    /// `ExpectSysTagByte(byte)` (objistrasnb.inl:115-123): the exact tag byte.
+    /// `ExpectSysTagByte` of `byte` (objistrasnb.inl:115-123): the exact tag byte.
     #[inline(always)]
     pub(crate) fn expect_sys_tag_byte(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
@@ -559,7 +559,7 @@ impl<S: AsnSource> BerReader<S> {
         }
     }
 
-    /// `ReadStdSigned` ([`read_std_signed`], the one port of it): `size` is `sizeof(T)`; the result
+    /// `ReadStdSigned` ([`read_std_signed`], the one port of it): `size` is the size of `T`; the result
     /// is the value of `T` widened to `i64`.
     pub(crate) fn read_std_signed(&mut self, size: usize) -> R<i64> {
         let length = self.read_short_length()?;
@@ -616,7 +616,7 @@ impl<S: AsnSource> BerReader<S> {
         self.skip_bytes(length)
     }
 
-    /// `SkipBytes(count)`: the end of the data inside them is a `CEofException`. (Values are
+    /// `SkipBytes` of `count`: the end of the data inside them is a `CEofException`. (Values are
     /// skipped only inside a delayed member, whose bytes the source keeps anyway.)
     fn skip_bytes(&mut self, count: u64) -> R<()> {
         if count == 0 {
@@ -650,7 +650,7 @@ impl<S: AsnSource> BerReader<S> {
     // (`SERIAL_READ_ANY_VISIBLESTRING_TAG` is 1 by default: a UTF8String is accepted for a
     // VisibleString, with a warning once per process; `SERIAL_READ_ANY_UTF8STRING_TAG` is true: a
     // VisibleString is accepted for a UTF8String.)
-    /// `ExpectStringTag(type)` of a VisibleString (`visible`) or a UTF8String.
+    /// `ExpectStringTag` of the string type, for a VisibleString (`visible`) or a UTF8String.
     fn expect_string_tag(&mut self, visible: bool, posts: &mut Vec<StringPost>) -> R<()> {
         let (tag, other) = if visible {
             (TAG_VISIBLE_STRING, TAG_UTF8_STRING)
@@ -679,7 +679,7 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1058-1067
-    /// `UnexpectedMember(tag, items)` of a SEQUENCE or CHOICE whose members or variants are
+    /// `UnexpectedMember` of the tag and the items, of a SEQUENCE or CHOICE whose members or variants are
     /// `items` (their automatic tags are 0, 1, ... in order).
     #[cold]
     #[inline(never)]
@@ -989,7 +989,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     // StringStore keeps its bytes in binary, unlike the text stream.)
     /// A string (`kind`) appended to `out`, with what NCBI posts while it reads it
     /// in `posts` (also when it then fails): its tag, its length, its bytes (`ReadBytes`:
-    /// `GetChars(str, count)`, which reserves `count` bytes first when they are not all in the
+    /// `GetChars` of `str` and `count`, which reserves `count` bytes first when they are not all in the
     /// input buffer, and reads to the end of the data), and for a VisibleString each byte outside
     /// `' '..='~'` read as `#`.
     fn read_string(
@@ -1013,7 +1013,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2093-2104
-    /// `SkipString(type)` / `SkipStringStore`: the tag, then the bytes skipped.
+    /// `SkipString` of the string type / `SkipStringStore`: the tag, then the bytes skipped.
     fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
         self.expect_string_kind(kind, posts)?;
         self.skip_tag_data()
@@ -1060,7 +1060,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2023-2039
-    /// `ReadEnum(values)`: an INTEGER for a type with any number, else an ENUMERATED that must be
+    /// `ReadEnum` of the enum's `values`: an INTEGER for a type with any number, else an ENUMERATED that must be
     /// one of the values (`FindName`).
     fn read_enum(&mut self, values: &(impl EnumItems + ?Sized)) -> R<i32> {
         if values.integer() {
@@ -1145,7 +1145,7 @@ impl<S: AsnSource> Input for BerReader<S> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:316-372
-/// `TagToString(byte)`: the class, `constructed/`, the universal type's name or the number,
+/// `TagToString` of `byte`: the class, `constructed/`, the universal type's name or the number,
 /// and the byte.
 pub(crate) fn tag_to_string(byte: u8) -> String {
     let class = match byte & 0xc0 {
@@ -1195,7 +1195,7 @@ pub(crate) fn tag_to_string(byte: u8) -> String {
 // (`ReadStringValue`, objistrasnb.cpp:803-826, fixes a new string after `ReadBytes`, before
 // `EndOfTag`: the position is the byte after the string. `SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_
 // READING` is 0.)
-/// `FixVisibleChars(str)` of the string `s`, read up to `end`: each byte outside `' '..='~'`
+/// `FixVisibleChars` of the string `s`, read up to `end`: each byte outside `' '..='~'`
 /// becomes `#`, posted with the string as fixed so far (the bytes before it already `#`).
 fn fix_visible_chars(s: &mut [u8], end: StreamPosition, posts: &mut Vec<StringPost>) {
     for i in 0..s.len() {
@@ -1225,7 +1225,7 @@ pub(crate) enum StdSignedError<E> {
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
 /// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
-/// taken one at a time from `byte`, read into a signed type of `width` bytes (`sizeof(T)`: 4 for
+/// taken one at a time from `byte`, read into a signed type of `width` bytes (the size of `T`: 4 for
 /// `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
 /// beyond the width are taken only as the sign extension of the value; anything else is an
 /// overflow. The one port of the function: the binary object stream (`BerReader`) and the header

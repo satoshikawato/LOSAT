@@ -466,7 +466,13 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     // Right extension in 4-base blocks.
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
+    // NCBI's `Int4` lengths: one below 0 gives no block. A seed of a MegaBLAST database index can
+    // start in the subject's last 3 letters (its seed runs on into the next sequence of the
+    // index's local id), so that `s_ext`, the next multiple of 4, lies past the last letter.
+    let right_len = q_len
+        .saturating_sub(q_ext)
+        .min(subject_len.saturating_sub(s_ext))
+        / COMPRESSION_RATIO;
     sum = 0;
     new_q = q_idx;
 
@@ -614,7 +620,7 @@ where
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:553-554
     let ext_to = word_length - (q_end - q_off_adjusted);
-    // NCBI's `Int4 ext_max` is negative for a word that runs past the context or the scan
+    // NCBI's `ext_max` (an `Int4`) is negative for a word that runs past the context or the scan
     // range (the aligned small-table extension does not check the right end at the end of
     // the query); then `ext_to > ext_max`, and no extension or double word is possible.
     let ext_max = (q_range as i64 - q_end as i64).min(s_range as i64 - s_end as i64);

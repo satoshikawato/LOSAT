@@ -85,20 +85,6 @@ impl Search {
         matches!(preparse(&self.argv), Preparsed::Words { dryrun: true, .. })
     }
 
-    /// Whether a search of this argv runs the NCBI application start at its beginning: the argv
-    /// has `-logfile`, `-conffile` or `-dryrun`, which the start reads (`api::start`).
-    pub(crate) fn starts(&self) -> bool {
-        use crate::blastinput::ncbi_environment::{log_file, preparse, Preparsed};
-        log_file(&self.argv).is_some()
-            || matches!(
-                preparse(&self.argv),
-                Preparsed::Words {
-                    conffile: Some(_),
-                    ..
-                } | Preparsed::Words { dryrun: true, .. }
-            )
-    }
-
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).

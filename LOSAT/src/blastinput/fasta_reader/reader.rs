@@ -1,5 +1,5 @@
 //! NCBI's `CFastaReader` with the flags of `CBlastFastaInputSource`
-//! (`fNoParseID | fDLOptional` or, with `-parse_deflines`, `fParseRawID`, `fAssumeNuc` or
+//! (`fNoParseID` and `fDLOptional` or, with `-parse_deflines`, `fParseRawID`, `fAssumeNuc` or
 //! `fAssumeProt`, `fNoSplit`,
 //! `fHyphensIgnoreAndWarn`, `fDisableNoResidues`, `fQuickIDCheck`), as overridden by
 //! `CCustomizedFastaReader` and `CBlastInputReader`.
@@ -96,7 +96,7 @@ pub(crate) fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
 }
 
 /// The values of `CLinkage_evidence::EType` by their ASN.1 names
-/// (`ENUM_METHOD_NAME(EType)()->NameToValue()`).
+/// (`NameToValue` of the enum's info, from `ENUM_METHOD_NAME`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:383-397
 pub(crate) fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
@@ -347,7 +347,7 @@ pub(crate) struct FastaReader<R: Read> {
     x_packed: Option<crate::sequence::packed_letters::PackedLetters>,
 }
 
-/// Where a reader message goes: `LOG_POST_X(1, Warning << message)` with no listener.
+/// Where a reader message goes: a warning posted with `LOG_POST_X` (subcode 1) with no listener.
 pub(crate) type Warn<'a> = &'a mut dyn FnMut(&[u8]) -> std::io::Result<()>;
 
 impl<R: Read> FastaReader<R> {
@@ -431,7 +431,7 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// `FASTA_ERROR`: `PostWarning` with `eDiag_Error` and no listener throws
-    /// `CObjReaderParseException(..., _eErrCode, _MessageStrmOps, _uLineNum, ...)`.
+    /// `CObjReaderParseException`, which gets the error code, the message and the line number.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2215-2218
     fn fasta_error(&self, code: super::ParseErrorCode, message: String) -> ReadError {
@@ -523,7 +523,7 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.next_line();
             let raw = self.lines.take_line();
-            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
+            // `NStr::TruncateSpaces_Unsafe` of the line (`eTrunc_Both`, fasta.cpp:376).
             let line = truncate_spaces(&raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 self.lines.put_line(raw);
@@ -845,7 +845,7 @@ impl<R: Read> FastaReader<R> {
         Ok(())
     }
 
-    /// `GetCurrentPos(ePosWithGapsAndSegs)`: the raw position plus the gaps before it
+    /// `GetCurrentPos` with `ePosWithGapsAndSegs`: the raw position plus the gaps before it
     /// (`m_SegmentBase` is 0 without `fInSegSet`).
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:502-516
@@ -859,7 +859,7 @@ impl<R: Read> FastaReader<R> {
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-499
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1083
-    /// `x_OpenMask` runs before `++m_CurrentPos`, so the start is the masked residue.
+    /// `x_OpenMask` runs before `m_CurrentPos` is incremented, so the start is the masked residue.
     fn open_mask(&mut self) {
         if self.mask_range_start.is_none() {
             self.mask_range_start = Some(self.current_pos_with_gaps() - 1);
@@ -869,7 +869,7 @@ impl<R: Read> FastaReader<R> {
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:291-292
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1085-1092
     /// In `ParseDataLine` `CloseMask` runs after the residue is stored and before
-    /// `++m_CurrentPos`: the interval ends before the residue that closes it (LOSAT has
+    /// `m_CurrentPos` is incremented: the interval ends before the residue that closes it (LOSAT has
     /// already pushed that residue, hence the `- 2`). `AssembleSeq` closes it at the end.
     fn close_mask(&mut self) {
         if let Some(start) = self.mask_range_start.take() {
@@ -1072,7 +1072,7 @@ pub(crate) fn gap_line_size(
         .iter()
         .position(|byte| !byte.is_ascii_digit())
         .unwrap_or(remaining.len());
-    // `NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow)`: 0 for an empty string or a value
+    // `NStr::StringToUInt` of `sDigits` with `NStr::fConvErr_NoThrow`: 0 for an empty string or a value
     // over UINT_MAX.
     let mut gap_size = crate::ncbi_str::string_to_uint(&remaining[..digits]).unwrap_or(0);
     if gap_size == 0 {
@@ -1125,7 +1125,7 @@ pub(crate) fn gap_line_size(
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
 /// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
-/// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
+/// `NStr::Split` with `fSplit_MergeDelimiters` and `fSplit_Truncate` drops empty pieces.
 fn gap_mod_warnings(
     line: u64,
     mods: &[(Vec<u8>, Vec<u8>)],

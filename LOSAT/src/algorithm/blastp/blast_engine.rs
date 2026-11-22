@@ -1122,7 +1122,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
@@ -1158,7 +1157,7 @@ impl BlastpSumStats {
         }
     }
 
-    /// `cutoff_score = MIN(new_cutoff, cutoff_score)` for each valid context.
+    /// Sets `cutoff_score` to the smaller of `new_cutoff` and `cutoff_score` for each valid context.
     pub(super) fn lower_hit_cutoffs(
         &self,
         contexts: &[QueryContext],
@@ -2308,7 +2307,7 @@ fn write_blastp_outfmt7_header<W: Write>(
         version_str
     )?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1297-1298
-    // psiblast's tabular reports carry their round (`x_PrintTabularReport(results, itr_num)`,
+    // psiblast's tabular reports carry their round (`x_PrintTabularReport` of `results` and `itr_num`,
     // blast_format.cpp:1458): 1, or the round of the round driver (`psi_round`).
     if let Some(iteration) = iteration {
         writeln!(writer, "# Iteration: {iteration}")?;
@@ -3462,8 +3461,9 @@ fn build_pairwise_hits(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
-            // The linked set's size with psiblast's `-sum_stats true` (`Expect(n)` of the
-            // alignment, showalign.cpp:3595-3598); an HSP outside a set has no "sum_n" score.
+            // The linked set's size with psiblast's `-sum_stats true` (the number in parentheses
+            // after the alignment's `Expect`, showalign.cpp:3595-3598); an HSP outside a set has
+            // no "sum_n" score.
             sum_n: (num > 1).then_some(num),
             subject_stored_gaps,
             query_stored_gaps,
@@ -4387,23 +4387,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
-    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
-    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
-    if (stream.failed || badbit) && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // report's where NCBI's buffer writes it (`cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -4513,7 +4500,7 @@ fn read_cli_subjects(
         },
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+    // `Reset` of `m_Subjects` with a new `blast::CObjMgr_QueryFactory` of `subjects` (blast_args.cpp:2557)
     // fails for a subject input without records.
     if subjects.records.is_empty() {
         return Err(app::empty_subjects_error());
@@ -6749,7 +6736,7 @@ fn search(
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
-        // A reader at the end of its input reads no batch (`!input.End()`): the reports of
+        // A reader at the end of its input reads no batch (its `End()` is true): the reports of
         // no query (an empty pipe, or `-query -` after `-subject -`).
         write_reports_without_queries(&args, subject_source, subject_label, outputs)?;
     }
@@ -7554,7 +7541,7 @@ fn write_reports_without_queries(
         .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
-        // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
+        // of line alone: `m_Outfile` gets `m_BlastXMLIncremental->m_SerialXmlEnd` and `endl`, with the
         // end of the document empty (blast_format.cpp:2242-2243).
         // The archive writes one document per batch: none without a query batch.
         if blastp_seqalign_format(format.outfmt).is_some() || blastp_is_archive(format.outfmt) {
@@ -9767,7 +9754,7 @@ fn run_call(
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
     // updated as the subjects came; `-best_hit_*`: `s_BlastHSPBestHitFinal` from the best hit
-    // lists (hspfilter_besthit.c:190-221; `besthit.rs`). A query chunk's lists leave below as the
+    // lists (hspfilter_besthit.c:194-231; `besthit.rs`). A query chunk's lists leave below as the
     // collector's do.
     if let Some(filter) = prelim_filter.take() {
         filter.finish(&mut x_compact_hit_lists);

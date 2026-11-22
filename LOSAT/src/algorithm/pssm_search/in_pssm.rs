@@ -37,13 +37,13 @@ const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 /// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
 const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
 
-/// What `-in_pssm` makes of the file: the `switch` on `CFormatGuess().Format(in)`.
+/// What `-in_pssm` makes of the file: the `switch` on the format that `CFormatGuess` guesses for the stream.
 #[derive(Debug)]
 enum PssmFileFormat {
     /// `eTextASN`: the text reader reads the stream from `start` (the start of the file, or its end after
     /// `TestFormatNewick` read a NEXUS file through).
     TextAsn { start: usize },
-    /// `eBinaryASN`: the binary reader reads the stream from `start` (`in >> MSerial_AsnBinary`).
+    /// `eBinaryASN`: the binary reader reads the stream from `start` (the stream read as `MSerial_AsnBinary`).
     BinaryAsn { start: usize },
     /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
     /// three).
@@ -64,10 +64,10 @@ const XML_PSSM: &str = "a PSSM file in XML";
 const UNDECIDED_GUESS: &str =
     "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
 
-/// `CFormatGuess().Format(in)` (`utils::format_guess`, the whole order of `sm_CheckOrder` without hints) and
-/// the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when the formats it
-/// could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); `eXml` is
-/// refused (the XML reader's first failure is its file header: `CObjectIStreamXml::ReadFileHeader`,
+/// The format that `CFormatGuess` guesses for the stream (`utils::format_guess`, the whole order of `sm_CheckOrder`
+/// without hints) and the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when
+/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); `eXml`
+/// is refused (the XML reader's first failure is its file header: `CObjectIStreamXml::ReadFileHeader`,
 /// objistrxml.cpp:582-660, with the declaration's attributes and encodings, comments, `DOCTYPE` and namespace
 /// prefixes, not ported).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
@@ -642,8 +642,8 @@ pub(crate) fn psi_search_and_object_of(
     // string or the integer's decimal digits (`CObject_id::AsString`). Any other id (`gi 4504347`
     // of a `-parse_deflines` PSSM, `swissprot`, `pdb`, ...), and several ids, are shown with or
     // without `-parse_deflines`, as `-parse_deflines` shows the ids of a FASTA query (NCBI BLAST+
-    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString(cbs,
-    // believe_local_id)` asks `believe_local_id` of a local id only, align_format_util.cpp).
+    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString` with `cbs` and
+    // `believe_local_id` asks `believe_local_id` of a local id only, align_format_util.cpp).
     let ids = query.ids.as_slice();
     if ids.is_empty() {
         return Err(reader.refuse(

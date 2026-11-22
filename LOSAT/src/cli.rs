@@ -205,7 +205,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
     /// Translated nucleotide query vs protein subject (blastx)
@@ -963,13 +963,12 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
 /// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
 /// (`blastn -out -version` prints the version) but not as the value of `-logfile` or
 /// `-conffile`, and also when other arguments are invalid; the first one is printed.
-/// `-version` prints the two lines of `fVersionInfo | fPackageShort`: the program name and
-/// version, then the package. NCBI's second line names its own package and build date; LOSAT's
-/// names LOSAT and the BLAST+ release its output follows. The full versions are NCBI's forms
-/// with LOSAT's values (`ncbi_version::print`, line RG item E3).
-/// `makeblastdb` prints `makeblastdb`, as NCBI's program does. `main` prints the
-/// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
-/// is clap's and is not read here.
+/// `-version` prints the two lines that the flags `fVersionInfo` and `fPackageShort` select: the
+/// program name and version, then the package. NCBI's second line names its own package and build
+/// date; LOSAT's names LOSAT and the BLAST+ release its output follows. The full versions are
+/// NCBI's forms with LOSAT's values (`ncbi_version::print`, line RG item E3). `makeblastdb` prints
+/// `makeblastdb`, as NCBI's program does. `main` prints the text on stdout and exits 0, before any
+/// argument is parsed. The top level `losat --version` is clap's and is not read here.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
 pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
@@ -1245,7 +1244,8 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242 (`AddDefaultFileArguments`:
 // every NCBI application's arguments have `-logfile` and `-conffile`; the BLAST programs hide
-// them from their `-help`, `HideStdArgs(fHideLogfile | fHideConffile | ...)`, blastn_app.cpp:92)
+// them from their `-help`, through `HideStdArgs` with `fHideLogfile`, `fHideConffile` and other
+// flags, blastn_app.cpp:92)
 /// `command` with NCBI's two toolkit file arguments, `-logfile` and `-conffile`, in each NCBI
 /// application that runs them (the BLAST programs and makeblastdb), hidden as NCBI hides them.
 /// Their values are read by the application start (`ncbi_environment::log_file` and
@@ -1290,17 +1290,15 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
 // The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-3).
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "gilist",
     "html",
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {
@@ -1309,10 +1307,9 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
 // The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-3).
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "gilist",
     "html",
@@ -1327,6 +1324,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
+// `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
 const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "html",
     "gilist",
@@ -1334,8 +1332,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "entrez_query",
     "ipglist",
     "negative_ipglist",
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "import_search_strategy",
     "remote",
     "use_sw_tback",
@@ -1471,6 +1467,35 @@ impl ReportStream {
             failed: false,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// The end of a run whose report went to this stream, `result` being the run's: what the
+    /// report wrote stays (a flush, also after an error, such as the outfmt 0 prolog). Where the
+    /// report's stream throws (`throws`: the stream of the outfmt 0 to 4 formatter,
+    /// blast_format.cpp:118-119, and the organism report's, `NcbiReportBuffer`), a write that
+    /// failed (`failed`) or an insertion that set the stream's `badbit` (`BadbitInsertion`) is
+    /// NCBI's "BLAST failed to write output", exit status 6. For the other formats NCBI aborts and
+    /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
+    /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
+    pub(crate) fn finish(
+        &mut self,
+        result: anyhow::Result<()>,
+        throws: bool,
+    ) -> anyhow::Result<()> {
+        use anyhow::Context;
+        let flushed = std::io::Write::flush(self);
+        let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
+        if (self.failed || badbit) && throws {
+            return Err(NativeError {
+                exit: 6,
+                message: "BLAST failed to write output\n".into(),
+            }
+            .into());
+        }
+        result?;
+        flushed.context("failed to write the output")
+    }
 }
 
 impl std::io::Write for ReportStream {
@@ -1490,12 +1515,12 @@ impl std::io::Write for ReportStream {
 // C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
-/// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
-/// `exceptions(NcbiBadbit)` (blast_format.cpp:118-119), and the application reports it as "BLAST
-/// failed to write output", exit status 6 (blast_app_util.hpp:252-255), after the bytes the report
-/// wrote before it. It travels as the `io::Error` of the report's writes (`error`), which a
-/// program reports as a failed write of the stream (`is`); the epilog's null matrix name raises it
-/// (`report::pairwise::write_matrix_line`).
+/// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream whose
+/// `exceptions` mask holds `NcbiBadbit` (blast_format.cpp:118-119), and the application reports it
+/// as "BLAST failed to write output", exit status 6 (blast_app_util.hpp:252-255), after the bytes
+/// the report wrote before it. It travels as the `io::Error` of the report's writes (`error`),
+/// which a program reports as a failed write of the stream (`is`); the epilog's null matrix name
+/// raises it (`report::pairwise::write_matrix_line`).
 #[derive(Debug)]
 pub(crate) struct BadbitInsertion;
 
@@ -1627,9 +1652,9 @@ impl std::io::Write for NcbiReportBuffer {
     }
 }
 
-/// `out << value` in NCBI's report: one insertion (a string or a number) of `bytes`, one write
-/// call, which the organism report's stream takes as one (`NcbiReportBuffer`); other writers just
-/// take the bytes. A string that LOSAT streams is `insert_streamed`.
+/// A stream insertion (`operator<<`) in NCBI's report: one insertion (a string or a number) of
+/// `bytes`, one write call, which the organism report's stream takes as one (`NcbiReportBuffer`);
+/// other writers just take the bytes. A string that LOSAT streams is `insert_streamed`.
 pub fn insert(out: &mut (impl std::io::Write + ?Sized), bytes: &[u8]) -> std::io::Result<()> {
     out.write_all(bytes)
 }
@@ -1716,8 +1741,8 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 /// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
-/// nothing of a program's before it: each write is one insertion of NCBI's (`out << value`,
-/// `insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
+/// nothing of a program's before it: each write is one insertion (`operator<<`) of NCBI's
+/// (`insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
 /// writes only to this type, and a writer becomes one only through the constructors below, one per
 /// destination, each saying what comes after it: they are the only places where a buffer or hold
 /// could come between the report's insertions and NCBI's buffer (`NcbiReportBuffer`, which counts
@@ -1734,10 +1759,11 @@ impl<'a> NcbiOstream<'a> {
 
     /// A format's sink opened as its report's stream (`OutputSink::open`): the caller's writer as
     /// it is, which the command line of blastn, blastp, tblastn and tblastx makes its
-    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`) and which a
-    /// library caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's
-    /// `Stdout` and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's
-    /// either: the report's bytes are NCBI's, the times at which they reach the device are not).
+    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`), which the
+    /// library's `run_to_file` makes the same (`api::local_blast::OutFile`) and which a library
+    /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's `Stdout`
+    /// and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's either: the
+    /// report's bytes are NCBI's, the times at which they reach the device are not).
     pub(crate) fn sink(
         sink: &'a mut crate::api::local_blast::OutputSink<'_>,
     ) -> std::io::Result<Self> {

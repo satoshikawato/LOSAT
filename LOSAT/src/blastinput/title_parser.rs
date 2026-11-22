@@ -40,8 +40,8 @@ pub(crate) fn find_brackets(line: &[u8], start: &mut usize) -> Option<(usize, us
     None
 }
 
-/// `CTitleParser::HasMods(title)`: whether the title has a modifier, `[name=value]`. NCBI's loop
-/// returns at the first bracket pair that `find_brackets` finds (true with an `=` before its
+/// `CTitleParser::HasMods` of `title`: whether the title has a modifier, `[name=value]`. NCBI's
+/// loop returns at the first bracket pair that `find_brackets` finds (true with an `=` before its
 /// `]`, false without one) and false where it finds none, so it is true exactly where the first
 /// call succeeds.
 ///

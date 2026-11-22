@@ -28,7 +28,7 @@ fn indexer() -> Indexer<'static> {
     }
 }
 
-/// `TryGetValue(row, v)` of the column `text` at each of `rows`, as text (`-` for none, `E:` and
+/// `TryGetValue` of the column `text` at each of `rows`, as text (`-` for none, `E:` and
 /// the message for an exception, `S:` and `what()` for a `std::exception`, `R` for a refusal).
 fn values(text: &str, want: Want, rows: std::ops::Range<u64>) -> Vec<String> {
     let value = column_value(text);
@@ -254,7 +254,7 @@ fn probe_rows(rows: u64, read: &Rows<'_>) -> std::collections::BTreeSet<u64> {
 }
 
 /// Whether the rows `rows` of a feature table whose `disabled` column is `column` are read
-/// (`RowIsDisabled(row)` false), against `read`.
+/// (`RowIsDisabled` false for the row), against `read`.
 fn check_disabled_rows(case: &str, column: &str, rows: u64, read: &Rows<'_>) {
     let value = column_value(column);
     let column = Column(V::new(named::SEQTABLE_COLUMN, &value));

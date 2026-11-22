@@ -19,7 +19,7 @@ pub(super) const BUFFER_SIZE: usize = 32 * 1024;
 /// What `m_Line` points to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
-    /// `CTempString(NULL)`: before the first line, and after `operator++` at the end.
+    /// The null `CTempString`: before the first line, and after `operator++` at the end.
     Null,
     /// `m_Buffer[start..end]`.
     Buffer { start: usize, end: usize },
@@ -89,7 +89,7 @@ impl<R: Read> BufferedLineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:475-495
-    /// `*m_Pos` with `m_Pos == m_End` (the case of the module comment) is the byte that an
+    /// `*m_Pos` with `m_Pos` at `m_End` (the case of the module comment) is the byte that an
     /// earlier read left in the buffer; the buffer is 32 KiB, so the byte exists. The reader
     /// never calls this at the end of the input.
     pub(super) fn peek_char(&self) -> u8 {

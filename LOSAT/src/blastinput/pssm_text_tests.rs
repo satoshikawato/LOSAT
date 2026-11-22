@@ -117,7 +117,7 @@ fn reals_are_read_with_ncbis_arithmetic() {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:845-846 (cited at `Reader::real`):
-// `pow((double)10.0, exp)`, which the table of `libm_pow10` stands for.
+// `pow` of 10.0 as a `double` to `exp`, which the table of `libm_pow10` stands for.
 #[test]
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn libm_pow10_is_glibcs_pow() {

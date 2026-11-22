@@ -1,19 +1,25 @@
-//! `losat blastn -use_index true` against NCBI BLAST+ 2.17.0 (line RG item D5b-1): each row of
-//! `tests/blastn_mb_index/cases.tsv` runs in its own copy of `tests/blastn_mb_index/in`, after
-//! its setup steps (LOSAT's `makembindex`, whose index files are NCBI's bytes, and edits of the
-//! files), and gives NCBI's standard output, standard error and exit status
-//! (`ncbi/<name>.{out,err,rc}`, the row's directory written `@CWD@`), frozen with the local
-//! official release and NCBI's makembindex. NCBI is not run here.
+//! `losat blastn -use_index true` against NCBI BLAST+ 2.17.0 (line RG items D5b-1 and D5b-2):
+//! each row of `tests/blastn_mb_index/cases.tsv` runs in its own copy of
+//! `tests/blastn_mb_index/in`, after its setup steps (LOSAT's `makembindex`, whose index files are
+//! NCBI's bytes, LOSAT's `makeblastdb` of FASTA files made from the genomes of `tests/fasta`
+//! (`@TESTS@` in a step is `tests`), and edits of the files), and gives NCBI's standard output,
+//! standard error and exit status (`ncbi/<name>.{out,err,rc}`, the row's directory written
+//! `@CWD@`), frozen with the local official release and NCBI's makembindex and makeblastdb. NCBI is
+//! not run here. A row's first `NAME=value` words are variables of its run
+//! (`masker_fixtures::take_variables`).
 //!
-//! A row with a refusal is one where NCBI searches with the index (or reads it in a way that
-//! leaves the search undefined): LOSAT refuses it with that text, and NCBI's output is kept for
-//! the indexed search of line D5b-2.
+//! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
+//! (a mixed search, a two-hit search, `-db_hard_mask`), or reads the index in a way that leaves
+//! the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is kept for
+//! the lines that take these searches. LOSAT writes nothing where NCBI's run succeeds; where NCBI
+//! exits with its error in a later query batch, LOSAT first writes NCBI's output of the batches
+//! before; where NCBI crashes or never ends, LOSAT writes at most a beginning of NCBI's output.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::masker_fixtures::shell_words;
+use crate::masker_fixtures::{shell_words, take_variables};
 use crate::ncbi_windows_paths::ncbi_paths_on_windows;
 
 /// `tests/blastn_mb_index`.
@@ -27,6 +33,8 @@ struct Case {
     /// The setup steps, each as shell words.
     setup: Vec<Vec<String>>,
     words: Vec<String>,
+    /// The variables of the row's first `NAME=value` words.
+    variables: Vec<(String, String)>,
     /// LOSAT's refusal (`@CWD@` for the row's directory), for a row that NCBI searches with
     /// the index.
     refusal: Option<String>,
@@ -45,22 +53,29 @@ fn cases() -> Vec<Case> {
             "-" => Vec::new(),
             steps => steps.split(" ; ").map(|step| shell_words(step).0).collect(),
         };
+        let mut words = shell_words(fields[2]).0;
+        let variables = take_variables(&mut words);
         cases.push(Case {
             name: fields[0].to_string(),
             setup,
-            words: shell_words(fields[2]).0,
+            words,
+            variables,
             refusal: fields.get(3).map(|text| text.to_string()),
         });
     }
     cases
 }
 
-/// A command of LOSAT with no LOSAT, NCBI or BLAST variable, run in `dir`.
+/// A command of LOSAT with no LOSAT, NCBI or BLAST variable, run in `dir` (the worker log of
+/// the `blastx-worker-probe` feature is kept: its threaded searches write to it).
 fn command(dir: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
+            || text.starts_with("NCBI_")
+            || text.starts_with("BLAST")
+        {
             command.env_remove(&name);
         }
     }
@@ -80,14 +95,48 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// Runs the setup step `step` in `dir`.
+/// The sequence lines of the FASTA file `bytes` (each with its end of line).
+fn sequence_lines(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for line in bytes.split(|&byte| byte == b'\n') {
+        if !line.is_empty() && line[0] != b'>' {
+            out.extend_from_slice(line);
+            out.push(b'\n');
+        }
+    }
+    out
+}
+
+/// Runs the setup step `step` in `dir`: `makembindex` and `makeblastdb` (LOSAT's), `put FILE
+/// OFFSET VALUE` (a little-endian 32-bit word), `cut FILE SIZE`, `cp FROM TO`, `rm FILE`, `cat OUT
+/// FROM...` (the bytes of the FROM files one after another) and `join OUT TITLE FROM...` (one FASTA
+/// record `>TITLE` with the sequence lines of the FROM files).
 fn setup(step: &[String], dir: &Path) {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let step: Vec<String> = step
+        .iter()
+        .map(|word| word.replace("@TESTS@", &tests.to_string_lossy()))
+        .collect();
     let file = |at: usize| dir.join(&step[at]);
     let number = |at: usize| step[at].parse::<u64>().unwrap();
     match step[0].as_str() {
-        "makembindex" => {
-            let output = command(dir).args(step).output().unwrap();
+        "makembindex" | "makeblastdb" => {
+            let output = command(dir).args(&step).output().unwrap();
             assert!(output.status.success(), "{step:?}: {output:?}");
+        }
+        "cat" => {
+            let mut bytes = Vec::new();
+            for from in &step[2..] {
+                bytes.extend(fs::read(dir.join(from)).unwrap());
+            }
+            fs::write(file(1), bytes).unwrap();
+        }
+        "join" => {
+            let mut bytes = format!(">{}\n", step[2]).into_bytes();
+            for from in &step[3..] {
+                bytes.extend(sequence_lines(&fs::read(dir.join(from)).unwrap()));
+            }
+            fs::write(file(1), bytes).unwrap();
         }
         "put" => {
             let mut bytes = fs::read(file(1)).unwrap();
@@ -166,6 +215,7 @@ fn rows_that_differ() -> Vec<String> {
         let output = command(&dir)
             .arg("blastn")
             .args(&case.words)
+            .envs(case.variables.iter().map(|(name, value)| (name, value)))
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -175,9 +225,35 @@ fn rows_that_differ() -> Vec<String> {
                     "-use_index true with {} is not supported by LOSAT's BLASTN",
                     here(refusal, &dir)
                 );
-                output.status.code() == Some(1)
-                    && output.stdout.is_empty()
-                    && stderr.contains(&line)
+                // Where NCBI fails (its search of a later query batch), LOSAT writes NCBI's
+                // output of the batches before and refuses there; elsewhere it writes nothing.
+                let ncbi = |extension: &str| {
+                    fs::read(
+                        fixtures()
+                            .join("ncbi")
+                            .join(format!("{}.{extension}", case.name)),
+                    )
+                    .unwrap()
+                };
+                let ncbi_rc: i32 = String::from_utf8(ncbi("rc"))
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap();
+                let want_out = if ncbi_rc != 0 {
+                    let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
+                    losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
+                } else {
+                    Vec::new()
+                };
+                // NCBI's run ended by a signal or the time limit (124): what it wrote up to its
+                // crash is no result, and LOSAT may refuse before it.
+                let out_ok = if ncbi_rc == 124 || ncbi_rc >= 128 {
+                    want_out.starts_with(&output.stdout)
+                } else {
+                    output.stdout == want_out
+                };
+                output.status.code() == Some(1) && out_ok && stderr.contains(&line)
             }
             None => {
                 let file = |extension: &str| {

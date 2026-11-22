@@ -578,6 +578,19 @@ culled by itself). Version 4, no `-parse_seqids`; only `.pin .psq .phr` / `.nin 
     makeblastdb -in tests/fasta/outfmt0/culling_dom_s.fna -dbtype nucl -out tests/db_search/culldomn \
         -title "culling dom nucl" -blastdb_version 4
     rm tests/db_search/culldom.pjs tests/db_search/culldomn.njs
+Rows `db.{blastx,tblastn,tblastx}.bh*` (line NP, O6a-3: `-best_hit_overhang` and `-best_hit_score_edge`) search `bh3p`
+(BLASTX) and `bh3n` (TBLASTN, TBLASTX), the subjects `bh3_s.faa` / `bh3_s.fna` of `tests/fasta/outfmt0/` (40 records of
+overlapping, nested and repeated pieces of the three `bh3_q.faa` proteins; `bh3_s.fna` back-translated, every other one
+reverse-complemented; generator `o6a3_gen.py 7` of line O6), with the queries `bh3_q.fna` (BLASTX, TBLASTX) and `bh3_q.faa`
+(TBLASTN). `db.tblastn.bh_inpssm.6` reads `tests/fixtures/pssm/o6a3_q0_bh3p.asn.gz`, NCBI psiblast 2.17.0's PSSM
+(`-num_iterations 2 -out_pssm`) of the first `bh3_q.faa` query against the `bh3_s.faa` proteins. Version 4, no
+`-parse_seqids`; only `.pin .psq .phr` / `.nin .nsq .nhr` are kept. Run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/bh3_s.faa -dbtype prot -out tests/db_search/bh3p \
+        -title "best hit O6a-3 prot" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/bh3_s.fna -dbtype nucl -out tests/db_search/bh3n \
+        -title "best hit O6a-3 nucl" -blastdb_version 4
+    rm tests/db_search/bh3p.pjs tests/db_search/bh3n.njs
 - OF-BPQB2 (outfmt 15 and 16 in the same block search): rows `db.sa.bpqb.15` and `db.sa.bpqb.16`, the same search as
   `db.sa.bpqb.8` (65 KB at most). `paja_taxid` is `paja` built with a taxid (`make_paja_taxid.py MAKEBLASTDB OUTDIR`: `makeblastdb
   -in tests/fasta/PajaWSV.faa -dbtype prot -blastdb_version 4 -taxid 10090`, then the taxid of BDT63547.1 patched to 9606 in
@@ -1274,6 +1287,16 @@ search (`db.ll2.bx.ug.*`), which takes its place before the cut and leaves at th
 NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and the search fails (exit 255 in the
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
+
+`x4b/`: rows `db.x4b.dbfail.*`, `db.x4b.excl.*`, `db.x4b.cut0.db.*`, `db.x4b.sp.db.*`, `db.x4b.sp.two.db.*` and
+`db.x4b.pssm.none.db.*` (line RG, item X4b-1 fix rounds 1 and 2: tblastn `-use_sw_tback`). `x4b/make_x4b.py` (its
+docstring has the usage and the records) writes with NCBI BLAST+ 2.17.0 makeblastdb (version 5) `x4b/fail`
+(`-parse_seqids`: X4's sok1 in frame +1 and sfail in frame -1, on which tks_W's Smith-Waterman redo fails), `x4b/excl`
+(the same and, at OID 2, a weaker copy of sfail's first half whose only line has a ti) and `x4b/polycg`
+(`tests/fasta/x4b/polycg.fna`, no hit for a PSSM). `x4b/neg.txt` lists an id that no database holds: as a
+`-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its fetch and
+sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), which clears the failure of the match on sfail before it
+(exit 0 where `fail` ends with `Traceback failed`).
 
 `x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
 the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line

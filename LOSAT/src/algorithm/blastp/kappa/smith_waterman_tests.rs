@@ -7,9 +7,11 @@ use super::*;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::{build_matrix_info, read_aa_composition};
 use crate::core::composition_adjustment::redo_alignment::{
-    build_query_word_hashes, BlastCompoAdjustMode, BlastCompoGappingParams, BlastCompoSequenceData,
+    blast_compo_alignment_new, build_query_word_hashes, redo_calc_lambda, BlastCompoAdjustMode,
+    BlastCompoAlignmentContext, BlastCompoGappingParams, BlastCompoSequenceData,
     BlastCompoSequenceRange, BlastRedoRangeResult, EMatrixAdjustRule,
 };
+use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 

@@ -7,7 +7,7 @@ CLI does only for a BLAST database. A database search is not an exact oracle for
 `-db` and `-subject` differ even at code 1 for some options (the S08+ sweep found 39
 gencode rows where LOSAT differs from NCBI's `-db` search). TLOSAN Stage E/G checked the
 decision with a comparison-only C++ API oracle that runs NCBI's local-subject search
-(`CLocalDbAdapter(..., dbscan_mode=true)`, tblastn_app.cpp's path) with the selected code
+(`CLocalDbAdapter` with `dbscan_mode` true, tblastn_app.cpp's path) with the selected code
 supplied to the sequence source (`docs/evidence/tlosan_stage_e/tblastn_stage_e_local_oracle.cpp`,
 built by `gates/build_api_oracle.sh`), at the CLI's query batches
 (`docs/evidence/tlosan_stage_g/run_batch_api_oracle.py`) and with Stage E's outfmt 0

@@ -226,9 +226,9 @@ fn booleans_and_nulls_are_words() {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912, 938-986 (cited at
-// `read::string`): a VisibleString's byte outside 0x20..0x7E is `#` with `ERR_POST_X(7)` naming
-// the stack's path, the line and the piece read (probe c09); a UTF8String keeps its bytes (c10);
-// `""` is a quote and the lines are joined.
+// `read::string`): a VisibleString's byte outside 0x20..0x7E is `#` with `ERR_POST_X` of subcode 7
+// naming the stack's path, the line and the piece read (probe c09); a UTF8String keeps its bytes
+// (c10); `""` is a quote and the lines are joined.
 #[test]
 fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     let (title, posts) = read(named::SEQDESC, "Seqdesc ::= title \"a\x01b\"\n");
@@ -696,9 +696,9 @@ fn seq_table_reserve_of_negative_rows_is_a_length_error() {
     ] {
         assert_eq!(read(named::SEQ_TABLE, table(-1, data)).0, reserve, "{data}");
     }
-    // `bit` reserves `(size+7)/8`, the outer `int-delta`, `int-scaled`, `real-scaled` and
-    // `bit-bvector` nothing; 4 nested `int-delta`s are past the hook's depth; a row count of 0
-    // or more reserves what NCBI ignores when it fails.
+    // `bit` reserves its `size` in bits rounded up to whole bytes, the outer `int-delta`,
+    // `int-scaled`, `real-scaled` and `bit-bvector` nothing; 4 nested `int-delta`s are past the
+    // hook's depth; a row count of 0 or more reserves what NCBI ignores when it fails.
     for (rows, data) in [
         (-1, "bit '80'H"),
         (-9, "bit '80'H"),

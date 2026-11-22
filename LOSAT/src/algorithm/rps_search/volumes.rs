@@ -89,7 +89,7 @@ pub(crate) struct RpsUnit {
     pub(crate) request_count: i32,
     /// `GetMinLength`: the subject length of the hit cutoff with the Gumbel block.
     pub(crate) min_length: i32,
-    /// The RPS engine's `dbsize`, `BlastSeqSrcGetTotLen + BlastSeqSrcGetNumSeqs`, widened from
+    /// The RPS engine's `dbsize`, `BlastSeqSrcGetTotLen` plus `BlastSeqSrcGetNumSeqs`, widened from
     /// NCBI's `Int8` (rule P2: NCBI's sum overflows for an alias file's `LENGTH` of 2^63 - 1 and
     /// an `NSEQ` of 1 or more, undefined behaviour; widened it is above `INT4_MAX`, NCBI's -3 and
     /// LOSAT's refusal of the double free, `RpsUnit::check_engine_length`), whose `Int4` is the
@@ -102,13 +102,13 @@ pub(crate) struct RpsUnit {
 }
 
 impl RpsUnit {
-    /// The concatenated length `Lc` of the unit's search, `concat_db.length = (Int4) dbsize`
-    /// (blast_engine.c:1143, cited above): the low 32 bits of `engine_size`. A bare volume's is
-    /// the letters of its index and one delimiter row per profile, the rows of its `.rps` file; an
-    /// alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or above them, also
-    /// to a negative value. The RPS engine reads it in three places (`RpsRun::concat_length`): the
-    /// size of the diagonal table, the bound of the ungapped extensions to the right and the root
-    /// of the gapped stage's interval tree.
+    /// The concatenated length `Lc` of the unit's search, `concat_db.length` set from `dbsize` cast
+    /// to `Int4` (blast_engine.c:1143, cited above): the low 32 bits of `engine_size`. A bare
+    /// volume's is the letters of its index and one delimiter row per profile, the rows of its
+    /// `.rps` file; an alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or
+    /// above them, also to a negative value. The RPS engine reads it in three places
+    /// (`RpsRun::concat_length`): the size of the diagonal table, the bound of the ungapped
+    /// extensions to the right and the root of the gapped stage's interval tree.
     pub(crate) fn concat_length(&self) -> i32 {
         self.engine_size as i32
     }
@@ -489,7 +489,7 @@ pub(crate) fn search_sets(
     use crate::report::archive::options::{Param, ParamValue};
     let mut sets = Vec::new();
     if let Some(db_length) = db_length {
-        // `SetDbLength(Int8)` of `D`, whatever its sign (0 too; probes p6_3v_l0#3,
+        // `SetDbLength` of `D` as an `Int8`, whatever its sign (0 too; probes p6_3v_l0#3,
         // p6_3v_l2p63p1#3 of line RG D1a-4).
         sets.push(Param {
             name: "DbLength",
@@ -1016,9 +1016,9 @@ impl RpsVolumeSetup {
                 self.program
             );
         }
-        // NCBI's scaled values: `(Int4)scale` multiplies the costs and cutoffs (a whole scale of
-        // 1 or more here; `RpsRun::search_volume` refuses one whose products leave `Int4` and one
-        // that changes Lambda).
+        // NCBI's scaled values: `scale` cast to `Int4` multiplies the costs and cutoffs (a whole
+        // scale of 1 or more here; `RpsRun::search_volume` refuses one whose products leave `Int4`
+        // and one that changes Lambda).
         let scale = aux.scale;
         if !(scale >= 1.0 && scale.fract() == 0.0) {
             bail!(

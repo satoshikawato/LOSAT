@@ -220,8 +220,8 @@ pub(crate) fn read_document(text: &[u8], root: u16, names: Names) -> Read<Value>
     ObjectStream::text(SliceSource::new(text), names).read_object(root)
 }
 
-/// [`read_document`] of the ASN.1 binary object at the start of `bytes` (`in >> MSerial_AsnBinary
-/// >> object`: no file header).
+/// [`read_document`] of the ASN.1 binary object at the start of `bytes` (the stream read as `MSerial_AsnBinary`
+/// into the object: no file header).
 pub(crate) fn read_ber_document(bytes: &[u8], root: u16, names: Names) -> Read<Value> {
     ObjectStream::binary(SliceSource::new(bytes), names).read_object(root)
 }
@@ -378,7 +378,7 @@ impl<I: Input> TypedReader<I> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, cited at
     // `object_frame::HANDLE_EOF`)
     /// `END_OBJECT_FRAME`: the frame is left, and an error that leaves it gets NCBI's handling. A
-    /// `CSerialException` takes the frame's name (`AddFrameInfo(GetFrameName())`); a
+    /// `CSerialException` takes the frame's name (`AddFrameInfo` of `GetFrameName()`); a
     /// `CEofException` is `HandleEOF`, which passes it on when fewer than 2 frames stay and throws
     /// its own `CSerialException` (with the frame's information, and without the frame's name)
     /// otherwise; another `CException` takes the frame's line (`NCBI_RETHROW_SAME` with
@@ -450,7 +450,7 @@ impl<I: Input> TypedReader<I> {
         self.pop(value)
     }
 
-    /// `SkipFileHeader(type)`: the type name of a text document must be the root's.
+    /// `SkipFileHeader` of the type: the type name of a text document must be the root's.
     fn file_header(&mut self, name: &'static str) -> R<()> {
         match self.inp.read_file_header()? {
             Some(id) if !id.is_empty() && id != name.as_bytes() => Err(throw_error(
@@ -587,7 +587,7 @@ impl<I: Input> TypedReader<I> {
     }
 
     /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `BeginClass`, the
-    /// member frame): the next member in module order (`BeginClassMember(classType, pos)`) with
+    /// member frame): the next member in module order (`BeginClassMember` of the class type and `pos`) with
     /// the mandatory members before it checked, and a read's (not a skip's) member hooks before
     /// its value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
     /// members after it checked, `EndClass`, the class frame left.

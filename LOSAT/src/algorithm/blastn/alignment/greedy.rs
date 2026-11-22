@@ -1271,7 +1271,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         let xdrop_score_raw =
             max_score[xdrop_idx + xdrop_offset] + score_common_factor * d - xdrop_threshold;
         // NCBI: (Int4)ceil((double)xdrop_score / match_score_half)
-        let xdrop_score = ((xdrop_score_raw as f64) / (match_score_half as f64)).ceil() as i32;
+        let xdrop_score = x_ceil_quotient_i32(xdrop_score_raw, match_score_half as f64);
         // NCBI: if (xdrop_score < 0) xdrop_score = 0;
         let xdrop_score = xdrop_score.max(0);
 
@@ -2010,6 +2010,33 @@ fn reduce_gaps(
     }
 
     rebuild_edit_script(esp);
+}
+
+/// No NCBI counterpart: the X-drop bound of a distance in NCBI's floating-point form (the raw
+/// bound converted to `double`, divided by half the match cost, rounded up and converted back to
+/// `Int4`; greedy_align.c, cited at each caller) without a call of the C library's `ceil`. The
+/// x86-64 build has no rounding instruction (SSE4.1 is not assumed), so `f64::ceil` is a call on
+/// every distance of every greedy alignment (megablast, line FM s1: the call, its return and
+/// the conversions were a fifth of `blast_greedy_align`'s cycles).
+///
+/// The quotient is the same `f64` division. A finite quotient below 2^52 in magnitude converts to
+/// `i64` exactly when truncated toward zero; its ceiling is that integer, plus one when the
+/// integer lies below the quotient, which is IEEE's ceiling. The conversion to `i32` saturates as
+/// Rust's `as` does. A divisor of 1 leaves the integer as it is (exact in `f64`). Any other
+/// quotient (infinite, NaN or of 2^52 and above) takes `f64::ceil` as before.
+#[inline(always)]
+fn x_ceil_quotient_i32(raw: i32, half: f64) -> i32 {
+    if half == 1.0 {
+        return raw;
+    }
+    let q = raw as f64 / half;
+    if q.abs() < 4_503_599_627_370_496.0 {
+        let t = q as i64;
+        let c = if (t as f64) < q { t + 1 } else { t };
+        c.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+    } else {
+        q.ceil() as i32
+    }
 }
 
 /// Find first mismatch with fence detection.
@@ -3175,7 +3202,7 @@ fn blast_greedy_align_rows(
         let xdrop_score = {
             let raw = non_affine_mem.max_score[d as usize] + (match_cost + mismatch_cost) * d
                 - xdrop_threshold;
-            ((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32
+            x_ceil_quotient_i32(raw, match_cost as f64 / 2.0)
         };
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-550,562,589,673-678
@@ -3670,7 +3697,7 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
 
     while d <= scaled_max_dist {
         let xdrop_raw = max_score_base[d as usize] + score_common_factor * d - xdrop_threshold;
-        let mut xdrop_score = ((xdrop_raw as f64) / (match_score_half as f64)).ceil() as i32;
+        let mut xdrop_score = x_ceil_quotient_i32(xdrop_raw, match_score_half as f64);
         if xdrop_score < 0 {
             xdrop_score = 0;
         }

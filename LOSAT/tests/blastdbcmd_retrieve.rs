@@ -401,6 +401,18 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("I775", &["-db", "db/p4n", "-entry", "1", "-outfmt", "%o %a"], 1),
     ("I776", &["-db", "db/p4n", "-entry", "lcl|3", "-outfmt", "%o %a"], 1),
     ("I777", &["-db", "db/p4n", "-entry", "gi|5", "-outfmt", "%o %a"], 1),
+    // Hexadecimal values of the keys with a constraint (`-line_length` `>=1`, `-ipg` `>=0`): NCBI's
+    // reader converts them and its constraint reads their text (line RG item K4i-1, 2026-11-18;
+    // G11 in `blastdbcmd_info.rs`).
+    ("G01", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x5"], 0),
+    ("G02", &["-db", "db/p5n", "-entry", "all", "-line_length", "0X10"], 0),
+    ("G03", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x"], 1),
+    ("G04", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x0"], 1),
+    ("G05", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x1p3"], 1),
+    ("G06", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x80000000"], 1),
+    ("G08", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x5g"], 1),
+    ("G09", &["-db", "db/ak/m_r", "-ipg", "0x3E9"], 0),
+    ("G10", &["-db", "db/ak/m_r", "-ipg", "0x"], 1),
 ];
 
 #[test]

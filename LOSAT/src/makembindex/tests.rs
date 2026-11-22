@@ -8,13 +8,7 @@ use super::*;
 /// `CArgAllow_Integers::GetUsage` of makembindex's constraints, as its `-help` prints them.
 #[test]
 fn integer_constraints_print_ncbi_usage() {
-    let usage = |name: &str| {
-        DESCS
-            .iter()
-            .find(|desc| desc.name() == name)
-            .and_then(|desc| desc.constraint_usage())
-            .unwrap()
-    };
+    let usage = |name: &str| crate::ncbi_app::args::constraint_usage("makembindex", name).unwrap();
     assert_eq!(usage("nmer"), "8..15");
     for name in ["ws_hint", "volsize", "stride"] {
         assert_eq!(usage(name), "greater or equal to 1");
@@ -125,4 +119,44 @@ fn a_stride_past_ncbi_s_shift_is_refused() {
     ];
     let (_, _, status, files) = run_in_dir("stride32767", &words, FASTA);
     assert_eq!((status, files.len()), (0, 1));
+}
+
+/// `-old_style_index true -iformat blastdb` over an alias file whose `OID_MASK_TYPE` leaves a
+/// sequence without a definition line (`tests/db_search/oidmask/ntall`, OID 1; line RG D1b-2):
+/// NCBI's database reader gives no Bioseq for it and makembindex stops on the null pointer with a
+/// report of the run's memory addresses (probe mk_old_ntall, exit status 3); LOSAT refuses it and
+/// leaves no file. The volumes alone (`omn`) are indexed.
+#[test]
+fn an_old_style_index_over_a_sequence_without_a_line_is_refused() {
+    let db = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/oidmask");
+    let words = |name: &str| {
+        let input = db.join(name).to_string_lossy().into_owned();
+        let words = [
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "blastdb",
+            "-nmer",
+            "8",
+            "-input",
+        ];
+        let mut words: Vec<String> = words.iter().map(|word| word.to_string()).collect();
+        words.push(input);
+        words
+    };
+    let all = words("ntall");
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    let (out, err, status, files) = run_in_dir("oidmask-ntall", &all, b"");
+    assert_eq!((out.as_str(), status, files.len()), ("", 1, 0));
+    assert_eq!(
+        err,
+        "creating @O@.00.idx...\nError: sequence 1 of the database, which has no letters or no \
+         definition line left by the alias files' OID_MASK_TYPE (NCBI's makembindex reads the null \
+         sequence its database reader gives for it and stops with a report of the run's memory \
+         addresses), is not supported by LOSAT's MAKEMBINDEX\n"
+    );
+    let volumes = words("omn");
+    let volumes: Vec<&str> = volumes.iter().map(String::as_str).collect();
+    let (_, _, status, files) = run_in_dir("oidmask-omn", &volumes, b"");
+    assert_eq!((status, files), (0, vec!["o.00.idx".to_string()]));
 }

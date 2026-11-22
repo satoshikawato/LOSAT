@@ -127,8 +127,9 @@ impl BlastnOutputFormat {
     /// What the format does with a subject whose lookup throws where its batch's prefetch is off
     /// (`report::db_subject::FormatThrow::of`): the default tables write the row (their `saccver`
     /// is a field of the subject block), a table with a field list as its fields say
-    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says; the
-    /// Seq-annots and the archive read nothing of the subject; LOSAT refuses it in the others.
+    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says, the pairwise
+    /// reports as their view says (`PairwiseView::after_throw`); the Seq-annots and the archive
+    /// read nothing of the subject; LOSAT refuses it in the others.
     pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
         use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
         match *self {
@@ -141,10 +142,13 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Xml2(kind) => {
                 FormatThrow::Writes(RunThrow::every_row(kind.after_throw()))
             }
+            BlastnOutputFormat::Pairwise(view) => {
+                FormatThrow::Writes(RunThrow::every_row(view.after_throw()))
+            }
             BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
-            BlastnOutputFormat::Pairwise(_)
-            | BlastnOutputFormat::Xml
-            | BlastnOutputFormat::Sam(_) => FormatThrow::Refused,
+            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => {
+                FormatThrow::Refused(crate::report::db_subject::ThrowRefusal::Format)
+            }
         }
     }
 

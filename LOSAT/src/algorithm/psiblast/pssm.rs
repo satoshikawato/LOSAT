@@ -143,7 +143,7 @@ impl PssmRequest {
         ]
     }
 
-    /// The diagnostics the engine computes (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
+    /// The diagnostics the engine computes (`PSIDiagnosticsRequestNewEx` with `SaveAsciiPssm`).
     pub(crate) fn diagnostics(&self) -> PsiDiagnosticsRequest {
         PsiDiagnosticsRequest::new_ex(self.ascii_path.is_some())
     }
@@ -308,9 +308,9 @@ pub(crate) struct QueryPssm {
 /// The PSSM of one query (`ComputePssmForNextIteration`) and its files: the ASN.1 text
 /// (`x_PSIMatrix2Asn1`, `PsiBlastAddAncillaryPssmData` and `MSerial_AsnText`) and the ASCII
 /// PSSM (`PrintAsciiPssm`), as requested. The inputs are the query, its Seq-aligns, the letters
-/// that NCBI's scope gives by their Seq-align ids (`subject(s_idx)`: in NCBIstdaa, the record's
-/// own or another sequence's, `None` for no sequence; `Err` for LOSAT's internal error of a record
-/// without letters) and the keys of those ids (`key(s_idx)`,
+/// that NCBI's scope gives by their Seq-align ids (the subject of index `s_idx`: in NCBIstdaa, the
+/// record's own or another sequence's, `None` for no sequence; `Err` for LOSAT's internal error of
+/// a record without letters) and the keys of those ids (the key of index `s_idx`,
 /// `rounds::SetKey`), the round's ancillary data, and the gapped block of the matrix and gap
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
@@ -515,7 +515,7 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::ColumnOfGaps => "Found column with only GAP residues",
         PsiError::StartingGap => "Found flanking gap at start of alignment",
         PsiError::EndingGap => "Found flanking gap at end of alignment",
-        // `x_ErrorCodeToString(PSIERR_UNKNOWN)`, PSIERR_UNKNOWN being -255 (blast_psi_priv.h:392).
+        // `x_ErrorCodeToString` of `PSIERR_UNKNOWN`, which is -255 (blast_psi_priv.h:392).
         PsiError::Unknown => "Unknown error code returned from PSSM engine: -255",
         PsiError::NoMatrixFrequencyData => {
             "No matrix frequency ratios were found for requested matrix"
@@ -697,7 +697,7 @@ pub(super) const RESIDUE_ORDER: [usize; 20] = [
     1, 16, 13, 4, 3, 15, 5, 7, 8, 9, 11, 10, 12, 6, 14, 17, 18, 20, 22, 19,
 ];
 
-/// A double as the C++ stream writes it with `fixed` and `setprecision(precision)` (the C
+/// A double as the C++ stream writes it with `fixed` and `setprecision` of `precision` (the C
 /// library's `%.*f`: correctly rounded, as Rust's formatting; `inf` and `nan` as glibc spells
 /// them).
 fn fixed(value: f64, precision: usize) -> String {
@@ -929,8 +929,8 @@ pub(crate) struct PssmFile {
 
 impl PssmFile {
     /// `GetStream`: with version 0, `CFile::Exists` (a regular file, through symbolic links) and
-    /// `Remove` (the name itself, `remove(3)`; a failure is neither checked nor, by default,
-    /// logged), then `ofstream` (made or truncated, through symbolic links).
+    /// `Remove` (the name itself, the C library's `remove`; a failure is neither checked nor, by
+    /// default, logged), then `ofstream` (made or truncated, through symbolic links).
     // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:4039-4042
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2595-2610
     pub(crate) fn open(&self) -> std::io::Result<std::fs::File> {

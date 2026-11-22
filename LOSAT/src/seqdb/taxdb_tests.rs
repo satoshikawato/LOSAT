@@ -105,7 +105,7 @@ fn names_of(db: &TaxDb, taxid: i32) -> (Option<TaxNames>, Vec<String>) {
     (names, messages)
 }
 
-// seqdbtax.cpp:258-259 (`info.taxid = tax_id` once the search finds the taxid, before the
+// seqdbtax.cpp:258-259 (`info.taxid` is set to `tax_id` once the search finds the taxid, before the
 // lookup can still fail): blastdbcmd's `-tax_info` writes empty names then, `N/A` only for a
 // taxid the search does not find (probe of line RG T5b, `T/t5b/out/extra`).
 #[test]

@@ -97,8 +97,9 @@ fn a_plus_strand_hit_of_a_translated_query() {
     assert_eq!(rf_index(&dom, 5000), 0);
 }
 
-// The minus strand: `alignedLen = (m_iTo + 1) / 3`, starts `alignedLen - (f / 3 + len)`, and
-// the frame index from the query's length (`PlusRFIdx2MinusRFIdx`).
+// The minus strand: `alignedLen` is `m_iTo` plus 1, divided by 3; starts `alignedLen` less the
+// sum of `f` divided by 3 and `len`, and the frame index from the query's length
+// (`PlusRFIdx2MinusRFIdx`).
 #[test]
 fn a_minus_strand_hit_of_a_translated_query() {
     let segs = [
@@ -211,11 +212,11 @@ fn locations_are_read_in_ncbis_order() {
     }
 }
 
-// biodata_blast.cpp:178-182 (cited at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
-// RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
-// 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
-// exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
-// shorter does (no overflow). A plus-strand hit with that end parses as it is.
+// biodata_blast.cpp:178-182 (cited at `parse_std_align`): `alignedLen` of a minus-strand hit,
+// `dst.m_iTo` plus 1 divided by `RF_SIZE`, is `int` arithmetic, which overflows for a hit that ends
+// at 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
+// exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base shorter
+// does (no overflow). A plus-strand hit with that end parses as it is.
 #[test]
 fn a_minus_strand_hit_that_ends_at_int_max() {
     let hit = |to: u32, strand: i32| {
@@ -276,15 +277,15 @@ fn ends_that_overflow_int() {
         pr2na_ends(&set(min + 1, 10), &minus),
         Some((568, -2_147_483_051))
     );
-    // The plus strand has no `pr - 1`: `INT_MIN * 3 + rfidx` wraps.
+    // The plus strand has no `pr - 1`: `INT_MIN` times 3 plus `rfidx` wraps.
     assert_eq!(pr2na_ends(&set(min, 10), &plus), Some((-2_147_483_647, 33)));
 }
 
-// basedata.cpp:1180-1250 (cited at `segset::SegSet::map_through`): `m_vecSStarts[idx] +
-// m_vecLens[idx] - 1` is an `unsigned int` sum stored in the `int` `end`. A segment from model
-// position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's range (2^31 - 8
-// to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and maps the part
-// of the range up to it.
+// basedata.cpp:1180-1250 (cited at `segset::SegSet::map_through`): one less than the sum of
+// `m_vecSStarts[idx]` and `m_vecLens[idx]` is an `unsigned int` sum stored in the `int` `end`. A
+// segment from model position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's
+// range (2^31 - 8 to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and
+// maps the part of the range up to it.
 #[test]
 fn mapped_segment_ends_wrap_as_unsigned_int() {
     let map = |s_start: i32| {
@@ -302,7 +303,7 @@ fn mapped_segment_ends_wrap_as_unsigned_int() {
 }
 
 // basedata.cpp:1252-1300 (cited at `translated_pos_map`): a minus-strand hit's positions move
-// by `aaLen - alignedLen`; an aligned length beyond the query is NCBI's exception.
+// by `aaLen` less `alignedLen`; an aligned length beyond the query is NCBI's exception.
 #[test]
 fn positions_on_a_minus_strand_translation() {
     let segs = [std_seg(int(301, 599, Some(2)), int(0, 99, None))];

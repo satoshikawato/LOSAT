@@ -7,7 +7,7 @@ use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutpu
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -2955,7 +2955,7 @@ impl UngappedHit {
     /// `ungapped` (offsets in the concatenated query), and whose offsets
     /// `s_AdjustInitialHSPOffsets` makes context-relative. NCBI's extensions run on the
     /// concatenated query (na_ungapped.c:164-206 and 284-310), so a saved hit can start left of
-    /// its context: where the exact walk passes two sentinels (`INT4_MIN / 2` each,
+    /// its context: where the exact walk passes two sentinels (half of `INT4_MIN` each,
     /// blast_stat.c:1124-1127) and its `Int4` sum wraps above 0 (a raw X-drop of 2^30 or more,
     /// such as the `INT_MIN` of `-xdrop_ungap 1e10`, does not stop the walk at the first one),
     /// or where the approximate walk, which reads the sentinel as bases, keeps a hit below the
@@ -3388,7 +3388,7 @@ fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize
 
 /// Where the second of two preliminary HSP lists continues the first: the start of a subject
 /// chunk, or the offsets of a query chunk's contexts (plus and minus strand; `Blast_HSPListsMerge`
-/// takes `contexts_per_query < 0` for the subject).
+/// takes a negative `contexts_per_query` for the subject).
 #[derive(Clone, Copy)]
 enum HspListSplit {
     Subject { offset: usize },
@@ -6285,22 +6285,11 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut report);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // exit 6; `cli::ReportStream::finish`).
+    report.finish(result, pairwise || tax_report)
 }
 
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
@@ -7605,8 +7594,8 @@ enum Subjects<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2609-2737
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2694-2697
-/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start +
-/// hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
+/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start` plus
+/// `hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
 /// of it (a negative `PrelimHit::prelim_qs`, or a `prelim_qe` past the context's length); the
 /// context's letters are the same bytes. Where the re-evaluation keeps a piece outside the
 /// context, NCBI's HSP keeps those offsets, and so does LOSAT's through the later stages, which may
@@ -8090,12 +8079,12 @@ fn run_in_pool(
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }
-        // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
+        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to `TSeqPos`.
         batching.batch_size = mixer.batch_size(None) as u32;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-280
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     if queries.input_count() == 0 && matches!(reading, QueryReading::End) {
         return write_batch_reports(

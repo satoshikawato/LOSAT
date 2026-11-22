@@ -96,7 +96,7 @@ pub(super) const NUC: u32 = F_NUC;
 pub(super) const PROT: u32 = F_PROT;
 pub(super) const SEQ: u32 = F_SEQ;
 
-/// `NCBI_ACC(type, div, mol)`.
+/// `NCBI_ACC` of the type, the division and the molecule.
 pub(super) const fn acc(seq_id: u32, division: u32, mol: u32) -> u32 {
     seq_id | division | mol
 }
@@ -370,7 +370,7 @@ pub(super) const ACC_INFO_NAMES: [(&str, u32); 213] = [
     ("unreserved_prot", acc(SEQID_NOT_SET, UNRESERVED, PROT)),
 ];
 
-/// `sc_AccInfoMap.find(name)`: the value of a type name, compared without case.
+/// `sc_AccInfoMap`'s `find` of `name`: the value of a type name, compared without case.
 pub(super) fn find_acc_info(name: &[u8]) -> Option<u32> {
     let lower = name.to_ascii_lowercase();
     ACC_INFO_NAMES

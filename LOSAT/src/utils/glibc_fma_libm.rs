@@ -632,8 +632,9 @@ fn ln1_poly<F: Fma>(r: f64, r2: f64, r3: f64, parts: [f64; 3]) -> f64 {
     F::fma_product_led(p, r3, lo)
 }
 
-/// `y` of log.c, whose result is `y + hi`: `lo + r2 * A[0] + r * r2 * (A[1] + r * A[2] + r2 *
-/// (A[3] + r * A[4]))` with `lo = w - hi + r + kd * Ln2lo`, with glibc's FMAs.
+/// `y` of log.c, whose result is `y` plus `hi`: `lo`, plus `r2` times `A[0]`, plus `r` times `r2`
+/// times the sum of `A[1]`, `r` times `A[2]`, and `r2` times the sum of `A[3]` and `r` times
+/// `A[4]`, where `lo` is `w` less `hi`, plus `r`, plus `kd` times `Ln2lo`, with glibc's FMAs.
 #[inline(always)]
 fn ln_poly<F: Fma>(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
     let lo = F::fma_small_int(kd, d(LOG_HEAD[1]), (w - hi) + r);

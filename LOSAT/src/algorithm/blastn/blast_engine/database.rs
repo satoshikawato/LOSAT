@@ -450,9 +450,9 @@ impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:643-651
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:664-668
     /// The volumes that NCBI's loader of a new-style MegaBLAST index finds for the `-db` value
-    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths(vols, true)` of the database opened
+    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths` of `vols` with `true`, on the database opened
     /// again by that name, as given, on the search path of this one), each with its number of
-    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). Where that
+    /// sequences (`GetNumOIDs` of the `CSeqDB` of the volume, the volume's in this database). Where that
     /// name does not open (a `-db` value with white space other than spaces at its ends, which
     /// the search trims and the loader keeps), the database reader's exception, or `None` where
     /// LOSAT does not know its place or the name opens other volumes than this database's.
@@ -486,7 +486,7 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
-    /// `SeqDB_ResolveDbPath(file)` on this database's search path: the path of the first
+    /// `SeqDB_ResolveDbPath` of `file` on this database's search path: the path of the first
     /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
     /// NCBI's empty string.
     pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {

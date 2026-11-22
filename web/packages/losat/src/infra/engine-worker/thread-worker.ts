@@ -5,6 +5,7 @@
 // carries messages (link.ts): a thread that stops is reported there.
 import { stopMessage } from '../reactor/abi.js';
 import { instantiateThread } from '../reactor/instance.js';
+import { RunDirectory } from '../reactor/run-directory.js';
 import { createWasi, type WasiContext } from '../reactor/wasi.js';
 import { InstanceUse } from './instance-use.js';
 import { openLink } from './link.js';
@@ -32,6 +33,8 @@ let faults: MessagePort | undefined;
 /** Resolves once the link to the main thread carries messages (openLink); the slot is ready only then. */
 let linked: Promise<void> = Promise.resolve();
 let use: InstanceUse | undefined;
+/** The run's working directory, on the table that the instance's threads share (run-directory.ts). */
+let directory: RunDirectory | undefined;
 let prepared: { readonly start: (tid: number, startArg: number) => void; readonly wasi: WasiContext } | undefined;
 
 function setState(value: number): void {
@@ -53,7 +56,7 @@ function finish(next: number): boolean {
 async function prepare(): Promise<void> {
   if (config === undefined) return;
   try {
-    const wasi = createWasi();
+    const wasi = createWasi(directory);
     const thread = await instantiateThread(config.module, config.memory, wasi);
     prepared = { start: thread.start, wasi };
     await linked;
@@ -76,6 +79,8 @@ function start(command: ThreadStart): void {
   Atomics.notify(started, 0);
   if (thread === undefined || outcome !== START_PENDING) return;
   try {
+    // The files of the run that spawned the thread; the descriptors that its threads opened are in the shared table.
+    directory?.take(command.files);
     thread.start(command.tid, command.startArg);
   } catch (error) {
     // The search cannot finish: the Engine worker may wait for this thread for ever, and
@@ -85,6 +90,8 @@ function start(command: ThreadStart): void {
     finish(SLOT_FAILED);
     return;
   }
+  // The thread has returned: the worker keeps no File of the run while it waits for the next (review of D12a, low 6).
+  directory?.take([]);
   if (finish(SLOT_PREPARING)) void prepare();
 }
 
@@ -96,6 +103,7 @@ scope.onmessage = (event) => {
     faults = command.faults;
     linked = openLink(command.faults);
     use = new InstanceUse(command.use);
+    directory = new RunDirectory(command.directory);
     void prepare();
     return;
   }

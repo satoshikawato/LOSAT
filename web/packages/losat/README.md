@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 11, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 12, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 11 |
+| 0.2.0 | 0.2.0 | 12 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -142,6 +142,32 @@ an empty file means none. These are the warnings that the command line writes fo
 `-outfmt`. What the run's other outputs add to them (their option warnings, and in a run of two
 searches the other search's warnings and errors) comes on stream 3 where it is `'diagnostics'` or
 `'logfile'`, and is not kept where it is `'nowhere'`.
+
+## Databases
+
+A search of `-db` reads a BLAST database from the user's device. Give the run the database's files, and
+the lists of its filters (`-seqidlist`, `-taxidlist`, `-gilist` and their negatives), as
+`EngineRunRequest.files`: each a `DirectoryFile`, a `File` named by its path in the run's working
+directory, as the command line run from that directory names it (`-db db/nt` reads `db/nt.nal`,
+`db/nt.00.nin`, ...). The engine looks for the taxonomy files (`taxdb.bti`, `taxdb.btd`,
+`taxonomy4blast.sqlite3`) as the command line does: at the directory's root, or in the directory that
+`[BLAST] BLASTDB` of the run's `.ncbirc` or `-conffile` names (a registry file), not beside the
+database; files named `db/taxdb.*` give the command line's `N/A` names. The directory is the engine's
+current directory, `/work`: a relative name is a file of it, an absolute one (`/db/nt`) names none, and
+a path is looked up as the OS looks it up (`nofolder/../db/nt` fails), as on the command line run from
+that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place, only the bytes that
+it needs, with `FileReaderSync` in the workers: a database is never copied into memory or into the
+browser's storage. Every thread of a threaded search reads the same files.
+
+The limits are the browser's: a search must fit in WebAssembly's 4 GiB of memory, and a browser keeps
+no access to the user's files across a reload, so the user gives them again. `-remote` and
+`-entrez_query` are refused, as on the command line.
+
+In Node, `instantiateSerial(module, directory)` takes a `RunDirectory`; give it a function that reads a
+`Blob`'s bytes synchronously, since Node has no `FileReaderSync` (the package's tests read each Blob's
+file with `fs.readSync`, `tests/database.test.ts`).
+
+## Calling a module directly
 
 In a worker or in Node, the serial module can also be called directly:
 

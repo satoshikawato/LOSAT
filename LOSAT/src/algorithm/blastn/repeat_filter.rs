@@ -200,6 +200,8 @@ impl RepeatFilter {
     /// Adds the masks of the repeats to `masks`, the masks of `queries` so far (DUST's and the
     /// lower case; for a chunk, the batch's masks cut to the chunk too): each query's hits
     /// (`hits`) join its masks (`combine`); a query without a hit keeps its masks as they are.
+    /// Returns the hits, which the BLAST archive of a query batch reads (`archive::CallBatches`'s
+    /// `repeat_hits`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
     ///
@@ -214,19 +216,19 @@ impl RepeatFilter {
         masks: &mut [Vec<MaskedInterval>],
         outside: &mut [MasksOutside],
         pool: &SearchPool<'_>,
-    ) -> Result<(), RepeatError> {
+    ) -> Result<Vec<Vec<(usize, usize)>>, RepeatError> {
         let found = self.hits(strand, queries, pool)?;
-        for (index, (query_masks, hits)) in masks.iter_mut().zip(found).enumerate() {
+        for (index, (query_masks, hits)) in masks.iter_mut().zip(&found).enumerate() {
             if !hits.is_empty() {
                 *query_masks = join(
-                    &hits,
+                    hits,
                     query_masks,
                     queries.length(index),
                     outside.get_mut(index),
                 );
             }
         }
-        Ok(())
+        Ok(found)
     }
 
     /// The database's name, as `-filtering_db` gives it.

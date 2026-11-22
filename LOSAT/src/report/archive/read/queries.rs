@@ -28,7 +28,6 @@ use crate::seqid::label::{bioseq_fasta, fasta};
 use crate::seqid::mask_handle::{handle_fasta_is_own, mask_handle_key};
 use crate::seqid::model::ParsedSeqId;
 use crate::sequence::stdaa_letters::protein_fasta_letters;
-use crate::sequence::write_fasta_lines;
 
 use super::request::{self, Bioseq};
 
@@ -53,13 +52,13 @@ pub fn render_queries(set: V<'_>) -> Result<Vec<u8>, RenderError> {
     Ok(stream.text)
 }
 
-/// The width of the sequence lines (`CFastaOstream::SetWidth(70)` in its constructor).
+/// The width of the sequence lines (70, which `CFastaOstream`'s constructor gives `SetWidth`).
 const WIDTH: u32 = 70;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:354-367
 /// The subject Bioseqs of a strategy (`s_ImportSubjects`: each Bioseq searched whole under its
 /// own id and title) as the FASTA text from which the program's `-subject` reader makes the same
-/// records: the Bioseq `i` (from 0) must have the one local id `Subject_<i + 1>` that NCBI's
+/// records: the Bioseq `i` (from 0) must have the one local id `Subject_N`, N one more than `i`, that NCBI's
 /// reader gives a subject without `-parse_deflines` (NCBI's own exports); without
 /// `parse_deflines` its definition line is its title alone (the reader numbers it again), with
 /// it `lcl|Subject_<i + 1>` and its title (the reader parses the id). Other ids are not modelled.
@@ -172,8 +171,14 @@ impl FastaOstream {
         self.write_seq_title(title, &ids, protein)?;
         // The reader reads a `TSeqPos` without a sign.
         let length = u32::try_from(length).expect("a Seq-inst length of 32 bits");
-        let letters = letters(inst, length, protein)?;
-        write_fasta_lines(&letters, WIDTH, &mut self.text);
+        // The letters go straight into the text and are broken into lines there: the text is the
+        // one copy of the sequence that the import holds.
+        let letters = length as usize;
+        self.text
+            .reserve(letters + letters.div_ceil(WIDTH as usize));
+        let start = self.text.len();
+        append_letters(inst, length, protein, &mut self.text)?;
+        break_into_lines(&mut self.text, start, WIDTH as usize);
         Ok(())
     }
 
@@ -482,10 +487,14 @@ const NO_SEGMENT: ThrowSite = ThrowSite {
 /// that passes the length is read up to it, as if it ended there (`dl_sum_short`, `dl_cut_*`);
 /// segments that end before it throw where they end (`dl_sum_long`, `dl_sum_long_gap`,
 /// `dl_empty`).
-fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderError> {
+fn append_letters(
+    inst: V<'_>,
+    length: u32,
+    protein: bool,
+    out: &mut Vec<u8>,
+) -> Result<(), RenderError> {
     let pieces = sequence_map(inst, length)?;
     let target = if protein { NCBIEAA } else { IUPACNA };
-    let mut out = Vec::new();
     let mut position = 0u32;
     for piece in pieces {
         if position >= length {
@@ -502,7 +511,7 @@ fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderErr
                 out.len() + needed as usize,
                 if protein { b'X' } else { b'N' },
             ),
-            Piece::Data(data, _) => data_letters(data, needed, target, &mut out)?,
+            Piece::Data(data, _) => data_letters(data, needed, target, out)?,
         }
         position = end;
     }
@@ -512,11 +521,30 @@ fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderErr
             format!("CSeqVector_CI: cannot locate segment at {position}"),
         )));
     }
-    Ok(out)
+    Ok(())
+}
+
+/// The letters from `start` to the end of `text` broken into lines of `width` letters, each ending
+/// with a newline (the last one shorter), in place: what `sequence::write_fasta_lines` writes for
+/// them, without a second buffer.
+fn break_into_lines(text: &mut Vec<u8>, start: usize, width: usize) {
+    let count = text.len() - start;
+    let lines = count.div_ceil(width);
+    text.resize(text.len() + lines, 0);
+    // From the last line back: each line moves right by the newlines of the lines before it.
+    let mut write = text.len();
+    for line in (0..lines).rev() {
+        let from = start + line * width;
+        let to = (from + width).min(start + count);
+        write -= 1;
+        text[write] = b'\n';
+        write -= to - from;
+        text.copy_within(from..to, write);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-291
-/// The Bioseq's sequence map (`CSeqMap(const CSeq_inst&)`) for a Bioseq whose length is set: its
+/// The Bioseq's sequence map (the `CSeqMap` constructor of a `CSeq_inst`) for a Bioseq whose length is set: its
 /// Seq-data over the length, whatever its representation (`r_*`); else its extension (a delta's
 /// literals in order, a literal without Seq-data or with `gap` data being a gap; a map's gap over
 /// the length); else a gap over the length (`virtual`, `map`, or another representation of a
@@ -560,7 +588,7 @@ fn sequence_map(inst: V<'_>, length: u32) -> Result<Vec<Piece<'_>>, RenderError>
     }
 }
 
-/// The throw of `CSeqMap(const CSeq_inst&)` for a Bioseq without data whose representation or
+/// The throw of the `CSeqMap` constructor of a `CSeq_inst` for a Bioseq without data whose representation or
 /// length says it has some (`m_raw_len0_nodata`, `m_notset_len4_nodata`). NCBI's kind is
 /// `eSeqDataError`, the text of `eDataError`.
 fn seq_map_error(message: &str) -> RenderError {

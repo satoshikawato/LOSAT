@@ -116,7 +116,7 @@ fn recorded(setter: &Setter) -> (&'static str, Recorded) {
         Setter::SegFilteringHicut(v) => (fields::SEG_FILTERING_HICUT.name(), Real(*v)),
         Setter::SumStatisticsMode(v) => (fields::SUM_STATISTICS_MODE.name(), Bool(*v)),
         Setter::SmithWatermanMode(v) => (fields::SMITH_WATERMAN_MODE.name(), Bool(*v)),
-        // `SetGappedMode(!v)` of `UngappedMode v`.
+        // `SetGappedMode` with the negation of `UngappedMode`'s value.
         Setter::GappedMode(v) => (fields::GAPPED_MODE.name(), Bool(!*v)),
         Setter::UnifiedP(v) => (fields::UNIFIED_P.name(), int(v)),
         Setter::SubjectBestHit => (fields::SUBJECT_BEST_HIT.name(), Bool(true)),

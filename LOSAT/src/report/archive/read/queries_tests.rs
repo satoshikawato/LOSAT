@@ -113,3 +113,19 @@ fn a_segment_that_passes_the_length_is_filled_up_to_it() {
         other => panic!("{other:?}"),
     }
 }
+
+/// The lines that `break_into_lines` makes in place are those of `sequence::write_fasta_lines`,
+/// after the text before the letters, at every length around the width.
+#[test]
+fn letters_broken_in_place_are_the_fasta_lines() {
+    for count in [0, 1, 69, 70, 71, 139, 140, 141, 1000] {
+        let letters: Vec<u8> = (0..count).map(|i| b"ACGT"[i % 4]).collect();
+        let mut expected = b">lcl|q title\n".to_vec();
+        crate::sequence::write_fasta_lines(&letters, WIDTH, &mut expected);
+        let mut text = b">lcl|q title\n".to_vec();
+        let start = text.len();
+        text.extend_from_slice(&letters);
+        break_into_lines(&mut text, start, WIDTH as usize);
+        assert_eq!(text, expected, "{count} letters");
+    }
+}

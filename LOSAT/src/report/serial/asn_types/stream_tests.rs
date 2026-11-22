@@ -74,7 +74,7 @@ fn one_object_read_leaves_the_rest() {
     assert_eq!(rest, &text[24..]);
 }
 
-/// `in.seekg(0)` of a file: the input from its start again.
+/// `seekg` back to the start of a file: the input from its start again.
 #[test]
 fn a_seekable_input_rewinds() {
     let text = b"Blast4-request ::= { body get-matrices NULL }\n".to_vec();

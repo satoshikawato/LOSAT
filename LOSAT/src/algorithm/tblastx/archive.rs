@@ -514,6 +514,8 @@ impl import::StrategyArgs for TblastxArgs {
                 })?
             }
             Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
             // A length other than 0 is NCBI's options error, as `-max_intron_length` gives it.
             Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
             Setter::GapOpeningCost(_)

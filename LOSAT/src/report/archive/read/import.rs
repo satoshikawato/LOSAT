@@ -153,7 +153,7 @@ fn no_posts(posts: &[crate::report::serial::asn_types::Post], program: &str) -> 
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2258-2273
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2295-2309
-/// `ExtractBlast4Request(in)`: the request of a strategy file, the reply type first.
+/// `ExtractBlast4Request` of the input stream: the request of a strategy file, the reply type first.
 fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
     let guessed = guess_encoding(input);
     // The first attempt: its exceptions are caught, and the guess of an input that is not read
@@ -194,7 +194,7 @@ fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
             unreachable!("an undecided guess is refused")
         }
     };
-    // `in.seekg(0)` of an input that cannot seek (a pipe) fails its stream: NCBI's second guess
+    // `seekg` back to the start of an input that cannot seek (a pipe) fails its stream: NCBI's second guess
     // reads nothing and its `default` throws.
     let input = first.map_err(|_| failed_to_read())?;
     let guessed = guess_encoding(input);
@@ -1081,7 +1081,7 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::SegFilteringHicut(v) => one(f::SEG_FILTERING_HICUT, Real(*v)),
         Setter::SumStatisticsMode(v) => one(f::SUM_STATISTICS_MODE, Boolean(*v)),
         Setter::SmithWatermanMode(v) => one(f::SMITH_WATERMAN_MODE, Boolean(*v)),
-        // `SetGappedMode(!v)` records `UngappedMode`, the value read.
+        // `SetGappedMode` with the value negated records `UngappedMode`, the value read.
         Setter::GappedMode(v) => one(f::GAPPED_MODE, Boolean(!*v)),
         Setter::UnifiedP(v) => one(f::UNIFIED_P, Integer(*v)),
         Setter::SubjectBestHit => one(f::SUBJECT_BEST_HIT, Boolean(true)),
@@ -1089,7 +1089,7 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::WindowSize(v) => one(f::WINDOW_SIZE, Integer(*v)),
         Setter::WordSize(v) => one(f::WORD_SIZE, Integer(*v)),
         Setter::WordThreshold(v) => one(f::WORD_THRESHOLD, Integer(*v)),
-        // The builder's `SetUseIndex(true, name, true)` records the force flag true; the run's
+        // The builder's `SetUseIndex` (index on, the name, forced) records the force flag true; the run's
         // loader that uses no index sets it false again (`options::replayed_options`).
         Setter::UseIndex { index_name } => vec![
             Param::new(f::FORCE_MB_INDEX, Boolean(true)),

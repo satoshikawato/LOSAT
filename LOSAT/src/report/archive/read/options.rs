@@ -5,7 +5,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:79-129
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:667-695
 //! [`build`] is that function: the program, its task, and the `Set*` calls that the builder makes
-//! on the program's factory options (`CBlastOptionsFactory::Create(program)`), in NCBI's order
+//! on the program's factory options (`CBlastOptionsFactory::Create` of the program), in NCBI's order
 //! ([`Setter`]); with what the builder keeps for the database and the query
 //! ([`BuiltOptions`]). The caller applies the calls in order to the program's own options, over
 //! the defaults of the task: the last call of an option wins, as NCBI's do. [`import_options`] is
@@ -257,7 +257,7 @@ fn text(bytes: &[u8]) -> String {
 pub enum Setter {
     BestHitScoreEdge(f64),
     BestHitOverhang(f64),
-    /// `SetCompositionBasedStats((ECompoAdjustModes) v)`: the number as read.
+    /// `SetCompositionBasedStats` with the value cast to `ECompoAdjustModes`: the number as read.
     CompositionBasedStats(i32),
     CullingLimit(i32),
     DbGeneticCode(i32),
@@ -269,24 +269,24 @@ pub enum Setter {
     DomainInclusionThreshold(f64),
     EffectiveSearchSpace(i64),
     EvalueThreshold(f64),
-    /// `SetFilterString(v, true)`.
+    /// `SetFilterString` with the value, clearing the filter options first (`clear` true).
     FilterString(String),
     GapExtensionCost(i32),
     GapOpeningCost(i32),
-    /// `SetGapTracebackAlgorithm((EBlastTbackExt) v)`: the number as read.
+    /// `SetGapTracebackAlgorithm` with the value cast to `EBlastTbackExt`: the number as read.
     GapTracebackAlgorithm(i32),
     GapTrigger(f64),
     GapXDropoff(f64),
     GapXDropoffFinal(f64),
-    /// `SetGapExtnAlgorithm(static_cast<EBlastPrelimGapExt>(v))`: the number as read.
+    /// `SetGapExtnAlgorithm` with the value cast to `EBlastPrelimGapExt`: the number as read.
     GapExtnAlgorithm(i32),
     HitlistSize(i32),
     InclusionThreshold(f64),
     IgnoreMsaMaster(bool),
     LongestIntronLength(i32),
-    /// `SetMBTemplateLength(unsigned char)`: the `int` converted (modulo 256).
+    /// `SetMBTemplateLength`, whose parameter is an unsigned char: the `int` converted (modulo 256).
     MbTemplateLength(u8),
-    /// `SetMBTemplateType(unsigned char)`: the `int` converted (modulo 256).
+    /// `SetMBTemplateType`, whose parameter is an unsigned char: the `int` converted (modulo 256).
     MbTemplateType(u8),
     MatchReward(i32),
     MatrixName(String),
@@ -294,7 +294,7 @@ pub enum Setter {
     MaskAtHash(bool),
     MaxHspsPerSubject(i32),
     OutOfFrameMode(bool),
-    /// `SetPHIPattern(pattern, is_na)`, `is_na` = the options' query is nucleotide.
+    /// `SetPHIPattern` with the pattern and `is_na`, true where the options' query is nucleotide.
     PhiPattern {
         pattern: String,
         is_na: bool,
@@ -305,7 +305,7 @@ pub enum Setter {
     QueryCovHspPerc(f64),
     RepeatFiltering(bool),
     RepeatFilteringDb(String),
-    /// `SetStrandOption((ENa_strand) v)`: the `Blast4-strand-type` number (forward 1, reverse 2,
+    /// `SetStrandOption` with the value cast to `ENa_strand`: the `Blast4-strand-type` number (forward 1, reverse 2,
     /// both 3, the numbers of `ENa_strand`'s plus, minus and both).
     StrandOption(i32),
     SegFiltering(bool),
@@ -314,7 +314,7 @@ pub enum Setter {
     SegFilteringHicut(f64),
     SumStatisticsMode(bool),
     SmithWatermanMode(bool),
-    /// `SetGappedMode(!v)` of `UngappedMode v`.
+    /// `SetGappedMode` with the negation of `UngappedMode`'s value.
     GappedMode(bool),
     UnifiedP(i32),
     /// `SetSubjectBestHit()`, whatever the value.
@@ -322,9 +322,9 @@ pub enum Setter {
     WindowMaskerTaxId(i32),
     WindowSize(i32),
     WordSize(i32),
-    /// `SetWordThreshold(double)` of an `int`.
+    /// `SetWordThreshold`, whose parameter is a double, of an `int`.
     WordThreshold(i32),
-    /// `SetUseIndex(true, m_MbIndexName, m_ForceMbIndex)` (`x_ApplyInteractions`): use the
+    /// `SetUseIndex` (index on, `m_MbIndexName`, `m_ForceMbIndex`; `x_ApplyInteractions`): use the
     /// megablast index `index_name`, forced; `old_style_index` keeps its default (false).
     UseIndex {
         index_name: String,
@@ -360,7 +360,7 @@ pub struct BuiltOptions {
     /// `FirstDbSeq`, `FinalDbSeq`.
     pub first_db_seq: Option<i32>,
     pub final_db_seq: Option<i32>,
-    /// `GiList`, `NegativeGiList`: each `int` as `(Uint4)` (`GI_FROM(Uint4, gi_v)`).
+    /// `GiList`, `NegativeGiList`: each `int` cast to `Uint4` (`GI_FROM`).
     pub gi_list: Option<Vec<i64>>,
     pub negative_gi_list: Option<Vec<i64>>,
     /// `TaxidList`, `NegativeTaxidList`.
@@ -369,7 +369,7 @@ pub struct BuiltOptions {
     /// `DbFilteringAlgorithmId`, `DbFilteringAlgorithmKey`.
     pub db_filtering_algorithm_id: Option<i32>,
     pub db_filtering_algorithm_key: Option<String>,
-    /// `SubjectMaskingType` (`(ESubjectMaskingType) v`: the number as read).
+    /// `SubjectMaskingType` (the value cast to `ESubjectMaskingType`: the number as read).
     pub subject_masking_type: Option<i32>,
     /// `LCaseMask` values (`Blast4-mask`), those of the algorithm options, else of the program
     /// options (`HaveQueryMasks`, `GetQueryMasks`).
@@ -1014,8 +1014,8 @@ pub struct OptionLists<'a> {
     pub format: Option<&'a [RawParam<'a>]>,
 }
 
-/// `CBlastOptionsBuilder(program, service, locality, false).GetSearchOptions(algorithm,
-/// program options, format options)`: the options of a request.
+/// `GetSearchOptions` of a `CBlastOptionsBuilder` of the program, the service and the locality
+/// (no PSSM query), over the algorithm, program and format options: the options of a request.
 pub fn build(
     program: &[u8],
     service: &[u8],
@@ -1031,7 +1031,7 @@ pub fn build(
     let adjusted = adjust_program(&all, computed, program)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:85-88
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:299-313
-    // `CBlastOptionsFactory::Create(program, eBoth)`: the options have the local and the remote
+    // `CBlastOptionsFactory::Create` of the program with `eBoth`: the options have the local and the remote
     // part, so the Blast4 parameter list that `-outfmt 11` and `-export_search_strategy` write is
     // kept.
     let mut builder = Builder::new(adjusted);

@@ -597,6 +597,8 @@ impl import::StrategyArgs for BlastxArgs {
             }
             Setter::LongestIntronLength(n) => self.max_intron_length = *n,
             Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
             Setter::SmithWatermanMode(false) | Setter::OutOfFrameMode(false) => {}
             _ => return Ok(false),
         }

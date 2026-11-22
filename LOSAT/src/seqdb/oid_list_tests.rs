@@ -51,7 +51,7 @@ fn a_path_that_is_not_a_file_is_ncbis_memory_map_error() {
     let dir = TempDir::new("missing");
     let missing = dir.0.join("absent.msk").to_str().unwrap().to_string();
     let error = read(&missing).unwrap_err();
-    assert_eq!(error, OidListError::NotAFile(missing.clone()));
+    assert!(matches!(&error, OidListError::NotAFile(path) if *path == missing));
     let error = error.to_error();
     let text = format!("To be memory mapped the file must exist: '{missing}'");
     assert!(
@@ -66,10 +66,10 @@ fn a_path_that_is_not_a_file_is_ncbis_memory_map_error() {
     assert_eq!(error.ncbi_request_message(), Some(text.into_bytes()));
     // A directory is not a file.
     let directory = dir.0.to_str().unwrap().to_string();
-    assert_eq!(
+    assert!(matches!(
         read(&directory).unwrap_err(),
-        OidListError::NotAFile(directory)
-    );
+        OidListError::NotAFile(path) if path == directory
+    ));
 }
 
 #[test]
@@ -84,7 +84,9 @@ fn files_without_a_byte_of_bits_are_refused() {
     for len in 1..=4u64 {
         let path = dir.write("short.msk", &vec![0u8; len as usize]);
         let error = read(&path).unwrap_err();
-        assert_eq!(error, OidListError::Short(PathBuf::from(&path), len));
+        assert!(
+            matches!(&error, OidListError::Short(at, n) if *at == PathBuf::from(&path) && *n == len)
+        );
         assert!(matches!(
             error.to_error(),
             SeqDbError::Integrity { message, .. } if message.contains(&format!("holds {len} bytes"))
@@ -136,13 +138,9 @@ fn a_read_past_the_last_mapped_page_is_refused() {
     let file = read(&path).unwrap();
     assert_eq!(oids(&file.volume_words(4092 * 8).unwrap()), [0]);
     let error = file.volume_words(4092 * 8 + 1).unwrap_err();
-    assert_eq!(
-        error,
-        OidListError::PastPage {
-            path: PathBuf::from(&path),
-            read: 4093,
-            len: 5,
-        }
-    );
+    assert!(matches!(
+        &error,
+        OidListError::PastPage { path: at, read: 4093, len: 5 } if *at == PathBuf::from(&path)
+    ));
     assert!(matches!(error.to_error(), SeqDbError::NcbiCrashes { .. }));
 }

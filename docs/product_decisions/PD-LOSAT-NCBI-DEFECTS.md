@@ -328,8 +328,8 @@
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07)
-  1.72 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: two
-  explicit rejections of a `SEQIDLIST`, kept under rule 2 until the maintainer chooses (line RG
+  1.72 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
+  explicit rejection of a `SEQIDLIST`, kept under rule 2 until the maintainer chooses (line RG
   question Q-D1c-R2); numbered after 1.71)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -2376,15 +2376,13 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
 - An alias file's `SEQIDLIST` over a version 4 database (version 1.72, 2026-11-22, line RG item
-  D1c-1; rule 2, the maintainer's choice pending, line RG question Q-D1c-R2), in two shapes whose
+  D1c-1; rule 2, the maintainer's choice pending, line RG question Q-D1c-R2), in a shape whose
   NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
   drops (a token of form feeds and vertical tabs alone: `WARNING:  <token> is not a valid seqid
   string.` when NCBI reads the list, at its constructor's scan or at the search's first read under
-  `NSEQ` and `LENGTH`), and a list that two volumes or more translate, with an id that NCBI's
-  `SeqDB_SimplifyAccession` changes when applied to its own result: NCBI simplifies the sorted ids
-  again for each later volume (`PreprocessIdsForISAMSiLookup`, `seqdbgilistset.cpp:457-461`) and
-  does not sort them again (`InsureOrder` keeps its order flag), so its lookups and its filtered
-  header reads walk and search an unsorted list. LOSAT refuses (exit 1) where NCBI reads the list.
+  `NSEQ` and `LENGTH`). LOSAT refuses (exit 1) where NCBI reads the list. A list that two volumes
+  or more translate, with an id that a second simplification changes, is read in NCBI's order:
+  the ids simplified again for each later volume and not sorted again (rows `db.il.bp.cv.*`).
 
 - `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
   D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's

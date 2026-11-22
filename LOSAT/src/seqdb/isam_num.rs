@@ -136,9 +136,21 @@ impl NumericIsam {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1102-1170
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1461-1520
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1492-1517
+    // The constructor runs `x_FindIndexBounds` whatever `x_InitSearch` returned, with the counts
+    // of the index header that `x_InitSearch` read before it compared the data file's length: it
+    // reads the first row of the data file and the row before `m_NumTerms`, through the mapping
+    // of the whole file without a bound (`GetFileDataPtr`). Inside the last memory page of the
+    // mapping it reads the zeros after the end of the file (`file::mapped_length`); past that
+    // page it reads memory that is not the file's, which LOSAT refuses. So the bounds are read in
+    // both states, and a data file of another length than the index says leaves the ISAM
+    // uninitialised only where they are in the mapping.
     /// The ISAM of `index` and `data`, an index of the numbers `what` names
     /// (`CSeqDBIsam::CSeqDBIsam`): uninitialized where the data file has another length than the
-    /// index says (`x_InitSearch` fails).
+    /// index says (`x_InitSearch` fails). LOSAT's refusal where NCBI's reads of the first and
+    /// last rows pass the memory page after the data file.
     fn open_files(index: DbFile, data: DbFile, what: &str) -> Result<Opened, SeqDbError> {
         let bad = |message: String| SeqDbError::Unsupported {
             path: index.path().to_path_buf(),
@@ -170,9 +182,6 @@ impl NumericIsam {
                  {page_size} terms"
             )));
         }
-        if i64::from(word(2)) != data.len() as i64 {
-            return Ok(Opened::Uninitialized);
-        }
         let mut isam = NumericIsam {
             index,
             data,
@@ -183,12 +192,42 @@ impl NumericIsam {
             first_key: 0,
             last_key: 0,
         };
-        isam.first_key = isam.row(&isam.data, 0)?.0;
         let (start, count) = isam.page(num_samples - 1);
-        isam.last_key = isam
-            .row(&isam.data, row_offset(isam.term_size(), start, count - 1))?
-            .0;
+        let last = row_offset(isam.term_size(), start, count - 1);
+        let data_len = isam.data.len();
+        let mapped = super::file::mapped_length(data_len);
+        if last.saturating_add(isam.term_size()) > mapped {
+            return Err(SeqDbError::NcbiCrashes {
+                path: isam.data.path().to_path_buf(),
+                message: format!(
+                    "NCBI reads row {} of the {what} data file (its last of {num_terms} terms), \
+                     past the memory page after its {data_len} bytes",
+                    num_terms - 1
+                ),
+            });
+        }
+        isam.first_key = isam.bound_key(0)?;
+        isam.last_key = isam.bound_key(last)?;
+        if i64::from(word(2)) != data_len as i64 {
+            return Ok(Opened::Uninitialized);
+        }
         Ok(Opened::Ready(isam))
+    }
+
+    /// The key of the row at `offset` of the data file as NCBI's mapping holds it: the bytes past
+    /// the end of the file are zeros (`open_files` checked the memory page).
+    fn bound_key(&self, offset: u64) -> Result<i64, SeqDbError> {
+        let len = self.data.len();
+        if offset.saturating_add(self.term_size()) <= len {
+            return Ok(self.row(&self.data, offset)?.0);
+        }
+        let mut bytes = if offset < len {
+            self.data.read_range(offset, len)?
+        } else {
+            Vec::new()
+        };
+        bytes.resize(self.term_size() as usize, 0);
+        Ok(self.key_of(&bytes))
     }
 
     /// `m_TermSize`.
@@ -205,13 +244,22 @@ impl NumericIsam {
     fn row(&self, file: &DbFile, offset: u64) -> Result<(i64, i32), SeqDbError> {
         let end = offset.saturating_add(self.term_size());
         let bytes = file.read_range(offset, end)?;
+        let oid = if self.long_id {
+            &bytes[8..]
+        } else {
+            &bytes[4..]
+        };
+        Ok((self.key_of(&bytes), be_i32(oid)))
+    }
+
+    /// The key at the start of the row `bytes` (`x_GetNumericKey`).
+    fn key_of(&self, bytes: &[u8]) -> i64 {
         if self.long_id {
             let mut key = [0u8; 8];
             key.copy_from_slice(&bytes[..8]);
-            Ok((i64::from_be_bytes(key), be_i32(&bytes[8..])))
+            i64::from_be_bytes(key)
         } else {
-            let key = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            Ok((i64::from(key), be_i32(&bytes[4..])))
+            i64::from(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
         }
     }
 

@@ -667,17 +667,14 @@ impl Volume {
     // found may keep no line, and a line with another id may be kept or removed by the sum
     // (line DBID ordsl, DECISIONS 55).
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2023-2034
-    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:943-969
-    // A line passes the id test when one of its Seq-ids is in the search's list (or the search has
-    // none with ids) and one, maybe another, is in one of the alias files' lists attached to the
-    // volume (or none is attached); the search's taxids come next, on the lines the ids keep. So
-    // the alias lists' test is ANDed with the search's rule. The lists are asked in the order of
-    // the line's Seq-ids until one holds one (`have_vol`); a `ti` id whose tag NCBI's conversion
-    // throws on before that is refused.
+    // The search's list and the alias files' lists attached to the volume test each line's
+    // Seq-ids as NCBI's filtered header read does (`filter::line_mask`): an exception of NCBI's
+    // lookups (a `ti` id whose string tag is no number, a `BL_ORD_ID` or `PIG` id with a string
+    // tag) ends the read with NCBI's exception (`SeqDbError::Ncbi`).
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the
     /// search's list rule and the alias files' id lists keep, as NCBI's filtered header read
     /// tests them: `None` where a seqid rule keeps none; the reader's error for a tag NCBI's read
-    /// cannot adjust, LOSAT's refusal of a `ti` id NCBI's lists throw on.
+    /// cannot adjust, NCBI's exception of a lookup.
     fn list_mask(
         &self,
         oid: u32,
@@ -701,21 +698,9 @@ impl Volume {
         } else {
             set
         };
-        let mut mask = match user {
-            Some(line_rule) => match line_rule.rule.keep_mask(set) {
-                Some(mask) => mask,
-                None => return Ok(None),
-            },
-            None => vec![true; set.deflines.len()],
-        };
-        if let Some(lines) = alias {
-            for (keep, defline) in mask.iter_mut().zip(&set.deflines) {
-                let held = super::id_list::lists_hold(&lines.lists, &defline.ids)
-                    .map_err(SeqDbError::Ncbi)?;
-                *keep &= held;
-            }
-        }
-        Ok(Some(mask))
+        let lists = alias.map_or(&[][..], |lines| lines.lists.as_slice());
+        super::filter::line_mask(user.map(|line_rule| &*line_rule.rule), lists, set)
+            .map_err(SeqDbError::Ncbi)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2006-2058
@@ -732,9 +717,9 @@ impl Volume {
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
     /// keep, as NCBI's filtered header read tests them (the search's list rule and the alias
     /// files' id lists, `list_mask`, then the erasure of model lines): `None` where a seqid rule
-    /// keeps none; the reader's error for
-    /// a tag NCBI's read cannot adjust, LOSAT's refusals of a removed line with bytes NCBI reads
-    /// as '#' and of an id the accession guide warns about.
+    /// keeps none; the reader's error for a tag NCBI's read cannot adjust, NCBI's exception of a
+    /// lookup, LOSAT's refusals of a removed line with bytes NCBI reads as '#' and of an id the
+    /// accession guide warns about.
     fn filtered_mask(
         &self,
         oid: u32,
@@ -885,10 +870,11 @@ impl Volume {
     }
 
     /// Whether the volume's reads remove a definition line of the sequence `oid`
-    /// (volume-relative): its list's rule or the erasure of model lines
-    /// (`SeqDb::erases_a_line_of_oid`). Nothing is posted or refused for the lines themselves,
-    /// as a read of the volume searched bare tests none (the reader's error for a header that
-    /// cannot be read or a tag NCBI's read cannot adjust stays).
+    /// (volume-relative): its list's rule, the alias files' id lists or the erasure of model
+    /// lines (`SeqDb::erases_a_line_of_oid`). The bytes of the removed lines and the accession
+    /// guide's warnings are not looked at, as a read of the volume searched bare tests none; the
+    /// reader's error for a header that cannot be read or a tag NCBI's read cannot adjust stays,
+    /// and so does NCBI's exception of a lookup of the id test (`list_mask`).
     pub(super) fn erases_a_line(&self, oid: u32) -> Result<bool, SeqDbError> {
         if !self.filters_lines() {
             return Ok(false);

@@ -156,6 +156,49 @@ fn an_id_translated_by_an_earlier_volume_keeps_its_oid() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// NCBI's constructor reads the first and last rows of the data file whatever `x_InitSearch`
+/// returned (`x_FindIndexBounds`): inside the last memory page of the mapping it reads the zeros
+/// after the file, past it memory that is not the file's, which LOSAT refuses in both states.
+#[test]
+fn the_bounds_are_read_in_the_mapping_of_the_data_file() {
+    let dir = temp_dir("bounds");
+    let base = write_isam(&dir, &[(5, 0), (9, 1)], false, 256);
+    let ni = with_extension(&base, SeqType::Protein, "ni");
+    let index = std::fs::read(&ni).unwrap();
+    let with_terms = |terms: i32, data_len: i32| {
+        let mut index = index.clone();
+        index[8..12].copy_from_slice(&data_len.to_be_bytes());
+        index[12..16].copy_from_slice(&terms.to_be_bytes());
+        std::fs::write(&ni, index).unwrap();
+    };
+    let open = || NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 2);
+    // 512 rows of 8 bytes end at the end of the first page: zeros past the 16 bytes of the file.
+    with_terms(512, 16);
+    let Some(Opened::Ready(isam)) = open().unwrap() else {
+        panic!("not ready");
+    };
+    assert_eq!((isam.first_key, isam.last_key), (5, 0));
+    with_terms(512, 4096);
+    assert!(matches!(open().unwrap(), Some(Opened::Uninitialized)));
+    // One more row ends past the page: refused whether or not the lengths agree.
+    for data_len in [16, 4104] {
+        with_terms(513, data_len);
+        let error = open().unwrap_err();
+        assert!(error.ncbi_crashes(), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("NCBI reads row 512 of the GI data file (its last of 513 terms), past the memory page after its 16 bytes"),
+            "{error}"
+        );
+    }
+    // An empty data file has no mapping (NCBI's null pointer): its first row is refused too.
+    std::fs::write(with_extension(&base, SeqType::Protein, "nd"), []).unwrap();
+    with_terms(1, 0);
+    assert!(open().unwrap_err().ncbi_crashes());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
     let dir = temp_dir("batch_open");

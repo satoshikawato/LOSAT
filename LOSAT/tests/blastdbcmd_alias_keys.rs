@@ -11,7 +11,9 @@
 //! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21) and (D1b-2) `OID_MASK_TYPE`
 //! (`make_d1b2_blastdbcmd.py`, 2026-11-21), and (D1c-1) `GILIST`, `TILIST` and `SEQIDLIST`
 //! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
-//! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22). The
+//! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
+//! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
+//! over two volumes, A382-A389). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -545,6 +547,14 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A379", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "all"], 1),
     ("A380", &["-db", "../db_search/idlist/tz_g", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
     ("A381", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "gnl|ti|77", "-outfmt", "%o|%a"], 0),
+    ("A382", &["-db", "../db_search/idlist/pz_rg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A383", &["-db", "../db_search/idlist/pz_og", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A384", &["-db", "../db_search/idlist/gtx_ti", "-dbtype", "prot", "-info"], 0),
+    ("A385", &["-db", "../db_search/idlist/gtx_ti", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A386", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-info"], 2),
+    ("A387", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 2),
+    ("A388", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A389", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-info"], 0),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits

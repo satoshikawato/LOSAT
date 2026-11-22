@@ -128,3 +128,71 @@ fn the_null_device_is_no_list() {
         assert_eq!(binary_kind(&bytes).unwrap_err(), "Specified file is empty.");
     }
 }
+
+fn general(db: &str, tag: ObjectId) -> ParsedSeqId {
+    ParsedSeqId::General(crate::seqid::model::Dbtag {
+        db: db.as_bytes().to_vec(),
+        tag,
+    })
+}
+
+fn text(tag: &str) -> ObjectId {
+    ObjectId::Str(tag.as_bytes().to_vec())
+}
+
+const GET_ID: &[u8] = b"CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str";
+
+/// `CSeqDBGiList::FindId` converts a `ti` id's string tag whatever the list holds, and its
+/// simplification of a `PIG` or `BL_ORD_ID` id with a string tag throws (a GI list asks it too: no
+/// string of the id is in its empty Seq-ids); `CSeqDBNegativeList::FindId` asks only the ids of
+/// the kind of the id, so a list without TIs converts no `ti` tag, and one without Seq-id strings
+/// simplifies nothing (review 1 of line RG D1c-1, F3 and F7).
+#[test]
+fn the_lookups_throw_where_ncbis_throw() {
+    let ti = find_id(&[], &[], &[], &general("ti", text("abc"))).unwrap_err();
+    assert!(ti
+        .get_msg()
+        .starts_with(b"Cannot convert string 'abc' to Int8"));
+    assert!(ti.places_known());
+    assert_eq!(
+        find_id(&[], &[1020], &[], &general("ti", ObjectId::Id(1020))),
+        Ok(true)
+    );
+    for db in ["PIG", "BL_ORD_ID"] {
+        let thrown = find_id(&[7001], &[], &[], &general(db, text("abc"))).unwrap_err();
+        assert_eq!(thrown.get_msg(), GET_ID);
+        assert!(!thrown.places_known());
+        let thrown = negative_find_id(&[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
+        assert_eq!(thrown.get_msg(), GET_ID);
+        assert_eq!(
+            negative_find_id(&[], &general(db, text("abc"))),
+            Ok((false, false))
+        );
+        assert_eq!(
+            find_id(&[], &[], &[], &general(db, ObjectId::Id(5))),
+            Ok(false)
+        );
+    }
+    assert_eq!(
+        negative_find_id(&[b"abc".to_vec()], &general("ti", text("abc"))),
+        Ok((false, false))
+    );
+}
+
+/// `SiToOid` halves the ids in their order: on ids that a second simplification left out of order
+/// (sq_a.txt sorted as written, then simplified) it misses one that a search of sorted ids finds.
+#[test]
+fn find_si_halves_the_ids_in_their_order() {
+    let ids = |words: &[&str]| -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
+    };
+    let sorted = ids(&["a", "b", "c"]);
+    for word in ["a", "b", "c"] {
+        assert!(find_si(&sorted, word.as_bytes()));
+    }
+    assert!(!find_si(&sorted, b"d"));
+    let unsorted = ids(&["np_000103.1", "np_000118.1", "p10102.1", "loc7"]);
+    assert!(!find_si(&unsorted, b"loc7"));
+    assert!(find_si(&unsorted, b"p10102.1"));
+    assert!(find_si(&unsorted, b"np_000103.1"));
+}

@@ -2,7 +2,8 @@
 //! `SeqDB_ReadMemoryGiList` and `SeqDB_ReadMemoryTiList` read them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
 //! big-endian id per word) or a text list (decimal numbers, each ended by a space, a line feed or
 //! a carriage return). The one owner of their layout, and of the lists the alias files attach to
-//! the volumes they reach for NCBI's filtered header read (`AliasIdList`).
+//! the volumes they reach for NCBI's filtered header read (`AliasIdList`), and of NCBI's lookups of
+//! a Seq-id in a list (`find_id`, `negative_find_id`).
 
 use crate::ncbi_exception::NcbiException;
 use crate::seqid::model::ObjectId;
@@ -51,56 +52,145 @@ impl IdListKind {
 
 /// An id list of the alias files as NCBI attaches it to a volume it reaches
 /// (`CSeqDBVol::AttachVolumeGiList`): the ids its filtered header read finds a definition line's
-/// Seq-ids in (`CSeqDBGiList::FindId`). Each kind sorted as NCBI's `InsureOrder` leaves it.
+/// Seq-ids in (`CSeqDBGiList::FindId`, [`find_id`]), each kind in NCBI's order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AliasIdList {
     /// The GIs of a `GILIST`.
     pub gis: Vec<i64>,
     /// The TIs of a `TILIST`, as NCBI's unsigned `TTi` (a number past `Int8` is none).
     pub tis: Vec<u64>,
-    /// The Seq-id strings of a `SEQIDLIST`, as the lookups left them.
+    /// The Seq-id strings of a `SEQIDLIST`, as the last translation left them, in its order (out
+    /// of order where a second simplification changed one after the sort).
     pub sis: Vec<Vec<u8>>,
 }
 
 impl AliasIdList {
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1633-1665
-    // A `ti` general id's string tag is converted by `NStr::StringToInt8`, whose exception for a
-    // tag that is not a number ends NCBI's read (probe ti of line RG D1c-1: blastdbcmd's
-    // `Cannot convert string 'abc' to Int8`, rc 1; blastp's exception trace, rc 255). The Seq-id
-    // strings are looked up in the forms of `filter::find_si_forms`.
-    /// `FindId`: whether the list holds `id`; NCBI's exception for a `ti` id whose tag is no
-    /// number.
+    /// `FindId`: whether the list holds `id` ([`find_id`]).
     pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, NcbiException> {
-        match id {
-            ParsedSeqId::Gi(gi) => Ok(self.gis.binary_search(gi).is_ok()),
-            ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => {
-                let ti = match &dbtag.tag {
-                    ObjectId::Id(value) => i64::from(*value),
-                    ObjectId::Str(text) => crate::ncbi_str::string_to_int8(text, 0)?,
-                };
-                Ok(self.tis.binary_search(&(ti as u64)).is_ok())
-            }
-            _ => Ok(super::filter::find_si_forms(&self.sis, id)),
-        }
+        find_id(&self.gis, &self.tis, &self.sis, id)
     }
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:957-968
-/// `have_vol` of NCBI's id test of a definition line with the Seq-ids `ids`: one of `lists` holds
-/// one of them, asked in the order of the ids; NCBI's exception of a `ti` id whose tag is no
-/// number, reached before one is found.
+/// `have_vol` of NCBI's id test of one Seq-id `id` of a definition line: one of `lists` holds it,
+/// asked in their order; NCBI's exception of the first list whose lookup throws.
 pub(crate) fn lists_hold(
     lists: &[std::sync::Arc<AliasIdList>],
-    ids: &[ParsedSeqId],
+    id: &ParsedSeqId,
 ) -> Result<bool, NcbiException> {
-    for id in ids {
-        for list in lists {
-            if list.find_id(id)? {
-                return Ok(true);
-            }
+    for list in lists {
+        if list.find_id(id)? {
+            return Ok(true);
         }
     }
     Ok(false)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1633-1665
+// A `ti` general id's tag is converted whatever the list holds: a string tag by
+// `NStr::StringToInt8`, whose exception for a tag that is not a number ends NCBI's read (probe ti
+// of line RG D1c-1: blastdbcmd's `Cannot convert string 'abc' to Int8`, rc 1; blastp's exception
+// trace, rc 255; probe p3 of review 1 of line RG D1c-1 for a `-seqidlist`, which holds no ti).
+/// `CSeqDBGiList::FindId`: whether a positive list of the GIs `gis`, the TIs `tis` (NCBI's
+/// unsigned `TTi`) and the Seq-id strings `sis` holds `id`; NCBI's exception of a `ti` id whose
+/// string tag is no number, and of the simplification of the Seq-id ([`find_si_forms`]). The
+/// three lists are in NCBI's order (`sis` in the order its last translation left it).
+pub(crate) fn find_id(
+    gis: &[i64],
+    tis: &[u64],
+    sis: &[Vec<u8>],
+    id: &ParsedSeqId,
+) -> Result<bool, NcbiException> {
+    match id {
+        ParsedSeqId::Gi(gi) => Ok(gis.binary_search(gi).is_ok()),
+        ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => {
+            let ti = match &dbtag.tag {
+                ObjectId::Id(value) => i64::from(*value),
+                ObjectId::Str(text) => crate::ncbi_str::string_to_int8(text, 0)?,
+            };
+            Ok(tis.binary_search(&(ti as u64)).is_ok())
+        }
+        _ => find_si_forms(sis, id),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1564-1610
+// The kind of the id decides which of the list's ids are asked (`match_type`): a gi only the
+// GIs, a `ti` general id only the TIs (its tag is converted only then), any other id only the
+// Seq-id strings. LOSAT's negative lists hold Seq-id strings alone.
+/// `CSeqDBNegativeList::FindId` of a negative list of the Seq-id strings `sis` (sorted):
+/// `(found, match_type)`; NCBI's exception of the simplification of the Seq-id
+/// ([`find_si_forms`]).
+pub(crate) fn negative_find_id(
+    sis: &[Vec<u8>],
+    id: &ParsedSeqId,
+) -> Result<(bool, bool), NcbiException> {
+    match id {
+        ParsedSeqId::Gi(_) => Ok((false, false)),
+        ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => Ok((false, false)),
+        _ => {
+            let match_type = !sis.is_empty();
+            Ok((match_type && find_si_forms(sis, id)?, match_type))
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1645-1662
+// The string of the Seq-id with its version and without, then `str_id` of `SeqDB_SimplifySeqid`
+// with no accession (`isam::seqdb_simplify_seqid`), with and without what follows its first
+// '.': the simplification of a `BL_ORD_ID` or `PIG` general id with a string tag throws
+// (`CObject_id::GetId`), as does that of a `ti` general id whose string tag is no number.
+/// The lookups of a Seq-id that is not a gi or a ti in the Seq-id strings `sis` of a list
+/// (`FindSi`, [`find_si`]); NCBI's exception of the simplification.
+pub(crate) fn find_si_forms(sis: &[Vec<u8>], id: &ParsedSeqId) -> Result<bool, NcbiException> {
+    if find_si(sis, &blast_seq_id_string(id, true)) || find_si(sis, &blast_seq_id_string(id, false))
+    {
+        return Ok(true);
+    }
+    let str_id = match super::isam::seqdb_simplify_seqid(id) {
+        Ok(simplified) => simplified.str_id,
+        Err(super::isam::SimplifyError::Exception(exception)) => return Err(exception),
+        Err(super::isam::SimplifyError::SeqId(_)) => {
+            unreachable!("a parsed Seq-id is simplified without parsing")
+        }
+    };
+    if find_si(sis, &str_id) {
+        return Ok(true);
+    }
+    Ok(match str_id.iter().position(|&c| c == b'.') {
+        Some(pos) => find_si(sis, &str_id[..pos]),
+        None => false,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:745-767
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1542-1560
+// `SiToOid` and `CSeqDBNegativeList::FindSi` halve the range of the ids by `std::string` order
+// (bytes) until the middle id is `si`: on ids out of order (an alias file's list that a second
+// simplification changed after its sort) the walk is NCBI's, not that of a search of sorted ids.
+/// Whether NCBI's binary search of the Seq-id strings `sis`, in their order, finds `si`.
+pub(crate) fn find_si(sis: &[Vec<u8>], si: &[u8]) -> bool {
+    let (mut b, mut e) = (0, sis.len());
+    while b < e {
+        let m = (b + e) / 2;
+        match sis[m].as_slice().cmp(si) {
+            std::cmp::Ordering::Less => b = m + 1,
+            std::cmp::Ordering::Greater => e = m,
+            std::cmp::Ordering::Equal => return true,
+        }
+    }
+    false
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2698-2705
+/// `GetBlastSeqIdString` of `id`, with its version or without.
+fn blast_seq_id_string(id: &ParsedSeqId, version: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    match id {
+        ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_) => crate::seqid::label::fasta(id, &mut out),
+        _ => crate::seqid::label::content(id, version, &mut out),
+    }
+    out
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:854-887

@@ -731,17 +731,40 @@ fn definition_lines_follow_ncbis_rules() {
     assert!(!negative.keeps(&defline(None, None)));
 }
 
+/// A line of the taxid `taxid` with one Seq-id.
+fn line_with_id(taxid: i32) -> BlastDefline {
+    BlastDefline {
+        ids: vec![ParsedSeqId::Gi(i64::from(taxid))],
+        ..defline(Some(taxid), None)
+    }
+}
+
 #[test]
 fn a_rule_that_keeps_no_line_keeps_every_line() {
     let rule = DeflineRule::Taxids([5].into_iter().collect());
     let set = DeflineSet {
-        deflines: vec![defline(Some(1), None), defline(Some(5), None)],
+        deflines: vec![line_with_id(1), line_with_id(5)],
     };
-    assert_eq!(rule.keep_mask(&set), Some(vec![false, true]));
+    assert_eq!(
+        line_mask(Some(&rule), &[], &set),
+        Ok(Some(vec![false, true]))
+    );
     let none = DeflineSet {
-        deflines: vec![defline(Some(1), None), defline(Some(2), None)],
+        deflines: vec![line_with_id(1), line_with_id(2)],
     };
-    assert_eq!(rule.keep_mask(&none), Some(vec![true, true]));
+    assert_eq!(
+        line_mask(Some(&rule), &[], &none),
+        Ok(Some(vec![true, true]))
+    );
+    // NCBI's id test runs under any list (`x_HaveIdFilter`): a line without a Seq-id passes
+    // none of it.
+    let bare = DeflineSet {
+        deflines: vec![defline(Some(5), None), line_with_id(5)],
+    };
+    assert_eq!(
+        line_mask(Some(&rule), &[], &bare),
+        Ok(Some(vec![false, true]))
+    );
     let mut lines = vec![1, 2, 3];
     lines.retain_lines(&[true, false, true]);
     assert_eq!(lines, vec![1, 3]);
@@ -929,4 +952,37 @@ fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
         lmdb_open_error(&file, ReadError::Format("LMDB: x (MDB_INVALID)".into())),
         SeqDbError::NotFound(_)
     ));
+}
+
+/// NCBI's id test asks each Seq-id of a line of the search's list, then of the alias files'
+/// lists, before the next id and the next line (`x_FilterHasId`): the first lookup that throws is
+/// the read's exception, here the alias GI list's conversion of the `ti` tag of the first line
+/// (a negative list without TIs converts none), before the negative list's simplification of the
+/// `PIG` id of the second line.
+#[test]
+fn the_id_tests_of_a_line_alternate_as_ncbis() {
+    let general = |db: &str, tag: &str| {
+        ParsedSeqId::General(crate::seqid::model::Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag: crate::seqid::model::ObjectId::Str(tag.as_bytes().to_vec()),
+        })
+    };
+    let line = |id: ParsedSeqId| BlastDefline {
+        ids: vec![id],
+        ..BlastDefline::default()
+    };
+    let rule = DeflineRule::NegativeSeqids(vec![b"x".to_vec()]);
+    let alias = Arc::new(super::super::id_list::AliasIdList {
+        gis: vec![7001],
+        ..Default::default()
+    });
+    let set = DeflineSet {
+        deflines: vec![line(general("ti", "abc")), line(general("PIG", "abc"))],
+    };
+    let thrown = line_mask(Some(&rule), &[alias], &set).unwrap_err();
+    assert!(thrown
+        .get_msg()
+        .starts_with(b"Cannot convert string 'abc' to Int8"));
+    let thrown = line_mask(Some(&rule), &[], &set).unwrap_err();
+    assert!(thrown.get_msg().starts_with(b"CObject_id::GetId()"));
 }

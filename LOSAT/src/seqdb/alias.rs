@@ -1358,6 +1358,17 @@ pub(super) fn has_filters(node: &AliasNode) -> bool {
         || node.subnodes.iter().any(has_filters)
 }
 
+/// Whether the alias tree under `node` names an id list that NCBI's OID list translates
+/// (`GILIST`, `TILIST`, `SEQIDLIST`; no pass of a version 4 database reads `TAXIDLIST`, and a
+/// version 5 one refuses it): its translation then depends on the search's positive list
+/// ([`UserList`]).
+pub(super) fn reads_id_lists(node: &AliasNode) -> bool {
+    node.lists
+        .iter()
+        .any(|list| !matches!(list.kind, IdListKind::TaxId))
+        || node.subnodes.iter().any(reads_id_lists)
+}
+
 /// LOSAT's refusal of a `SEQIDLIST` or `TAXIDLIST` of the alias tree under `node` over a version 5
 /// database, which NCBI reads in a second pass over the volumes (seqdboidlist.cpp:718-760) that
 /// LOSAT does not make yet.
@@ -1392,10 +1403,7 @@ pub(super) fn needs_totals_scan(node: &AliasNode) -> bool {
     if node.value("NSEQ").is_some() && node.value("LENGTH").is_some() {
         return false;
     }
-    if ["GILIST", "TILIST", "SEQIDLIST", "TAXIDLIST", "OIDLIST"]
-        .iter()
-        .any(|key| node.value(key).is_some())
-    {
+    if PATH_KEYS.iter().any(|key| node.value(key).is_some()) {
         return true;
     }
     node.subnodes.iter().any(needs_totals_scan)
@@ -1430,28 +1438,27 @@ pub(super) struct AliasOids {
     pub lists: Vec<Vec<std::sync::Arc<AliasIdList>>>,
 }
 
-/// A volume of the alias tree as [`alias_oids`] reads it: its path without extension, its global
-/// OIDs `[start, end)`, and whether it names an LMDB file (a version 5 volume, whose seqid
-/// lookups NCBI does not make through its string ISAM).
+/// A volume of the alias tree as [`alias_oids`] reads it: its path without extension and its
+/// global OIDs `[start, end)`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TreeVolume<'a> {
     pub name: &'a str,
     pub start: u32,
     pub end: u32,
-    pub has_lmdb: bool,
 }
 
 /// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
 /// `volumes` are the volumes in NCBI's order, of the sequence type `seqtype`, `version5` whether
-/// NCBI reads the database as version 5 (`IsBlastDBVersion5`). The OID list files and the id
-/// lists are read once each (`files`, [`ListSet`]), in NCBI's order ([`volume_set`]): the first
-/// that fails is the error.
+/// NCBI reads the database as version 5 (`IsBlastDBVersion5`), `user` the search's positive list
+/// as NCBI holds it ([`UserList`]). The OID list files and the id lists are read once each
+/// (`files`, [`ListSet`]), in NCBI's order ([`volume_set`]): the first that fails is the error.
 pub(super) fn alias_oids(
     root: &AliasNode,
     volumes: &[TreeVolume<'_>],
     num_oids: u32,
     seqtype: SeqType,
     version5: bool,
+    user: UserList,
 ) -> Result<AliasOids, OidListError> {
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
     let mut all = Shape::new(0, u64::from(num_oids), Special::None);
@@ -1459,6 +1466,7 @@ pub(super) fn alias_oids(
     let mut lists = ListSet {
         seqtype,
         version5,
+        user,
         loaded: Vec::new(),
     };
     let mut mask_types = vec![0u32; volumes.len()];
@@ -1520,22 +1528,54 @@ struct VolumeReach<'a, 'r> {
     attached: &'r mut Vec<usize>,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-480
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2501-2551
 // `GetNodeIdList` reads a list's file at its first use, one list per kind and path, and at
 // each use translates the list through the volume (`IdsToOids`) and attaches it to the volume.
-// A list of ids needs the volume's ISAM of their kind (the volume's string ISAM for Seq-ids, on
-// a volume without an LMDB file; the volume opens an ISAM only where it has OIDs): without one
-// NCBI throws `<GI|TI|SI> list specified but no ISAM file found for <GI|TI|SI> in <volume>`. The
-// searches' lists (`-seqidlist`, `-taxids`) hold Seq-ids or taxids, so NCBI translates the
-// alias files' lists by the volumes in every case (`mixed_ids`), and the user list adds no
-// translation of their gis or tis (it has none).
+// A list of ids needs the volume's ISAM of their kind (the volume's string ISAM for Seq-ids; the
+// volume opens an ISAM only where it has OIDs): without one NCBI throws `<GI|TI|SI> list
+// specified but no ISAM file found for <GI|TI|SI> in <volume>`. Whether the volumes translate
+// the list depends on the search's positive list (`UserList`).
 /// The id lists of the alias files as NCBI's `CSeqDBGiListSet` holds them for the OID list
 /// ([`volume_set`]).
 struct ListSet<'a> {
     seqtype: SeqType,
     version5: bool,
+    user: UserList,
     loaded: Vec<LoadedList<'a>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:417-423
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:447-461
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:472-480
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:588-592
+// With a positive list, `GetNodeIdList` translates the gis and tis of an alias file's list from
+// it at the list's first use (`x_TranslateFromUserList`), which begins by putting the list in
+// order (`InsureOrder`, `ListIds::insure_order`): a list of Seq-ids is then sorted by its ids as
+// the file gives them, before any simplification. LOSAT's positive lists hold no gi and no ti, so
+// that translation finds nothing. The volumes then translate the list (`mixed_ids`) where the
+// positive list holds Seq-ids or taxids, and not at all where it holds none: a version 5
+// database's `-seqidlist` whose every id is a gi (`s_ProcessSeqIDsForV5` drops them,
+// seqdbgilistset.cpp:148-180) leaves the list's OIDs unset and its ISAMs unread.
+/// What NCBI's `CSeqDBGiListSet` holds of the search's positive list (`m_UserList`) when it reads
+/// the alias files' id lists ([`alias_oids`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UserList {
+    /// No positive list: the database opened without a list, or with a negative one.
+    None,
+    /// A positive list (`-seqidlist`, `-taxids`, `-taxidlist`) of `ids` Seq-ids and taxids, as
+    /// NCBI counts them after its processing of the list.
+    Positive { ids: usize },
+}
+
+impl UserList {
+    /// Whether the volumes translate an alias file's list (`m_UserList.Empty() || mixed_ids`).
+    fn translates(self) -> bool {
+        match self {
+            UserList::None => true,
+            UserList::Positive { ids } => ids > 0,
+        }
+    }
 }
 
 /// An id list read from its file, with the translation of its ids so far.
@@ -1546,35 +1586,52 @@ struct LoadedList<'a> {
     /// The ids the list counts (`GetNumGis`, `GetNumTis`, `GetNumSis`), which decides whether a
     /// volume is asked for its ISAM.
     count: usize,
-    /// The volumes that translated the list so far.
-    translations: usize,
 }
 
 /// The ids of a [`LoadedList`].
 enum ListIds {
-    /// The GIs, sorted (`InsureOrder`), with the OIDs found so far.
+    /// The GIs, sorted (NCBI puts them in order at their first translation, `InsureOrder`, and
+    /// nothing changes them after it), with the OIDs found so far.
     Gi(Vec<super::isam_num::NumOid>),
-    /// The TIs, as NCBI's unsigned `TTi`, sorted; a number past `Int8` is none.
+    /// The TIs, as NCBI's unsigned `TTi`, sorted (as `FindTi` sorts them); a number past `Int8`
+    /// is none.
     Ti(Vec<u64>),
-    /// The Seq-ids as NCBI's preprocessing for the string ISAM leaves them
-    /// (`PreprocessIdsForISAMSiLookup`), with the OIDs found so far; `unstable` when a second
-    /// preprocessing would change one.
+    /// The Seq-ids in NCBI's order, as the file gives them until the first translation
+    /// simplifies them (`PreprocessIdsForISAMSiLookup`), with the OIDs found so far, and NCBI's
+    /// order flag (`m_CurrentOrder` at `eGi`, `isam::insure_order`).
     Si {
         ids: Vec<super::isam::SiOid>,
-        unstable: bool,
+        sorted: bool,
     },
 }
 
+impl ListIds {
+    /// `InsureOrder` with `eGi` of the list (`x_TranslateFromUserList`): the GIs and TIs are kept
+    /// sorted already.
+    fn insure_order(&mut self) {
+        if let ListIds::Si { ids, sorted } = self {
+            super::isam::insure_order(ids, sorted);
+        }
+    }
+}
+
 impl LoadedList<'_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:745-767
+    // The filtered header read looks the Seq-ids up in the list as the last translation left it
+    // (`FindSi`), whose first lookup puts it in order where its flag is not set yet (no volume
+    // translated it): every lookup comes after the last translation.
     /// The list as the volumes it reached hold it for the filtered header read.
     fn attached(self) -> AliasIdList {
         let mut list = AliasIdList::default();
         match self.ids {
             ListIds::Gi(ids) => list.gis = ids.into_iter().map(|id| id.key).collect(),
             ListIds::Ti(tis) => list.tis = tis,
-            ListIds::Si { ids, .. } => {
+            ListIds::Si {
+                mut ids,
+                mut sorted,
+            } => {
+                super::isam::insure_order(&mut ids, &mut sorted);
                 list.sis = ids.into_iter().map(|id| id.si).collect();
-                list.sis.sort();
             }
         }
         list
@@ -1583,13 +1640,10 @@ impl LoadedList<'_> {
 
 impl<'a> ListSet<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:86-131
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:608-614
     // The file is mapped as an OID list file is (`not_a_file`), then read as its kind's list
-    // (`id_list`; a seqid list as text, `seqidlist::read_memory_si_list`). A seqid list's ids are
-    // simplified and lower-cased before each volume translates them. LOSAT refuses a token that
-    // NCBI's text reader reports (it writes a warning), an id that NCBI's simplification throws
-    // on, and an id that a second simplification would change where a second volume translates
-    // the list (NCBI sorts the list once, at its first translation).
+    // (`id_list`; a seqid list as text, `seqidlist::read_memory_si_list`, its ids as the file
+    // gives them, not in order). LOSAT refuses a token that NCBI's text reader reports (it writes
+    // a warning).
     /// The index in `loaded` of the list of `kind` at `path`, read at its first use.
     fn load(&mut self, kind: IdListKind, path: &'a str) -> Result<usize, OidListError> {
         if let Some(at) = self
@@ -1603,7 +1657,7 @@ impl<'a> ListSet<'a> {
         if !exists(at) {
             return Err(OidListError::NotAFile(path.to_string()));
         }
-        let keep = |error| OidListError::Reader(oid_list::KeptError::keep(error));
+        let keep = OidListError::reader;
         let file = DbFile::open(at).map_err(keep)?;
         let bytes = if file.is_empty() {
             Vec::new()
@@ -1611,14 +1665,8 @@ impl<'a> ListSet<'a> {
             file.read_all().map_err(keep)?
         };
         let list_error =
-            |text: String| OidListError::Reader(oid_list::KeptError::NotFound(text.into_bytes()));
-        let refused = |message: String| {
-            OidListError::Reader(oid_list::KeptError::Unsupported {
-                path: at.to_path_buf(),
-                message,
-            })
-        };
-        let (ids, count) = match kind {
+            |text: String| OidListError::reader(SeqDbError::NotFound(text.into_bytes()));
+        let (mut ids, count) = match kind {
             IdListKind::Gi => {
                 let mut gis: Vec<super::isam_num::NumOid> = super::id_list::read_gi_list(&bytes)
                     .map_err(list_error)?
@@ -1649,49 +1697,49 @@ impl<'a> ListSet<'a> {
                 let mut warnings = Vec::new();
                 let read = super::seqidlist::read_memory_si_list(&bytes, &mut warnings);
                 if let Some(warning) = warnings.first() {
-                    return Err(refused(format!(
-                        "the seqid list of an alias file's SEQIDLIST has a token NCBI reports \
-                         (`{}`)",
-                        warning.trim()
-                    )));
+                    return Err(OidListError::reader(SeqDbError::Unsupported {
+                        path: at.to_path_buf(),
+                        message: format!(
+                            "the seqid list of an alias file's SEQIDLIST has a token NCBI reports \
+                             (`{}`)",
+                            warning.trim()
+                        ),
+                    }));
                 }
-                let mut ids = Vec::with_capacity(read.len());
-                let mut unstable = false;
-                for id in &read {
-                    let simplify = |id: &[u8]| {
-                        super::isam::simplify_accession_for_isam(id).map_err(|error| {
-                            refused(format!(
-                                "the id {} of the seqid list of an alias file's SEQIDLIST throws \
-                                 in NCBI's SeqDB_SimplifyAccession: {}",
-                                String::from_utf8_lossy(id),
-                                error.to_string().trim_end()
-                            ))
-                        })
-                    };
-                    let once = simplify(id)?;
-                    unstable |= simplify(&once).map_or(true, |twice| twice != once);
-                    ids.push(super::isam::SiOid::new(once));
-                }
+                let ids: Vec<super::isam::SiOid> =
+                    read.into_iter().map(super::isam::SiOid::new).collect();
                 let count = ids.len();
-                (ListIds::Si { ids, unstable }, count)
+                (ListIds::Si { ids, sorted: false }, count)
             }
             IdListKind::TaxId => unreachable!("no pass of a version 4 database reads TAXIDLIST"),
         };
+        if matches!(self.user, UserList::Positive { .. }) {
+            ids.insure_order();
+        }
         self.loaded.push(LoadedList {
             kind,
             path,
             ids,
             count,
-            translations: 0,
         });
         Ok(self.loaded.len() - 1)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:407-460
-    // The TIs of a TI list are translated through the volume's TI ISAM: NCBI BLAST+ 2.17.0 finds
-    // no OID for any of them, on every TI ISAM tried (NCBI's test data `short-tis` and `long-tis`
-    // and an ISAM written for the probe, whose single lookups find the same TIs: probes b4b, b4c
-    // and tiself of line RG D1c), so LOSAT finds none.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1388-1419
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:155
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:128
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:447-451
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:620-630
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:548-562
+    // A TI list is translated by the TI ISAM's `x_TranslateGiList` of the ISAM's own `TTi`, a
+    // signed `Int8`, while the list's specialisations of its size and keys are of the global
+    // `TTi`, an unsigned `Uint8`: the translation takes the generic size, the count of the list's
+    // GIs, which a TI list has none of, and returns before it looks at the ISAM. So no TI of any
+    // list finds an OID on any TI ISAM (an uninitialised one included: no batch-mode error), and
+    // only the ISAM's opening can fail (`NumericIsam::open_for_list`; probes b4b, b4c and tiself
+    // of line RG D1c agree). A seqid list is simplified again before each translation
+    // (`PreprocessIdsForISAMSiLookup`): LOSAT refuses an id that NCBI's simplification throws on.
     /// The OIDs of `volume` that the list `at` holds (`IdsToOids`, then `x_IdsToBitSet`), as bits
     /// over the volume's OIDs.
     fn volume_bits(
@@ -1699,9 +1747,9 @@ impl<'a> ListSet<'a> {
         at: usize,
         volume: &TreeVolume<'_>,
     ) -> Result<Vec<u64>, OidListError> {
-        let keep = |error| OidListError::Reader(oid_list::KeptError::keep(error));
+        let keep = OidListError::reader;
         let no_isam = |what: &str| {
-            OidListError::Reader(oid_list::KeptError::NotFound(
+            OidListError::reader(SeqDbError::NotFound(
                 format!(
                     "{what} list specified but no ISAM file found for {what} in {}",
                     volume.name
@@ -1710,12 +1758,14 @@ impl<'a> ListSet<'a> {
             ))
         };
         let num_oids = volume.end - volume.start;
-        let list = &mut self.loaded[at];
-        list.translations += 1;
         let frame = Frame {
             start: u64::from(volume.start),
             end: u64::from(volume.end),
         };
+        let list = &mut self.loaded[at];
+        if !self.user.translates() || list.count == 0 {
+            return Ok(frame.clear_words());
+        }
         let bits_of = |oids: &mut dyn Iterator<Item = Option<u32>>| {
             let mut bits = frame.clear_words();
             for oid in oids.flatten() {
@@ -1728,60 +1778,39 @@ impl<'a> ListSet<'a> {
         };
         let base = Path::new(volume.name);
         match &mut list.ids {
-            ListIds::Gi(gis) => {
-                if list.count == 0 {
-                    return Ok(frame.clear_words());
-                }
-                let isam = super::isam_num::NumericIsam::open_for_list(
-                    base,
-                    self.seqtype,
-                    super::isam_num::ListIsam::Gi,
-                    num_oids,
-                )
-                .map_err(keep)?;
-                match isam {
-                    None => return Err(no_isam("GI")),
-                    Some(super::isam_num::Opened::Uninitialized) => {
-                        return Err(keep(super::isam::batch_mode_error()))
+            ListIds::Gi(_) | ListIds::Ti(_) => {
+                let (kind, what) = match list.ids {
+                    ListIds::Gi(_) => (super::isam_num::ListIsam::Gi, "GI"),
+                    _ => (super::isam_num::ListIsam::Ti, "TI"),
+                };
+                let isam =
+                    super::isam_num::NumericIsam::open_for_list(base, self.seqtype, kind, num_oids)
+                        .map_err(keep)?
+                        .ok_or_else(|| no_isam(what))?;
+                match (&mut list.ids, isam) {
+                    (ListIds::Gi(gis), super::isam_num::Opened::Ready(isam)) => {
+                        isam.ids_to_oids(volume.start, gis).map_err(keep)?;
+                        Ok(bits_of(&mut gis.iter().map(|gi| gi.oid)))
                     }
-                    Some(super::isam_num::Opened::Ready(isam)) => {
-                        isam.ids_to_oids(volume.start, gis).map_err(keep)?
+                    (ListIds::Gi(_), super::isam_num::Opened::Uninitialized) => {
+                        Err(keep(super::isam::batch_mode_error()))
                     }
+                    _ => Ok(frame.clear_words()),
                 }
-                Ok(bits_of(&mut gis.iter().map(|gi| gi.oid)))
             }
-            ListIds::Ti(_) => {
-                if list.count == 0 {
-                    return Ok(frame.clear_words());
-                }
-                let isam = super::isam_num::NumericIsam::open_for_list(
-                    base,
-                    self.seqtype,
-                    super::isam_num::ListIsam::Ti,
-                    num_oids,
-                )
-                .map_err(keep)?;
-                match isam {
-                    None => return Err(no_isam("TI")),
-                    Some(super::isam_num::Opened::Uninitialized) => {
-                        return Err(keep(super::isam::batch_mode_error()))
-                    }
-                    Some(super::isam_num::Opened::Ready(_)) => {}
-                }
-                Ok(frame.clear_words())
-            }
-            ListIds::Si { ids, unstable } => {
-                if list.count == 0 || volume.has_lmdb {
-                    return Ok(frame.clear_words());
-                }
-                if list.translations > 1 && *unstable {
-                    return Err(OidListError::Reader(oid_list::KeptError::Unsupported {
-                        path: PathBuf::from(list.path),
-                        message: "a second volume translates the seqid list of an alias file's \
-                                  SEQIDLIST, and NCBI's second simplification of its ids changes \
-                                  one after their sort"
-                            .to_string(),
-                    }));
+            ListIds::Si { ids, sorted } => {
+                for id in ids.iter_mut() {
+                    id.si = super::isam::simplify_accession_for_isam(&id.si).map_err(|error| {
+                        OidListError::reader(SeqDbError::Unsupported {
+                            path: PathBuf::from(list.path),
+                            message: format!(
+                                "the id {} of the seqid list of an alias file's SEQIDLIST throws \
+                                 in NCBI's SeqDB_SimplifyAccession: {}",
+                                String::from_utf8_lossy(&id.si),
+                                error.to_string().trim_end()
+                            ),
+                        })
+                    })?;
                 }
                 let protein = matches!(self.seqtype, SeqType::Protein);
                 let isam = if num_oids == 0 {
@@ -1792,7 +1821,7 @@ impl<'a> ListSet<'a> {
                 let Some(isam) = isam else {
                     return Err(no_isam("SI"));
                 };
-                isam.ids_to_oids(volume.start, ids).map_err(keep)?;
+                isam.ids_to_oids(volume.start, ids, sorted).map_err(keep)?;
                 Ok(bits_of(&mut ids.iter().map(|id| id.oid)))
             }
         }

@@ -194,7 +194,7 @@ enum ConfigFile {
 impl ConfigFile {
     /// The read of the file `path` of `bytes` while `program` (in lower case) runs, into a file
     /// layer as `CNcbiRegistry`'s constructor reads a stream (`read_cwd_ncbirc`). `Err(what)`
-    /// for a file that LOSAT refuses (completing "the registry file <path> ..."): one that
+    /// for a file that LOSAT refuses (completing `the registry file <path> ...`): one that
     /// `read_registry` does not read as NCBI does, and one with `[NCBI] .Inherits` (NCBI then reads
     /// the files it names, which LOSAT's registry reads refuse elsewhere too).
     fn of(program: &str, path: std::ffi::OsString, bytes: &[u8]) -> Result<Self, String> {
@@ -298,8 +298,8 @@ impl InitConfig {
     /// The registry of the run of `program` (in lower case, as NCBI's posts name it), from the
     /// environment (`FMTCFG`, `NCBI`, `GETURL_DEBUG`) and the current directory. LOSAT refuses a
     /// file that cannot be read and one with `[NCBI] .Inherits` (`CNcbiRegistry` reads the files
-    /// it names, which LOSAT's registry reads refuse elsewhere too); `what` completes "the
-    /// registry file <path> ...".
+    /// it names, which LOSAT's registry reads refuse elsewhere too); `what` completes `the
+    /// registry file <path> ...`.
     pub(crate) fn read(program: &str) -> Result<Self, String> {
         let path = init_config_path(
             std::env::var_os("FMTCFG").as_deref(),

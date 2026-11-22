@@ -1902,10 +1902,12 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
-    // `-html`: the rows' links, and the subjects with parsed Seq-ids by subject index.
+    // `-html`: the rows' links, the subjects with parsed Seq-ids by subject index and what the
+    // report's loads do at each subject (`HtmlRows`).
     html: Option<(
         &super::html_ids::HtmlReport,
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        &crate::report::db_subject::HitLoads,
     )>,
 ) -> io::Result<()> {
     write_description_table(
@@ -1922,7 +1924,11 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             )
         },
         read,
-        html.map(|(report, parsed)| HtmlRows { report, parsed }),
+        html.map(|(report, parsed, loads)| HtmlRows {
+            report,
+            parsed,
+            loads,
+        }),
     )
 }
 
@@ -3315,6 +3321,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             self.config.html.as_ref().map(|report| HtmlRows {
                 report,
                 parsed: self.parsed_subjects,
+                loads: self.loads,
             }),
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
@@ -3625,6 +3632,9 @@ fn write_description_table<W: Write>(
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         read(*s_idx, writer)?;
+        if let Some(html) = html {
+            html.end_at_thrown(*s_idx)?;
+        }
         let bits = format_bitscore_ncbi(best.hit.bit_score);
         match html {
             None => {
@@ -3861,9 +3871,25 @@ impl DescriptionLabel {
 struct HtmlRows<'a> {
     report: &'a super::html_ids::HtmlReport,
     parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// What the report's loads do at each subject, by subject (`HitLoads::thrown`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 impl HtmlRows<'_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
+    /// The end of the run at the `-html` row of subject `s_idx` where its load throws
+    /// (`HitLoads::thrown`): the `catch` of the row's load makes the row's link, whose
+    /// `GetIDUrl` loads the subject again with the scope, and that throw leaves the report. The
+    /// writer's error is the load's exception (as `x_pairwise_par::end_here`), after the rows
+    /// before it and the row's own read; the plain row is the `catch`'s `Unknown`.
+    fn end_at_thrown(self, s_idx: u32) -> io::Result<()> {
+        match self.loads.thrown(s_idx as usize) {
+            Some(exception) => Err(exception.clone().into_io_error()),
+            None => Ok(()),
+        }
+    }
+
     /// The start of the `-html` description row of rank `rank` (from 1) for the subject `s_idx`
     /// with the label `label` and the bit score `bits` (in a column of `max_score`): the label
     /// (`DescriptionLabel::write_html`), two spaces, then the bit score inside the score link.
@@ -3964,7 +3990,11 @@ fn write_blastn_description_table<W: Write>(
             )
         },
         read,
-        html.map(|report| HtmlRows { report, parsed }),
+        html.map(|report| HtmlRows {
+            report,
+            parsed,
+            loads,
+        }),
     )
 }
 
@@ -5677,7 +5707,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
                     Some((_, _, parsed, _)) => parsed,
                     None => self.records_parsed,
                 };
-                (report, parsed)
+                (report, parsed, self.loads)
             }),
         )?;
         writeln!(writer)

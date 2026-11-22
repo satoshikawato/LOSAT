@@ -1167,6 +1167,42 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         "{:?}",
         String::from_utf8_lossy(rows[1])
     );
+    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end_at_thrown`):
+    // the run ends at the second row with the load's exception, after the first row.
+    let registry =
+        crate::report::formatter_registry::InitConfig::of("blastn", None, false).unwrap();
+    let links = Arc::new(crate::report::html_ids::HtmlLinks {
+        registry,
+        db_name: Vec::new(),
+        nucleotide: true,
+        references: Default::default(),
+    });
+    let report = crate::report::html_ids::HtmlReport::new(&links, []);
+    let mut html = Vec::new();
+    let error = write_blastn_description_table(
+        &mut html,
+        &[0, 1],
+        true,
+        &hits,
+        &titles,
+        &parsed,
+        &[],
+        false,
+        false,
+        None,
+        &mut crate::report::query_warnings::no_subject_reads,
+        Some(&report),
+        &loads,
+    )
+    .unwrap_err();
+    let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+    assert_eq!(exception.what(), loads.thrown(1).unwrap().what());
+    // The two header lines, the blank line and the first row; nothing of the second.
+    let text = String::from_utf8(html).unwrap();
+    let lines: Vec<&str> = text.split_terminator('\n').collect();
+    assert_eq!(lines.len(), 4, "{text:?}");
+    assert!(lines[3].contains("NM_100000.1"), "{text:?}");
+    assert!(!text.contains("NM_100001"), "{text:?}");
     let mut out = Vec::new();
     write_database_subject_alignments_part(
         &mut out,

@@ -71,7 +71,7 @@ impl MaskInfoRegistry {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.cpp:76-89
-    /// `Add(const string & id)`: registers an algorithm named by the user
+    /// `Add` of the `string` id: registers an algorithm named by the user
     /// (`makeblastdb -mask_id`); its id is the first free one from 100 on.
     pub(crate) fn add_id(&mut self, id: &[u8]) -> Result<i32, WriteDbError> {
         if self.registered.iter().any(|known| known == id) {
@@ -88,7 +88,7 @@ impl MaskInfoRegistry {
     // `progname` is the name of the mask file for makeblastdb. The two-
     // argument `x_AssignId` (repeat, other) takes the first free id from the
     // program's own value on and ignores the options.
-    /// `Add(program, options, progname)`: registers an algorithm of a
+    /// `Add` of a program, its options and a program name: registers an algorithm of a
     /// filtering program. `program` is the `Blast-filter-program` number.
     pub(crate) fn add_program(
         &mut self,

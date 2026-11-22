@@ -787,7 +787,7 @@ fn defaults_and_task_overrides_remain_distinct() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
-// more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
+// more (`CArgAllowValuesGreaterThanOrEqual` with 0), which NCBI reads with the sign and
 // hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
 #[test]
 fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
@@ -803,7 +803,7 @@ fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
                     "{program} {key} {value}"
                 );
             }
-            // The exclusion is NCBI's `SetDependency(eExcludes)`.
+            // The exclusion is NCBI's `SetDependency` with `eExcludes`.
             let error = parse(program, &["-max_target_seqs", "5", key, "5"])
                 .err()
                 .unwrap_or_else(|| panic!("{program} -max_target_seqs with {key}"));

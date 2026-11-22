@@ -32,7 +32,7 @@ impl RangeRole {
 }
 
 /// A range as given on the command line, 0-based and closed (`TSeqRange` after
-/// `from--, to--`); it is not limited to the length of any record.
+/// one is taken from each of `from` and `to`); it is not limited to the length of any record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SequenceRange {
     pub from: usize,
@@ -97,7 +97,8 @@ pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRang
     })
 }
 
-/// Parses the range of a role when it was given (`args.Exist(...) && args[...]`).
+/// Parses the range of a role when it was given (`args.Exist` is true for the argument and `args`
+/// holds a value for it).
 pub fn parse_optional_range(value: Option<&str>, role: RangeRole) -> Result<Option<SequenceRange>> {
     value
         .map(|value| parse_sequence_range(value, role))
@@ -321,7 +322,7 @@ impl QueryInput {
     }
 
     /// The query batches of the input with a fixed batch size: NCBI reads batches while
-    /// records remain (`!input.End()`), so a batch can hold only skipped records (NCBI then
+    /// records remain (`End` of the input is false), so a batch can hold only skipped records (NCBI then
     /// stops with `Empty CBlastQueryVector`, and no batch follows). A batch size of 0
     /// reads no record: one empty batch. Each record counts its own letters: under
     /// `-parse_deflines` NCBI's reader counts a record otherwise only where it repeats an id of

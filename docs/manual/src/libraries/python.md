@@ -138,8 +138,8 @@ As on the command line, `makeblastdb` needs `-title` when it reads standard inpu
 All errors derive from `LosatError` and carry the command line's message for the same failure:
 
 - `ArgumentError`: an option or value that the parser refuses.
-- `InputError`: a FASTA input that the reader refuses or cannot open.
-- `SearchError`: a search, database or tool that fails.
+- `InputError`: a FASTA input that does not open, or a subject record that the reader refuses (the command line reads every subject before the first query).
+- `SearchError`: a search, database or tool that fails. A query record that the reader refuses is one too: the command line reads its queries one batch at a time, so the search ends in the batch of that record, after the batches before it. `batches` gives those batches, and `run_to_file` writes their reports, as the command line's `-out` does.
 
 `str(error)` is the message as text, with one U+FFFD per maximal ill-formed subpart of its bytes; `error.message_bytes` is the bytes that the command line writes.
 

@@ -114,7 +114,7 @@ fn removes_a_symbolic_link_and_keeps_its_target() {
     assert!(!sub.exists() && target.join("a").exists());
 }
 
-// `CDirEntry::Rename(fRF_Overwrite)` as makeblastdb 2.17.0 calls it for a volume file
+// `CDirEntry::Rename` with `fRF_Overwrite` as makeblastdb 2.17.0 calls it for a volume file
 // (probes of 2026-11-11; the same cases run against the built program in
 // `tests/makeblastdb_rename_lock.rs`).
 #[test]

@@ -2000,8 +2000,8 @@ fn write_pairwise_prologs(
                         crate::wording::REPORT_VERSION,
                         tblastx_pairwise_database_name(args).as_bytes(),
                         records.len() as i64,
-                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
-                        // (Int8) (*iter)->length`).
+                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181: `m_iTotalLength` grows by
+                        // the `length` of each element, cast to `Int8`).
                         match x_stored {
                             Some((stores, _)) => {
                                 stores.iter().map(|store| store.len() as i64).sum()
@@ -2989,7 +2989,7 @@ fn run_in_pool(
         reads: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     let no_batch = query_runs.input_records.is_empty() && matches!(reading, QueryReading::End);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length

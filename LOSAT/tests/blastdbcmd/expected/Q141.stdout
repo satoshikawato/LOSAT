@@ -1,0 +1,72 @@
+Blast-def-line-set ::= {
+  {
+    title "trace 1",
+    seqid {
+      general {
+        db "ti",
+        tag id 12345
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "trace 2",
+    seqid {
+      general {
+        db "ti",
+        tag id 12346
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "plain",
+    seqid {
+      genbank {
+        accession "AF000001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "trace string",
+    seqid {
+      general {
+        db "ti",
+        tag str "abc"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "sra",
+    seqid {
+      general {
+        db "SRA",
+        tag str "SRR1.1"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "tsa",
+    seqid {
+      general {
+        db "TSA",
+        tag str "T1"
+      }
+    },
+    taxid 0
+  }
+}

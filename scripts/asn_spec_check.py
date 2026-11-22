@@ -13,8 +13,8 @@ The companion of `asn_spec_gen.py` (a maintainer tool; LOSAT's build runs neithe
   4. the C++ storage of every INTEGER member and list element against the `typedef` of the
      generated `*_.hpp` (`TSeqPos` Uint4, `int` Int4, `Int8`/`TGi`/`TEntrezId` Int8, ...), and of
      every named INTEGER against its `BEGIN_ALIAS_INFO` (`PubMedId` Int8);
-  5. no class of the table is read in random order (`SetRandomOrder(true)`) and all are
-     `DataSpec(EDataSpec::eASN)` where the block names a data spec;
+  5. no class of the table is read in random order (`SetRandomOrder` with true) and all are
+     `DataSpec` of `EDataSpec::eASN` where the block names a data spec;
   6. the kind of every member's and variant's value (VisibleString, UTF8String, StringStore,
      REAL, BOOLEAN, NULL, OCTET STRING, INTEGER, ENUMERATED, or the class it names) against the
      `ADD_NAMED_*` macro of the block, the `BEGIN_ALIAS_INFO` of a named alias and the typedef
@@ -173,7 +173,7 @@ def generated_headers(include: Path, type_name: str) -> list[Path]:
 
 
 def header_constants(include: Path, type_name: str) -> dict[str, int]:
-    """The enum constants (`eRepr_raw = 2`) of the generated header of `type_name`."""
+    """The enum constants (`eRepr_raw` with the value 2) of the generated header of `type_name`."""
     out: dict[str, int] = {}
     for path in generated_headers(include, type_name):
         for m in ENUM_CONST.finditer(path.read_text(encoding="latin-1")):

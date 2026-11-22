@@ -37,7 +37,7 @@ impl<'a> V<'a> {
         }
     }
 
-    /// The variant of the CHOICE: its name (`SelectionName(Which())`) and value.
+    /// The variant of the CHOICE: its name (`SelectionName` of `Which()`) and value.
     pub(crate) fn choice(self) -> (&'static str, V<'a>) {
         match self.value {
             Value::Choice(index, value) => {

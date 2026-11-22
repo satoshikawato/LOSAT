@@ -235,7 +235,7 @@ pub struct PairwiseReading {
 
 impl PairwiseConfig {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1525-1528
-    /// Whether the report is TBLASTX's (`m_Program == "tblastx"`): the sorts and the description
+    /// Whether the report is TBLASTX's (`m_Program` is "tblastx"): the sorts and the description
     /// table's identities read its alignment lengths in nucleotides (`HspScores::alignment_length`).
     pub(crate) fn tblastx(&self) -> bool {
         self.program == "tblastx"
@@ -367,8 +367,8 @@ pub(crate) enum EmptyRowsStop {
 /// - the subjects by query coverage (`-sorthits 4`: `GetMasterCoverage`): `-db`'s empty query row
 ///   (227), `-subject`'s nucleotide is not empty;
 /// - then each subject's HSPs, a list of two or more: by query start (`-sorthsps 2`,
-///   `GetSeqStart(0)`) the empty query row of `-db` (227); by percent identity (`-sorthsps 3`)
-///   `-subject`'s Dense-seg (801); by subject start (`-sorthsps 4`, `GetSeqStart(1)`) the empty
+///   `GetSeqStart` of row 0) the empty query row of `-db` (227); by percent identity (`-sorthsps 3`)
+///   `-subject`'s Dense-seg (801); by subject start (`-sorthsps 4`, `GetSeqStart` of row 1) the empty
 ///   subject row of both (227).
 ///
 /// The scores' sorts (`-sorthits 1` and `2`, `-sorthsps 1`) read no range. Probes: survey set K
@@ -603,8 +603,8 @@ pub fn write_subject_header<W: Write>(
     subject_length: Option<usize>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2385-2388,2461-2471,340-359
-    // `s_WrapOutputLine` counts and writes bytes (`str[i]`, `isspace((unsigned char)
-    // str[i])`), so a line can end inside a UTF-8 sequence.
+    // `s_WrapOutputLine` counts and writes bytes (`str[i]`, `isspace` of `str[i]` cast to
+    // `unsigned char`), so a line can end inside a UTF-8 sequence.
     let mut title = subject_id.to_vec();
     if let Some(subject_title) = subject_title.filter(|title| !title.is_empty()) {
         title.push(b' ');
@@ -921,7 +921,8 @@ fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
     }
 }
 
-/// The `Expect` label of an HSP's header: `Expect(n)` for an HSP of a linked set of n > 1 HSPs
+/// The `Expect` label of an HSP's header: `Expect` followed by n in parentheses for an HSP of a
+/// linked set of n > 1 HSPs
 /// (`sum_n`, `BlastHSP::num`), else `Expect` (showalign.cpp:3593-3598, cited at
 /// `write_hsp_info`).
 #[inline]
@@ -1208,7 +1209,7 @@ fn write_alignment_with_sequences<W: Write>(
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1579
     // A row is written on a line that meets its columns between its end gaps
-    // (`rowRng = m_AV->GetSeqAlnRange(row)`, showalign.cpp:1272; `write_hsp_rows`), the middle
+    // (`rowRng` is set from `m_AV->GetSeqAlnRange` of the row, showalign.cpp:1272; `write_hsp_rows`), the middle
     // line with the query's; its end gaps are NCBI's end character (`write_row_chars`).
     write_hsp_rows(
         writer,
@@ -1262,7 +1263,7 @@ const ROW_LABELS: [&str; 2] = ["Query", "Sbjct"];
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1781-1783
 /// The lines are those of the HSP's Dense-seg (`GetAlnStop`), whose columns the rows' letters
 /// are: a difference is an internal error. An HSP of length 0 (BLASTX's empty rows) has none
-/// (`(int)aln_stop` is -1). `prev_stop` starts at 0 (`vector<int>`).
+/// (`aln_stop` cast to `int` is -1). `prev_stop` starts at 0 (`vector<int>`).
 #[allow(clippy::too_many_arguments)]
 fn write_hsp_rows<W: Write>(
     writer: &mut W,
@@ -1330,12 +1331,12 @@ fn write_hsp_rows<W: Write>(
 /// line of first column `j`; `prev_stop` is the row's `end` on its last line shown.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1597-1626
-/// A later line without residues ends where the row's previous line ended (`end ==
-/// prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives `maxStartLen + 2`
-/// spaces. The labels of the pairwise rows are equally long (`maxIdLen`): two spaces follow. A
-/// first line of one residue at 1 of a row of letters shows no coordinates (the `-line_length 1`
-/// rows of an HSP from a sequence's first letter); a translated row's first residue spans a
-/// codon, so its start and end differ.
+/// A later line without residues ends where the row's previous line ended (`end == prev_stop`).
+/// `AddSpace` takes a `size_t`, so an omitted start gives two more than `maxStartLen` spaces. The
+/// labels of the pairwise rows are equally long (`maxIdLen`): two spaces follow. A first line of
+/// one residue at 1 of a row of letters shows no coordinates (the `-line_length 1` rows of an HSP
+/// from a sequence's first letter); a translated row's first residue spans a codon, so its start
+/// and end differ.
 #[allow(clippy::too_many_arguments)]
 fn write_sequence_row<W: Write>(
     writer: &mut W,
@@ -1354,7 +1355,7 @@ fn write_sequence_row<W: Write>(
     } else {
         (start_text.text(), end_text.text())
     };
-    // `startLen`: the length of the start's text (`NStr::IntToString(start).size()`), 0 without.
+    // `startLen`: the length of the start's text (the size of `NStr::IntToString` of `start`), 0 without.
     write_joined(
         writer,
         &[label.as_bytes(), b"  ", start_text],
@@ -1621,8 +1622,8 @@ fn digit_count(value: usize) -> usize {
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1366-1367
 /// `GetSeqStart` and `GetSeqStop` are 0-based, so the width is that of the largest
 /// 1-based coordinate minus one, and a printed 1-based start can have one digit
-/// more. NCBI then pads with the `size_t` value `maxStartLen - startLen +
-/// k_StartSequenceMargin`, which is one space in that case; callers write
+/// more. NCBI then pads with the `size_t` value of `maxStartLen` less `startLen`, plus
+/// `k_StartSequenceMargin`, which is one space in that case; callers write
 /// `width + 2 - digits` (showalign.cpp:1614; align_format_util.cpp:932-936).
 fn coordinate_width(hit: &Hit) -> usize {
     digit_count(hit.q_start.max(hit.q_end).max(hit.s_start).max(hit.s_end) - 1)
@@ -1737,6 +1738,7 @@ fn write_blastp_pairwise_intro<W: Write>(
         false,
         super::reference::DEFAULT_PROTOCOL,
         program,
+        false,
         false,
     )
 }
@@ -2189,7 +2191,7 @@ fn write_blastp_final_footer<W: Write>(
     }
     write_matrix_line(writer, report.matrix_name.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2270-2288 (cited at
-    // `write_blastn_final_footer`): `if (options.GetGappedMode() == true) { ... "Gap Penalties: "`.
+    // `write_blastn_final_footer`): with `options.GetGappedMode()` true it writes "Gap Penalties: ".
     if report.gapped {
         writeln!(
             writer,
@@ -2994,14 +2996,16 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 // =============================================================================
 
 /// What the BLASTN prolog's program line and references follow: `-task megablast` (NCBI's
-/// `m_Megablast`; the program name stays `blastn`) and matrix-only scoring (the option reward and
-/// penalty both 0, NCBI's `m_DisableKAStats`), which also leaves out the description table, the
-/// query footers and the bit scores and e-values of the HSP headers.
+/// `m_Megablast`; the program name stays `blastn`), a search with a MegaBLAST database index
+/// (`m_IndexedMegablast`, the `-use_index true` that NCBI's loader kept), and matrix-only scoring
+/// (the option reward and penalty both 0, NCBI's `m_DisableKAStats`), which also leaves out the
+/// description table, the query footers and the bit scores and e-values of the HSP headers.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:168-177
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BlastnIntro {
     pub megablast: bool,
+    pub indexed_megablast: bool,
     pub matrix_only: bool,
 }
 
@@ -3109,7 +3113,7 @@ fn write_description_table<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:513-514
     // c++/src/objtools/align_format/showdefline.cpp:757,848: with `-num_descriptions 0`
     // the header block (the two header lines and the blank line) and the rows are not written;
-    // the blank line that closes the table is (`out << "\n"` at blast_format.cpp:613).
+    // the blank line that closes the table is (a line feed written to `out` at blast_format.cpp:613).
     if described.is_empty() {
         return writeln!(writer);
     }
@@ -3151,7 +3155,7 @@ fn write_description_table<W: Write>(
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-944
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:932-938
                 // The last row's total, wider than the column (above 99999 bits, `%5.3le`),
-                // pads with `m_MaxTotalScoreLen - size` spaces as a `size_t` below 0: NCBI
+                // pads with as many spaces as `m_MaxTotalScoreLen` less `size`, a `size_t` below 0: NCBI
                 // writes spaces without end. No valid report exists to match, so the run stops
                 // with an error (an NCBI failure is an explicit rejection, AGENTS.md rule 3).
                 if columns.is_some() {
@@ -3278,7 +3282,7 @@ pub(crate) fn is_total_score_refusal(error: &anyhow::Error) -> bool {
 struct SortColumnValues {
     /// `percent_coverage`.
     percent_coverage: i64,
-    /// The shown identity: `(int)(0.5 + percent_identity)`, 99 above 100.
+    /// The shown identity: `percent_identity` plus 0.5, cast to `int`, 99 above 100.
     percent_identity: i64,
 }
 
@@ -3473,10 +3477,14 @@ fn write_blastn_description_table<W: Write>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
-// The prolog of a megablast search: the reference is the megablast one
-// (`reference::write_prolog_references`); the layout is that of
-// `write_translated_pairwise_intro`.
-fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
+// The prolog of a megablast search: the reference is the megablast one, with the database
+// indexing one after it for a search with an index (`reference::write_prolog_references`); the
+// layout is that of `write_translated_pairwise_intro`.
+fn write_megablast_pairwise_intro(
+    writer: &mut impl Write,
+    version: &str,
+    indexed_megablast: bool,
+) -> io::Result<()> {
     super::reference::write_version_line(writer, false, "blastn", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -3486,6 +3494,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
         super::reference::DEFAULT_PROTOCOL,
         "blastn",
         true,
+        indexed_megablast,
     )
 }
 
@@ -3497,7 +3506,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_matrix_only_pairwise_intro(
     writer: &mut impl Write,
     version: &str,
-    megablast: bool,
+    intro: BlastnIntro,
 ) -> io::Result<()> {
     super::reference::write_version_line(writer, false, "rmblastn", version)?;
     writer.write_all(
@@ -3513,7 +3522,8 @@ fn write_matrix_only_pairwise_intro(
         false,
         super::reference::DEFAULT_PROTOCOL,
         "blastn",
-        megablast,
+        intro.megablast,
+        intro.indexed_megablast,
     )
 }
 
@@ -3623,9 +3633,9 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if intro.matrix_only {
-        write_matrix_only_pairwise_intro(writer, version, intro.megablast)?;
+        write_matrix_only_pairwise_intro(writer, version, intro)?;
     } else if intro.megablast {
-        write_megablast_pairwise_intro(writer, version)?;
+        write_megablast_pairwise_intro(writer, version, intro.indexed_megablast)?;
     } else {
         write_translated_pairwise_intro(writer, "BLASTN", version)?;
     }
@@ -4937,6 +4947,7 @@ fn write_translated_pairwise_intro(
         false,
         super::reference::DEFAULT_PROTOCOL,
         program,
+        false,
         false,
     )
 }

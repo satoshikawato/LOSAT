@@ -626,9 +626,10 @@ fn handle_order_packed() {
 }
 #[test]
 fn unpacked_handles_come_last() {
-    // `m_Packed - 1` as an unsigned number: ref|NC_000001.1| (1) before gi|123, both before the
-    // unpacked ones (0); a negative packed value (a general tag at or below 0 packs to id - 1, a
-    // zero digit value to -1) wraps to the top of the range, just below the unpacked ones.
+    // One less than `m_Packed`, as an unsigned number: ref|NC_000001.1| (1) before gi|123, both
+    // before the unpacked ones (0); a negative packed value (a general tag at or below 0 packs to
+    // id - 1, a zero digit value to -1) wraps to the top of the range, just below the unpacked
+    // ones.
     assert!(mask_handle_order(1) < mask_handle_order(123));
     assert!(mask_handle_order(123) < mask_handle_order(-1));
     assert!(mask_handle_order(-1) < mask_handle_order(0));

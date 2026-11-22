@@ -9,6 +9,7 @@
 mod anchored;
 pub(crate) mod archive;
 pub mod args;
+mod besthit;
 pub mod blast_aascan;
 pub mod blast_engine;
 pub mod blast_extend;

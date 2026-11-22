@@ -15,7 +15,8 @@ impl SeqRange {
     /// `TSeqRange::Empty()`: `from` above `to`. The empty range has `from == to`
     /// (`GetEmpty` is `[max, max)` with the open end as `max - 1`: `TSeqRange::GetToOpen`
     /// unset); NCBI's `NotEmpty` is what `-range` tests, and the range of no `-range` holds
-    /// `to` below `from` there (`CRange<TSeqPos>::GetEmpty()` is `from = max, to = max - 1`).
+    /// `to` below `from` there (`CRange<TSeqPos>::GetEmpty()` has `from` at the maximum, `to` one
+    /// below).
     pub fn is_empty(self) -> bool {
         self.from > self.to
     }
@@ -36,14 +37,15 @@ impl SeqRange {
     }
 }
 
-/// `CRange<TSeqPos>::GetEmpty()`: the range of no `-range` (`m_SeqRange = TSeqRange::GetEmpty()`).
+/// `CRange<TSeqPos>::GetEmpty()`: the range of no `-range` (`m_SeqRange` is set from
+/// `TSeqRange::GetEmpty`).
 pub(super) const NO_RANGE: SeqRange = SeqRange {
     from: u32::MAX,
     to: u32::MAX - 1,
 };
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-/// `NStr::StringToInt(text)` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
+/// `NStr::StringToInt` of `text` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
 /// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
 /// integer, `int` for one that fits 64 bits but not 32).
 fn string_to_int(text: &str) -> Result<i32, String> {
@@ -52,7 +54,7 @@ fn string_to_int(text: &str) -> Result<i32, String> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:181-219
-/// `ParseSequenceRangeOpenEnd(text)`: the range, or the message of the exception NCBI
+/// `ParseSequenceRangeOpenEnd` of `text`: the range, or the message of the exception NCBI
 /// throws (a `CBlastException` of its own, or the `CStringException` of `StringToInt`).
 /// The first and the last `-`-separated pieces are the start and the end (a middle piece is
 /// ignored); an empty last piece is an open end. The `TSeqRange` is built from `int`s:
@@ -87,7 +89,7 @@ pub(super) fn parse_sequence_range_open_end(text: &str) -> Result<SeqRange, Stri
         }
         range.to = (to - 1) as u32;
     }
-    // `from--` on an `int`, stored as a `TSeqPos` (unsigned 32-bit).
+    // A decrement of `from` on an `int`, stored as a `TSeqPos` (unsigned 32-bit).
     range.from = (from.wrapping_sub(1)) as u32;
     Ok(range)
 }

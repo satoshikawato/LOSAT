@@ -215,6 +215,8 @@ fn parse_blastn_args(
         // ... and no database masks (series NP, M4a-2).
         db_mask: Default::default(),
         db_mask_resolved: None,
+        // ... and no MegaBLAST database index (line RG item D5b).
+        megablast_index_loaded: None,
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
@@ -418,6 +420,8 @@ fn parse_tblastx_args(
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         subject_besthit: false,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,

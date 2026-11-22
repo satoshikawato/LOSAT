@@ -25,7 +25,8 @@ use super::model::{
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:70-130
 const TAG_INTEGER: u8 = 2;
-/// `MakeTagByte(eApplication, ePrimitive, eInteger)`, which `ExpectIntegerTag` also takes.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eInteger`, which `ExpectIntegerTag` also
+/// takes.
 const TAG_APPLICATION_INTEGER: u8 = (1 << 6) | TAG_INTEGER;
 const TAG_VISIBLE_STRING: u8 = 26;
 pub(crate) const TAG_SEQUENCE: u8 = (1 << 5) | 16;
@@ -369,8 +370,8 @@ pub(crate) enum StdSignedError<E> {
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
 /// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
-/// taken one at a time from `byte`, read into a signed type of `width` bytes (`sizeof(T)`: 4 for
-/// `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
+/// taken one at a time from `byte`, read into a signed type of `width` bytes (the size of `T`: 4
+/// for `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
 /// beyond the width are taken only as the sign extension of the value; anything else is an
 /// overflow. The one port of the function: the header reader (`Reader::int`) and the mask-file
 /// reader (`writedb::mask_info::ber`) read their INTEGERs with it.

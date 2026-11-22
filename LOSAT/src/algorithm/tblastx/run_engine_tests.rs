@@ -64,6 +64,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         subject_besthit: false,
         query_loc: None,
         subject_loc: None,

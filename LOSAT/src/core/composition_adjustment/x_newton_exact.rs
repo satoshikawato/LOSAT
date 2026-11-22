@@ -551,9 +551,11 @@ fn optimize(
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:277-279,286-286
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-221
         // `DualResiduals` and `MultiplyByAtranspose`: the per-element operations below are these, in this order.
-        // `grads[0] = temp + 1`, `grads[1] = (temp + scores) + 1`, `values[1] += x * (temp + scores)`.
-        // DualResiduals: resids_x = -grads[0] + eta * grads[1], then
-        // MultiplyByAtranspose(1.0, resids_x, 1.0, z): += 1.0 * z[j], += 1.0 * z[i + 19].
+        // `grads[0]` is `temp` plus 1, `grads[1]` is the sum of `temp` and `scores` plus 1, and
+        // `values[1]` grows by `x` times the sum of `temp` and `scores`.
+        // `DualResiduals` sets each entry of `resids_x` to minus `grads[0]` plus `eta` times
+        // `grads[1]`, then `MultiplyByAtranspose` with the scalars 1.0 and 1.0, `resids_x` and `z`
+        // adds 1.0 times `z[j]` and, in a row `i` above 0, 1.0 times `z` at `i` plus 19.
         let eta = z[M - 1];
         let mut values1 = 0.0f64;
         for i in 0..N {
@@ -578,8 +580,9 @@ fn optimize(
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:331-332
         let norm_resids_x = euclidean_norm(&resids_x);
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:243-249,172-172,177-177
-        // `MultiplyByA(1.0, rA, alphsize, -1.0, x)` adds `-1.0 * x` to each entry, first the column
-        // sums over i, then the row sums over j, in the order of the loops.
+        // `MultiplyByA` with the scalars 1.0 and -1.0, `rA`, `alphsize` and `x` adds -1.0 times
+        // `x` to each entry, first the column sums over i, then the row sums over j, in the order of
+        // the loops.
         // ResidualsLinearConstraints: (col_sums, row_sums[1..]) - A x
         resids_z[..N].copy_from_slice(col_sums);
         for i in 1..N {
@@ -620,7 +623,7 @@ fn optimize(
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
             // ---- FactorReNewtonSystem
             // `dinv = x / (1 - eta)`; `W[j][j] += dinv` over i in order;
-            // `W[i+19][i+19] += dinv` over j in order; `workspace = dinv * grad_re`;
+            // `W[i+19][i+19] += dinv` over j in order; `workspace` is set to `dinv` times `grad_re`;
             // W[39][39] += grad_re * workspace in order; W[39][c] column / row sums.
             let mut wdiag = [0.0f64; N];
             let mut wrow = [0.0f64; N];

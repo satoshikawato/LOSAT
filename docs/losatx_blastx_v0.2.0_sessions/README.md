@@ -20,8 +20,8 @@ TLOSAN 実装後の `origin/feature/tlosan-tblastn-v0.2.0` の
 | F | [並列・WASI・Web](session_f_parallel_wasi_web.md) | threads と入口をまたいで同一 bytes、worker lifecycle |
 | G | [総合認証・性能](session_g_certification.md) | 全 coverage、回帰、性能標本、独立監査 |
 
-各セッションで [AGENTS.md](../../../AGENTS.md) と
-[verify-ncbi-parity-and-speed](../../../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md)
+各セッションで [AGENTS.md](../../AGENTS.md) と
+[verify-ncbi-parity-and-speed](../../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md)
 を適用する。NCBI C/C++ は唯一の挙動権威、実行ファイルは比較専用 oracle。
 Rust の変更には直上に該当 NCBI 断片・ファイル・行番号を付ける。
 未完成の公開機能は明示的に拒否し、raw byte 差を許容差で合格にしない。

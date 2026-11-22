@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 - `validate(program, &argv)` checks the options and returns a reusable `Search`; `describe(program)` lists the options.
-- `Inputs::database(&query, "swissprot")` searches a BLAST database, found as the command line finds `-db`. `Inputs::pssm` and `Inputs::pssm_database` take the PSSM of `-in_pssm` (`psiblast`, `tblastn`). `Inputs::msa` and `Inputs::msa_database` take a multiple sequence alignment for `psiblast` (`-in_msa`). `Inputs::msa` and `Inputs::msa_database` take a multiple sequence alignment for `psiblast` (`-in_msa`). `Inputs::msa` and `Inputs::msa_database` take a multiple sequence alignment for `psiblast` (`-in_msa`).
+- `Inputs::database(&query, "swissprot")` searches a BLAST database, found as the command line finds `-db`. `Inputs::pssm` and `Inputs::pssm_database` take the PSSM of `-in_pssm` (`psiblast`, `tblastn`). `Inputs::msa` and `Inputs::msa_database` take a multiple sequence alignment for `psiblast` (`-in_msa`).
 - `run_collect` returns the reports, the HSP records, the statistics and the diagnostics. `run_batches` gives them one of NCBI's query batches at a time. `run` writes the reports to your writers, and `run_to_file` is `-out` (and the way to `-outfmt 13` and `14`).
 - `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and `run_makembindex` run the tools with your reader and writers as their standard streams.
 - The library writes nothing to standard output or standard error, and its errors carry the command line's messages.

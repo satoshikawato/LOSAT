@@ -1,4 +1,4 @@
-- Docs & CLI: fix `rpsblast -help` stale `-outfmt` description (`0 to 16, 18 and 20`), fix factual/wording
-  mismatches across README, manual pages, package READMEs, `CONTRIBUTING.md`, `RELEASE.md`, and Bioconda
-  packaging, split rare/pathological inputs out of `refusals.md` into `refusals-edge-cases.md`, add
-  `docs/manual/src/web.md`, archive closed plans/sessions under `docs/archive/`, and extend manual/refusal checks.
+- Documentation & CLI help: fix `rpsblast -outfmt` `-help` text, add a LOSAT Web (Browser GUI) manual page,
+  split rare and pathological inputs out of `refusals.md` into `refusals-edge-cases.md` with an at-a-glance
+  refusals table, expand troubleshooting and citation sections, and align README, package README, Bioconda,
+  and program manual details with v0.2.0 behavior.

@@ -54,10 +54,9 @@ There is one section for each program, and one for the five search programs toge
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Refused |
 | `-html` | All search programs | Not yet supported |
-| `-best_hit_overhang`, `-best_hit_score_edge` | `blastx`, `tblastn`, `tblastx` | Refused (`blastn`, `blastp`, `psiblast` run them) |
 | `-use_sw_tback` | `blastx`, `tblastn`, `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY` / `-ungapped`) | Refused |
 | `-ungapped` | `tblastn`, `rpstblastn` (without CBS) | Refused (`rpstblastn` with CBS gives NCBI error) |
-| `-use_index true` | `blastn` | Refused when a MegaBLAST index would be used |
+| `-use_index true` | `blastn` | Index searches run; refused for partial-volume indexes, two-hit (`-window_size` above 0), `-db_hard_mask`, or damaged/mismatched index volumes |
 | `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`; `-in_pssm` / `-in_msa`: `0, 6, 7`) |
 | `-mk_counts`, `-convert` | `windowmasker` | Not yet supported (`-ustat` supported) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
@@ -101,7 +100,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_index true` with a MegaBLAST index (made by `makembindex`) that NCBI searches with, when the index covers only some volumes of `-db`, the search is two-hit (`-window_size` above 0), or `-db_hard_mask` is given | Refused. Other searches with an index give NCBI's output. When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. |
 | `-use_index true` with a new-style index volume of 36 to 39 bytes or one without read access, an empty first index volume, or an `-index_name` volume range whose loop NCBI never ends (a first volume of 0 or more with a negative last one, such as `oidx,,0,-1`, or a last one of -1) | Refused. NCBI reads such a header undefined, crashes on the empty volume, or never finishes the loop. |
 | `-use_index true` with an index volume whose parts do not fit together (a list, offset or local id outside its sections, an Nmer length of 0, a stride of 32,768 or more), an index not made from the database (a sequence with more chunks than the index has), a seed of the index that starts at or past the last letter of its sequence, or an old-style index (`-index_name`) of fewer sequences than the database when the search runs more than one query batch or query chunk | Refused. NCBI reads past such an index's sections or past the sequence, crashes, or gives a result that depends on the order of its threads. With the old-style index NCBI stops with an error in its second search of the index (a later query batch or query chunk); LOSAT writes the same output of the batches before and refuses there. |
-| `-xdrop_gap` or `-xdrop_gap_final` so large that NCBI's 32-bit arithmetic overflows | Refused. See Rare inputs for the limits. |
+| `-xdrop_gap` or `-xdrop_gap_final` so large that NCBI's 32-bit arithmetic overflows | Refused. See [Rare and pathological inputs](refusals-edge-cases.md#blastn) for the limits. |
 | A very large `-xdrop_ungap` (such as `1e10`) that leads to an alignment outside its query context | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |

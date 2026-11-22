@@ -66,13 +66,13 @@ BLASTX の合格記録へ転用しない。
 
 ### 2.2 優先する資料
 
-- [AGENTS.md](../../AGENTS.md): 現行の最上位リポジトリ規則。
-- [verify-ncbi-parity-and-speed](../../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md):
+- [AGENTS.md](../AGENTS.md): 現行の最上位リポジトリ規則。
+- [verify-ncbi-parity-and-speed](../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md):
   差分凍結、NCBI owner 追跡、比較、性能、証拠記録。
 - [CLI v2](cli_v2_migration.md): single-dash/snake_case、公開能力と内部設定の区別。
 - 現行 `LOSAT/src/algorithm/{blastn,blastp,tblastx}/args.rs` と検索入口の validation。
 - [TLOSAN 計画](tlosan_tblastn_v0.2.0_plan.md)と
-  [段階 G 記録](../evidence/tlosan_stage_g/STAGE_G_CERTIFICATION_20260926.md):
+  [段階 G 記録](evidence/tlosan_stage_g/STAGE_G_CERTIFICATION_20260926.md):
   再利用候補、バッチ・統計・出力の検証方法。BLASTX の証拠への転用は不可。
 - [NCBI CLI マニュアル](https://www.ncbi.nlm.nih.gov/books/NBK279684/): 引数表の補助。
   挙動の最終権威は固定 C/C++ ソースと対応する executable oracle。
@@ -324,7 +324,7 @@ BLASTX の protein subject に適用しない。
 | R07 | `EDL933.fna` / `Sakai.fna` と対応 GB から抽出した FAA | bacterial code 11、長 query、多 subject、メモリと並列 | extended / release |
 | R08 | HBB `NM_000518.5 → NP_000509.1` と `NG_000007.3` の HBB 注釈領域→同蛋白 | transcript と intron を含む genomic query、code 1、複数 HSP/linking | 段階 A で取得・領域・bytes を固定、release |
 
-既存実データの場所は [LOSAT/tests/fasta](../../LOSAT/tests/fasta)。
+既存実データの場所は [LOSAT/tests/fasta](../LOSAT/tests/fasta)。
 R01/R02 の核酸 accession.version はそれぞれ `LC738883.1`、`AP027154.1`。
 R03/R04 は `AP027131.1`、`AP027133.1`。ファイル名を checksum の代わりにしない。
 表のサイズは計画作成時の集計であり、実行時に record 数・長さ・checksum を再記録する。
@@ -551,7 +551,7 @@ thread target の build 成功だけで並列対応を認証しない。
 追加 architecture は段階 A で現在の release workflow と対応表を照合する。
 各 platform で source identity、toolchain、build flags、binary hash を残す。
 
-[PD-NCBI-PLATFORM-VARIANCE](../product_decisions/PD-NCBI-PLATFORM-VARIANCE.md)の
+[PD-NCBI-PLATFORM-VARIANCE](product_decisions/PD-NCBI-PLATFORM-VARIANCE.md)の
 既存 PR 6 契約を変更しない。
 
 - 既存 Gate A: LOSAT は凍結 PR 5 raw bytes に一致する。

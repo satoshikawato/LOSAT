@@ -1,7 +1,8 @@
 //! No NCBI counterpart: a guard that the user manual's page "What LOSAT refuses"
-//! (docs/manual/src/refusals.md, the one list of refusals that users read) names every option that
-//! this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that LOSAT
-//! does not provide.
+//! (docs/manual/src/refusals.md) names every option and run-time refusal per program and every
+//! NCBI BLAST+ 2.17.0 executable that LOSAT does not provide, while rare and pathological inputs
+//! live on the linked page docs/manual/src/refusals-edge-cases.md (not counted toward CLI option
+//! coverage).
 //!
 //! The page is read at compile time. The lists under test are the ones that
 //! `unknown_option_error` consults (`UNPORTED_*_ARGS`) and
@@ -89,19 +90,24 @@ const NCBI_EXECUTABLES: [&str; 28] = [
     "windowmasker",
 ];
 
-/// The lines of `refusals.md` and `refusals-edge-cases.md` with the heading of the section
-/// each belongs to ("" before the first heading of each page).
-fn refusal_lines() -> Vec<(&'static str, &'static str)> {
+/// The lines of one manual page with the heading of the section each belongs to
+/// ("" before the first `## ` heading).
+fn page_lines(page: &'static str) -> Vec<(&'static str, &'static str)> {
     let mut lines = Vec::new();
-    for page in [PAGE, EDGE_CASES_PAGE] {
-        let mut heading = "";
-        for line in page.lines() {
-            if let Some(rest) = line.strip_prefix("## ") {
-                heading = rest.trim();
-            }
-            lines.push((heading, line));
+    let mut heading = "";
+    for line in page.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            heading = rest.trim();
         }
+        lines.push((heading, line));
     }
+    lines
+}
+
+/// The lines of `docs/manual/src/refusals.md` (primary refused options, run refusals, and
+/// non-provided executable list; `refusals-edge-cases.md` is intentionally excluded).
+fn primary_refusal_lines() -> Vec<(&'static str, &'static str)> {
+    let lines = page_lines(PAGE);
     assert!(
         lines.iter().any(|&(heading, _)| heading == FIVE_SECTION),
         "refusals.md has no section `## {FIVE_SECTION}`"
@@ -151,7 +157,7 @@ fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
 
 #[test]
 fn every_refused_option_is_in_the_manual_for_its_program() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let psiblast: Vec<&str> = UNPORTED_PSIBLAST_OWN_ARGS
         .iter()
         .chain(UNPORTED_BLASTP_ARGS)
@@ -183,7 +189,7 @@ fn every_refused_option_is_in_the_manual_for_its_program() {
         for name in names {
             if !documented(&lines, program, name) {
                 missing.push(format!(
-                    "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
+                    "{program}: the option -{name} is refused by LOSAT but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
                 ));
             }
         }
@@ -193,12 +199,12 @@ fn every_refused_option_is_in_the_manual_for_its_program() {
 
 #[test]
 fn every_run_refusal_is_in_the_manual_for_its_program() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let mut missing = Vec::new();
     for &(program, name, _) in RUN_REFUSALS {
         if !documented(&lines, program, name) {
             missing.push(format!(
-                "{program}: the run refusal -{name} is in RUN_REFUSALS but the manual's refusals.md does not name it for {program}"
+                "{program}: the run refusal -{name} is in RUN_REFUSALS but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
             ));
         }
     }
@@ -227,7 +233,7 @@ fn the_versions_are_answered_by_every_program() {
 
 #[test]
 fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let listed: Vec<&str> = lines
         .iter()
         .filter(|(heading, _)| {
@@ -251,7 +257,7 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         .collect();
     assert!(
         !not_provided.is_empty(),
-        "refusals.md's \"Programs LOSAT does not provide\" lists nothing"
+        "docs/manual/src/refusals.md's \"Programs LOSAT does not provide\" lists nothing"
     );
     let mut wrong = Vec::new();
     for executable in NCBI_EXECUTABLES {
@@ -325,4 +331,66 @@ fn the_in_msa_input_refusals_of_the_code_are_listed_in_the_manual() {
         }
     }
     assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+}
+
+fn mdbook_heading_id(heading: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for ch in heading.trim().chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if in_tag => {}
+            '`' => {}
+            _ if ch.is_alphanumeric() || ch == '_' || ch == '-' => {
+                out.extend(ch.to_lowercase());
+            }
+            _ if ch.is_whitespace() => out.push('-'),
+            _ => {}
+        }
+    }
+    out
+}
+
+#[test]
+fn edge_cases_page_has_sections_linked_from_refusals() {
+    assert!(
+        !EDGE_CASES_PAGE.trim().is_empty(),
+        "docs/manual/src/refusals-edge-cases.md must not be empty"
+    );
+    let edge_headings: Vec<String> = page_lines(EDGE_CASES_PAGE)
+        .into_iter()
+        .filter(|(_, line)| line.starts_with("## "))
+        .map(|(heading, _)| mdbook_heading_id(heading))
+        .collect();
+    assert!(
+        !edge_headings.is_empty(),
+        "docs/manual/src/refusals-edge-cases.md has no ## section headings"
+    );
+
+    let mut linked_anchors = 0usize;
+    let mut missing = Vec::new();
+    let prefix = "(refusals-edge-cases.md#";
+    for (idx, line) in PAGE.lines().enumerate() {
+        let mut rest = line;
+        while let Some(pos) = rest.find(prefix) {
+            rest = &rest[pos + prefix.len()..];
+            if let Some(end) = rest.find(')') {
+                let anchor = &rest[..end];
+                linked_anchors += 1;
+                if !edge_headings.iter().any(|h| h == anchor) {
+                    missing.push(format!(
+                        "docs/manual/src/refusals.md:{}: anchor #{anchor} has no matching ## heading in docs/manual/src/refusals-edge-cases.md",
+                        idx + 1
+                    ));
+                }
+                rest = &rest[end + 1..];
+            }
+        }
+    }
+    assert!(
+        linked_anchors > 0,
+        "docs/manual/src/refusals.md should link to sections in docs/manual/src/refusals-edge-cases.md"
+    );
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
 }

@@ -131,6 +131,9 @@ def check(src: Path) -> list[str]:
     listed = set()
     for number, line in prose_lines(summary.read_text(encoding="utf-8")):
         for target in LINK.findall(line):
+            if target in listed:
+                problems.append(f"SUMMARY.md:{number}: lists {target} more than once")
+                continue
             listed.add(target)
             if target not in pages:
                 problems.append(f"SUMMARY.md:{number}: lists {target}, which does not exist")

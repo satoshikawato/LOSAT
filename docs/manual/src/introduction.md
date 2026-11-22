@@ -73,15 +73,6 @@ If you use LOSAT in published work, cite LOSAT ([CITATION.cff](https://github.co
 - Altschul, S. F. et al. (1997). Gapped BLAST and PSI-BLAST: a new generation of protein database search programs. *Nucleic Acids Res.*, 25(17), 3389–3402.
 - Camacho, C. et al. (2009). BLAST+: architecture and applications. *BMC Bioinformatics*, 10, 421.
 
-## Citation
-
-If you use LOSAT in published work, cite LOSAT ([CITATION.cff](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/CITATION.cff)) together with the foundational BLAST / BLAST+ papers:
-
-- Kawato, S. LOSAT (LOcal Sequence Alignment Tool). <https://github.com/satoshikawato/LOSAT>.
-- Altschul, S. F. et al. (1990). Basic local alignment search tool. *J. Mol. Biol.*, 215(3), 403–410.
-- Altschul, S. F. et al. (1997). Gapped BLAST and PSI-BLAST: a new generation of protein database search programs. *Nucleic Acids Res.*, 25(17), 3389–3402.
-- Camacho, C. et al. (2009). BLAST+: architecture and applications. *BMC Bioinformatics*, 10, 421.
-
 ## License
 
 LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

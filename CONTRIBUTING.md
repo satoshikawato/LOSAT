@@ -101,30 +101,6 @@ python3 scripts/check_manual_links.py docs/manual/src --repo-root . \
   --package-readme web/packages/losat/README.md --check-figure-sync
 ```
 
-For manual and documentation changes:
-
-```bash
-python3 -m unittest tests/test_check_manual_links.py
-python3 scripts/check_manual_links.py docs/manual/src --repo-root . \
-  --repo-readme README.md --repo-readme benchmarks/README.md \
-  --repo-readme benchmarks/v0.2.0/README.md --repo-readme docs/release/v0.2.0.md \
-  --repo-readme packaging/bioconda/README.md \
-  --package-readme LOSAT/README.md --package-readme python/README.md \
-  --package-readme web/packages/losat/README.md --check-figure-sync
-```
-
-For manual and documentation changes:
-
-```bash
-python3 -m unittest tests/test_check_manual_links.py
-python3 scripts/check_manual_links.py docs/manual/src --repo-root . \
-  --repo-readme README.md --repo-readme benchmarks/README.md \
-  --repo-readme benchmarks/v0.2.0/README.md --repo-readme docs/release/v0.2.0.md \
-  --repo-readme packaging/bioconda/README.md \
-  --package-readme LOSAT/README.md --package-readme python/README.md \
-  --package-readme web/packages/losat/README.md --check-figure-sync
-```
-
 For packaging changes:
 
 ```bash

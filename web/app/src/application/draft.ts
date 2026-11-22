@@ -1878,9 +1878,9 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
 /**
  * The name that a source has in the run's argv: the user's own file name, as the command line is typed. A file named `.gz`,
  * `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's run takes the bytes of its
- * inputs, not files, and writes the names of its argv where the command line writes the names of its files (outfmt 0 and 7's
- * `Input:` line of a subject set, SAM's command line), so the argv names the file the user gave (line WQA's D21, S3-3 and the
- * review's F1, 2026-11-23).
+ * inputs, not files, and writes the names of its argv where the command line writes the names of its files (the `Input:` line
+ * of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave (line WQA's D21, S3-3
+ * and the review's F1, 2026-11-23).
  */
 function nameOf(source: DraftSource, role: InputRole): string {
   return source.origin === 'paste' ? PASTED_NAMES[role] : source.file.name;

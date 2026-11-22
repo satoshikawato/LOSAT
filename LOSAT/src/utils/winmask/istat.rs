@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::ostat::StatAlgoVersion;
 use super::pct::{apply_pct, PctSettings};
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
@@ -47,7 +48,7 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
 
 /// The counts file `path` opened by name.
 ///
-/// No NCBI counterpart: `CNcbiIfstream( "" )` and POSIX `open( "" )` fail (ENOENT) on every
+/// No NCBI counterpart: `CNcbiIfstream` and POSIX `open` of an empty name fail (ENOENT) on every
 /// platform NCBI runs on, which is what the empty name of a `-window_masker_taxid` run without a
 /// counts file must give; WASI's `path_open` takes the empty path as the preopened directory
 /// and succeeds, so the empty name is "not found" here on every target.
@@ -276,6 +277,10 @@ pub struct UnitCounts {
     uset: Uset,
     metadata: Vec<Vec<u8>>,
     warnings: Vec<String>,
+    /// The format of the file.
+    stat_type: StatType,
+    /// The counts algorithm's version that the metadata names (`GetStatAlgoVersion`).
+    algo_version: StatAlgoVersion,
 }
 
 enum Uset {
@@ -355,6 +360,8 @@ impl UnitCounts {
             }),
             metadata: found.metadata,
             warnings: Vec::new(),
+            stat_type: found.stat_type,
+            algo_version: StatAlgoVersion::default(),
         };
         let start_line = counts.metadata.len();
         match found.stat_type {
@@ -368,7 +375,8 @@ impl UnitCounts {
                 })
             }
         }
-        check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
+        counts.algo_version =
+            check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
         Ok(counts)
     }
 
@@ -671,7 +679,7 @@ impl UnitCounts {
                 // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:164-186
                 // `arg_use_ba` is true for blastn and the application (`winmask_filter.cpp:121`,
                 // `win_mask_config.cpp:361`), so the array is kept. Units of 1 or 2 letters give
-                // an array of 0 words that is still in use (`new Uint4[0]`); see `SeqMasker::mask`.
+                // an array of 0 words that is still in use (a `new` of 0 `Uint4` words); see `SeqMasker::mask`.
                 let cba_size = (1u64 << (2 * unit_size as u32)) / 32;
                 match s.read_u32s(cba_size) {
                     Some(cba) => self.cba = Some(cba),
@@ -852,9 +860,40 @@ impl UnitCounts {
         &self.metadata
     }
 
-    /// The warnings NCBI posts while reading the file (`ERR_POST( Warning << ...)`).
+    /// The warnings NCBI posts while reading the file (`ERR_POST` with `Warning`).
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// The counts algorithm's version that the file names (`GetStatAlgoVersion`).
+    pub fn stat_algo_version(&self) -> StatAlgoVersion {
+        self.algo_version
+    }
+
+    /// The text of the file's first `##note:` line (`GetMetaData`, `ExtractMetaDataStr`): what
+    /// follows the first `:` after the line's `##` of the first line whose name is `note`; empty
+    /// for none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:149-162
+    pub fn note(&self) -> &[u8] {
+        for line in &self.metadata {
+            let Some(at) = line.iter().skip(2).position(|&b| b == b':') else {
+                continue;
+            };
+            let pos = at + 2;
+            if &line[2..pos] == b"note" {
+                return &line[pos + 1..];
+            }
+        }
+        &[]
+    }
+
+    /// The percentage of each count from 0 that the file's `##pct:` lines hold (`GetCountMap`),
+    /// read as the factory reads them; empty for none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:237-276
+    pub fn count_map(&self) -> Result<Vec<f64>, WinMaskError> {
+        super::pct::count_map(&self.metadata, self.stat_type)
     }
 
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat.hpp:155-156
@@ -865,7 +904,10 @@ impl UnitCounts {
 
 impl UsetHash {
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:73-111
-    #[inline]
+    // Always inlined: the masker reaches it through `at` for every unit of every window, and
+    // with `true_count` (`-convert`) as a second caller LLVM kept it out of line, which cost
+    // blastn `-window_masker_db` 0.2-0.5 % more instructions.
+    #[inline(always)]
     fn get_info(&self, unit: u32) -> Result<u32, WinMaskError> {
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };
@@ -896,15 +938,16 @@ impl UsetHash {
 }
 
 impl UsetArray {
-    /// `CSeqMaskerUsetArray::get_info(unit)`: the count of the unit or of its reverse complement,
-    /// whichever is smaller, 0 when the array has no entry for it.
+    /// `CSeqMaskerUsetArray::get_info` of a unit: the count of the unit or of its reverse
+    /// complement, whichever is smaller, 0 when the array has no entry for it.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_array.cpp:64-82
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:151-153
     /// The units of a binary file are not checked for order (`add_info`), so in a file whose
     /// units are not increasing the entry found is the one NCBI's `lower_bound` finds
     /// (`utils::lower_bound`). No data (`unit_data` null) is an empty array here: 0 either way.
-    #[inline]
+    // Always inlined into `at`, as `UsetHash::get_info` is.
+    #[inline(always)]
     fn get_info(&self, unit: u32) -> u32 {
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };
@@ -1020,20 +1063,20 @@ impl<R: Read> Stream<'_, R> {
         }
     }
 
-    /// `is.read( (char *)&word, sizeof( Uint4 ) )`, in the machine's byte order.
+    /// `is.read` of one `Uint4` into `word`, in the machine's byte order.
     fn read_into(&mut self, word: &mut u32) {
         let mut bytes = word.to_ne_bytes();
         self.read(&mut bytes);
         *word = u32::from_ne_bytes(bytes);
     }
 
-    /// `is.read( (char *)array, n*sizeof( Uint4 ) )` into a new array; `None` when the read
+    /// `is.read` of `n` `Uint4` words into a new array; `None` when the read
     /// fails (checked against the file's length before the array is allocated).
     fn read_u32s(&mut self, n: u64) -> Option<Vec<u32>> {
         self.read_array(n, u32::from_ne_bytes)
     }
 
-    /// `is.read( (char *)array, n*sizeof( Uint2 ) )` into a new array; `None` when it fails.
+    /// `is.read` of `n` `Uint2` words into a new array; `None` when it fails.
     fn read_u16s(&mut self, n: u64) -> Option<Vec<u16>> {
         self.read_array(n, u16::from_ne_bytes)
     }
@@ -1085,19 +1128,35 @@ impl<R: Read> Stream<'_, R> {
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:361-366
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
-/// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
-/// are used only by the application's `-t_*_pct` settings (`pct::apply_pct`).
+/// `substr` at position 7; the text is libstdc++'s, as in NCBI's Linux builds. A binary line whose
+/// largest count reads as `u32::MAX` (also a larger number, which the stream stores as that) is
+/// refused whether or not the percentages are used: NCBI's table has room for the count plus
+/// one, 0 in 32 bits, and its loop reads past it (undefined behaviour in C++). The percentages
+/// themselves are used only by the application's `-t_*_pct` settings (`pct::apply_pct`) and
+/// `-convert` (`pct::count_map`).
 fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
     let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
-    let short = match stat_type {
-        StatType::Binary | StatType::OBinary => pct.next().is_some_and(|line| line.len() == 6),
-        StatType::Ascii | StatType::OAscii => pct.any(|line| line.len() == 6),
-        StatType::Unknown => false,
+    let (short, first) = match stat_type {
+        StatType::Binary | StatType::OBinary => {
+            let first = pct.next();
+            (first.is_some_and(|line| line.len() == 6), first)
+        }
+        StatType::Ascii | StatType::OAscii => (pct.any(|line| line.len() == 6), None),
+        StatType::Unknown => (false, None),
     };
     if short {
         return Err(WinMaskError::CreateFail {
             message: "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)".to_string(),
         });
+    }
+    if let Some(line) = first {
+        let mut at = 0;
+        if extract_uint(&line[7..], &mut at).is_some_and(|(max, _)| max == u32::MAX) {
+            return Err(WinMaskError::PctLine {
+                line: String::from_utf8_lossy(line).into_owned(),
+                why: super::pct::PctWhy::MaxCountWraps,
+            });
+        }
     }
     Ok(())
 }
@@ -1105,8 +1164,9 @@ fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinM
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:111-146
 /// `CSeqMaskerIstatFactory::create` calls it after the reader (`:343-348`), inside its `try`:
 /// a part of digits that `StringToInt` cannot convert (empty, or beyond `int`) is its
-/// exception, which the factory rethrows. The version itself is not used by the masker.
-fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
+/// exception, which the factory rethrows. The masker does not use the version; `-convert`
+/// writes it into the converted file (1.0.0 when no line names one).
+fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<StatAlgoVersion, NcbiException> {
     const NAME: &[u8] = b"windowmasker-statistics-algorithm-version";
     let digits = |t: &[u8]| t.iter().all(u8::is_ascii_digit);
     let find = |line: &[u8], c: u8, from: usize| {
@@ -1130,7 +1190,7 @@ fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
+        let major = ncbi_str::string_to_int(t, 0)?;
         let pp = p + 1;
         let Some(p) = find(line, b'.', pp) else {
             continue;
@@ -1139,15 +1199,19 @@ fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
+        let minor = ncbi_str::string_to_int(t, 0)?;
         let t = &line[p + 1..];
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
-        return Ok(());
+        let patch = ncbi_str::string_to_int(t, 0)?;
+        return Ok(StatAlgoVersion {
+            major,
+            minor,
+            patch,
+        });
     }
-    Ok(())
+    Ok(StatAlgoVersion::default())
 }
 
 /// The function of the ascii reader's throws.
@@ -1244,41 +1308,12 @@ impl<R: Read> TextLines<R> {
 /// * A stream that has failed, or that reached the end of the text while accumulating a field,
 ///   stores nothing more.
 pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
-    let is_space = |byte: u8| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
     let mut values = [0u32; N];
     let mut stored = 0;
     let mut at = 0;
     while stored < N {
-        while at < line.len() && is_space(line[at]) {
-            at += 1;
-        }
-        if at == line.len() {
+        let Some((value, failed)) = extract_uint(line, &mut at) else {
             break;
-        }
-        let negative = line[at] == b'-';
-        if matches!(line[at], b'-' | b'+') {
-            at += 1;
-        }
-        let first_digit = at;
-        let mut magnitude = 0u64;
-        let mut too_large = false;
-        while at < line.len() && line[at].is_ascii_digit() {
-            magnitude = magnitude * 10 + u64::from(line[at] - b'0');
-            if magnitude > u64::from(u32::MAX) {
-                // Past this the magnitude only has to stay above the limit.
-                too_large = true;
-                magnitude = u64::from(u32::MAX) + 1;
-            }
-            at += 1;
-        }
-        let (value, failed) = if at == first_digit {
-            (0, true)
-        } else if too_large {
-            (u32::MAX, true)
-        } else if negative {
-            ((magnitude as u32).wrapping_neg(), false)
-        } else {
-            (magnitude as u32, false)
         };
         values[stored] = value;
         stored += 1;
@@ -1287,4 +1322,47 @@ pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
         }
     }
     (values, stored)
+}
+
+/// The white space that `>>` skips (the "C" locale's `isspace`).
+pub(super) fn is_c_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+/// One `>>` of an `unsigned int` from `line` at `*at` (by the rules of [`extract_uints`]), which
+/// moves past what it read: `None` when the text ends at white space (nothing stored, the
+/// stream has failed); else the value stored and whether the stream has failed. A stream that
+/// has failed, or that has reached the end of the text, stores nothing more.
+pub(super) fn extract_uint(line: &[u8], at: &mut usize) -> Option<(u32, bool)> {
+    while *at < line.len() && is_c_space(line[*at]) {
+        *at += 1;
+    }
+    if *at == line.len() {
+        return None;
+    }
+    let negative = line[*at] == b'-';
+    if matches!(line[*at], b'-' | b'+') {
+        *at += 1;
+    }
+    let first_digit = *at;
+    let mut magnitude = 0u64;
+    let mut too_large = false;
+    while *at < line.len() && line[*at].is_ascii_digit() {
+        magnitude = magnitude * 10 + u64::from(line[*at] - b'0');
+        if magnitude > u64::from(u32::MAX) {
+            // Past this the magnitude only has to stay above the limit.
+            too_large = true;
+            magnitude = u64::from(u32::MAX) + 1;
+        }
+        *at += 1;
+    }
+    Some(if *at == first_digit {
+        (0, true)
+    } else if too_large {
+        (u32::MAX, true)
+    } else if negative {
+        ((magnitude as u32).wrapping_neg(), false)
+    } else {
+        (magnitude as u32, false)
+    })
 }

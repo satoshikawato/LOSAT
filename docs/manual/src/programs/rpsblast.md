@@ -59,9 +59,9 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0, 5, 6, 7, 10 and 11. Formats 6, 7 and 10 take a custom field list. As in NCBI's `rpsblast`, `delim=` is read and checked but the columns keep their tab or comma. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0 to 16, 18 and 20, every format that NCBI's `rpsblast` writes. Formats 6, 7, 10 and 20 take a custom field list. As in NCBI's `rpsblast`, `delim=` is read and checked but the columns keep their tab or comma. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
-`-outfmt 11` (BLAST archive) and `-outfmt 5` (BLAST XML) are the bytes of NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1`, at any thread count, except that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data`.
+Every format is the bytes of NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1`, at any thread count, except that LOSAT names its own version where NCBI names its own (`RPSBLAST (LOSAT 0.2.0)` where NCBI writes `RPSBLAST 2.17.0+`, `LOSAT 0.2.0` in the archive's `ident`) and that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data`.
 
 ## Differences from NCBI BLAST+
 
@@ -69,7 +69,7 @@ Supported `-outfmt` values: 0, 5, 6, 7, 10 and 11. Formats 6, 7 and 10 take a cu
 
 ## What LOSAT refuses
 
-Not yet supported: `-outfmt` other than 0, 6, 7 and 10; `-html`.
+Not yet supported: `-html`; `rpsblast` runs on the command line only (not in the Rust library, `pylosat`, or LOSAT Web).
 
 Also refused:
 

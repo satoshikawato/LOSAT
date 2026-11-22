@@ -19,11 +19,30 @@ fn read(name: &str) -> Option<Vec<u8>> {
     std::fs::read(format!("{FIXTURES}/{name}")).ok()
 }
 
+/// The text of the query set `text` held whole, after the check that the text written to a file a
+/// block at a time is the same, or the same error.
 fn render(text: &[u8]) -> Result<Vec<u8>, RenderError> {
     let (value, posts) = read_document(text, named::BIOSEQ_SET);
     assert!(posts.is_empty(), "{posts:?}");
     let value = value.unwrap_or_else(|error| panic!("{error:?}"));
-    render_queries(V::new(named::BIOSEQ_SET, &value))
+    let set = V::new(named::BIOSEQ_SET, &value);
+    let held = render_queries(set, Text::held()).map(bytes);
+    let file = crate::blastinput::input_files::temporary_output("query").expect("a file");
+    let written = render_queries(set, Text::file(file)).map(bytes);
+    assert_eq!(format!("{written:?}"), format!("{held:?}"));
+    held
+}
+
+/// The bytes of a text written.
+fn bytes(rendered: Rendered) -> Vec<u8> {
+    match rendered {
+        Rendered::Bytes(bytes) => bytes,
+        Rendered::File(mut file) => {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut bytes).expect("the file read");
+            bytes
+        }
+    }
 }
 
 #[test]
@@ -112,4 +131,32 @@ fn a_segment_that_passes_the_length_is_filled_up_to_it() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// Sequences of more letters than the blocks in which they are converted and written are the
+/// lines of the letters written whole: a gap, letters copied and letters converted, held or
+/// written to a file (`render` checks the two).
+#[test]
+fn long_sequences_are_written_in_blocks_as_whole() {
+    let gap = 3 * LETTER_BLOCK + 5;
+    let packed = FILE_BLOCK + 7;
+    let copied = 2 * LETTER_BLOCK + 3;
+    let set = format!(
+        "Bioseq-set ::= {{ seq-set {{ \
+         seq {{ id {{ local str \"Query_1\" }}, descr {{ title \"v\" }}, inst {{ repr virtual, mol na, length {gap} }} }}, \
+         seq {{ id {{ local str \"Query_2\" }}, descr {{ title \"p\" }}, inst {{ repr raw, mol na, length {}, seq-data ncbi2na '{}'H }} }}, \
+         seq {{ id {{ local str \"Query_3\" }}, descr {{ title \"c\" }}, inst {{ repr raw, mol aa, length {copied}, seq-data ncbieaa \"{}\" }} }} }} }}",
+        4 * packed,
+        "1B".repeat(packed),
+        "M".repeat(copied),
+    );
+    let text = render(set.as_bytes()).unwrap_or_else(|error| panic!("{error:?}"));
+    let mut expected = b">lcl|Query_1 v\n".to_vec();
+    crate::sequence::write_fasta_lines(&vec![b'N'; gap], WIDTH, &mut expected);
+    expected.extend_from_slice(b">lcl|Query_2 p\n");
+    crate::sequence::write_fasta_lines(&b"ACGT".repeat(packed), WIDTH, &mut expected);
+    expected.extend_from_slice(b">lcl|Query_3 c\n");
+    crate::sequence::write_fasta_lines(&vec![b'M'; copied], WIDTH, &mut expected);
+    assert!(expected.len() > 4 * FILE_BLOCK);
+    assert!(text == expected, "the long sequences' lines");
 }

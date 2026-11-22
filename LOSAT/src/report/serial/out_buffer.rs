@@ -6,17 +6,17 @@
 //!
 //! The buffer holds 4096 bytes at first. A call that puts `count` bytes (`Skip`, `Reserve`) and
 //! does not fit first writes all the buffer but its last `back limit` bytes to the output
-//! (`FlushBuffer(false)`), then doubles the buffer until the call fits; a string of 1024 bytes or
-//! more goes through `Write`, which fills the buffer up and flushes it as often as it needs
-//! without growing it; the end of a document writes everything (`EndOfWrite`). The back limit
+//! (`FlushBuffer` with `false`), then doubles the buffer until the call fits; a string of 1024
+//! bytes or more goes through `Write`, which fills the buffer up and flushes it as often as it
+//! needs without growing it; the end of a document writes everything (`EndOfWrite`). The back limit
 //! is 80 for ASN.1 text (the string wrap inserts its end of line up to a line back), 1 for XML
 //! (`BackChar` takes back the `>` of a tag) and 0 for ASN.1 binary.
 //!
 //! NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:46-52
 //! NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-947
 //! NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:281-339
-//! (`PutChar` is `Skip(1)`; `PutEol` is `Reserve(1)` and the end of line, then `PutIndent`, a
-//! `Skip` of the indentation; `PutInt4` and `PutInt8` are one `Skip` of the digits.)
+//! (`PutChar` is a `Skip` of 1; `PutEol` is a `Reserve` of 1 and the end of line, then `PutIndent`,
+//! a `Skip` of the indentation; `PutInt4` and `PutInt8` are one `Skip` of the digits.)
 //!
 //! Each `Encoder` call of `Traced` gives the bytes that it wrote and what it wrote (`Piece`);
 //! `OutBuffer::put` splits them into the buffer calls that NCBI's stream makes for them.
@@ -37,7 +37,7 @@ impl Stream {
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:64-69
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:84-87
-    /// (`CObjectOStreamAsnBinary` sets none: `m_BackLimit(0)` of the `COStreamBuffer`
+    /// (`CObjectOStreamAsnBinary` sets none: `m_BackLimit` is 0 in the `COStreamBuffer`
     /// constructor, util/strbuffer.cpp:783-796.)
     fn back_limit(self) -> usize {
         match self {
@@ -86,7 +86,7 @@ pub(super) enum Piece {
     /// An OCTET STRING (`BeginBytes`, `WriteBytes`, `EndBytes`).
     Octets,
     /// The text of a delay buffer (`Encoder::delayed`), copied with
-    /// `COStreamBuffer::Write(CByteSourceReader&)`.
+    /// `COStreamBuffer::Write` of a `CByteSourceReader`.
     Raw,
     /// `EndOfWrite` and the separator.
     End,
@@ -97,7 +97,7 @@ pub(super) enum Piece {
 #[derive(Clone, Debug)]
 pub(super) struct OutBuffer {
     stream: Stream,
-    /// `m_BufferEnd - m_Buffer`.
+    /// `m_BufferEnd` less `m_Buffer`.
     capacity: usize,
     /// `GetUsedSpace()`.
     used: usize,
@@ -137,7 +137,7 @@ impl OutBuffer {
         self.first_write
     }
 
-    /// `FlushBuffer(false)`.
+    /// `FlushBuffer` with `false`.
     fn flush_buffer(&mut self) {
         let leave = self.stream.back_limit();
         if self.used < leave {
@@ -176,7 +176,7 @@ impl OutBuffer {
         }
     }
 
-    /// `PutString(str, length)`: `Skip` below 1024 bytes, `Write` from 1024.
+    /// `PutString` of a string and its `length`: `Skip` below 1024 bytes, `Write` from 1024.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1143-1161
     fn put_string(&mut self, mut length: usize) {
@@ -198,8 +198,8 @@ impl OutBuffer {
         self.used += length;
     }
 
-    /// `Write(CByteSourceReader&)` of `length` bytes: the buffer filled up and flushed whenever it
-    /// is full, without growing it, and flushed once more when the bytes end exactly at its end
+    /// `Write` of a `CByteSourceReader`, `length` bytes: the buffer filled up and flushed whenever
+    /// it is full, without growing it, and flushed once more when the bytes end exactly at its end
     /// (the reader's last `Read` finds no room first).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1164-1182
@@ -261,29 +261,30 @@ impl OutBuffer {
     /// The calls of `CObjectOStreamAsn` (objostrasn.cpp).
     fn asn_text(&mut self, piece: Piece, bytes: &[u8], posts: &[usize], written: &mut Vec<u64>) {
         match piece {
-            // `WriteId(type name)` and `PutString(" ::= ")` (objostrasn.cpp:105-111).
+            // `WriteId` of the type name and `PutString` of `" ::= "` (objostrasn.cpp:105-111).
             Piece::Header => {
                 let name = bytes.len().saturating_sub(5);
                 self.skip(name);
                 self.skip(bytes.len() - name);
             }
             Piece::Markup => self.asn_text_markup(bytes),
-            // `PutInt4`, `PutInt8`, `PutString("TRUE")`, `PutString("NULL")`.
+            // `PutInt4`, `PutInt8`, `PutString` of `"TRUE"`, `PutString` of `"NULL"`.
             Piece::Number | Piece::Bool => self.skip(bytes.len()),
             Piece::Raw => self.write_reader(bytes.len()),
-            // `PutChar(tolower(name[0]))` and `PutString(name + 1)` (objostrasn.cpp:113-127).
+            // `PutChar` of the lower-cased `name[0]` and `PutString` of `name` from its second byte
+            // (objostrasn.cpp:113-127).
             Piece::Enum => {
                 self.skip(1);
                 self.skip(bytes.len() - 1);
             }
             Piece::Real => self.asn_text_real(bytes),
-            // `WriteString` puts each byte with `PutChar`, after `WrapAt(78, true)` (an end of
-            // line inserted with `Reserve(1)`); a doubled `"` is a `PutChar` of its own
+            // `WriteString` puts each byte with `PutChar`, after `WrapAt` at 78 with `true` (an end
+            // of line inserted with `Reserve` of 1); a doubled `"` is a `PutChar` of its own
             // (objostrasn.cpp:413-444). Every call puts one byte, so the encoder's bytes before a
             // post count NCBI's calls before it.
             Piece::Str => self.ones_with_posts(bytes.len(), posts, written),
-            // `PutChar('\'')`, `WrapAt(78, false)` and two `PutChar`s per byte, then `WrapAt` and
-            // `PutString("'H")` (objostrasn.cpp:868-895).
+            // `PutChar` of a single quote, `WrapAt` at 78 with `false` and two `PutChar`s per byte,
+            // then `WrapAt` and `PutString` of `"'H"` (objostrasn.cpp:868-895).
             Piece::Octets => {
                 let end = bytes.len().saturating_sub(2);
                 self.skip_ones(end);
@@ -326,7 +327,7 @@ impl OutBuffer {
 
     /// `CObjectOStreamAsn::WriteDouble2` with `m_FastWriteDouble` (the default): `PutString`
     /// of `{ `, of the sign, of the digits and of `, 10, `, `PutInt4` of the exponent,
-    /// `PutString(" }")`; zero, a NaN and an infinity are one `PutString`.
+    /// `PutString` of `" }"`; zero, a NaN and an infinity are one `PutString`.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:198-222
     fn asn_text_real(&mut self, bytes: &[u8]) {
@@ -411,7 +412,8 @@ impl OutBuffer {
         let rest = bytes.len() - i;
         match piece {
             Piece::Number | Piece::Real => {
-                // `WriteDouble2` of an infinity: `PutChar('-')` and `PutString("INF", 3)`.
+                // `WriteDouble2` of an infinity: `PutChar` of a minus sign and `PutString` of
+                // `"INF"` with a length of 3.
                 if bytes[i..].starts_with(b"-INF") {
                     self.skip(1);
                     self.skip(3);
@@ -437,11 +439,12 @@ impl OutBuffer {
                 }
                 self.back_char();
                 if piece == Piece::Bool {
-                    // `PutString(" value=\"true\"")`, `SelfCloseTagEnd` (`PutString("/>")`).
+                    // `PutString` of `" value=\"true\""`, `SelfCloseTagEnd` (`PutString` of
+                    // `"/>"`).
                     self.skip(rest - 2);
                     self.skip(2);
                 } else {
-                    // `PutString(" value=\"")`, the name, `PutChar('"')`, then
+                    // `PutString` of `" value=\""`, the name, `PutChar` of a double quote, then
                     // `SelfCloseTagEnd` or, for an INTEGER with named values, `OpenTagEnd` and
                     // `PutInt4` (objostrxml.cpp:427-487).
                     self.skip(8);
@@ -463,13 +466,13 @@ impl OutBuffer {
         }
     }
 
-    /// The tags at the start of `bytes`: `OpenTagStart` (`PutEol(false)`, `PutIndent`,
-    /// `PutChar('<')`) or `CloseTagStart` (`PutEol(false)` and `PutIndent` after a closing tag,
-    /// `PutString("</")`), the name, `OpenTagEnd` / `CloseTagEnd` (`PutChar('>')`). A name is
-    /// put as `PrintTagName` puts it: the type's name, then for each member or variant
-    /// `PutChar('_')` and `PutString(name)`, for a list element `PutString("_E")`.
-    /// Returns where the tags end and whether the last tag's name ends there without its `>`
-    /// (a `value` attribute follows).
+    /// The tags at the start of `bytes`: `OpenTagStart` (`PutEol` with `false`, `PutIndent`,
+    /// `PutChar` of a less-than sign) or `CloseTagStart` (`PutEol` with `false` and `PutIndent`
+    /// after a closing tag, `PutString` of `"</"`), the name, `OpenTagEnd` / `CloseTagEnd`
+    /// (`PutChar` of a greater-than sign). A name is put as `PrintTagName` puts it: the type's
+    /// name, then for each member or variant `PutChar` of an underscore and `PutString` of `name`,
+    /// for a list element `PutString` of `"_E"`. Returns where the tags end and whether the last
+    /// tag's name ends there without its `>` (a `value` attribute follows).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1089-1132
     /// (ASN.1 member names start with a lower-case letter, so a piece `E` is an element.)
@@ -521,8 +524,8 @@ impl OutBuffer {
     }
 
     /// `WriteEscapedChar` of the byte at the start of `bytes` (`PutString` of an entity, for a
-    /// control byte `PutString("&#x")`, a `PutChar` per hex digit and `PutChar(';')`, else
-    /// `PutChar`); the bytes that it wrote.
+    /// control byte `PutString` of `"&#x"`, a `PutChar` per hex digit and `PutChar` of a semicolon,
+    /// else `PutChar`); the bytes that it wrote.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:502-538
     fn xml_char(&mut self, bytes: &[u8]) -> usize {

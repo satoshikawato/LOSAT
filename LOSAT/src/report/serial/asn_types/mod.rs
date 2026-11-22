@@ -15,7 +15,7 @@
 //!
 //! What the table holds of a type is what NCBI's text reader reads of it: the kind, the members
 //! or variants in module order with their tags, OPTIONAL and DEFAULT marks and the delayed member
-//! of `Auth-list` (`biblio.def`: `names._delay = 1`), the value lists, the C++ storage of each
+//! of `Auth-list` (`biblio.def`: `names._delay` is 1), the value lists, the C++ storage of each
 //! INTEGER (`.def` `_type`: `TSeqPos` is read as Uint4, `TGi` as Int8, ...) and the ASN.1 name
 //! (empty for an anonymous type, as `CTypeInfo::GetName` reports an internal type,
 //! serial/typeinfo.cpp:249-252), which the reader's stack names in NCBI's exception reports.
@@ -49,9 +49,9 @@ pub(crate) use read::{read_document, Post, ReadError};
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;
-/// `Member::flags`: a member with a DEFAULT (`->SetDefault(...)`; NCBI reads it as optional).
+/// `Member::flags`: a member with a DEFAULT (`SetDefault`; NCBI reads it as optional).
 pub(crate) const DEFAULT: u8 = 2;
-/// `Member::flags`: a member that NCBI reads into a delay buffer (`->SetDelayBuffer(...)`):
+/// `Member::flags`: a member that NCBI reads into a delay buffer (`SetDelayBuffer`):
 /// skipped with the skip functions and kept as the text read (`Value::Delayed`).
 pub(crate) const DELAYED: u8 = 4;
 

@@ -1,8 +1,8 @@
 //! The text parsers of `CSeq_id` (`c++/src/objects/seqloc/Seq_id.cpp`, `Textseq_id.cpp`,
 //! `c++/src/objects/general/Object_id.cpp`) that `makeblastdb -parse_seqids` runs on a
 //! definition line: `ParseIDs` (FASTA ids such as `gi|123|ref|NP_000549.1|`), the
-//! constructor from a bare id (`CSeq_id(text, flags)`, with the accession guide) and the
-//! typed `Set`. Each gives a `ParsedSeqId` or the `CSeqIdException` NCBI throws
+//! constructor from a bare id (`CSeq_id` from the text and `flags`, with the accession guide) and
+//! the typed `Set`. Each gives a `ParsedSeqId` or the `CSeqIdException` NCBI throws
 //! (`SeqIdError`, whose `what` is the text NCBI prints when it posts one).
 
 use super::accguide::{
@@ -52,8 +52,8 @@ impl SeqIdError {
         }
     }
 
-    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`), with the
-    /// message's bytes.
+    /// The exception NCBI throws (`NCBI_THROW` of `CSeqIdException` with `eFormat` and a message),
+    /// with the message's bytes.
     pub fn exception(&self) -> NcbiException {
         let site = ThrowSite {
             file: self.file,
@@ -80,7 +80,7 @@ impl SeqIdError {
 const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";
 const TEXTSEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Textseq_id.cpp";
 
-/// `CObject_id::SetStrOrId(str)`.
+/// `CObject_id::SetStrOrId` of `str`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/general/Object_id.cpp:187-198
 pub fn str_or_id(s: &[u8]) -> ObjectId {
@@ -93,7 +93,7 @@ pub fn str_or_id(s: &[u8]) -> ObjectId {
     ObjectId::Str(s.to_vec())
 }
 
-/// `CSeq_id::WhichInverseSeqId(code)`: the type of a FASTA tag (`E_Choice`, 0 when it is
+/// `CSeq_id::WhichInverseSeqId` of `code`: the type of a FASTA tag (`E_Choice`, 0 when it is
 /// not one), compared without case.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:526-568,598-607
@@ -140,7 +140,7 @@ fn text_id(choice: u32) -> &'static str {
     TEXT_ID.get(choice as usize).copied().unwrap_or("")
 }
 
-/// `CSeq_id::SelectionName(type)`: the ASN.1 name of the alternative.
+/// `CSeq_id::SelectionName` of the type: the ASN.1 name of the alternative.
 fn selection_name(choice: u32) -> &'static str {
     match choice {
         0 => "not set",
@@ -159,7 +159,7 @@ enum TypeVariant {
     Pgp,
 }
 
-/// `CSeq_id::x_IdentifyTypeVariant(type, str)`.
+/// `CSeq_id::x_IdentifyTypeVariant` of a type and a string.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2438-2449
 fn identify_type_variant(choice: u32, s: &[u8]) -> TypeVariant {
@@ -172,7 +172,7 @@ fn identify_type_variant(choice: u32, s: &[u8]) -> TypeVariant {
     }
 }
 
-/// `CTextseq_id::Set(acc, name, version, release, allow_dot_version)`.
+/// `CTextseq_id::Set` with the accession, name, version, release and `allow_dot_version`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:58-139
 fn textseq_set(
@@ -266,7 +266,7 @@ fn textseq_set(
     Ok(id)
 }
 
-/// `CSeq_id::Set(the_type, the_id)` of a numeric id.
+/// `CSeq_id::Set` of a type and a numeric id.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2850-2884
 /// `the_id` is a non-negative `int` here (`StringToNonNegativeInt`).
@@ -301,7 +301,7 @@ fn set_numeric(choice: u32, the_id: i32) -> Result<ParsedSeqId, SeqIdError> {
     })
 }
 
-/// `CSeq_id::Set(the_type, acc, name, version, release)`; `None` for `e_not_set`.
+/// `CSeq_id::Set` of a type, accession, name, version and release; `None` for `e_not_set`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2898-3036
 /// (`TGi` is an `Int8`: `NCBI_INT8_GI` is defined in 2.17.0. The Info message is not shown
@@ -413,7 +413,7 @@ pub fn set_typed(
     }))
 }
 
-/// `s_SplitVersion(acc_in, acc, ver)`.
+/// `s_SplitVersion` of the input accession into the accession and the version.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:151-166
 fn split_version(acc_in: &[u8]) -> Result<(&[u8], i32), SeqIdError> {
@@ -441,7 +441,8 @@ fn split_version(acc_in: &[u8]) -> Result<(&[u8], i32), SeqIdError> {
     Ok((&acc_in[..dot], ver))
 }
 
-/// `NStr::Split(s, "|", pieces)` without flags: every `|` ends a piece, empty ones kept.
+/// `NStr::Split` of `s` at `"|"` into pieces, without flags: every `|` ends a piece, empty ones
+/// kept.
 fn split_bars(s: &[u8]) -> std::collections::VecDeque<&[u8]> {
     if s.is_empty() {
         return Default::default();
@@ -449,7 +450,7 @@ fn split_bars(s: &[u8]) -> std::collections::VecDeque<&[u8]> {
     s.split(|&c| c == b'|').collect()
 }
 
-/// `CSeq_id::CheckLocalID(s)` as `IsValidLocalID` reads it: not blank, at most
+/// `CSeq_id::CheckLocalID` of `s` as `IsValidLocalID` reads it: not blank, at most
 /// `kMaxLocalIDLength` (50) bytes, no byte that `CSeq_id_find_pred` finds (a control
 /// byte, a byte from 0x80 up, or one of ` >[]|"`; [`has_invalid_local_char`]).
 ///
@@ -462,8 +463,9 @@ pub fn is_valid_local_id(s: &[u8]) -> bool {
 // `char` is signed on the reference platform (x86-64), so every byte from 0x80 up is
 // below 32 there; with an unsigned `char` it is above 127. Either way a control byte
 // (below 0x20) and a byte of 0x80 or more are illegal; 0x7F is not. `strchr` also finds
-// the terminating NUL, which the `ch<32` test has already taken.
-/// `CheckLocalID(s) & fInvalidChar`: a byte below 0x20, from 0x80 up, or one of ` >[]|"`.
+// the terminating NUL, which the test for a `ch` below 32 has already taken.
+/// The `fInvalidChar` bit of `CheckLocalID` of `s`: a byte below 0x20, from 0x80 up, or one of
+/// ` >[]|"`.
 pub fn has_invalid_local_char(s: &[u8]) -> bool {
     s.iter()
         .any(|&c| !(0x20..0x80).contains(&c) || b" >[]|\"".contains(&c))
@@ -509,7 +511,7 @@ const RAW_DBTAGS: [&[u8]; 25] = [
     b"dbSTS",
 ];
 
-/// `s_CheckForFastaTag(s)`.
+/// `s_CheckForFastaTag` of `s`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:632-642
 fn check_for_fasta_tag(s: &[u8]) -> u32 {
@@ -522,17 +524,17 @@ fn check_for_fasta_tag(s: &[u8]) -> u32 {
     }
 }
 
-/// `s_HasFastaTag(s)` (Seq_id.cpp:610-620): `|` at the third or fourth byte, with more
+/// `s_HasFastaTag` of `s` (Seq_id.cpp:610-620): `|` at the third or fourth byte, with more
 /// after it.
 fn has_fasta_tag(s: &[u8]) -> bool {
     (s.len() > 3 && s[2] == b'|') || (s.len() > 4 && s[3] == b'|')
 }
 
-/// `CSeq_id(the_id, flags)` (`CSeq_id::Set(the_id, flags)`). `warn` gets the diagnostics
-/// NCBI posts.
+/// `CSeq_id` from the id and `flags` (`CSeq_id::Set` of the id and `flags`). `warn` gets the
+/// diagnostics NCBI posts.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2457-2557
-/// (`Set(e_Gi, the_id)` is the typed `Set` with the id as the accession. The tagged
+/// (`Set` of `e_Gi` and the id is the typed `Set` with the id as the accession. The tagged
 /// branch is reached only without `fParse_NoFASTA`, which makeblastdb's two parses never
 /// use on a tagged id.)
 pub fn seq_id_from_text(
@@ -637,8 +639,8 @@ pub fn seq_id_from_text(
     }
 }
 
-/// `CSeq_id::x_Init(fasta_pieces, type, tv)`: the id of the type from the next pieces,
-/// and the type that the piece left first announces (`e_not_set` for none).
+/// `CSeq_id::x_Init` of the FASTA pieces, a type and its variant `tv`: the id of the type from the
+/// next pieces, and the type that the piece left first announces (`e_not_set` for none).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2698-2840
 /// (`strchr` also finds the NUL of a `fields[0]` whose fifth byte is NUL.)
@@ -757,7 +759,7 @@ fn x_init(
     Ok((id, next_type))
 }
 
-/// `CSeq_id::ParseIDs(ids, s, flags)`: the ids of a FASTA id string; an id that stays
+/// `CSeq_id::ParseIDs` of `ids`, `s` and `flags`: the ids of a FASTA id string; an id that stays
 /// unset (`None`) after a skipped piece is kept, as NCBI keeps it. `warn` gets the
 /// exceptions that `fParse_PartialOK` turns into warnings (subcode 7, the `what` text).
 ///

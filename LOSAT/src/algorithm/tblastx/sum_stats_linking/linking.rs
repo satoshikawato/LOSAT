@@ -1430,7 +1430,8 @@ fn link_hsp_group_ncbi(
     // - pool_lh_helpers[i+2]: corresponds to pool_hsp_links[i]
     // NCBI `c++/src/algo/blast/core/link_hsps.c` allocates `lh_helper` with `calloc`, so the sentinel
     // entries are zero-initialized. We mirror that exactly (sums=0, next_larger=0).
-    // NCBI line 576: lh_helper[0].maxsum1 = -10000;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:576 sets `maxsum1` of the
+    // first sentinel to -10000.
     // NCBI memory pooling: reuse pool_lh_helpers buffer instead of allocating fresh
     // Resize to n+2 (group size + sentinels), clearing and reusing existing capacity
     // NCBI uses calloc to allocate n+2 entries, all zero-initialized.
@@ -1491,7 +1492,7 @@ fn link_hsp_group_ncbi(
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
         // (`best_sum` is reset where the sums are recomputed, below; with `use_current_max`
-        // only `best` is read, as NCBI's max0/max1 are local to the `if (!first_pass)` block)
+        // only `best` is read, as NCBI's max0/max1 are local to the block for `first_pass` false)
         let mut best: [Option<usize>; 2] = [None, None];
         let mut best_sum: [i64; 2];
         let mut use_current_max = false;
@@ -1719,8 +1720,8 @@ fn link_hsp_group_ncbi(
                     let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_small));
                     let ctx_idx = pool_hsp_links[i].ctx_idx;
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
-                    // Preserve C's left-associative evaluation order; pre-adding
-                    // `(score * Lambda - logK)` changes 1-ULP chain E-value ties.
+                    // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
+                    // less `logK` as one group changes 1-ULP chain E-value ties.
                     let new_xsum = h_xsum
                         + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                         - log_k_by_ctx[ctx_idx];
@@ -1836,8 +1837,8 @@ fn link_hsp_group_ncbi(
                             );
                         }
 
-                        // NCBI `c++/src/algo/blast/core/link_hsps.c:812,816-817` lines 812-823 (note the hardcoded `if(1)`):
-                        //      if(1){
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:812-823 (the
+                        // condition at 812 is the constant 1, so the branch always runs).
                         //
                         // This sets the initial best score to slightly less than the previous
                         // best's real value so ties preserve original ordering.
@@ -1892,8 +1893,8 @@ fn link_hsp_group_ncbi(
                 let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:866-867
-                // Preserve C's left-associative evaluation order; pre-adding
-                // `(score * Lambda - logK)` changes 1-ULP chain E-value ties.
+                // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
+                // less `logK` as one group changes 1-ULP chain E-value ties.
                 let new_xsum = h_xsum
                     + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                     - log_k_by_ctx[ctx_idx];
@@ -1984,7 +1985,7 @@ fn link_hsp_group_ncbi(
 
                 // The count is NCBI's Int2: a wrapped (negative) count is not "> 1"
                 // (link_hsps.c:918). BLAST_GapDecayDivisor takes it as an unsigned and raises the
-                // rate to the Int4 `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor
+                // rate to the Int4 `nsegs` less 1; `as usize` sign-extends and gap_decay_divisor
                 // truncates `num_segments - 1` to the same i32.
                 let num = pool_hsp_links[bi].num[0];
                 let xsum = pool_hsp_links[bi].xsum[0];
@@ -1998,10 +1999,9 @@ fn link_hsp_group_ncbi(
                     eff_search_space,
                     divisor,
                 );
-                // NCBI `c++/src/algo/blast/core/link_hsps.c` lines 918-922:
-                //   if( num > 1 ) {
-                //     if( gap_prob == 0 || (prob /= gap_prob) > INT4_MAX ) prob = INT4_MAX;
-                //   }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:918-922: with more
+                // than one HSP, `prob` becomes `INT4_MAX` when `gap_prob` is 0; otherwise it is
+                // divided by `gap_prob` and capped at `INT4_MAX`.
                 if num > 1 {
                     if gap_prob == 0.0 || (prob[0] / gap_prob) > int4_max {
                         prob[0] = int4_max;

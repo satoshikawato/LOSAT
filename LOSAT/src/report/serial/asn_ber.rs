@@ -12,7 +12,7 @@
 use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
 
-/// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
+/// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2` of `data` with `DBL_DIG`).
 const DBL_DIG: u32 = 15;
 
 /// The identifier octets of the primitive types and of the constructed types that NCBI
@@ -130,14 +130,14 @@ impl<'b> AsnBinaryEncoder<'b> {
         } else if length <= 0xff_ffff {
             3
         } else {
-            // `sizeof(length)`: eight bytes on x86-64 Linux, not the shortest four.
+            // The `sizeof` of `length`: eight bytes on x86-64 Linux, not the shortest four.
             8
         };
         self.out.push(0x80 + count as u8);
         self.out.extend_from_slice(&bytes[8 - count..]);
     }
 
-    /// `WriteNumberValue(Int4)`: the length (1 to 4) and the two's-complement bytes, the
+    /// `WriteNumberValue` of an `Int4`: the length (1 to 4) and the two's-complement bytes, the
     /// shortest of the ranges of one, two and three bytes, else four.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
@@ -276,7 +276,7 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.write_string::<true>(value);
     }
 
-    /// `WriteDouble2(data, DBL_DIG)`: `09`, the length, the decimal form byte 0 and the
+    /// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length, the decimal form byte 0 and the
     /// digits of `DoubleToStringPosix`. (NCBI marks a NaN or an infinity by another form
     /// byte, which LOSAT does not write: BLAST reports have none.)
     ///

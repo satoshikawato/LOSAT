@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 10, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 11, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -18,7 +18,7 @@ drops the output that the engine tells it to discard (stream 9, in "Use").
 The package is not published on npm. Build it from the [LOSAT repository](https://github.com/satoshikawato/LOSAT):
 make the two modules with `web/adapter/tools/build_reactors.py`, then run
 `LOSAT_WEB_REACTORS=<modules directory> npm run build` in `web/packages/losat`; `npm pack` there makes a
-file to install ([web/AGENTS.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/web/AGENTS.md)).
+file to install (see the [WebAssembly manual page](https://satoshikawato.github.io/LOSAT/libraries/webassembly.html) and [CONTRIBUTING.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/CONTRIBUTING.md)).
 
 ## Versions
 
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 10 |
+| 0.2.0 | 0.2.0 | 11 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -80,7 +80,15 @@ const engine = new WasmEngine({ assets: ENGINE_ASSETS, control });
 port, onPhase)` runs one search. The outputs arrive on the `MessagePort` as chunks of each
 stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `EngineInput.records`
 holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
-engine checks them before it searches.
+engine checks them before it searches. When the reader fails on a query record, the scan ends there:
+its records are those before it, and `reader_error` gives the command line's message, the offset
+of that record, and whether it starts with a defline (`defline`). Pass the query's bytes from that
+offset on after the records you keep, and the run searches the query batches before the record and
+ends with that message, as the command line does. Bytes from an offset whose record has no defline
+(an input's first line, such as a byte order mark) would be read as letters of the record before
+them: do not pass them after another input's records.
+A subject with such a record is refused when it is registered, as the command line reads every
+subject before its first query.
 
 The engine tells the host which outputs a run could not write, and where their errors are: for
 each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stream number and then

@@ -3,26 +3,8 @@
 //! object as `NStr::PrintableString` writes it, and `x_GetFastaReaderDeflines` reads it
 //! back (`c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp`, `c++/src/corelib/ncbistr.cpp`).
 
-use crate::ncbi_str::parse_escapes;
-
-/// `NStr::Replace` and `NStr::ReplaceInPlace`: every occurrence of `search`, from the
-/// left, without reading the replacement again.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3371-3385
-fn replace(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
-    let mut dst = Vec::with_capacity(src.len());
-    let mut pos = 0;
-    while let Some(found) = src[pos..]
-        .windows(search.len())
-        .position(|window| window == search)
-    {
-        dst.extend_from_slice(&src[pos..pos + found]);
-        dst.extend_from_slice(replacement);
-        pos += found + search.len();
-    }
-    dst.extend_from_slice(&src[pos..]);
-    dst
-}
+use crate::ncbi_str::{parse_escapes, replace, replace_in_place};
+use crate::utils::byte_search::find_first;
 
 /// The `fasta` string of `x_GetFastaReaderDeflines`: the `DefLine` field with `\t` replaced
 /// by three spaces, then its escapes read (`fasta_reader_title` quotes the lines) by
@@ -51,13 +33,22 @@ const TAB_REPLACEMENT: &[u8] = b"   ";
 /// No escape fails: a backslash that starts an escape is one that `ncbi_str::printable_string`
 /// wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the backslash
 /// left of a replaced `\\t`, followed by a space.
+///
+/// A field without a backslash, a ctrl-A and a tab (the field of every definition line that
+/// `printable_string` escaped nothing of, as most are) has nothing that these steps change: its
+/// title is the field after the `>`, found with one search of the field.
 pub(super) fn fasta_reader_title(defline_field: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
-    let fasta = fasta_reader_fasta(defline_field)?;
-    if fasta.is_empty() {
+    if find_first(defline_field, |b| (b == b'\\') | (b == 0x01) | (b == b'\t')).is_none() {
+        return Ok(defline_field.get(1..).map(<[u8]>::to_vec));
+    }
+    let mut title = fasta_reader_fasta(defline_field)?;
+    if title.is_empty() {
         return Ok(None);
     }
-    let title = replace(&fasta[1..], b"\x01", b" ");
-    Ok(Some(replace(&title, b"\t", TAB_REPLACEMENT)))
+    title.remove(0);
+    replace_in_place(&mut title, b"\x01", b" ");
+    replace_in_place(&mut title, b"\t", TAB_REPLACEMENT);
+    Ok(Some(title))
 }
 
 #[cfg(test)]

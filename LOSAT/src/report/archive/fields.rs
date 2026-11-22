@@ -2,18 +2,19 @@
 //! the request writer (`options`, `writer`: what NCBI's `Set*` calls record) and the strategy
 //! reader (`read::options`: what NCBI's `CBlastOptionsBuilder` applies) share.
 //!
+//! NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:53-339
 //! NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:367-373
 //! A field is a name with the `Blast4-value` alternative that NCBI's table gives it
-//! (names.cpp:53-337, `CBlast4Field::Get`); a parameter is the field's only when both agree
+//! (the cases of `CBlast4Field::Get`); a parameter is the field's only when both agree
 //! ([`Field::matches`]). One name has two fields: `Culling` is the culling limit as an integer
 //! ([`CULLING_LIMIT`]) and the builder's culling switch as a boolean ([`CULLING`]).
 //!
 //! A [`Field`] is made here only, so every parameter that LOSAT writes or reads names a field of
 //! this table.
 
-/// An alternative of `Blast4-value` (blast.asn:512-551), in the module's order.
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-551
+/// An alternative of `Blast4-value`, in the module's order.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-526
 /// The discriminants are NCBI's `CBlast4_value::E_Choice` (`e_not_set` is 0, the first
 /// alternative 1), the number that `Which()` returns and NCBI's messages print.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -151,15 +152,16 @@ impl Field {
         self.value_type
     }
 
-    /// `CBlast4Field::Match` (names.cpp:367-373): a parameter named `name` whose value is the
+    // NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:367-373
+    /// `CBlast4Field::Match`: a parameter named `name` whose value is the
     /// alternative `value_type` is this field's.
     pub fn matches(self, name: &[u8], value_type: ValueType) -> bool {
         value_type == self.value_type && name == self.name.as_bytes()
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:53-60
-// The constants below are the cases of `CBlast4Field::Get` in names.cpp's order, each named after
+// NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:53-339
+// The constants below are the cases of `CBlast4Field::Get` in that file's order, each named after
 // its `EBlastOptIdx` (`eBlastOpt_WordThreshold` is `WORD_THRESHOLD`); the commented-out cases
 // (`Program`, `LookupTableType`, `XDropoff`, ...) have no field. The cases that neither LOSAT's
 // writer nor NCBI's `CBlastOptionsBuilder` names are left out (`ComplexityAdjustMode`, `MaskLevel`,
@@ -200,7 +202,8 @@ pub const QUERY_COV_HSP_PERC: Field = Field::new("QueryCovHspPerc", T::Real);
 pub const MAX_HSPS_PER_SUBJECT: Field = Field::new("MaxHspsPerSubject", T::Integer);
 pub const SUM_STATISTICS_MODE: Field = Field::new("SumStatistics", T::Boolean);
 pub const LONGEST_INTRON_LENGTH: Field = Field::new("LongestIntronLength", T::Integer);
-/// `eBlastOpt_GappedMode`: "same as !ungapped mode" (names.cpp:153).
+// NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:156-158
+/// `eBlastOpt_GappedMode`: the field is named `UngappedMode`, the inverse of the gapped mode.
 pub const GAPPED_MODE: Field = Field::new("UngappedMode", T::Boolean);
 pub const MATRIX_NAME: Field = Field::new("MatrixName", T::String);
 pub const MATCH_REWARD: Field = Field::new("MatchReward", T::Integer);

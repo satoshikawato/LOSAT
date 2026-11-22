@@ -144,7 +144,7 @@ pub fn fasta_na_score(id: &ParsedSeqId) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiutil.hpp:224-258
-/// `FindBestChoice(ids, score)`: the first id with the lowest score; `None` for no ids.
+/// `FindBestChoice` of `ids` with `score`: the first id with the lowest score; `None` for no ids.
 pub fn find_best<'a>(
     ids: impl IntoIterator<Item = &'a ParsedSeqId>,
     score: impl Fn(&ParsedSeqId) -> i32,

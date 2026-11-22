@@ -140,6 +140,8 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             letters,
             &[],
             &[],
+            None,
+            &[],
         )
         .unwrap()
     };
@@ -194,6 +196,8 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             SubjectLetters::Stream(&stream),
             true,
             &[],
+            &[],
+            None,
             &[],
         )
         .unwrap();

@@ -75,9 +75,15 @@ impl QueryStrand {
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastnArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`). The first field: the
+    /// parser takes each later field's values out of the matches as it reads them
+    /// (`from_arg_matches_mut`), so this one reads the matches whole.
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<BlastnArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
     // `-` is standard input (`blastn/blast_engine/run.rs`).
     #[arg(long, default_value = "-", value_parser = blastn_input_path(), value_name = "PATH")]
@@ -111,6 +117,11 @@ pub struct BlastnArgs {
     /// (`DbMaskOption::resolve`, in `run::search`); `None` before, and for a search without it.
     #[arg(skip)]
     pub db_mask_resolved: Option<crate::blastinput::db_mask::ResolvedMask>,
+    /// The MegaBLAST database index that the search uses (`-use_index true` that NCBI's loader
+    /// kept, `blast_engine::mb_index`, set in `run::search`); `None` before, and for a search
+    /// without one.
+    #[arg(skip)]
+    pub(crate) megablast_index_loaded: Option<std::sync::Arc<crate::dbindex::search::LoadedIndex>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`
     // (`BlastnArgs::db_length`).
@@ -167,9 +178,10 @@ pub struct BlastnArgs {
     /// `-use_index` as NCBI's handler reads it (`blast_engine::mb_index`): ignored with
     /// `-subject` and for a task other than megablast; with `-db` and megablast, NCBI loads the
     /// database's index. When it loads none, or the word size is below the index's, NCBI warns
-    /// and searches without it, which LOSAT does; LOSAT refuses an index that NCBI searches with
-    /// (it has no indexed search yet, line RG item D5b).
-    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index (an index that would be used is not supported) [default: false]")]
+    /// and searches without it; otherwise it searches with the index. LOSAT does both, and
+    /// refuses an index of only some database volumes, a two-hit search and `-db_hard_mask`
+    /// with an index (line RG items D5b-3 and D5b-5).
+    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index [default: false]")]
     pub use_index: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362
     /// `-index_name`: the old-style index of `-use_index true` (`megablast_index_name`); without
@@ -244,7 +256,7 @@ pub struct BlastnArgs {
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
     // The search strategy to import (`report::archive::read::import`), read by `run` before the
-    // other options (`archive::apply_strategy`).
+    // other options (`import::apply`).
     #[arg(
         long,
         value_name = "filename",
@@ -252,7 +264,7 @@ pub struct BlastnArgs {
         help = "Search strategy to use"
     )]
     pub import_search_strategy: Option<PathBuf>,
-    /// The run state of an imported search strategy (`archive::apply_strategy`).
+    /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
@@ -350,7 +362,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::blastn::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
@@ -505,12 +517,19 @@ pub struct BlastnArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
 impl BlastnArgs {
     /// Whether the report cites the megablast paper: task megablast run by blastn. The program
     /// of the command line chooses its formatter's reference, so tblastx running a megablast
-    /// strategy cites Gapped BLAST (`import::RunAs`, probe `C.tblastx.from.blastn.db`).
+    /// strategy cites Gapped BLAST (`import::apply`, probe `C.tblastx.from.blastn.db`).
     pub(crate) fn megablast_reference(&self) -> bool {
         self.task == "megablast" && self.import.as_ref().is_none_or(|run| run.app == "blastn")
     }
@@ -531,10 +550,18 @@ impl BlastnArgs {
     /// The name of the MegaBLAST index that NCBI's handler asks for, and whether it is an
     /// old-style one: with `-use_index true`, task megablast and a database (with `-subject` or
     /// another task NCBI ignores `-use_index`; `blast_engine::mb_index`), the `-index_name` value
-    /// (old style) or else the `-db` value as given (new style first).
+    /// (old style) or else the `-db` value as given (new style first). A run of an imported
+    /// strategy asks for the import's index (`ImportRun::mb_index`: the strategy's, or the one
+    /// that the command line names over it).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
     pub(crate) fn megablast_index_name(&self) -> Option<(&str, bool)> {
+        if let Some(run) = &self.import {
+            return run
+                .mb_index
+                .as_ref()
+                .map(|(name, old_style)| (name.as_str(), *old_style));
+        }
         if self.use_index != Some(true) || self.task != "megablast" {
             return None;
         }

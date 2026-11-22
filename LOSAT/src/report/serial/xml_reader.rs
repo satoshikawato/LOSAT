@@ -133,8 +133,8 @@ const CP1252: [u32; 32] = [
 /// `CUtf8::x_AppendChar`: the UTF-8 bytes of a code point (any 32-bit value: the bits above 21
 /// are cut by the byte conversion).
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7040-7060
-// (`CUtf8::AsUTF8(&chU, 1)` of one `TUnicodeSymbol`, ncbistr.hpp:5718-5758, appends it with
-// this; the surrogate pair test of `x_TCharToUnicodeSymbol` is for 2-byte characters only.)
+// (`CUtf8::AsUTF8` of one `TUnicodeSymbol` (`chU`, length 1), ncbistr.hpp:5718-5758, appends it
+// with this; the surrogate pair test of `x_TCharToUnicodeSymbol` is for 2-byte characters only.)
 pub(crate) fn utf8_of(c: u32) -> Vec<u8> {
     if c < 0x80 {
         vec![c as u8]
@@ -156,9 +156,9 @@ pub(crate) fn utf8_of(c: u32) -> Vec<u8> {
     }
 }
 
-/// `CUtf8::AsUTF8(CTempString(&ch, 1), enc_in)` of one byte of 0x80 and above in a document of
-/// a single-byte encoding: the byte itself for ASCII (`x_Append` copies ASCII and UTF-8), its
-/// code point in UTF-8 for Latin-1 and cp1252 (`CharToSymbol`).
+/// `CUtf8::AsUTF8` of a `CTempString` holding `ch` (length 1) and `enc_in`, for one byte of 0x80
+/// and above in a document of a single-byte encoding: the byte itself for ASCII (`x_Append` copies
+/// ASCII and UTF-8), its code point in UTF-8 for Latin-1 and cp1252 (`CharToSymbol`).
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7062-7079
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6859-6881
 fn utf8_of_byte(c: u8, encoding: Encoding) -> Vec<u8> {
@@ -298,7 +298,7 @@ impl<S: AsnSource> XmlReader<S> {
         self.utf8_at = 0;
     }
 
-    /// `PeekChar(offset)`: the byte, or the failure of the end of the input (`CEofException`).
+    /// `PeekChar` at `offset`: the byte, or the failure of the end of the input (`CEofException`).
     #[inline]
     pub(super) fn peek(&mut self, offset: usize) -> Result<u8> {
         match self.src.byte_at(self.pos + offset) {
@@ -307,7 +307,7 @@ impl<S: AsnSource> XmlReader<S> {
         }
     }
 
-    /// `PeekCharNoEOF(offset)`: the byte, 0 past the end of the input.
+    /// `PeekCharNoEOF` at `offset`: the byte, 0 past the end of the input.
     #[inline]
     pub(super) fn peek_no_eof(&mut self, offset: usize) -> u8 {
         self.src.byte_at(self.pos + offset).unwrap_or(0)
@@ -338,7 +338,7 @@ impl<S: AsnSource> XmlReader<S> {
         }
     }
 
-    /// `CIStreamBuffer::SkipEndOfLine(lastChar)`: a `\r\n` or `\n\r` pair is one end of line.
+    /// `CIStreamBuffer::SkipEndOfLine` of `lastChar`: a `\r\n` or `\n\r` pair is one end of line.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     pub(super) fn skip_end_of_line(&mut self, last: u8) {
         self.line += 1;
@@ -348,7 +348,7 @@ impl<S: AsnSource> XmlReader<S> {
         }
     }
 
-    /// `FindChar(c)`: moves to the next `c`.
+    /// `FindChar` of `c`: moves to the next `c`.
     fn find_char(&mut self, c: u8) -> Result<()> {
         while self.peek(0)? != c {
             self.pos += 1;
@@ -356,8 +356,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `PeekFindChar(c, limit)`: the offset of `c` among the next `limit` bytes (fewer at the end
-    /// of the input), `limit` when it is not there.
+    /// `PeekFindChar` of `c` and `limit`: the offset of `c` among the next `limit` bytes (fewer at
+    /// the end of the input), `limit` when it is not there.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:292-306
     fn peek_find_char(&mut self, c: u8, limit: usize) -> usize {
         for i in 0..limit {
@@ -538,10 +538,10 @@ impl<S: AsnSource> XmlReader<S> {
         self.peek(0)
     }
 
-    /// `ReadName(c)`: the name that starts with `c` (not read yet), into `last_tag`.
+    /// `ReadName` of `c`: the name that starts with `c` (not read yet), into `last_tag`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-469
     // (`m_Doctype_found` is false for the types of an ASN.1 module (ReadFileHeader:
-    // `GetDataSpec() == EDataSpec::eDTD`). A `:` after the first byte makes a namespace prefix,
+    // `GetDataSpec()` is `EDataSpec::eDTD`). A `:` after the first byte makes a namespace prefix,
     // refused; the `xmlns` and `nil` names of `m_Attlist` are attributes, refused before.)
     pub(super) fn read_name(&mut self, c: u8) -> Result<()> {
         if !is_first_name_char(c) {
@@ -612,7 +612,7 @@ impl<S: AsnSource> XmlReader<S> {
         }
     }
 
-    /// `ReadAttributeValue(value)` of a processing instruction (`m_Attlist` false: the closing
+    /// `ReadAttributeValue` of `value` for a processing instruction (`m_Attlist` false: the closing
     /// quote is read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:891-912
     pub(super) fn read_attribute_value(&mut self) -> Result<Vec<u8>> {
@@ -639,7 +639,7 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(value)
     }
 
-    /// `SkipAttributeValue(c)`: a quoted string of the `DOCTYPE`.
+    /// `SkipAttributeValue` of `c`: a quoted string of the `DOCTYPE`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:537-543
     fn skip_attribute_value(&mut self, c: u8) -> Result<()> {
         self.skip(1);
@@ -648,9 +648,10 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `ReadEscapedChar(endingChar, &encoded)`: the next character (a byte, or the value of an
-    /// entity or character reference, which is `encoded`), or -1 at `ending` (not read). A
-    /// character reference of 2^31 and more is negative, as NCBI's `int` of its `unsigned`.
+    /// `ReadEscapedChar` of `endingChar` (and `encoded`, by address): the next character (a byte,
+    /// or the value of an entity or character reference, which is `encoded`), or -1 at `ending`
+    /// (not read). A character reference of 2^31 and more is negative, as NCBI's `int` of its
+    /// `unsigned`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:722-800
     pub(super) fn read_escaped_char(&mut self, ending: u8) -> Result<(i32, bool)> {
         let c = self.peek(0)?;
@@ -714,9 +715,9 @@ impl<S: AsnSource> XmlReader<S> {
         Ok((i32::from(c), false))
     }
 
-    /// `ReadEncodedChar(endingChar, type, encoded)` of a VisibleString (or of a UTF-8 attribute
-    /// value: the output encoding is UTF-8 either way, `m_StringEncoding`): the bytes of the
-    /// next character in UTF-8, one per call, or a negative value at `ending`; a control
+    /// `ReadEncodedChar` of `endingChar`, `type` and `encoded`, for a VisibleString (or of a UTF-8
+    /// attribute value: the output encoding is UTF-8 either way, `m_StringEncoding`): the bytes of
+    /// the next character in UTF-8, one per call, or a negative value at `ending`; a control
     /// character is refused (`x_VerifyChar`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:818-868
     fn read_encoded_char(&mut self, ending: u8) -> Result<i32> {
@@ -756,7 +757,7 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(c)
     }
 
-    /// `ReadCDSection(str)`: a CDATA section where character data meets `<`.
+    /// `ReadCDSection` of `str`: a CDATA section where character data meets `<`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1271-1295
     fn read_cd_section(&mut self, out: &mut Vec<u8>) -> Result<bool> {
         if self.peek(0)? != b'<' || self.peek(1)? != b'!' {
@@ -778,8 +779,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(true)
     }
 
-    /// `ReadTagData(str, eStringTypeVisible)`: the character data up to the next tag, with
-    /// NCBI's end-of-line handling (a first `\r` is dropped; from it to the next `\n`, every
+    /// `ReadTagData` of `str` with `eStringTypeVisible`: the character data up to the next tag,
+    /// with NCBI's end-of-line handling (a first `\r` is dropped; from it to the next `\n`, every
     /// `\r` is a `\n`) and NUL characters dropped.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1297-1354
     pub(super) fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
@@ -813,7 +814,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `ReadWord(str)`: the character data up to white space or the next tag, after white space.
+    /// `ReadWord` of `str`: the character data up to white space or the next tag, after white
+    /// space.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1356-1374
     pub(super) fn read_word(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
@@ -876,8 +878,8 @@ impl<S: AsnSource> XmlReader<S> {
     /// `ReadInt4`: an INTEGER.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:987-997
     // (No member of these types has a default: `ExpectSpecialCase` is 0. For `-2147483648`,
-    // `-Int4(n)` negates `INT_MIN`, a signed overflow; LOSAT gives the number's value, `INT_MIN`,
-    // which both NCBI builds give too (PS16d oracle `p_intmin`).)
+    // the negation of `n` cast to `Int4` negates `INT_MIN`, a signed overflow; LOSAT gives the
+    // number's value, `INT_MIN`, which both NCBI builds give too (PS16d oracle `p_intmin`).)
     pub(crate) fn int4(&mut self) -> Result<i32> {
         self.begin_data()?;
         let (negative, n) = self.get_number(i32::MAX as u64)?;
@@ -911,7 +913,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(value)
     }
 
-    /// `ReadString(str, eStringTypeVisible)`: a VisibleString (empty for a self-closed tag).
+    /// `ReadString` of `str` with `eStringTypeVisible`: a VisibleString (empty for a self-closed
+    /// tag).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1233-1258
     pub(crate) fn string(&mut self, out: &mut Vec<u8>) -> Result<()> {
         out.clear();
@@ -926,7 +929,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// (`UndoClassMember`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:582-670
     // (The namespace prefix of the type name is refused by `read_name`; without one,
-    // `m_CurrNsPrefix` is empty and `":" + typeName` never equals a type's name.)
+    // `m_CurrNsPrefix` is empty and a colon followed by `typeName` never equals a type's name.)
     pub(super) fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);
@@ -987,7 +990,7 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `OpenTag(e)`: the opening tag `e` (its name given back by `UndoClassMember`, or read).
+    /// `OpenTag` of `e`: the opening tag `e` (its name given back by `UndoClassMember`, or read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:525-535,1563-1573
     fn open_tag(&mut self, e: &str) -> Result<()> {
         match self.rejected.take() {
@@ -1006,8 +1009,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// The closing tag of a class (`CloseTag(e)`) or of a member (`CloseStackTag(0)`, whose name
-    /// is the class's name, `_` and the member's): nothing after a self-closed opening tag.
+    /// The closing tag of a class (`CloseTag` of `e`) or of a member (`CloseStackTag` of 0, whose
+    /// name is the class's name, `_` and the member's): nothing after a self-closed opening tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1575-1586,1604-1623
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1508-1561
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrxml.inl:104-124
@@ -1057,8 +1060,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(false)
     }
 
-    /// `BeginClassMember(classType, pos)` of a SEQUENCE of an ASN.1 module (not standard XML,
-    /// no member without a tag, no attribute list, unknown members not skipped): the index of
+    /// `BeginClassMember` of `classType` at `pos` for a SEQUENCE of an ASN.1 module (not standard
+    /// XML, no member without a tag, no attribute list, unknown members not skipped): the index of
     /// the next member, `None` at the end of the members.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2185-2367
     // NCBI reference (598d8ae6): c++/src/serial/memberlist.cpp:294-313,432-439
@@ -1113,7 +1116,7 @@ impl<S: AsnSource> XmlReader<S> {
     // (The verification of the read is `eSerialVerifyData_Yes` unless `SERIAL_VERIFY_DATA_READ`
     // turns it off, which LOSAT's rpsbproc rejects; `FindNextMandatory` of a member with a tag is
     // the member when it is not OPTIONAL. Members come in the module's order only
-    // (`begin_class_member`), so `prevIndex >= index` never holds.)
+    // (`begin_class_member`), so `prevIndex` is never at or above `index`.)
     pub(crate) fn class(
         &mut self,
         class: &str,

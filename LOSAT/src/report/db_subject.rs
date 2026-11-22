@@ -614,13 +614,14 @@ impl ParsedSubject {
     /// `load`: what the reports do at the subject's `Hit` (`HitLoads::load`, the one answer): a
     /// subject whose `Hit` throws (`HitLoad::Throws`: its lookup fails on a file with NCBI's
     /// exception in a batch whose prefetch is off, and every format of the run writes it as NCBI
-    /// does, `FormatThrow::of_run`: the XML2 and JSON documents of outfmt 13 to 16, the tables of
-    /// outfmt 6, 7, 10 and 20, the organism report of outfmt 18) is not refused for what the lookup
-    /// finds (it finds nothing: it throws before any definition line is read), and one that no
-    /// report loads (`HitLoad::Unread`: shown only after such a `Hit`) is not refused at all;
-    /// every other subject (`HitLoad::Loaded`, `HitLoad::Refused`) is refused as above, a lookup
-    /// that fails on a file among them (outfmt 5 here, before any byte is written; the reason of
-    /// a run whose formats refuse it, `HitLoad::Refused`).
+    /// does, `FormatThrow::of_run`: BLAST XML (outfmt 5), the XML2 and JSON documents of outfmt 13
+    /// to 16, the tables of outfmt 6, 7, 10 and 20, the organism report of outfmt 18, the pairwise
+    /// reports of outfmt 0 to 4) is not refused for what the lookup finds (it finds nothing: it
+    /// throws before any definition line is read), and one that no report loads
+    /// (`HitLoad::Unread`: shown only after such a `Hit`, or as a copy of the record in it) is not
+    /// refused at all; every other subject (`HitLoad::Loaded`, `HitLoad::Refused`) is refused as
+    /// above, a lookup that fails on a file among them (outfmt 17 here, before any byte is
+    /// written; the reason of a run whose formats refuse it, `HitLoad::Refused`).
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool, load: HitLoad) -> Result<(), String> {
         match load {
             HitLoad::Unread => return Ok(()),
@@ -1884,6 +1885,9 @@ pub fn rank_joins_as_copy(
 // (cited at `ParsedSubject::lookup_throws`: the `Hit` loads its subject by the Seq-align id of
 // its first Seq-align, and a lookup that throws there throws again outside the hit's `catch`)
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-760
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407 (cited at
+// `report::blast_xml::writer::Xml5Hits`: outfmt 5's `catch` of the `Hit`'s lookup), 143-164 (cited
+// at `report::blast_xml::writer::Xml5Hsps`: the `catch` of each HSP's lookup; neither throws again)
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-870 (cited at
 // `report::tabular::TabularSpec::row_throw`: a table's row whose subject block catches the throw)
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898 (cited at
@@ -1899,7 +1903,7 @@ pub fn rank_joins_as_copy(
 // of outfmt 1 to 4 loads each shown alignment's subject without a `catch`)
 /// What a report does after a subject whose lookup throws where its batch's prefetch is off
 /// (`ParsedSubject::lookup_throws`; DECISIONS 62 of line DBID): the one answer of each writer,
-/// which [`HitLoads::of`] takes for the run ([`FormatThrow::of_run`]). The first three are ordered
+/// which [`HitLoads::of`] takes for the run ([`FormatThrow::of_run`]). The first four are ordered
 /// by what the reports load after the throw (each loads at least what the one before it loads);
 /// the pairwise reports' two (`is_pairwise`) load the subjects of their description lines and of
 /// their alignments, an order of their own (sorted by `-sorthits`), which is in no such order with
@@ -1914,6 +1918,12 @@ pub enum AfterThrow {
     /// The report function catches it and leaves the query's report out (outfmt 15 and 16,
     /// `BlastXML2_FormatReport`, `BlastJSON_FormatReport`); the next query's report goes on.
     EndsReport,
+    /// BLAST XML, outfmt 5: the `catch` of the `Hit` writes it with the Seq-align id and
+    /// `Unknown`, and the `catch` of each of its HSPs writes the HSP's Seq-align scores alone
+    /// (`blast_xml::writer`, `XmlHit::lookup_throws`); the report goes on with the next `Hit`,
+    /// which looks its own subject up. The copies of the record in the thrown `Hit` load nothing,
+    /// as in outfmt 13 to 16, where a table's row of such a copy looks it up itself (`WritesRow`).
+    WritesHit,
     /// The `catch` of the table's subject block ends the row's fields, the row is written with
     /// what the query's formatter kept (`report::tabular::TabularWriter::row`), and the report
     /// goes on: a table with a field of that block (outfmt 6, 7, 10 and 20); the organism report
@@ -1964,7 +1974,10 @@ impl AfterThrow {
                 .filter(|&first| throws(first) && !local(first))
                 .map(|_| 0),
             AfterThrow::EndsAtAlignment => aligned.position(throws),
-            AfterThrow::EndsRun | AfterThrow::EndsReport | AfterThrow::WritesRow => None,
+            AfterThrow::EndsRun
+            | AfterThrow::EndsReport
+            | AfterThrow::WritesHit
+            | AfterThrow::WritesRow => None,
         }
     }
 }
@@ -2058,7 +2071,7 @@ pub enum ThrowRefusal {
     /// outfmt 1 to 4 and the other formats (`FormatThrow::and`), in one search or in one search
     /// per hit list size (`FormatThrow::of_search`).
     Mixed,
-    /// A format whose writer LOSAT does not make write it as NCBI does (outfmt 5, 17).
+    /// A format whose writer LOSAT does not make write it as NCBI does (outfmt 17).
     Format,
 }
 
@@ -2068,7 +2081,7 @@ impl ThrowRefusal {
     /// a call of the library either.
     pub fn words(self) -> &'static str {
         match self {
-            ThrowRefusal::Format => "LOSAT does not write that for outfmt 5 or 17",
+            ThrowRefusal::Format => "LOSAT does not write that for outfmt 17",
             ThrowRefusal::Mixed => "LOSAT does not write that in a call of its library that mixes outfmt 0, outfmt 1 to 4 and the other formats, also where the call searches once for each hit list size: NCBI BLAST+ writes each format in a run of its own, and those runs stop at different places with different exit statuses and standard errors, where the call has one result",
         }
     }
@@ -2079,7 +2092,7 @@ impl ThrowRefusal {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FormatThrow {
     /// LOSAT refuses such a subject (`ParsedSubject::fetched`), for the reason given: a format
-    /// whose writer LOSAT does not make write it as NCBI does (outfmt 5, 17), or a call whose
+    /// whose writer LOSAT does not make write it as NCBI does (outfmt 17), or a call whose
     /// formats stop at different places after it (`and`, `of_search`).
     Refused(ThrowRefusal),
     /// The format reads nothing of the subject (a table of fields that read nothing of it; the
@@ -2115,6 +2128,7 @@ impl FormatThrow {
                 FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow)),
                 |spec| spec.format_throw(program),
             ),
+            ReportFormat::Xml => FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)),
             ReportFormat::AsnText
             | ReportFormat::AsnBinary
             | ReportFormat::ArchiveFormat
@@ -2314,7 +2328,7 @@ pub fn unchanged_by_load_throws_outfmts<'a>(
     })
 }
 
-/// What NCBI's reports do at the `Hit` (outfmt 13 to 16), the rows (outfmt 6, 7, 10 and 20) or
+/// What NCBI's reports do at the `Hit` (outfmt 5, 13 to 16), the rows (outfmt 6, 7, 10 and 20) or
 /// the organism report's HSPs (outfmt 18) of a subject: the one answer to "this subject's lookup
 /// throws there" and "this subject is never loaded", which the refusals
 /// (`ParsedSubject::fetched`, the tables' rows at which NCBI has no result,
@@ -2379,6 +2393,9 @@ impl HitLoads {
     /// - `WritesRow` (a table of a field of the subject block, the organism report): each row looks
     ///   its own Seq-align id up, so every subject whose lookup throws throws, every other one
     ///   loads;
+    /// - `WritesHit` (outfmt 5): each `Hit` looks its own subject up, so every `Hit` whose
+    ///   subject's lookup throws throws, every other one loads; the copies in a `Hit` that throws
+    ///   load nothing;
     /// - `EndsReport` (outfmt 15 and 16): the `Hit`s after it in the report load nothing, the next
     ///   report goes on;
     /// - `EndsRun` (outfmt 13 and 14, a table that reads the subject after its subject block):
@@ -2511,7 +2528,9 @@ impl HitLoads {
                     continue;
                 }
                 loads.throws.insert(first, exception);
-                thrown = run.after != AfterThrow::WritesRow;
+                // Outfmt 13 to 16 load nothing after it in the report (or the run); BLAST XML's
+                // next `Hit` and a table's next row look their own subjects up.
+                thrown = matches!(run.after, AfterThrow::EndsRun | AfterThrow::EndsReport);
                 if run.after == AfterThrow::EndsRun {
                     ended.set(true);
                 }

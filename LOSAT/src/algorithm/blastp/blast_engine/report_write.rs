@@ -539,6 +539,7 @@ pub(super) fn write_xml(
         // JSON write no `hits` and add to its message.
         searched: no_alignment_set.iter().map(|&none| !none).collect(),
         program: args.app.name(),
+        psiblast: args.app == crate::algorithm::blastp::args::BlastpApp::Psiblast,
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
         only_xml2: xml_only_xml2,

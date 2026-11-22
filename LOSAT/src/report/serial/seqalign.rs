@@ -90,6 +90,21 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1491-1495
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:810-849
+/// The `num_ident` of an HSP's Seq-align as `GetAlnScores` reads it back (BLAST XML's `catch` of
+/// an HSP whose subject's lookup throws, `blast_xml::XmlHsp::alignment_identities`): the engine's
+/// identities `num_ident`, or -1 where the Seq-align has no `num_ident` score: a count below 0,
+/// and psiblast's (`psiblast`) count of 0, which NCBI sets to -1 before it makes the Seq-align.
+pub(crate) fn read_num_ident(num_ident: i64, psiblast: bool) -> i32 {
+    if num_ident < 0 || (psiblast && num_ident == 0) {
+        -1
+    } else {
+        i32::try_from(num_ident).unwrap_or(i32::MAX)
+    }
+}
+
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 

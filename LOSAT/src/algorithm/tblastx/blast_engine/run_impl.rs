@@ -2103,6 +2103,10 @@ fn write_tblastx_outputs(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
+    // BLAST XML's `catch` of an HSP whose subject's lookup throws writes the engine's identities,
+    // read before the display counts replace them (`blast_xml::thrown_identities`).
+    let xml_thrown_identities =
+        super::super::blast_xml::thrown_identities(&hits, run, &output_formats);
     let (engine_counts, seqalign_identities, pairwise) = if matrix == ScoringMatrix::Blosum62 {
         report_counts(
             Blosum62Score,
@@ -2593,7 +2597,7 @@ fn write_tblastx_outputs(
                     false,
                     xml_only_xml2,
                     &mut writer,
-                    &hits,
+                    (&hits, xml_thrown_identities.as_deref()),
                     run,
                     warnings.as_mut(),
                 )?,
@@ -2611,7 +2615,7 @@ fn write_tblastx_outputs(
                         true,
                         xml_only_xml2,
                         &mut writer,
-                        &hits,
+                        (&hits, None),
                         run,
                         warnings.as_mut(),
                     )?

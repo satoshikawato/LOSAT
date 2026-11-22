@@ -682,14 +682,9 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
     assert_eq!(of("13"), writes(AfterThrow::EndsRun));
     assert_eq!(of("15"), writes(AfterThrow::EndsReport));
+    assert_eq!(of("5"), writes(AfterThrow::WritesHit));
     assert_eq!(of("8"), FormatThrow::Unread);
-    for refused in ["5", "17"] {
-        assert_eq!(
-            of(refused),
-            FormatThrow::Refused(ThrowRefusal::Format),
-            "{refused}"
-        );
-    }
+    assert_eq!(of("17"), FormatThrow::Refused(ThrowRefusal::Format));
     // Pairwise: the first shown alignment ends the run, a later one is skipped; query-anchored:
     // any shown alignment ends the run.
     assert_eq!(of("0"), writes(AfterThrow::SkipsAlignment));
@@ -717,14 +712,33 @@ fn the_formats_say_what_loads_after_a_throw() {
         )
     };
     let after = |outfmts: &[&str]| answer(outfmts).run();
-    // The reason of each refusal: a format of its own (outfmt 5, 17) before a mix.
+    // The reason of each refusal: a format of its own (outfmt 17) before a mix; outfmt 5 with a
+    // pairwise report is a mix.
     assert_eq!(
         answer(&["6", "0"]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     assert_eq!(
-        answer(&["0", "5", "6"]),
+        answer(&["0", "5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    assert_eq!(
+        answer(&["0", "17", "6"]),
         FormatThrow::Refused(ThrowRefusal::Format)
+    );
+    // Outfmt 5 loads after a throw what a table's rows load but its thrown `Hit`'s copies, which a
+    // row of such a copy looks up itself; more than outfmt 13 to 16, which end there.
+    assert_eq!(
+        after(&["5", "6"]),
+        Some(RunThrow::every_row(AfterThrow::WritesRow))
+    );
+    assert_eq!(
+        after(&["15", "5"]),
+        Some(RunThrow::every_row(AfterThrow::WritesHit))
+    );
+    assert_eq!(
+        after(&["5", "8"]),
+        Some(RunThrow::every_row(AfterThrow::WritesHit))
     );
     assert_eq!(
         after(&["6", "8"]),
@@ -747,6 +761,66 @@ fn the_formats_say_what_loads_after_a_throw() {
         after(&["6 qseqid nident", "6 qseqid slen"]),
         Some(RunThrow::every_row(AfterThrow::EndsRun))
     );
+}
+
+// Line DBID pfoff-4 (DECISIONS 62 (15), probe `R/pfoff/p4`): BLAST XML (outfmt 5) looks each
+// `Hit`'s subject up and goes on after a `Hit` whose lookup throws: every `Hit` that throws throws
+// (its first subject; the copies of the record in it load nothing), every other `Hit` loads, in
+// that report and the next; the run never ends there.
+#[test]
+fn each_hit_of_blast_xml_looks_its_own_subject_up() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 0 and its copy 1 throw (one `Hit`); 2 and 4 are found; 3 throws.
+    let copy = plain("AAA00001").found_instead(throws());
+    let parsed: Vec<ParsedSubject> = vec![
+        copy.clone(),
+        copy,
+        plain("AAA00003"),
+        plain("AAA00004").found_instead(throws()),
+        plain("AAA00005"),
+    ];
+    assert!(joins_as_copy(&parsed[0], &parsed[1]));
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let loads = HitLoads::of(
+        Some(RunThrow::every_row(AfterThrow::WritesHit)),
+        [
+            (true, vec![Some(0), Some(1), None, Some(2), Some(3)]),
+            (true, vec![Some(4)]),
+        ],
+        subject,
+        none,
+    );
+    assert_eq!(loads.load(0), HitLoad::Throws);
+    assert_eq!(loads.load(1), HitLoad::Unread);
+    assert!(loads.loaded(2));
+    assert_eq!(loads.load(3), HitLoad::Throws);
+    assert!(loads.loaded(4));
+    assert!(loads.reaches(0) && loads.reaches(1));
+    assert_eq!(
+        AfterThrow::WritesHit.alignment_end(0..2, |_| true, |_| false),
+        None
+    );
+    assert!(!AfterThrow::WritesHit.is_pairwise());
+    // With a table of a field of the subject block, each row looks its subject up: the copy 1
+    // throws on its own.
+    let rows = HitLoads::of(
+        FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)).and(FormatThrow::Writes(
+            RunThrow::every_row(AfterThrow::WritesRow),
+        )),
+        [(true, vec![Some(0), Some(1), Some(2)])],
+        subject,
+        none,
+    );
+    assert_eq!(rows.load(1), HitLoad::Throws);
+    // The refusals let both through.
+    assert!(parsed[0].fetched(false, true, HitLoad::Throws).is_ok());
+    assert!(parsed[1].fetched(false, true, HitLoad::Unread).is_ok());
 }
 
 // Review 2 of line DBID pfoff-2, M1 and L1 (probe `R/pfoff/p2/review2`, `zP`): where `nident`
@@ -913,10 +987,17 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
         search(&["0"], &["6 qseqid slen"]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
     );
-    // Outfmt 5 in another search: the call's refusal is outfmt 5's.
+    // Outfmt 17 in another search: the call's refusal is outfmt 17's.
     assert_eq!(
-        search(&["6"], &["5"]),
+        search(&["6"], &["17"]),
         FormatThrow::Refused(ThrowRefusal::Format)
+    );
+    // Outfmt 5 in another search (line DBID pfoff-4): a table keeps its own answer, outfmt 0
+    // refuses the mix.
+    assert_eq!(search(&["6"], &["5"]), writes(AfterThrow::WritesRow));
+    assert_eq!(
+        search(&["0"], &["5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     // Formats that agree: each search keeps its own answer (a table of fields that read nothing
     // of the subject too).
@@ -930,7 +1011,7 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
 
 // Review 3 of line DBID pfoff-3, L-2: the reason of a refusal of a subject whose lookup throws
 // says what NCBI does and why LOSAT refuses, one text for each situation
-// (`ThrowRefusal::words`): outfmt 5 and 17, which the command line meets too, say nothing of the
+// (`ThrowRefusal::words`): outfmt 17, which the command line meets too, says nothing of the
 // library; a call that mixes the formats says the library's reason.
 #[test]
 fn a_refused_throw_gives_the_reason_of_its_situation() {

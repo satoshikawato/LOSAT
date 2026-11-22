@@ -44,7 +44,7 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTX";
@@ -135,9 +135,31 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (cited at
+// `report::serial::seqalign::read_num_ident`)
+/// The Seq-align's `num_ident` of each HSP of `hits`, by HSP index, for BLAST XML's `catch` of an
+/// HSP whose subject's lookup throws (`XmlHsp::alignment_identities`): the engine's identities
+/// (`report::seqalign_identities`), which the display counts replace in `hits` where another
+/// format of the run reads them (`report::set_displayed_identities`), so they are read before
+/// that. Made only where the run writes BLAST XML (`formats`) and the load of some subject of its
+/// database throws (`HitLoads::any_throws`); `None` otherwise.
+pub(crate) fn thrown_identities(
+    hits: &[TblastxHsp],
+    run: &TblastxReportRun<'_>,
+    formats: &[crate::algorithm::tblastx::report::TblastxOutputFormat],
+) -> Option<Vec<u32>> {
+    let throws = run
+        .database
+        .as_ref()
+        .is_some_and(|database| database.reported.loads.any_throws());
+    (throws && formats.contains(&crate::algorithm::tblastx::report::TblastxOutputFormat::Xml))
+        .then(|| crate::algorithm::tblastx::report::seqalign_identities(hits))
+}
+
 /// Writes the document of every query of `run` (`hits` is the final list after
-/// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
-/// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
+/// `shift_to_records`: record coordinates, in query order, with the Seq-align's `num_ident` of
+/// each HSP where the display counts replaced its identities, `thrown_identities`) through
+/// `document` (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
 /// header before the first query and its end after the last when `run.epilog`. A query or
 /// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
 /// other text is written as NCBI's streams write it. `all_masks`: the masks of every searched
@@ -148,7 +170,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     all_masks: bool,
     only_xml2: bool,
     writer: &mut dyn Write,
-    hits: &[TblastxHsp],
+    (hits, identities): (&[TblastxHsp], Option<&[u32]>),
     run: &TblastxReportRun<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -306,6 +328,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         let text = &texts[q_idx];
         let searched_length = query.seq().len();
         let record_length = query_placements.length(q_idx, searched_length) as i32;
+        let query_start = query_hits[q_idx].start;
         let query_hits = &hits[query_hits[q_idx].clone()];
         masks.clear();
         // A query of a batch NCBI did not search has no masks (its result is made without the
@@ -358,7 +381,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
-                posts.hit(sink.position(), s_idx, |texts| {
+                posts.hit(sink.position(), &hit, s_idx, |texts| {
                     if posting {
                         taxdb_printer.at_names(s_idx as usize, subject, texts)
                     } else {
@@ -366,7 +389,22 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                     }
                 })?;
                 sink.hit(&hit, |hsps| {
-                    for hsp in &query_hits[first..end] {
+                    for (index, hsp) in (first..end).zip(&query_hits[first..end]) {
+                        let identities = read_num_ident(
+                            identities.map_or(hsp.hit.num_ident as i64, |identities| {
+                                i64::from(identities[query_start + index])
+                            }),
+                            false,
+                        );
+                        if !hsps.reads_alignment() {
+                            hsps.hsp(&XmlHsp::unaligned(
+                                hsp.hit.raw_score,
+                                hsp.hit.bit_score,
+                                seqalign_evalue(hsp.hit.e_value),
+                                identities,
+                            ))?;
+                            continue;
+                        }
                         run.subject_letters.rows_into(
                             hsp,
                             query.seq(),
@@ -416,6 +454,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                             // where the row runs backwards.
                             query_first: if plus { query_from - 1 } else { query_to - 1 },
                             query_step: if plus { 3 } else { -3 },
+                            alignment_identities: identities,
                         })?;
                     }
                     Ok(())

@@ -1260,3 +1260,17 @@ fn replaced_bytes_of_a_long_string_share_it() {
     let text_lines = buf.iter().filter(|&&byte| byte == b'\n').count() as u64;
     assert!(lines[9_999] <= text_lines);
 }
+
+// Line DBID pfoff-4: BLAST XML's `catch` of an HSP whose subject's lookup throws writes the
+// Seq-align's identities as `GetAlnScores` reads them: the count, or -1 where the Seq-align has
+// no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first).
+#[test]
+fn the_identities_of_a_seq_align_as_ncbi_reads_them() {
+    use super::seqalign::read_num_ident;
+    assert_eq!(read_num_ident(66, false), 66);
+    assert_eq!(read_num_ident(0, false), 0);
+    assert_eq!(read_num_ident(-1, false), -1);
+    assert_eq!(read_num_ident(0, true), -1);
+    assert_eq!(read_num_ident(5, true), 5);
+    assert_eq!(read_num_ident(i64::from(i32::MAX) + 1, false), i32::MAX);
+}

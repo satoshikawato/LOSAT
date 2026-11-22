@@ -118,10 +118,71 @@ fn run(program: &str, case: &Case) -> Streams {
     run_binary(Path::new(env!("CARGO_BIN_EXE_losat")), program, case)
 }
 
-/// `run` of `binary <program>` (the command line, or the library's example).
+/// `run` of `binary <program>` (the command line, or the library's example). A row whose words
+/// name `@OUT@` (windowmasker's counts files) runs with a directory of its own there; the files
+/// the run leaves in it follow the standard output (`with_files`), and its path in the standard
+/// error is written `@OUT@`.
 fn run_binary(binary: &Path, program: &str, case: &Case) -> Streams {
-    let output = command(binary, program, case).output().unwrap();
-    (output.stdout, output.stderr, output.status.code().unwrap())
+    let Some(dir) = out_directory(program, case) else {
+        let output = command(binary, program, case).output().unwrap();
+        return (output.stdout, output.stderr, output.status.code().unwrap());
+    };
+    let path = dir.to_string_lossy().into_owned();
+    let words = case
+        .words
+        .iter()
+        .map(|word| word.replace(OUT, &path))
+        .collect();
+    let named = Case {
+        name: case.name.clone(),
+        words,
+        stdin: case.stdin.clone(),
+        variables: case.variables.clone(),
+    };
+    let output = command(binary, program, &named).output().unwrap();
+    let stdout = with_files(output.stdout, &dir);
+    fs::remove_dir_all(&dir).unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .replace(&path, OUT)
+        .into_bytes();
+    (stdout, stderr, output.status.code().unwrap())
+}
+
+/// The word of a row that names the directory of its output files.
+const OUT: &str = "@OUT@";
+
+/// A new empty directory for a run of `case`, when its words name `OUT`.
+fn out_directory(program: &str, case: &Case) -> Option<PathBuf> {
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if !case.words.iter().any(|word| word.contains(OUT)) {
+        return None;
+    }
+    let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "masker-out-{program}-{}-{}-{run}",
+        case.name,
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    Some(dir)
+}
+
+/// `stdout` followed by each file of `dir` in the order of the names: a line `@OUT@/<name>
+/// <length>` after a newline, then the bytes of the file (`make_fixtures.py` writes NCBI's runs
+/// the same way).
+fn with_files(mut stdout: Vec<u8>, dir: &Path) -> Vec<u8> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    for name in names {
+        let bytes = fs::read(dir.join(&name)).unwrap();
+        stdout.extend_from_slice(format!("\n{OUT}/{name} {}\n", bytes.len()).as_bytes());
+        stdout.extend_from_slice(&bytes);
+    }
+    stdout
 }
 
 /// The command of `run_binary`.
@@ -159,12 +220,14 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
 ///   interval writer of its directory row writes nothing before a record; windowmasker opens
 ///   `-in` itself, `CWinMaskConfig`'s `ifstream`, whose failure names the file after ` - `; the test
 ///   `the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one` checks that the standard
-///   output is the same); on Linux the directory opens and its first read fails;
+///   output is the same); windowmasker's `-mk_counts` opens each file of `-in` itself
+///   (`CWinMaskUtil::CInputBioseq_CI`), whose failed stream gives the read error of
+///   `MK_COUNTS_MISSING_INPUT`; on Linux the directory opens and its first read fails;
 /// - the paths of the database messages and the search path (`ncbi_paths_on_windows`).
 fn expected(program: &str, case: &Case) -> Streams {
     if cfg!(windows) {
         if let Some(directory) = input_directory(program, case) {
-            let (missing, missing_name) = missing_input(program);
+            let (missing, missing_name) = missing_input(program, case);
             let named = |bytes: Vec<u8>| -> Vec<u8> {
                 String::from_utf8(bytes)
                     .unwrap()
@@ -190,12 +253,27 @@ const MISSING_INPUT: [(&str, &str); 4] = [
     ("convert2blastmask", "in_missing"),
 ];
 
-/// The name of `program`'s row `MISSING_INPUT` and the file its `-in` names.
-fn missing_input(program: &str) -> (&'static str, String) {
+/// windowmasker's `-mk_counts` row whose `-in` names a file that does not exist, with the
+/// settings of its directory row.
+const MK_COUNTS_MISSING_INPUT: &str = "k_in_missing";
+
+/// Whether `case` is a row of windowmasker's `-mk_counts`.
+fn makes_counts(program: &str, case: &Case) -> bool {
+    program == "windowmasker" && case.words.iter().any(|word| word == "-mk_counts")
+}
+
+/// The name of the row of `program` whose `-in` names a missing file in the mode of `case`
+/// (`MISSING_INPUT`, `MK_COUNTS_MISSING_INPUT`) and the file its `-in` names.
+fn missing_input(program: &str, case: &Case) -> (&'static str, String) {
     let (_, row) = MISSING_INPUT
         .into_iter()
         .find(|(name, _)| *name == program)
         .expect("a masking program of MISSING_INPUT");
+    let row = if makes_counts(program, case) {
+        MK_COUNTS_MISSING_INPUT
+    } else {
+        row
+    };
     let case = cases(program)
         .into_iter()
         .find(|case| case.name == row)
@@ -211,16 +289,34 @@ fn input(case: &Case) -> Option<&str> {
 }
 
 /// The value of `-in` in `case` when it names a directory that the program opens as a file: the
-/// FASTA input (`-infmt blastdb` opens no file of that name), a name that is not blank (an
-/// empty name joins to the fixture directory itself, and so does `" "` on Windows).
+/// FASTA input (`-infmt blastdb` opens no file of that name, windowmasker's `-convert` reads
+/// `-in` as a counts file: `counts_directory`), a name that is not blank (an empty name joins
+/// to the fixture directory itself, and so does `" "` on Windows).
 fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     let database = case
         .words
         .windows(2)
         .any(|pair| pair[0] == "-infmt" && pair[1] == "blastdb");
     input(case).filter(|name| {
-        !database && !name.trim().is_empty() && fixtures(program).join(name).is_dir()
+        !database
+            && !converts_counts(program, case)
+            && !name.trim().is_empty()
+            && fixtures(program).join(name).is_dir()
     })
+}
+
+/// Whether `case` is a row of windowmasker's `-convert`.
+fn converts_counts(program: &str, case: &Case) -> bool {
+    program == "windowmasker" && case.words.iter().any(|word| word == "-convert")
+}
+
+/// Whether `case` is a `-convert` row whose `-in` names a directory: NCBI's counts reader
+/// (`CSeqMaskerIstatFactory`) opens it on Linux and finds no format in it; what its build for
+/// Windows, whose library opens no directory, says was not probed, so the row runs on Unix.
+fn counts_directory(program: &str, case: &Case) -> bool {
+    converts_counts(program, case)
+        && input(case)
+            .is_some_and(|name| !name.trim().is_empty() && fixtures(program).join(name).is_dir())
 }
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
@@ -257,10 +353,14 @@ fn expected_row(program: &str, name: &str) -> Streams {
     )
 }
 
-/// Whether `case` runs on this platform: a row that writes its output to a device file runs
-/// where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null` means no
-/// log file on every platform: NCBI's `SetLogFile` compares the name, corelib/ncbidiag.cpp:7594).
-fn runs_here(case: &Case) -> bool {
+/// Whether `case` of `program` runs on this platform: a row that writes its output to a device
+/// file runs where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null`
+/// means no log file on every platform: NCBI's `SetLogFile` compares the name,
+/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix.
+fn runs_here(program: &str, case: &Case) -> bool {
+    if counts_directory(program, case) && !cfg!(unix) {
+        return false;
+    }
     let out = case
         .words
         .iter()
@@ -281,7 +381,10 @@ fn runs_here(case: &Case) -> bool {
 
 /// The rows of `program` that run here (`runs_here`).
 fn cases_here(program: &str) -> Vec<Case> {
-    cases(program).into_iter().filter(runs_here).collect()
+    cases(program)
+        .into_iter()
+        .filter(|case| runs_here(program, case))
+        .collect()
 }
 
 /// `rows`, the rows that differ, each with what LOSAT and NCBI wrote (the start of each stream),
@@ -506,6 +609,34 @@ fn dustmasker_posts_where_ncbi_does_in_one_file() {
     }
 }
 
+/// windowmasker's `-mk_counts` writes the counts files of `tests/winmask/counts` that NCBI BLAST+
+/// 2.17.0 wrote (`tests/winmask/README.md`, 2026-10-19 and 11-12): the units of 9 letters of
+/// `tests/fasta/MG1655.fna` (4.6 Mb) in the optimized binary, ascii and optimized ascii formats,
+/// and the units of 2 letters of `dm2L_60k.fa` (optimized binary, a cache bit array of 0 words).
+/// These formats write the same bytes to the standard output and to a file.
+#[test]
+fn windowmasker_writes_ncbis_counts_files_of_the_winmask_fixtures() {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    for (input, unit, sformat, counts) in [
+        ("fasta/MG1655.fna", "9", "obinary", "mg1655_u9.obinary"),
+        ("fasta/MG1655.fna", "9", "ascii", "mg1655_u9.ascii"),
+        ("fasta/MG1655.fna", "9", "oascii", "mg1655_u9.oascii"),
+        ("winmask/fasta/dm2L_60k.fa", "2", "obinary", "dm_u2.obinary"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+            .current_dir(&tests)
+            .args(["windowmasker", "-mk_counts", "-in", input, "-unit", unit])
+            .args(["-sformat", sformat])
+            .env("BLAST_USAGE_REPORT", "false")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let want = fs::read(tests.join("winmask").join("counts").join(counts)).unwrap();
+        assert_eq!(output.status.code(), Some(0), "{counts}");
+        assert!(output.stdout == want, "{counts}: the bytes differ");
+    }
+}
+
 /// windowmasker writes the FASTA reader's warnings between records (post level Warning) while
 /// earlier records' output may still be in NCBI's stdout buffer: in one file (`2>&1`) each
 /// warning falls where NCBI's does (`ncbi/<name>.merged`, make_fixtures.py's `MERGED`).
@@ -537,8 +668,6 @@ fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
         "windowmasker",
         "convert2blastmask",
     ] {
-        let (missing, _) = missing_input(program);
-        let (missing_out, _, _) = expected_row(program, missing);
         for case in cases(program) {
             let (out, err, _) = expected_row(program, &case.name);
             let read_a_directory = String::from_utf8_lossy(&err)
@@ -550,6 +679,8 @@ fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
                 case.name
             );
             if read_a_directory {
+                let (missing, _) = missing_input(program, &case);
+                let (missing_out, _, _) = expected_row(program, missing);
                 assert_eq!(out, missing_out, "{program} {}: standard output", case.name);
             }
         }

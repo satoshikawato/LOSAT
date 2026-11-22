@@ -78,6 +78,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
     assert_eq!(diag.run_arg_exception(error), 1);
@@ -97,6 +98,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
     assert_eq!(

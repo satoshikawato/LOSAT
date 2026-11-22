@@ -165,7 +165,7 @@ fn the_option_is_read_as_ncbi_reads_it() {
     }
 }
 
-// NCBI `SetCullingLimit(0)` is ignored: the report is the one without the option.
+// NCBI `SetCullingLimit` of 0 is ignored: the report is the one without the option.
 #[test]
 fn a_limit_of_zero_is_no_culling() {
     let none = subject_search(&[], &[]);

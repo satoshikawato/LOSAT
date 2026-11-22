@@ -35,9 +35,9 @@
 //! 2. A kernel's result depends only on its group's records, the shared arguments and its
 //!    scratch, all the same as in the reference. The arguments: `link_groups_as` builds
 //!    `GroupArgs` with the expressions of the reference body (`legacy_linking_requested()`,
-//!    `diagnostics_enabled()`, the same references, `MAX(1024, hspcnt+5)`), and the scratch with
-//!    the same `buffer_pools`. The kernels: `link_one_slice` takes the branch of the reference's
-//!    per-group call on `use_legacy`. The default branch calls
+//!    `diagnostics_enabled()`, the same references, the larger of 1024 and `hspcnt` plus 5), and
+//!    the scratch with the same `buffer_pools`. The kernels: `link_one_slice` takes the branch of
+//!    the reference's per-group call on `use_legacy`. The default branch calls
 //!    `link_hsp_group_incremental_slice` (`linking.rs`), the statements of
 //!    `link_hsp_group_incremental` on the slice, which calls `link_hsp_group_incr_slice`
 //!    (`linking_incr.rs`); `link_hsp_group_incr` only passes its Vec to that function as a slice

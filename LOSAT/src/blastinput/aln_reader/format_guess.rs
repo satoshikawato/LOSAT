@@ -20,7 +20,7 @@ pub(crate) enum AlignFormat {
 /// `CAlnFormatGuesser::SAMPLE_SIZE`.
 const SAMPLE_SIZE: usize = 10;
 
-/// `CAlnFormatGuesser::GetFormat(iStr)`.
+/// `CAlnFormatGuesser::GetFormat` of the stream `iStr`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:50-74
 /// `xInitSample`: the first `SAMPLE_SIZE` lines, each with the white space cut from both ends
@@ -57,7 +57,7 @@ pub(crate) fn guess_format(input: &mut PeekAheadStream<'_>) -> AlignFormat {
     AlignFormat::Unknown
 }
 
-/// `NStr::StartsWith(str, prefix)`.
+/// `NStr::StartsWith` of `str` with `prefix`.
 fn starts_with(str: &[u8], prefix: &[u8]) -> bool {
     str.starts_with(prefix)
 }
@@ -69,7 +69,7 @@ fn sample_is_nexus(sample: &[Vec<u8>]) -> bool {
     starts_with(&sample[0].to_ascii_lowercase(), b"#nexus")
 }
 
-/// `xSampleIsClustal`: a first line `clustalw` or `clustal w` (a `CLUSTAL O(...)` header of Clustal
+/// `xSampleIsClustal`: a first line `clustalw` or `clustal w` (a `CLUSTAL O` header of Clustal
 /// Omega is neither), or three blocks of lines each ended by an empty line that follows a
 /// conservation line. The lines past the sample come from the stream as it is, not cut, and the
 /// sample grows with them.

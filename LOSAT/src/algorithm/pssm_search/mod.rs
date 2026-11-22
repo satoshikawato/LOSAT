@@ -271,7 +271,7 @@ impl PsiSearch {
 
     /// Whether `kbp_psi[0]` (`ungapped_karlin`) is valid: a file's negative ungapped value makes
     /// it invalid, and the search's setup then stops with NCBI's engine error of an invalid query
-    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp = kbp_psi`, blast_stat.c:2826).
+    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp` set to `kbp_psi`, blast_stat.c:2826).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
     pub(crate) fn ungapped_karlin_valid(&self, kbp_std: &KarlinParams) -> bool {
@@ -438,7 +438,7 @@ impl PsiSearch {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 and
     // c++/src/app/blast/tblastn_app.cpp:226, 270 (psiblast posts the object manager's messages after
     // its prolog, tblastn before it: `formatter.PrintProlog()` comes before
-    // `scope->AddTopLevelSeqEntry(pssm->SetQuery())` in psiblast, after it in tblastn)
+    // `scope->AddTopLevelSeqEntry` of the query (`pssm->SetQuery`) in psiblast, after it in tblastn)
     /// The messages of NCBI's object manager about the PSSM query's annotations, written to
     /// `diagnostics` (psiblast after its prolog, as the messages of its query batch,
     /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), each saved as one

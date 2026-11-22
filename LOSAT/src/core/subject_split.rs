@@ -1,6 +1,6 @@
 //! The chunks of a database sequence searched with hard ranges (`-db_hard_mask`): NCBI's
 //! `SubjectSplitStruct` and `s_GetNextSubjectChunk` (core/blast_engine.c:122-310) with
-//! `mask_type == eHardSubjMasking`, and the overlap of the merge after each chunk
+//! `mask_type` equal to `eHardSubjMasking`, and the overlap of the merge after each chunk
 //! (blast_engine.c:579-584), as arithmetic on the hard ranges.
 //!
 //! The one owner of the hard chunks (series NP, M4a-2b review S1): BLASTN's preliminary stage
@@ -29,7 +29,7 @@ pub const DBSEQ_CHUNK_OVERLAP: usize = 100;
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:280-306
 // `get_data()` starts one `TSeqPos` before the first mask, so its `SSeqRange` pairs are
 // (the spare value, start 0), (end 0, start 1), ..., (end n-1, the spare value after the
-// last): with `tmp[0].left = 0` and the last `right` the length, the complement of the
+// last): with `tmp[0].left` at 0 and the last `right` the length, the complement of the
 // masks in the order they are stored, the `TSeqPos` values read as `Int4`. Unsorted or
 // overlapping masks give inverted members, which the scan skips (`masksubj.inl:43-60`);
 // nothing is sorted or merged (decision D3 of M4a-2).
@@ -83,7 +83,7 @@ pub struct HardChunk {
 /// `SubjectSplitStruct` of a subject with hard ranges: its full range's end, its hard ranges
 /// (the complement of its masks in the order stored, [`complement_masks`]), `hm_index` and
 /// `next`. Its soft ranges are the full range (blast_engine.c:162-164). The first hard range
-/// starts at 0 (`BlastSeqBlkSetSeqRanges` sets `tmp[0].left = 0`), so `next` starts at 0. A
+/// starts at 0 (`BlastSeqBlkSetSeqRanges` sets `tmp[0].left` to 0), so `next` starts at 0. A
 /// search's worker keeps one, its ranges empty outside a hard-masked sequence.
 #[derive(Debug, Default)]
 pub struct HardSplitState {
@@ -117,7 +117,7 @@ impl HardSplitState {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, with
-    // `mask_type == eHardSubjMasking`
+    // `mask_type` equal to `eHardSubjMasking`
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -

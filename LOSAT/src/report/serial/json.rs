@@ -56,7 +56,7 @@ impl<'b> JsonEncoder<'b> {
         encoder
     }
 
-    /// `COStreamBuffer::PutEol(true)` (`asn_text::AsnTextEncoder::eol`).
+    /// `COStreamBuffer::PutEol` with its flag true (`asn_text::AsnTextEncoder::eol`).
     fn eol(&mut self) {
         self.out.push(b'\n');
         let indent = self.indent;
@@ -132,7 +132,7 @@ impl<'b> JsonEncoder<'b> {
 }
 
 impl Encoder for JsonEncoder<'_> {
-    /// `m_EnforceWritingDefaults = true` (the constructor, cited in the module).
+    /// `m_EnforceWritingDefaults` is set to `true` (the constructor, cited in the module).
     fn writes_defaults(&self) -> bool {
         true
     }
@@ -265,8 +265,8 @@ impl Encoder for JsonEncoder<'_> {
         }
     }
 
-    /// `WriteDouble2(data, DBL_DIG)` (`real::write_json_double`), which raises an error for
-    /// a NaN or an infinity.
+    /// `WriteDouble2` of `data` with `DBL_DIG` (`real::write_json_double`), which raises an error
+    /// for a NaN or an infinity.
     fn real(&mut self, value: f64) {
         if let Err(error) = write_json_double(value, self.out) {
             if self.error.is_none() {

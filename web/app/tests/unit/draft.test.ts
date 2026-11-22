@@ -1456,6 +1456,8 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
     draft.setProgram('tblastn');
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
+    draft.setProgram('blastx');
+    expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
   // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help

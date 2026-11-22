@@ -2,8 +2,8 @@
 //! the encoding (`Reader`, shared with the ordinal-id decoder of `seqdb::header`) and the
 //! decoder of a whole `Blast-def-line-set` with every member and every Seq-id alternative
 //! (`decode_full_set`). An INTEGER is read as NCBI's `ReadInt4` / `ReadInt8` read it, at the
-//! width of the member's NCBI type (`read_std_signed`, which the mask-file reader of
-//! `writedb::mask_info` shares).
+//! width of the member's NCBI type (`read_std_signed` of the binary object stream,
+//! `report::serial::asn_ber_reader`, whose tag bytes it shares too).
 //!
 //! `decode_full_set` reads the record as NCBI's object stream does (`CObjectIStreamAsnBinary`
 //! with the type information of `Blast-def-line-set`): where that read fails, its error is
@@ -32,19 +32,14 @@ use super::model::{
     PdbSeqId, TextseqId,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_ber_reader::{
+    read_std_signed, StdSignedError, TAG_APPLICATION_INTEGER, TAG_INTEGER, TAG_UTF8_STRING,
+    TAG_VISIBLE_STRING, UNIVERSAL_CONSTRUCTED as TAG_CONSTRUCTED,
+};
+pub(crate) use crate::report::serial::asn_ber_reader::{
+    CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
+};
 use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind};
-
-// NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:70-130
-const TAG_INTEGER: u8 = 2;
-/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eInteger`, which `ExpectIntegerTag` also
-/// takes.
-const TAG_APPLICATION_INTEGER: u8 = (1 << 6) | TAG_INTEGER;
-const TAG_UTF8_STRING: u8 = 12;
-const TAG_VISIBLE_STRING: u8 = 26;
-/// `MakeTagClassAndConstructed` of the class `eUniversal` with `eConstructed`.
-const TAG_CONSTRUCTED: u8 = 1 << 5;
-pub(crate) const TAG_SEQUENCE: u8 = TAG_CONSTRUCTED | 16;
-pub(crate) const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 pub(crate) const TAG_NUMBER_MASK: u8 = 31;
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 /// Deepest nesting accepted inside a skipped member.
@@ -1072,63 +1067,6 @@ impl<'a> Reader<'a> {
             &format!("member {name} expected"),
         )
     }
-}
-
-/// Why `read_std_signed` stops: one of NCBI's errors, or the byte source's own.
-pub(crate) enum StdSignedError<E> {
-    /// `fFormatError`, "zero length of number".
-    ZeroLength,
-    /// `fOverflow`, "overflow error", thrown at `line` of objistrasnb.cpp (488: the first byte
-    /// beyond the width is not a sign; 493: a later one differs from it; 499: the value's sign
-    /// differs from it).
-    Overflow { line: u32 },
-    /// The byte source failed (the data ends inside the value).
-    Read(E),
-}
-
-// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
-/// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
-/// taken one at a time from `byte`, read into a signed type of `width` bytes (the size of `T`: 4
-/// for `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
-/// beyond the width are taken only as the sign extension of the value; anything else is an
-/// overflow. The one port of the function: the header reader (`Reader::int`) and the mask-file
-/// reader (`writedb::mask_info::ber`) read their INTEGERs with it.
-pub(crate) fn read_std_signed<E>(
-    mut length: usize,
-    width: usize,
-    mut byte: impl FnMut() -> Result<u8, E>,
-) -> Result<i64, StdSignedError<E>> {
-    if length == 0 {
-        return Err(StdSignedError::ZeroLength);
-    }
-    let mut next = || byte().map_err(StdSignedError::Read);
-    let mut n: i64;
-    if length > width {
-        length -= 1;
-        let c = next()? as i8;
-        if c != 0 && c != -1 {
-            return Err(StdSignedError::Overflow { line: 488 });
-        }
-        while length > width {
-            length -= 1;
-            if next()? as i8 != c {
-                return Err(StdSignedError::Overflow { line: 493 });
-            }
-        }
-        length -= 1;
-        n = i64::from(next()? as i8);
-        if (n ^ i64::from(c)) & 0x80 != 0 {
-            return Err(StdSignedError::Overflow { line: 499 });
-        }
-    } else {
-        length -= 1;
-        n = i64::from(next()? as i8);
-    }
-    while length > 0 {
-        length -= 1;
-        n = (n << 8) | i64::from(next()?);
-    }
-    Ok(n)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:724-738

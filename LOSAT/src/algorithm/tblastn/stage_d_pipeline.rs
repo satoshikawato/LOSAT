@@ -2164,9 +2164,9 @@ fn redo_stream<L>(lists: &[(usize, usize, L)], fetched: &[FetchedRead]) -> Vec<(
 /// Notes the batch's first fetch of the redo (composition-based or Smith-Waterman, one loop over
 /// the stream `stream`) that read a header with a UTF8String where a VisibleString is expected
 /// (`fetched`, in the stream's order), of the lists up to the stream's place `until` (the match
-/// whose redo failed the batch, or every list): the subjects whose turn its early termination
-/// test leaves (`common::database::redo_fetches`, with each query's heap as at the turn: the
-/// records of `heaps`, as the redo left them, from the lists before it), kept or excluded.
+/// whose redo failed the batch, or every list), as `common::database::first_redo_fetch` finds
+/// it, with each query's heap as at the turn (the records of `heaps`, as the redo left them, from
+/// the lists before it).
 #[cold]
 #[inline(never)]
 fn note_redo_fetched(
@@ -2176,28 +2176,16 @@ fn note_redo_fetched(
     stream: &[(usize, i32)],
     until: usize,
 ) {
-    let mut before = std::collections::HashSet::new();
-    let mut at = 0;
-    for (read, (_, evalue, has_hsps)) in fetched {
-        if read.index > until {
-            break;
-        }
-        while at < read.index {
-            before.insert(stream[at]);
-            at += 1;
-        }
-        if !*has_hsps {
-            continue;
-        }
-        let redo_heaps: Vec<_> = heaps
-            .iter()
-            .enumerate()
-            .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
-            .collect();
-        if crate::algorithm::common::database::redo_fetches(*evalue, &redo_heaps) {
-            fetches.note(read.ordinal);
-            return;
-        }
+    let first =
+        crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
+            heaps
+                .iter()
+                .enumerate()
+                .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
+                .collect()
+        });
+    if let Some(ordinal) = first {
+        fetches.note(ordinal);
     }
 }
 

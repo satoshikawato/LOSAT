@@ -445,7 +445,6 @@ pub(super) fn write_tblastn_tabular(
                         hsp.s_start,
                         hsp.s_end,
                         &payload.edit_script,
-                        &[],
                         &mut qrow,
                         &mut srow,
                     )?;

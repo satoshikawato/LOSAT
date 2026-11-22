@@ -96,7 +96,8 @@ sequence that holds a reported sequence's Seq-align id (`dup_main`); with `--dup
 order of such a load to a lookup that throws on its id and to another such load (`dup5_main`). With
 `--sw-only` (merge 6 of T5d) it writes the databases of the reads of the composition-based redo's fetches
 before its Smith-Waterman redo fails a batch (`sw_main`); with `--nsw-only` (merge 12) TBLASTN's copies of
-line RG item X4b-1's `../x4b/excl` with a UTF8String title (`nsw_main`, no makeblastdb).
+line RG item X4b-1's `../x4b/excl` with a UTF8String title (`nsw_main`, no makeblastdb); with `--bnsw-only`
+(merge 15) BLASTX's copies of line RG item X4b-2's `../x4b2/excl` (`bnsw_main`).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -691,6 +692,50 @@ def nsw_main(ncbi_bin):
     patch_record_any(out, "n", 0, utf8)
 
 
+
+def bnsw_main(ncbi_bin):
+    """`--bnsw-only` (merge 15 of line RG item T5d, with the rows of line RG item X4b-2): BLASTX's copies of
+    `../x4b2/excl` (sok1, sfail and sx, which `../x4b2/neg.txt` keeps without a definition line, so the fetch of
+    BLASTX's Smith-Waterman redo excludes it after sfail's match and clears the failure of sfail's redo) in
+    `bnsw_first`, `bnsw_kept` and `bnsw_excl`, the title of OID 0, 1 or 2 a UTF8String: NCBI's redo reads the
+    header of each subject it fetches, kept or excluded, so the first of them posts its warning, in the redo's
+    order (BLASTX's stream is by subject). The copies keep the database's name (`excl`). And `bnsw_fail`: the
+    same three records with sx first (OID 0, its title a UTF8String), so that its fetch, which excludes it, comes
+    before sfail's failed redo at the batch's last match: the warning, then NCBI's `Traceback failed`."""
+    here = os.path.join("tests", "db_search", "t5")
+    source = os.path.join("tests", "db_search", "x4b2")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("bnsw_first", 0), ("bnsw_kept", 1), ("bnsw_excl", 2)):
+        out = os.path.join(here, name)
+        os.makedirs(out, exist_ok=True)
+        for file in sorted(os.listdir(source)):
+            if file.startswith("excl."):
+                shutil.copyfile(os.path.join(source, file), os.path.join(out, file))
+        patch_record_any(os.path.join(out, "excl"), "p", oid, utf8)
+    # make_x4b2.py's records: its constants and functions, read from its source.
+    import ast
+    tree = ast.parse(open(os.path.join(source, "make_x4b2.py")).read())
+    names = {"CODON", "COMP", "BODY", "SOK1", "SFAIL"}
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+             or (isinstance(node, ast.Assign) and {getattr(t, "id", "") for t in node.targets} <= names)]
+    x4b2 = {}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "make_x4b2.py", "exec"), x4b2)
+    records = [("gnl|ti|9003 sx sfail's first half with 8 substitutions", x4b2["weaker"]("D" + x4b2["BODY"])),
+               ("dbj|AB300001.1| sok1 BDT63546.1 of PajaWSV", x4b2["SOK1"]),
+               ("dbj|AB300002.1| sfail tks_M with D first, twice", x4b2["SFAIL"])]
+    fasta = os.path.join(here, "bnsw_fail.faa")
+    with open(fasta, "w") as f:
+        for name, seq in records:
+            f.write(f">{name}\n{seq}\n")
+    out = os.path.join(here, "bnsw_fail")
+    cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+           "-blastdb_version", "5", "-title", "bnsw_fail", "-out", out]
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    os.remove(fasta)
+    patch_record_any(out, "p", 0, utf8)
+
+
 def dup_main(ncbi_bin):
     """`--dup-only` (line RG item T5d fix 3): databases whose lists hold `gb|DUP00001.1|` twice. `pds` and
     `pda` (version 5, protein, `-parse_seqids`): the subject `gb|DUP00001.1| subject record`, hd0 of `hd.faa`
@@ -1072,6 +1117,8 @@ if __name__ == "__main__":
         sw_main(sys.argv[1])
     elif "--nsw-only" in sys.argv[2:]:
         nsw_main(sys.argv[1])
+    elif "--bnsw-only" in sys.argv[2:]:
+        bnsw_main(sys.argv[1])
     elif "--dup-only" in sys.argv[2:]:
         dup_main(sys.argv[1])
     elif "--dup5-only" in sys.argv[2:]:

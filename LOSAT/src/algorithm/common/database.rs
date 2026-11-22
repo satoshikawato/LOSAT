@@ -1338,6 +1338,39 @@ pub(crate) fn redo_fetches(evalue: f64, heaps: &[RedoHeap]) -> bool {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// The first of `fetched` (`FetchMarks::of_noting` of a redo's stream `stream`, in its order,
+/// with the query of each list, its best E-value and whether it has HSPs) that NCBI's redo
+/// (composition-based or Smith-Waterman, one loop over the stream) fetches, of the lists up to
+/// the stream's place `until` (the match whose redo failed the batch, or every list): the
+/// subjects whose turn its early termination test leaves (`redo_fetches`, with the heaps that
+/// `heaps_at` makes from the lists of `stream` before the turn), kept or excluded. The one walk
+/// of TBLASTN's redo (`stage_d_pipeline::note_redo_fetched`) and BLASTX's Smith-Waterman redo
+/// (`kappa_batch::sw_fetched`).
+pub(crate) fn first_redo_fetch<K: Copy + Eq + std::hash::Hash>(
+    fetched: &[(FetchedUtf8, (usize, f64, bool))],
+    stream: &[K],
+    until: usize,
+    heaps_at: impl Fn(&std::collections::HashSet<K>) -> Vec<RedoHeap>,
+) -> Option<u32> {
+    let mut before = std::collections::HashSet::new();
+    let mut at = 0;
+    for (read, (_, evalue, has_hsps)) in fetched {
+        if read.index > until {
+            break;
+        }
+        while at < read.index {
+            before.insert(stream[at]);
+            at += 1;
+        }
+        if *has_hsps && redo_fetches(*evalue, &heaps_at(&before)) {
+            return Some(read.ordinal);
+        }
+    }
+    None
+}
+
 impl FetchedUtf8 {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream_mt_utils.c:145-170
     // and blast_hspstream.c:196-203 (`s_SortHSPListByOid`: decreasing OID, read from the end)

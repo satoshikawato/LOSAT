@@ -4,13 +4,14 @@
 
 use super::read::{read_document, Post, ReadError};
 use super::table::named;
-use super::{member_index, Value};
+use super::{member_index, Encoding, Value};
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
+use crate::report::serial::asn_input::Names;
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// The value of the document `text` of the root type `root`, or the error, with the posts.
 fn read(root: u16, text: impl AsRef<[u8]>) -> (Result<Value, ReadError>, Vec<Post>) {
-    read_document(text.as_ref(), root)
+    read_document(text.as_ref(), root, Names::TEST)
 }
 
 fn value(root: u16, text: &str) -> Value {
@@ -513,7 +514,10 @@ fn the_delayed_member_is_kept_as_read() {
         list,
         Value::Sequence(vec![(
             0,
-            Value::Delayed(b"std { { name name { last \"A\" } , level 1 } }".to_vec())
+            Value::Delayed {
+                encoding: Encoding::Text,
+                bytes: b"std { { name name { last \"A\" } , level 1 } }".to_vec()
+            }
         )])
     );
     let overflow =
@@ -801,7 +805,7 @@ fn every_recursive_type_nests_to_any_depth() {
                 text.push_str(&before.repeat(depth));
                 text.push_str(inner);
                 text.push_str(&after.repeat(depth));
-                let (value, posts) = read_document(text.as_bytes(), root);
+                let (value, posts) = read_document(text.as_bytes(), root, Names::TEST);
                 assert!(posts.is_empty(), "{around}: {posts:?}");
                 assert!(value.is_ok(), "{around}: {value:?}");
             }
@@ -815,7 +819,8 @@ fn every_recursive_type_nests_to_any_depth() {
                     around.repeat(depth),
                     " }".repeat(depth)
                 );
-                let (value, posts) = read_document(scaled.as_bytes(), named::SEQTABLE_MULTI_DATA);
+                let (value, posts) =
+                    read_document(scaled.as_bytes(), named::SEQTABLE_MULTI_DATA, Names::TEST);
                 assert!(posts.is_empty() && value.is_ok(), "{around}");
             }
         })
@@ -842,7 +847,7 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             text.push_str(&"mix { ".repeat(depth));
             text.push_str("int { from 0, to 1, id local id 1 }");
             text.push_str(&" }".repeat(depth));
-            let (value, posts) = read_document(text.as_bytes(), named::SEQ_LOC);
+            let (value, posts) = read_document(text.as_bytes(), named::SEQ_LOC, Names::TEST);
             assert!(posts.is_empty());
             let value = value.expect("read");
             let (mut at, mut levels) = (&value, 0);
@@ -880,13 +885,13 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             drop(copy);
             // An error deep inside: NCBI's frames are left one by one.
             let broken = text.replacen("int {", "int [", 1);
-            let (value, _) = read_document(broken.as_bytes(), named::SEQ_LOC);
+            let (value, _) = read_document(broken.as_bytes(), named::SEQ_LOC, Names::TEST);
             assert!(matches!(value, Err(ReadError::Serial(_))), "{value:?}");
             // A number that overflows at the bottom: NCBI rethrows its `CUtilException` in each
             // frame it leaves (`NCBI_RETHROW_SAME`, a chain of one link per frame), reported,
             // cloned, compared and dropped link by link (line RG D3-1 review 7 B1).
             let overflow = text.replacen("from 0", "from 99999999999999999999", 1);
-            let (value, _) = read_document(overflow.as_bytes(), named::SEQ_LOC);
+            let (value, _) = read_document(overflow.as_bytes(), named::SEQ_LOC, Names::TEST);
             let Err(ReadError::Exception(exception)) = value else {
                 panic!("an exception");
             };
@@ -952,7 +957,7 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::SEQ_INST,
         "Seq-inst ::= { repr raw, mol aa, length 12",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameClassMember, Member name= length\")), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 239, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStreamAsn::SkipWhiteSpace\") }, message: \"line 1: end of file\\n\", extra: Some(\" at Seq-inst.length\") }])), [])",
     ),
     (named::SEQ_ID, "Seq-id ::= gi 9223372036854775807", "(Ok(SeqId(Gi(9223372036854775807))), [])"),
     (named::SEQ_ID, "Seq-id ::= gi\r\n9223372036854775808", "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-id\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Seq-id\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= gi\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 2\", extra: None, main_text: true }])), [])"),
@@ -960,22 +965,22 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id\n\r 99999999999 } } } }",
-        "(Ok(Sequence([(0, Delayed([115, 116, 100, 32, 123, 32, 123, 32, 110, 97, 109, 101, 32, 100, 98, 116, 97, 103, 32, 123, 32, 100, 98, 32, 34, 120, 34, 44, 32, 116, 97, 103, 32, 105, 100, 10, 13, 32, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 32, 125, 32, 125, 32, 125]))])), [])",
+        "(Ok(Sequence([(0, Delayed(Text, [115, 116, 100, 32, 123, 32, 123, 32, 110, 97, 109, 101, 32, 100, 98, 116, 97, 103, 32, 123, 32, 100, 98, 32, 34, 120, 34, 44, 32, 116, 97, 103, 32, 105, 100, 10, 13, 32, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 32, 125, 32, 125, 32, 125]))])), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id -\n5 } } } }",
-        "(Err(Serial(\"bad signed integer in line 1\")), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1042, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::SkipSNumber\") }, message: \"line 1: bad signed integer in line 1\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag.id\") }])), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id 5",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\") }])), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id +",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\") }])), [])",
     ),
 ];
 

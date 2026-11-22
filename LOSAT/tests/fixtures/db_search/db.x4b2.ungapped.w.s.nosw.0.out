@@ -1,0 +1,90 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa).
+           2 sequences; 284 total letters
+
+
+
+Query= tks_W_nt tks_W in frame +1
+
+Length=240
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sfail tks_M with D first, twice: two HSPs with tks_W, W against D     194     7e-55  1
+
+
+> sfail tks_M with D first, twice: two HSPs with tks_W, W against 
+D
+Length=160
+
+ Score = 194 bits (419),  Expect = 7e-55
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = +1
+
+Query  4    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  183
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+
+Query  184  IVTHAGEVIEGCTTVSSIK  240
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  62   IVTHAGEVIEGCTTVSSIK  80
+
+
+ Score = 194 bits (419),  Expect = 7e-55
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = +1
+
+Query  4    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  183
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  82   QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  141
+
+Query  184  IVTHAGEVIEGCTTVSSIK  240
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  142  IVTHAGEVIEGCTTVSSIK  160
+
+
+ Score = 13.0 bits (22),  Expect = 4.0
+ Identities = 4/17 (24%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  155  SRECLTNRQCLLPPFSC  105
+            ++ CL  +  L   + C
+Sbjct  41   NKHCLFVKHSLETRYGC  57
+
+
+ Score = 13.0 bits (22),  Expect = 4.0
+ Identities = 4/17 (24%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  155  SRECLTNRQCLLPPFSC  105
+            ++ CL  +  L   + C
+Sbjct  121  NKHCLFVKHSLETRYGC  137
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 16510
+
+
+  Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa).
+    Posted date:  Unknown
+  Number of letters in database: 284
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 12
+Window for multiple hits: 40

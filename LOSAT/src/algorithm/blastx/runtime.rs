@@ -860,6 +860,11 @@ impl PreliminarySink for Runtime<'_> {
         use super::x_timing::End as XEnd;
         let x_t = super::x_timing::lap();
         let mut x_t_finish = None;
+        // `-use_sw_tback` with `-ungapped`: NCBI's traceback crashes at the redo's set-up of every
+        // batch it searches (`kappa::sw_ungapped_refusal`).
+        if self.options.use_sw_tback && !self.options.gapped {
+            return Err(super::kappa::sw_ungapped_refusal());
+        }
         let mut stream = self.stream.take().expect("batch stream");
 
         let mut full = params.to_vec();
@@ -887,7 +892,9 @@ impl PreliminarySink for Runtime<'_> {
         // stream before the redo or the traceback reads it. An ungapped search fetches no protein
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
         // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
-        // (`FetchExcluded::refusal`).
+        // (`FetchExcluded::refusal`). The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps
+        // such lists in the stream as markers, which clear its batch's status
+        // (`kappa_batch`), and notes its UTF8String reads from the same read of the headers.
         // The subjects whose header holds a UTF8String where a VisibleString is expected, with
         // the query of their list, its best E-value and whether it has HSPs, and the lists left in
         // the stream's order (their query and subject) where there is one: the batch's first such
@@ -895,7 +902,8 @@ impl PreliminarySink for Runtime<'_> {
         let mut fetched_reads = Vec::new();
         let mut fetched_order = Vec::new();
         let mut fetched_utf8 = None;
-        if self.options.gapped {
+        let sw_redo = self.options.use_sw_tback && self.options.gapped;
+        if self.options.gapped && !sw_redo {
             if let Some(excluded) = self
                 .subjects
                 .seqdb()
@@ -939,7 +947,9 @@ impl PreliminarySink for Runtime<'_> {
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3281-3296
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3120-3132
-        let mut inactive_heaps: Vec<_> = if self.options.composition != 0 {
+        // The redo runs with composition-based statistics or with the Smith-Waterman traceback.
+        let redo = self.options.composition != 0 || sw_redo;
+        let mut inactive_heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -950,7 +960,7 @@ impl PreliminarySink for Runtime<'_> {
             self.observer.heap(q, "INIT", 0.0, 0, -1, 0, heap);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3281-3296
-        let mut heaps: Vec<_> = if self.options.composition != 0 {
+        let mut heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -965,7 +975,7 @@ impl PreliminarySink for Runtime<'_> {
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3120-3132
 
-        let mut kappa = if self.options.composition != 0 {
+        let mut kappa = if redo {
             Some(KappaState::new(batch, &full, self.options)?)
         } else {
             None
@@ -976,7 +986,7 @@ impl PreliminarySink for Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1688-1707
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream_mt_utils.c:145-170
         let mut result_batches = Vec::new();
-        if !self.options.gapped || self.options.composition == 0 {
+        if !self.options.gapped || !redo {
             loop {
                 let lists = stream.batch_read_observed(self.observer);
                 if lists.is_empty() {
@@ -999,7 +1009,7 @@ impl PreliminarySink for Runtime<'_> {
             }
         } else if let Some(state) = &mut kappa {
             let mut redo_fetched = None;
-            x_t_finish = self.kappa_redo_batch(KappaBatch {
+            let kappa_batch = KappaBatch {
                 batch,
                 full: &full,
                 state,
@@ -1008,7 +1018,12 @@ impl PreliminarySink for Runtime<'_> {
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
                 fetched: (&fetched_reads, &fetched_order, &mut redo_fetched),
-            })?;
+            };
+            x_t_finish = if sw_redo {
+                self.kappa_redo_batch::<true>(kappa_batch)?
+            } else {
+                self.kappa_redo_batch::<false>(kappa_batch)?
+            };
             fetched_utf8 = redo_fetched;
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
@@ -1163,7 +1178,7 @@ fn finalize_redone(
         options,
         subject.len() as i32,
         db_length,
-        if options.composition != 0 { 32.0 } else { 1.0 },
+        super::kappa::redo_scale(options),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
     let observe_reap = !linked.hsps.is_empty();

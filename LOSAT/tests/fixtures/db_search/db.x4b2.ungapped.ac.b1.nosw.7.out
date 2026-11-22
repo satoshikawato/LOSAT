@@ -1,0 +1,13 @@
+# BLASTX 2.17.0+
+# Query: ac two bases
+# Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa)
+# BLASTX 2.17.0+
+# Query: tks_W_nt tks_W in frame +1
+# Database: User specified sequence set (Input: tests/fasta/x4b2/ok_fail.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+tks_W_nt	sfail	100.000	79	0	0	4	240	2	80	7.10e-55	194
+tks_W_nt	sfail	100.000	79	0	0	4	240	82	160	7.10e-55	194
+tks_W_nt	sfail	23.529	17	13	0	155	105	41	57	4.0	13.0
+tks_W_nt	sfail	23.529	17	13	0	155	105	121	137	4.0	13.0
+# BLAST processed 2 queries

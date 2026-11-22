@@ -2361,10 +2361,11 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     keeps one table per thread. Evidence: `lk400` (200 pairs of sequences A then B, BLASTP
     `-window_size 0`): at 1 thread two runs gave the same bytes, B's identical row in 0 of 200 pairs
     and A's in 200 of 200; at 4 threads three runs gave B's in 5, 6 and 3 of 200 and A's in 197, 196
-    and 200, every run another md5. Counts with segmasker 2.17.0's defaults and LOSAT's
-    criterion: A. thaliana TAIR10 118 of its 35,642 proteins with masks at the default window, 543 with
-    `-window_size 0`; a UniRef50 sample (its first 60,000 sequences) 240 of its 59,484 with masks, 1,368 with `-window_size 0`. Whether to search
-    such sequences each on its own is the Owner's question Q5 of M4b (pending).
+    and 200, every run another md5. Counts with segmasker 2.17.0's defaults and LOSAT's criterion:
+    A. thaliana TAIR10 118 of its 35,642 proteins with masks at the default window, 543 with
+    `-window_size 0`; a UniRef50 sample (its first 60,000 sequences) 240 of its 59,484 with masks,
+    1,368 with `-window_size 0`. Whether to search such sequences each on its own is the Owner's
+    question Q5 of M4b (pending).
   - `algorithm::blastp::hard_chunk_scan::short_chunk_seed_refusal`, during the search: a part
     between overlapping masks shorter than the word where NCBI saves a seed from the one word it
     reads past the part. Evidence: `g3` (consecutive inverted parts, `WWW` at both offsets): NCBI's

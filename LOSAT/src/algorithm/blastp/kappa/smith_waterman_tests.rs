@@ -11,6 +11,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAlignmentContext, BlastCompoGappingParams, BlastCompoSequenceData,
     BlastCompoSequenceRange, BlastRedoRangeResult, EMatrixAdjustRule,
 };
+use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 

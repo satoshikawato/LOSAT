@@ -6,11 +6,12 @@ import { INFLATED_TOO_LARGE, type FileInflater } from 'losat/ports';
 // (makeblastdb's: the name ends in the suffix, in any case) decides; the inflated bytes are kept as
 // a new File under the engine's plain name, which the card shows. The run's argv still names the file
 // the user gave (`SearchDraft.nameOf`): the engine's run takes the bytes of its inputs, never a file,
-// so the name is only what it writes where the command line writes a file name (outfmt 0 and 7's
-// `Input:` line, SAM's command line), and the bytes of a run equal the command line's on the shown
-// command (line WQA's D21, 2026-11-23). Every member, stream or frame of a concatenated file is read (bgzip, pzstd, `cat`). A
-// downloaded Example set (a gzip body) takes the same path in the Data worker, with its byte limit
-// (WholeFileInflater, losat/ports: inflate.ts; infra/browser/example-downloader.ts).
+// so the name is only what it writes where the command line writes a file name (the `Input:` line
+// of outfmt 0 to 4 and 7, SAM's command line), and the bytes of a run equal the command line's on the
+// shown command (line WQA's D21, 2026-11-23). Every member, stream or frame of a concatenated file is
+// read (bgzip, pzstd, `cat`). A downloaded Example set (a gzip body) takes the same path in the Data
+// worker, with its byte limit (WholeFileInflater, losat/ports: inflate.ts;
+// infra/browser/example-downloader.ts).
 // A `.bz2` name is read as well (Owner 2026-11-11, swebok-improve SW8 DECISIONS 51). It was refused
 // from 2026-11-04 (line GZ decision 11) because the pure-JS bzip2 decoder of that time ran at
 // 1.1 MB/s and held about 3x the inflated size; the engine's decoder has neither cost.

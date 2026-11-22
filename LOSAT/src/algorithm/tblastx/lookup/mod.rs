@@ -9,6 +9,8 @@
 //! - `compressed` - compressed amino-acid lookup primitives for `blastp-fast`
 
 mod backbone;
+/// PROBE (exp/fx-cellbf): the cell-stage form fixed at build time (LOSAT_FXCELL_BUILD).
+pub(crate) use backbone::X_FX_CELL;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:186-267
 pub mod compressed;
 

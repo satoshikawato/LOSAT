@@ -1826,6 +1826,13 @@ const _: () = {
     assert!(
         2 + 2 * X_CROSS_PIECE <= (1 + <BackboneCell16 as XCell>::PAD_CELLS) * 8
             && X_CROSS_PIECE - 1 <= <BackboneCell16 as XCell>::PAD_HITS
+    );
+    // PROBE (LOSAT_FXCELL_BUILD=2): the second piece's loads end 2 * X_CROSS_PIECE hits from the
+    // list's start.
+    assert!(
+        crate::algorithm::tblastx::lookup::X_FX_CELL < 2
+            || (2 + 4 * X_CROSS_PIECE <= (1 + <BackboneCell16 as XCell>::PAD_CELLS) * 8
+                && 2 * X_CROSS_PIECE - 4 <= <BackboneCell16 as XCell>::PAD_HITS)
     )
 };
 
@@ -3519,6 +3526,43 @@ where
     let cell = Kn::cell(s, table.mask);
     let mut p = hits.as_ptr();
     let mut left = hits.len();
+    if crate::algorithm::tblastx::lookup::X_FX_CELL >= 2 {
+        // PROBE (exp/fx-cellbf, LOSAT_FXCELL_BUILD=2): the first two pieces without a branch on
+        // the cell's size: the second piece is always stored (its hits, `left - 24` clamped to
+        // 0..=24, are what the count advances by), and only a cell of more than 48 hits loops.
+        // The second piece's loads end 96 bytes from the list's start (`PAD_CELLS`, `PAD_HITS`).
+        let first = left.min(X_CROSS_PIECE);
+        Kn::stage(
+            cell,
+            p,
+            first,
+            cross.coord().add(staged),
+            XCross::<CHUNK>::STRIDE,
+        );
+        staged += first;
+        if staged >= CHUNK {
+            staged =
+                Kn::drain::<DEFER, CHUNK, F>(cross, staged, false, table, test, candidate, counts);
+        }
+        let second = left.saturating_sub(X_CROSS_PIECE).min(X_CROSS_PIECE);
+        Kn::stage(
+            cell,
+            p.wrapping_add(X_CROSS_PIECE),
+            second,
+            cross.coord().add(staged),
+            XCross::<CHUNK>::STRIDE,
+        );
+        staged += second;
+        if staged >= CHUNK {
+            staged =
+                Kn::drain::<DEFER, CHUNK, F>(cross, staged, false, table, test, candidate, counts);
+        }
+        if left <= 2 * X_CROSS_PIECE {
+            return staged;
+        }
+        left -= 2 * X_CROSS_PIECE;
+        p = p.add(2 * X_CROSS_PIECE);
+    }
     loop {
         let piece = left.min(X_CROSS_PIECE);
         // staged < CHUNK, so the piece's lanes end at staged + 24 < STRIDE in each array

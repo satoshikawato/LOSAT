@@ -605,7 +605,7 @@ const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
 
 /// PROBE (exp/fx-cellbf, line FX s2): the form of [`BackboneCell16::hits`], fixed at build time
 /// (LOSAT_FXCELL_BUILD, a digit; 0 or unset = dev's branch on the cell's size).
-const X_FX_CELL: u8 = match option_env!("LOSAT_FXCELL_BUILD") {
+pub(crate) const X_FX_CELL: u8 = match option_env!("LOSAT_FXCELL_BUILD") {
     Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
     None => 0,
 };
@@ -617,11 +617,14 @@ impl XCell for BackboneCell16 {
     // 16 and 32 bytes on from it, which end 48 bytes from the start whatever the list's length.
     // For a cell's own entries (2 bytes into the cell) that is 50 bytes from the cell's start, 42
     // past its end: 6 cells of 8 bytes.
-    const PAD_CELLS: usize = 6;
+    // PROBE (LOSAT_FXCELL_BUILD=2): the second piece, always read, ends 96 bytes from the start:
+    // 98 bytes from the cell's start, 90 past its end: 12 cells.
+    const PAD_CELLS: usize = if X_FX_CELL >= 2 { 12 } else { 6 };
     // A list in the overflow array is staged in pieces of 24 hits from its start, and its last
     // piece (1 to 24 hits left) reads up to 23 hits past its end: 24 hits. Every other cell test
-    // reads 8 hits at most.
-    const PAD_HITS: usize = 24;
+    // reads 8 hits at most. PROBE (LOSAT_FXCELL_BUILD=2): a list of at least 4 hits whose second
+    // piece is always read reads up to 44 hits past its end: 48.
+    const PAD_HITS: usize = if X_FX_CELL >= 2 { 48 } else { 24 };
 
     #[inline(always)]
     fn count(&self) -> usize {

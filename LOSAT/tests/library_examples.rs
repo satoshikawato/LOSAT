@@ -9,10 +9,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The features of `LOSAT/Cargo.toml` `[features]` (all but `default`) with whether the test
-/// crate, which is compiled with the features of the package, has each on. A new feature goes in
-/// this list: `every_feature_of_the_package_is_listed` fails otherwise.
+/// The features of `LOSAT/Cargo.toml` `[features]` with whether the test crate, which is
+/// compiled with the features of the package, has each on. `default` is one of them: cargo gives
+/// the compiler `feature="default"` when it is on (`cargo test --all-features` too), so a build
+/// without it is another variant of the library. A new feature goes in this list:
+/// `every_feature_of_the_package_is_listed` fails otherwise.
 const FEATURES: &[(&str, bool)] = &[
+    ("default", cfg!(feature = "default")),
     ("parallel", cfg!(feature = "parallel")),
     ("xstats", cfg!(feature = "xstats")),
     ("diagnostics", cfg!(feature = "diagnostics")),
@@ -64,7 +67,7 @@ pub(crate) fn example_binary(name: &str) -> PathBuf {
     example
 }
 
-/// The names of the features in the `[features]` table of `Cargo.toml` (`default` excluded).
+/// The names of the features in the `[features]` table of `Cargo.toml`.
 fn package_features(manifest: &str) -> Vec<&str> {
     let mut in_table = false;
     let mut names = Vec::new();
@@ -74,10 +77,7 @@ fn package_features(manifest: &str) -> Vec<&str> {
             in_table = line == "[features]";
         } else if in_table && !line.starts_with('#') {
             if let Some((key, _)) = line.split_once('=') {
-                let key = key.trim();
-                if key != "default" {
-                    names.push(key);
-                }
+                names.push(key.trim());
             }
         }
     }

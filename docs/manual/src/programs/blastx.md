@@ -92,6 +92,7 @@ LOSAT stops with an error for these `blastx` settings instead of running somethi
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
+- `-db_hard_mask` on a few databases whose masks overlap or are stored out of order. Most such databases, such as those `segmasker` writes, are searched as NCBI BLAST+ searches them. See [What LOSAT refuses](../refusals.md#blastx).
 
 ## Examples
 

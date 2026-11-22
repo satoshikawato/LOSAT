@@ -200,7 +200,12 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused. See Rare inputs. |
 | `-db_hard_mask` on a database with more than 5,000,000 letters between two masks | Refused. NCBI searches them in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
+| `-db_hard_mask` on a database with a sequence whose overlapping masks make NCBI's word hits reach the table of diagonals that belongs to the sequences searched before or after it | Refused. NCBI keeps one table per thread, so its rows for such a sequence depend on its neighbours in the search and vary from run to run with threads. See Rare inputs. |
+| `-db_hard_mask` on a database with a part between overlapping masks that is shorter than the word and where NCBI saves a seed | Refused when the search reaches it (exit status 1). NCBI's rows then show letters past the part, or its search never ends. |
+| `-db_hard_mask` on a database with a part between masks that is shorter than the word and whose one word NCBI reads past the end of the sequence | Refused. NCBI reads the first letters of the next sequence there, where its hits can change the rows. |
+| `-db_hard_mask` on a database whose masks are stored out of order, when the part after the later-stored mask starts before the end of a part before the earlier one and both can hold a word | Refused. NCBI joins the alignments of the two parts by a merge across that overlap. |
+| `-db_hard_mask` on a database with a mask that ends before it starts, or that ends past its sequence (`makeblastdb` never writes either) | Refused. |
+| `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 
 <details>
 <summary>Rare inputs</summary>
@@ -218,6 +223,16 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 - For both, LOSAT writes the results of the query batches before and then stops with the error.
 - With `-ungapped -window_size 0` and a low `-threshold`, `-outfmt 1` to `4` is refused for a one-hit ungapped alignment of length 0 among the alignments shown, where NCBI's merge of the query-anchored alignments frees memory that it still reads. NCBI crashed in every such run we made but one; LOSAT writes that one. Every other format writes NCBI's report of such an alignment (apart from the version line, which names LOSAT).
 - With `-ungapped` and a database, the 5,000,000-residue limit is checked against the longest sequence of the database, also when a sequence list or an alias file leaves that sequence out of the search.
+- `-db_hard_mask` searches a database whose masks overlap, nest or are stored out of order (`segmasker` writes such masks) as NCBI searches it, with the rows NCBI gives. NCBI cuts each sequence into parts at its masks in the order stored. Where masks overlap, a part ends before it starts, and NCBI's table of diagonals moves back by it.
+- The cases below are refused. They are the ones where NCBI's rows do not come from the sequence alone, or where NCBI reads outside the part it searches.
+- A sequence with overlapping masks whose word hits, after those masks, reach entries of NCBI's table of diagonals that belong to the sequences searched before it, or leave entries that the next sequence reads. NCBI keeps one table per thread. With several threads its rows for these sequences change from run to run (with 4 threads, 3, 5 and 6 of 200 rows of one search differed between runs). With one thread they depend on the neighbouring sequences. LOSAT refuses before the search and names the sequence.
+- With NCBI's defaults for `segmasker` this is 118 of the 35,642 proteins of A. thaliana TAIR10 at the default window and 543 with `-window_size 0`.
+- A part between overlapping masks shorter than the word, where NCBI saves a seed from the one word it reads past the part. NCBI's rows then show letters past the part, or its gapped search never ends and its memory grows. LOSAT stops with exit status 1 when the search reaches the sequence, and the error names it by its position (OID) in the database.
+- A part between masks shorter than the word whose one word NCBI reads past the end of the sequence, from the next sequence's letters, where its hits can change the rows.
+- Masks stored out of order whose part after the later-stored mask starts before the end of a part before the earlier one, both parts able to hold a word: NCBI joins the two parts' alignments by a merge across that overlap. Masks out of order whose parts do not meet so are searched.
+- A mask that ends before it starts, or ends past its sequence.
+- The other refusals above come before the search, so before the first byte of output, and name the first such sequence by its position in the database.
+- `tblastn` and `tblastx` refuse every database whose masks overlap or are stored out of order.
 
 </details>
 
@@ -233,7 +248,9 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database with more than 5,000,000 letters between two masks, and the mask checks of `blastn` | Refused, as in `blastp`. |
+| `-db_hard_mask` on a database with more than 5,000,000 letters between two masks | Refused, as in `blastp`. |
+| `-db_hard_mask` on a database with overlapping masks that make NCBI's rows depend on the sequences searched next to a sequence, with a part between masks that is shorter than the word where NCBI reads or saves a seed past the part, with masks out of order whose parts NCBI merges across an overlap, or with a mask that ends before it starts or past its sequence | Refused, as in `blastp`. Other databases whose masks overlap or are stored out of order are searched as NCBI searches them. |
+| `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 
 The error names the sequence and exits with status 1: `Error: subject sequence N has M residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX` for the N-th record of `-subject` (counted from 1), and the same sentence starting with `database sequence N` for a database sequence (N is its position in the database, counted from 0).
 

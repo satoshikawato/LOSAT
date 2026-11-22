@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.69
+- Version: 1.72
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -303,7 +303,17 @@
   search a sequence whose first mask runs to its end (in TBLASTN and TBLASTX, a reading frame whose
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
   near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
-  M4b-3; numbered after 1.68)
+  M4b-3; numbered after 1.68);
+  1.72 2026-11-22 (BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
+  of order: searched as NCBI searches them, rule 4; the explicit rejections, rule 3, of a
+  sequence whose overlapping masks make NCBI's word hits reach the table of diagonals of the
+  sequences searched before or after it (`StaleDiagonals`), of a part between overlapping masks
+  shorter than the word where NCBI saves a seed (`short_chunk_seed_refusal`), of a part between
+  masks shorter than the word whose one word NCBI reads past the sequence's end (`WordPastEnd`), of
+  masks out of order whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and of a mask
+  that ends before it starts (`Inverted`); TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the
+  Owner's decision of 2026-11-21 (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07, for the rejections; numbered after 1.71)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1098,9 +1108,11 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     leaves a frame an empty first part (`FrameStartMask`: an empty first part of a frame, then a part
     that NCBI searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0
     before a tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13)
-    stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do masks out of
-    order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
-    longer than 5,000,000 letters. `blastinput::db_mask::HardScan`,
+    stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do a mask that ends
+    past its sequence and in BLASTP and BLASTX a range longer than 5,000,000 letters. Masks out of
+    order and overlapping masks stayed refused in this version; from version 1.72 BLASTP and BLASTX
+    search them (rule 4) except the rejections of 1.72 (the end of the Explicit rejections list),
+    and TBLASTN and TBLASTX still refuse them. `blastinput::db_mask::HardScan`,
     `HardMaskShape::of_scan`, `algorithm::common::translated_chunks::translated_db_mask_chunks`,
     `algorithm::blastp::blast_engine::db_masked::hard_chunks`.
     Evidence (NCBI BLAST+ 2.17.0, each run capped; line NP's task folder `M/m4b` (SURVEY.md §4.1,
@@ -2331,6 +2343,47 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
     is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
     negative ones too, end and are reproduced.
+
+- BLASTP and BLASTX `-db_hard_mask` on a database whose masks overlap, nest or are stored out of
+  order (version 1.72, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07). Such a database is searched as NCBI searches it (rule 4): NCBI
+  cuts each sequence into parts at the complement of its masks in the order stored, a part
+  between overlapping masks "ends before it starts" and holds no letters, and its table of
+  diagonals moves back by it (`blast_engine.c:221-276`); segmasker writes such masks (A. thaliana
+  TAIR10, UniRef50). Fixture rows `db.pmask.bp.hard.ov_*` and `db.pmask.bx.hard.ov_*` of
+  `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`, databases `ov_*` of
+  `LOSAT/tests/db_search/dbmaskp/`. LOSAT refuses (exit 1) five shapes, each where NCBI's rows do
+  not come from the sequence alone or NCBI reads outside the part it searches. Evidence: NCBI
+  BLAST+ 2.17.0 runs of probe 2 of line NP's `M/m4b3b/NOTES_M4B3B.md`, each capped.
+  - `blastinput::db_mask::HardMaskShape::StaleDiagonals`, before the search: a sequence with
+    overlapping masks after which NCBI's word hits reach entries of its table of diagonals that
+    belong to the sequences searched before it, or leave entries that the next sequence reads. NCBI
+    keeps one table per thread. Evidence: `lk400` (200 pairs of sequences A then B, BLASTP
+    `-window_size 0`): at 1 thread two runs gave the same bytes, B's identical row in 0 of 200 pairs
+    and A's in 200 of 200; at 4 threads three runs gave B's in 5, 6 and 3 of 200 and A's in 197, 196
+    and 200, every run another md5. Counts with segmasker 2.17.0's defaults and LOSAT's
+    criterion: A. thaliana TAIR10 118 of 35,642 proteins at the default window, 543 with
+    `-window_size 0`; a UniRef50 sample 240 of 59,484, 1,368 with `-window_size 0`. Whether to search
+    such sequences each on its own is the Owner's question Q5 of M4b (pending).
+  - `algorithm::blastp::hard_chunk_scan::short_chunk_seed_refusal`, during the search: a part
+    between overlapping masks shorter than the word where NCBI saves a seed from the one word it
+    reads past the part. Evidence: `g3` (consecutive inverted parts, `WWW` at both offsets): NCBI's
+    gapped search never ends and its memory grows to the 4 GB cap (BLASTP and BLASTX, two-hit;
+    killed by the 20 s timeout); with `-ungapped -comp_based_stats 0` it ends and reports the seed inside
+    the mask. `s2`: rows past the part's end (31-32/71-72, and at `-evalue 1000` 72-73, into the mask
+    [72, 90), the alignment showing `Ww`).
+  - `HardMaskShape::WordPastEnd`, before the search: a part between masks shorter than the word whose
+    one word NCBI reads past the sequence's end, from the next sequence's letters, where its hits
+    can change the rows.
+  - `HardMaskShape::PartsOutOfOrder`, before the search: masks stored out of order whose part after
+    the later-stored mask starts before the end of a part before the earlier one, both able to hold
+    a word: NCBI joins the two parts' alignments by a merge across that overlap (as the rejection
+    of a last mask shorter than the letters before its end, `ShortLastMask`). Masks out of order
+    whose parts do not meet so are searched.
+  - `HardMaskShape::Inverted`, before the search: a mask that ends before it starts, which makeblastdb
+    never writes.
+  TBLASTN and TBLASTX refuse masks that overlap or are stored out of order (`Unsorted`), as before
+  (line NP item M4b-3c); BLASTN is unchanged.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

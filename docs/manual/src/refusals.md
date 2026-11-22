@@ -409,6 +409,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 
 An empty `-rid`, the archive's other errors and the errors of `-outfmt` come as in NCBI.
+
 ## makembindex
 
 `makembindex` runs every option of its `-help` (`-xmlhelp` on the command line only).

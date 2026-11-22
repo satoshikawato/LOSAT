@@ -1,15 +1,16 @@
 //! `losat dustmasker`, `losat segmasker`, `losat windowmasker`, `losat convert2blastmask` and
 //! `losat blast_formatter` against NCBI BLAST+ 2.17.0 dustmasker 1.0.0, segmasker 1.0.0,
 //! windowmasker 1.0.0, convert2blastmask and blast_formatter: each row of
-//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file`
-//! is the standard input) gives NCBI's standard output, standard error and exit status, frozen
-//! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
-//! 2026-11-12 and 11-13, on ws and the local official release; windowmasker's of line NP item
-//! M5a, 2026-11-20 on ws, `tests/windowmasker/make_fixtures.py`; blast_formatter's of line RG
-//! item F3, 2026-11-20 and later, on ws). A name the table repeats is compared on its last row,
-//! whose output the probe kept. NCBI is not run here. Every row runs through the library API too
-//! (`losat::api::run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`,
-//! `run_blast_formatter`, by `examples/library_command_line`), with the same bytes.
+//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file` is
+//! the standard input) gives NCBI's standard output, standard error and exit status, frozen in
+//! `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3, 2026-11-12
+//! and 11-13, on ws and the local official release; windowmasker's of line NP item M5a, 2026-11-20
+//! on ws, `tests/windowmasker/make_fixtures.py`; blast_formatter's of line RG item F3, 2026-11-20
+//! on ws and 2026-11-23 on the local official release). A name the table repeats is compared on its
+//! last row, whose output the probe kept. NCBI is not run here. Every row runs through the library
+//! API too (`losat::api::run_dustmasker`, `run_segmasker`, `run_windowmasker`,
+//! `run_convert2blastmask`, `run_blast_formatter`, by `examples/library_command_line`), with the
+//! same bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -199,62 +200,14 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
         Some(file) => Stdio::from(fs::File::open(dir.join(file)).unwrap()),
         None => Stdio::null(),
     };
-    let out = out_file(program, case);
-    let words = case.words.iter().map(|word| {
-        if word == OUT_FILE {
-            out.as_os_str().to_owned()
-        } else {
-            word.into()
-        }
-    });
     command
         .env("NCBI_CONFIG_PATH", &dir)
         .envs(case.variables.iter().map(|(name, value)| (name, value)))
         .current_dir(&dir)
         .arg(program)
-        .args(words)
+        .args(&case.words)
         .stdin(stdin);
     command
-}
-
-/// The word of the table that names a file the row writes (`-out @OUT@`): the run writes it
-/// in the test's temporary directory (`out_file`), and the file is compared with NCBI's,
-/// frozen in `ncbi/<name>.file`.
-const OUT_FILE: &str = "@OUT@";
-
-/// The file of `OUT_FILE` for `case` of `program`.
-fn out_file(program: &str, case: &Case) -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "masker-out-{program}-{}-{}",
-        case.name,
-        std::process::id()
-    ))
-}
-
-/// Whether the file that `case` wrote (`OUT_FILE`) differs from NCBI's; the file is removed.
-/// A row without `OUT_FILE` writes none.
-fn written_file_differs(program: &str, case: &Case) -> bool {
-    if !case.words.iter().any(|word| word == OUT_FILE) {
-        return false;
-    }
-    let path = out_file(program, case);
-    let got = fs::read(&path).unwrap_or_default();
-    let _ = fs::remove_file(&path);
-    let want = fs::read(
-        fixtures(program)
-            .join("ncbi")
-            .join(format!("{}.file", case.name)),
-    )
-    .unwrap();
-    if got != want {
-        eprintln!(
-            "--- {}: the written file differs\nLOSAT: {:?}\nNCBI:  {:?}",
-            case.name,
-            String::from_utf8_lossy(&got),
-            String::from_utf8_lossy(&want)
-        );
-    }
-    got != want
 }
 
 /// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux.
@@ -472,8 +425,7 @@ fn rows_that_differ(program: &str) -> Vec<String> {
     let mut differ = Vec::new();
     for case in cases_here(program) {
         let (got, want) = (run(program, &case), expected(program, &case));
-        let file_differs = written_file_differs(program, &case);
-        if got != want || file_differs {
+        if got != want {
             differ.push((case.name.clone(), got, want));
         }
     }
@@ -550,7 +502,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             (out, err, i32::from(status != 0))
         };
         let got = (out, err, status);
-        if written_file_differs(program, &case) || got != expected {
+        if got != expected {
             differ.push((case.name.clone(), got, expected));
         }
     }

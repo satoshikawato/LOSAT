@@ -27,7 +27,7 @@ from make_dbmaskp_ov import back_translate
 
 # `ov_athaw` (decision 52): ov_atha without the six proteins whose scans in the one-hit scan (-window_size 0) reach
 # diagonal entries of the subject before them or leave entries that the next subject reads, which LOSAT refused before
-# PD-LOSAT-NCBI-DEFECTS exception 22 (it now searches each of them on its own).
+# PD-LOSAT-NCBI-DEFECTS exception 23 (it now searches each of them on its own).
 WITHOUT = ("AT1G02550.1", "AT1G02800.1", "AT1G04080.2", "AT1G04080.5", "AT1G06760.1", "AT1G09460.1")
 
 

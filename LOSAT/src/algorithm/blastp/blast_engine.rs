@@ -545,7 +545,7 @@ impl BlastpSubjectScratch {
         self.diag_array.fill(DiagStruct::default());
     }
 
-    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b).
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b).
     /// The diagonal offset moved up by `by` between two sequences of a `-db_hard_mask` search
     /// (`db_masked.rs`), so that no entry of one reaches the other's hits
     /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4
@@ -1160,7 +1160,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
@@ -4570,10 +4569,8 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it

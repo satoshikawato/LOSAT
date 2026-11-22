@@ -219,7 +219,7 @@ enum ShortChunkRefusal {
 /// (`common::hard_chunk_walk::DiagonalWalk`), the sequence searched on its own: on NCBI's new table
 /// where it is the first searched sequence (`first`), else with the diagonal offset moved so that no
 /// entry of another sequence reaches its hits or theirs (`DiagonalWalk::start`, `DiagonalWalk::
-/// after`; PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22). A
+/// after`; PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22). A
 /// chunk that holds a word is searched over its own
 /// letters (by the reference scan where its diagonal offset went back below an entry of the
 /// table), the chunk from the start before a mask that runs to the end included, which NCBI scans

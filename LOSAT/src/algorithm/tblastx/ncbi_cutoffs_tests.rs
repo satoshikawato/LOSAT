@@ -69,6 +69,22 @@ fn blosum62_gapped() -> KarlinParams {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:965-973
+// `BLAST_Cutoffs` starts from a cutoff of 1 and only raises it. With `-db` SeqDB's shortest
+// length 10 makes TBLASTN's subject length 3: a search space of 3 x 3 gives a score below 1
+// for E = 0.9, and the cutoff is 1 (NCBI 2.17.0's `cutoff_s` 1 and 32 of line RG X4b's
+// survey, section 1.6).
+#[test]
+fn the_sum_statistics_cutoff_is_at_least_one() {
+    let gapped = blosum62_gapped();
+    assert!(cutoff_score_from_evalue(0.9, 9, &gapped) <= 0);
+    assert_eq!(cutoff_score_sum_stats(160, 3, 0.1, &gapped), 1);
+    // A search space large enough keeps the computed score.
+    let computed = cutoff_score_from_evalue(0.9, 160 * 2500, &gapped);
+    assert!(computed > 1);
+    assert_eq!(cutoff_score_sum_stats(160, 2500, 0.1, &gapped), computed);
+}
+
 #[test]
 fn test_gap_trigger_raw_score() {
     let ungapped = blosum62_ungapped();

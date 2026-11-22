@@ -255,7 +255,7 @@ fn hard(chunks: &[(usize, i32)]) -> Vec<crate::core::subject_split::HardChunk> {
         .collect()
 }
 
-/// How the search keeps each sequence on its own (PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's
+/// How the search keeps each sequence on its own (PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's
 /// answer Q5 = B of M4b): the first searched sequence takes NCBI's new table; another moves the
 /// offset up by its margin below the start, after a clear where a chunk before its last would
 /// reach INT4_MAX / 4; a walk that does not read back keeps NCBI's offsets; after the sequence the

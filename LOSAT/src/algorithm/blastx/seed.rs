@@ -260,7 +260,7 @@ impl Diagonals {
         }
         Ok(())
     }
-    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b).
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b).
     /// The offset moved up by `by` between two sequences of a `-db_hard_mask` search
     /// (`search_db_masked.rs`), so that no entry of one reaches the other's hits
     /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4

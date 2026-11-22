@@ -29,7 +29,7 @@ named. The queries are random (no W) + WWW + random: `qov1.faa` / `qov1.fna` (th
            A's chunk end 40; B holds the same letters and the mask [230,235).
 Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order of the subject; no -parse_seqids, as the
 `edge_*.asnt`), algorithm seg; `makeblastdb -mask_data` gives them the algorithm number 21.
-  ov_lkn:  the near input of ov_lk (PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22):
+  ov_lkn:  the near input of ov_lk (PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22):
            A, a spacer of 240 `X` (no word hit), then B, with A's and B's masks (`near_db`), over which the alias
            `ov_lkn.pal` keeps ov_lk's number of sequences and total length: NCBI searches B with every diagonal entry
            of A out of reach, as LOSAT searches B of ov_lk.

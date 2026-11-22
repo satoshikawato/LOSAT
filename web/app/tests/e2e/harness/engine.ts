@@ -565,6 +565,86 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
   return results;
 }
 
+/** A search of `-db` (line WQA D12a): the argv as on the command line run from LOSAT/, without -num_threads. */
+export interface DatabaseSearch {
+  readonly id: string;
+  readonly program: ProgramId;
+  readonly argv: readonly string[];
+  /** The query file, by its path under LOSAT/ (the argv's -query). */
+  readonly query: string;
+  /** The files of the run's directory, by their paths under LOSAT/: those of a pick of the database's folder. */
+  readonly files: readonly string[];
+  readonly threads: number;
+}
+
+export interface DatabaseResult {
+  readonly id: string;
+  readonly threads: number;
+  readonly runtime?: RuntimeInfo;
+  readonly error?: string;
+  /** SHA-256 of the stored outfmt 6. */
+  readonly sha256?: string;
+  /** Milliseconds of the engine's run (from its phase 'running' to its end), and of the whole search. */
+  readonly runMs?: number;
+  readonly totalMs: number;
+}
+
+/**
+ * Searches of `-db` through one EngineGateway and Data worker, in order (line WQA D12a, 2026-11-20): the query
+ * indexed by the Data worker as the application indexes it, the database's files given to the run as Files
+ * (`EngineRunRequest.files`), which the engine reads in place on every thread. The outfmt 6 that the run stored.
+ * With `picked`, the selector of an `<input type=file>` whose files the test set (Playwright's `setInputFiles`), the
+ * run's files are the user's picked Files, read from the disk (each by its name, the last part of its path), as a
+ * pick in the application gives them; otherwise Files made from the server's bytes.
+ */
+export async function databaseSearches(list: readonly DatabaseSearch[], picked?: string): Promise<DatabaseResult[]> {
+  if (ENGINE_ASSETS === null) throw new Error('the harness was built without the engine (LOSAT_WEB_REACTORS)');
+  const data = startDataWorker();
+  const engine = new WasmEngine({ assets: ENGINE_ASSETS, control: data });
+  const files = new Map<string, Promise<File>>();
+  const pick = picked === undefined ? undefined : [...(document.querySelector<HTMLInputElement>(picked)?.files ?? [])];
+  const file = (path: string) => {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const chosen = pick?.find((candidate) => candidate.name === name);
+    if (chosen !== undefined) return Promise.resolve(chosen);
+    let cached = files.get(path);
+    if (cached === undefined) {
+      cached = fetchFile({ url: `/__files/LOSAT/${path}`, name: path.slice(path.lastIndexOf('/') + 1) });
+      files.set(path, cached);
+    }
+    return cached;
+  };
+  const results: DatabaseResult[] = [];
+  for (const [i, search] of list.entries()) {
+    const runId = `database-${i}`;
+    const started = performance.now();
+    let running: number | undefined;
+    try {
+      const source = await data.addSource(await file(search.query));
+      // The rows have no registry file: the query is read with the data loaders on, as the CLI reads it (ABI v2 §9).
+      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true });
+      const run = await data.buildRunInput([revision.revisionId]);
+      const query: EngineInput = { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
+      const directory = await Promise.all(search.files.map(async (name) => ({ name, file: await file(name) })));
+      const output = await data.openRun(runId);
+      const runtime = await engine.run({ runId, argv: search.argv, query, files: directory, requestedThreads: search.threads }, output, (phase) => {
+        if (phase === 'running') running = performance.now();
+      });
+      const ran = performance.now();
+      await data.commitRun(runId);
+      const sha256 = await sha256Hex(await data.readOutput(runId, 6));
+      await data.deleteRun(runId);
+      results.push({ id: search.id, threads: search.threads, runtime, sha256, runMs: ran - (running ?? started), totalMs: performance.now() - started });
+    } catch (error) {
+      await data.discardRun(runId).catch(() => undefined);
+      results.push({ id: search.id, threads: search.threads, error: String(error), totalMs: performance.now() - started });
+    }
+    const last = results[results.length - 1]!;
+    console.log(`${last.error === undefined ? 'done' : `failed (${last.error})`} ${search.id} n=${search.threads}: run ${Math.round(last.runMs ?? 0)} ms`);
+  }
+  return results;
+}
+
 /** The engine-input contract against the real EngineGateway and Engine worker. */
 export async function engineInput(env: {
   readonly argv: readonly string[];

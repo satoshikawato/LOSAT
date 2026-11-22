@@ -40,7 +40,10 @@ Both suites add a TBLASTX search over several subjects, which the threaded react
 reduces in the wasm-threads-only path, the searches of a query whose reader fails in its second
 query batch (`reader_error`), the BLASTN `-window_masker_db` and `-window_masker_taxid`
 searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`),
-the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`), and the
+the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`), the
+`-db` searches of the db_search rows that the wasm-threading check runs and of two filters (`database`),
+whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), with
+a query read with the data loaders on and off (`-conffile` of `DATA_LOADERS=none`), and the
 inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
 `-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
 `--group fasta_input` writes that group of the full suite alone.
@@ -262,6 +265,57 @@ def direct_tblastx() -> dict:
     rel = run.relative_to(REPO)
     return {"program": "tblastx", "argv": ["tblastx", "-query", str(rel / "q.fna"), "-subject", str(rel / "s.fna")],
             "cwd": str(REPO), "cases": ["tblastx-threaded-direct"], "frozen": {}}
+
+
+# The db_search rows of LOSAT/tests/check_wasm_threading.py (one outfmt 6 row per program) and two filters of a
+# BLASTP database: -seqidlist (a binary list) and -taxids (line WQA D12a, 2026-11-20).
+DATABASE_ROWS = ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6",
+                 "db.sl.bp.bsl.6", "db.tf.bp.nosql.6"]
+
+
+def database() -> list[dict]:
+    """The `-db` searches (`DATABASE_ROWS`), run from LOSAT/ as the manifest's paths are, with NCBI's frozen
+    outfmt 6 (LOSAT/tests/db_search_manifest). The host gives the engine LOSAT/ as the run's working
+    directory, and the run no subject."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import db_search_fixtures  # noqa: E402  (the manifest reader)
+    rows = {row["row_id"]: row for row in db_search_fixtures.read_manifest()[1]}
+    searches = []
+    for row_id in DATABASE_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["outfmt"] == "6", row_id
+        searches.append({"program": row["program"],
+                         "argv": [row["program"], "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
+                         "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {"6": row["stdout_sha256"]},
+                         "database": True})
+    # With -parse_deflines the run registers its query with `register_inputs` (its subject handle 0, the
+    # response's subject null), and the records' `s_idx` are the database's OIDs (abi_v2.md §4, §8); the
+    # native CLI's run of the argv is the reference (review of D12a, low 3).
+    parsed = dict(searches[DATABASE_ROWS.index("db.d1.6")])
+    searches.append({**parsed, "argv": [*parsed["argv"], "-parse_deflines"], "cases": ["db.d1.6.parse_deflines"], "frozen": {}})
+    # A run of -db reads its query with the data loaders of its argv, as every run's inputs are read (line WQA's D13
+    # and D16 with D12a, 2026-11-21): with the `-conffile` of `[BLAST] DATA_LOADERS=none` (web/adapter/tests/fixtures/d16)
+    # the query's first line `2HHB` is data, and without it the CLI refuses that line. Run from the repository's root,
+    # which holds the database and the D16 files; the native CLI's run of each argv is the reference.
+    d16 = "web/adapter/tests/fixtures/d16"
+    argv = ["blastp", "-db", f"LOSAT/{rows['db.d1.6']['db']}", "-query", f"{d16}/sid.q.faa"]
+    searches.append({"program": "blastp", "argv": [argv[0], "-conffile", f"{d16}/nol.ini", *argv[1:]], "cwd": str(REPO),
+                     "cases": ["db.d16.blastp.conffile_no_loaders"], "frozen": {}, "database": True})
+    searches.append({"program": "blastp", "argv": argv, "cwd": str(REPO), "cases": ["db.d16.blastp.loaders_on"],
+                     "frozen": {}, "expect": "failure", "database": True})
+    # A run of -db reads its query as every run reads it (line WQA's D10 with D12a, 2026-11-22): 30 copies of the
+    # db.d1 query (358 letters each) fill more than BLASTP's first batch of 10000 letters, and a reader's error on
+    # the record after them ends the run in its batch, after the database search of the batches before, as on the
+    # CLI (the native CLI's run of the argv is the reference). Written under LOSAT/target, as reader_error's inputs.
+    directory = Path("target/v_abi_reader_error")
+    (REPO / "LOSAT" / directory).mkdir(parents=True, exist_ok=True)
+    d1 = rows["db.d1.6"]
+    query = (REPO / "LOSAT" / d1["query"]).read_bytes() * 30 + b">bad\nMKVL%%%%\n"
+    (REPO / "LOSAT" / directory / "blastp_db.q.fa").write_bytes(query)
+    searches.append({"program": "blastp", "argv": ["blastp", "-db", d1["db"], "-query", str(directory / "blastp_db.q.fa")],
+                     "cwd": str(REPO / "LOSAT"), "cases": ["db.d1.reader_error"], "frozen": {}, "expect": "failure",
+                     "database": True})
+    return searches
 
 
 def window_masker() -> list[dict]:
@@ -747,6 +801,7 @@ def main() -> int:
         searches += window_masker()
         searches += reader_error()
         searches += own_search()
+        searches += database()
         searches += scan_d13()
         searches += failed_outputs()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")

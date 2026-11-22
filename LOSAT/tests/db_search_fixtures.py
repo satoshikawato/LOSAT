@@ -37,7 +37,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   2.17.0 crashes, adds rows from the masked letters, drops seeds of the next subject or writes an HSP many times;
   exception 3: a one-hit gapped start whose window reads past the end of a database volume's last memory page, where
   NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
-  1073741798; exception 22: `-db_hard_mask` with overlapping masks after which NCBI's word hits reach diagonal
+  1073741798; exception 23: `-db_hard_mask` with overlapping masks after which NCBI's word hits reach diagonal
   entries of another subject, with the near database that holds a spacer of `X` between the two subjects under an
   alias with the database's statistics). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is

@@ -208,7 +208,7 @@ impl Masked<'_> {
     /// nothing. The sequence is searched on its own: on NCBI's new table where it is the first
     /// searched sequence, else with the diagonal offset moved so that no entry of another sequence
     /// reaches its hits or theirs (`common::hard_chunk_walk::DiagonalWalk::start`,
-    /// `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b,
+    /// `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b,
     /// 2026-11-22). The sequences that LOSAT refuses before the search never come here
     /// (`blastinput::db_mask::HardMaskShape`: masks out of the order of their start, past the end,
     /// a range longer than `MAX_DBSEQ_LEN`, a tail mask with masks stored after it, a one word past

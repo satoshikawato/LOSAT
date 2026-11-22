@@ -956,7 +956,7 @@ fn protein_shapes_of_the_hard_masks() {
 /// `HardMaskShape::of_scan` of the protein programs on masks that overlap or nest, or are out of
 /// the order of their start (series NP, M4b-3b; the masks of probe 2 of M/m4b3b/NOTES_M4B3B.md, a
 /// sequence of 240 letters, word 3): searched also where the walk of the chunks' diagonal offsets
-/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 22: the search's
+/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 23: the search's
 /// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
 /// change a result; `PartsOutOfOrder` where a chunk that can hold
 /// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
@@ -1081,7 +1081,7 @@ fn protein_shapes_of_overlapping_masks() {
 /// The place of a sequence among the searched ones (`SearchedPlace`): the first searched
 /// sequence's hits below its start meet the entries of NCBI's new table, a one word past the
 /// sentinel with them; the margins below the start and past the end refuse no sequence at any
-/// place (each sequence is searched on its own, PD-LOSAT-NCBI-DEFECTS exception 22).
+/// place (each sequence is searched on its own, PD-LOSAT-NCBI-DEFECTS exception 23).
 #[test]
 fn protein_shapes_at_every_searched_place() {
     let of = |masks: &[(u32, u32)], length: usize, window: i32, first: bool| {

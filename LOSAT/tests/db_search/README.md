@@ -1288,6 +1288,16 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4b/`: rows `db.x4b.dbfail.*`, `db.x4b.excl.*`, `db.x4b.cut0.db.*`, `db.x4b.sp.db.*`, `db.x4b.sp.two.db.*` and
+`db.x4b.pssm.none.db.*` (line RG, item X4b-1 fix rounds 1 and 2: tblastn `-use_sw_tback`). `x4b/make_x4b.py` (its
+docstring has the usage and the records) writes with NCBI BLAST+ 2.17.0 makeblastdb (version 5) `x4b/fail`
+(`-parse_seqids`: X4's sok1 in frame +1 and sfail in frame -1, on which tks_W's Smith-Waterman redo fails), `x4b/excl`
+(the same and, at OID 2, a weaker copy of sfail's first half whose only line has a ti) and `x4b/polycg`
+(`tests/fasta/x4b/polycg.fna`, no hit for a PSSM). `x4b/neg.txt` lists an id that no database holds: as a
+`-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its fetch and
+sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), which clears the failure of the match on sfail before it
+(exit 0 where `fail` ends with `Traceback failed`).
+
 `x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
 the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
 has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
@@ -2342,7 +2352,7 @@ for `qov2.faa` and for `qwpe.faa`, `qov2.faa`'s protein with `W-W`, whose `-` th
 `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different words) and `ov_lk` (two
 subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B, 98 positions past A's end, 137 in the
 one-hit scan (`-window_size 0`); NCBI's rows of B depend on the thread order). LOSAT searches B with A's entries out of reach
-(PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
+(PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
 NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000`, `-window_size 0` and `-ungapped` expect NCBI's run
 of `ov_lkn` (`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240
 `X`, which no query word hits, then B) and `ov_lkn.asnt` (A's and B's masks, `local id` renumbered), and the alias `ov_lkn.pal`
@@ -2356,7 +2366,7 @@ printf 'TITLE overlapping masks lk\nDBLIST ov_lknv\nNSEQ 2\nLENGTH 480\nSTATS_NS
 
 6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
 their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before
-exception 22 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`
+exception 23 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`
 at each of the six boundaries (at 1 and 4 threads, BLASTP and BLASTX; `ncbi-parity-20261019/M/m4b3b/Q5B_PROGRESS.md`), so
 they are `ncbi` rows. `ov_athaw` (`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for
 `ov_atha`) has the one-hit rows `.ov_athaw.21.w0.6`. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every

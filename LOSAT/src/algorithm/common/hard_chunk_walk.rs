@@ -12,7 +12,7 @@
 //! finder reads of each chunk ([`ChunkWork`]), the margins by which the sequence's word hits
 //! reach past it ([`DiagonalMargins`]), and from them how the search moves the diagonal offset
 //! so that each sequence is searched on its own ([`DiagonalWalk::start`], [`DiagonalWalk::after`]:
-//! PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22).
+//! PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22).
 
 /// What the word finder reads of one hard chunk ([`DiagonalWalk::chunk`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,7 +286,7 @@ impl DiagonalWalk {
     /// How the search of a sequence of `length` letters whose hard chunks are `chunks` (in walk
     /// order) starts on a table at the diagonal offset `offset`, in a search with the word `word`
     /// and the window `window`, and the walk of its search (the margin of [`DiagonalWalk::after`]
-    /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b,
+    /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b,
     /// 2026-11-22 22:34 JST): each sequence is searched on its own, so that no entry of another
     /// sequence reaches its hits, and its rows are the same at every thread count.
     /// - `first`, the first sequence that the search reads (the first with letters): NCBI's new

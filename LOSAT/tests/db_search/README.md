@@ -2268,6 +2268,40 @@ with pieces of two and no letters the same way. The rows `*.ungapped.*` of BLAST
 `-ungapped`, #1420, and `ps5`/`ph5` with seg masks) search each hard piece's ungapped hits and merge them as the
 gapped pieces are merged.
 
+`ov_*` and `ov_atha` (M4b-3b, 2026-11-22; overlapping hard masks, rows `db.pmask.{bp,bx}.hard.ov_*`): databases whose masks
+overlap, so that `-db_hard_mask` searches an inverted range (a chunk of negative length: a mask that starts before the
+previous one ends). `../../make_dbmaskp_ov.py` (seeds 20261121 and 20261122, the letters and masks of the probes of
+`ncbi-parity-20261019/M/m4b3/probe/make_p1.py` and `M/m4b3b/probe/make_p2.py`) writes `ov_<shape>.faa` and `ov_<shape>.asnt`
+(ASN.1 text, algorithm seg, `local id N`, N the order of the subject) and the queries `qov1.faa`/`qov1.fna` (probe 1: `e3`,
+`e3c`, `g3`, `nest`, `big`) and `qov2.faa`/`qov2.fna` (probe 2: `s2`, `r37`, `r36`, `nb`, `lk`; a random protein with one `WWW`
+and its back-translation for BLASTX); each shape is one subject of 240 random letters without `W` but for the `W` runs named
+in the script's header (`ov_lk`: two subjects), and the database is made as the `pe_*`:
+
+```
+python3 ../../make_dbmaskp_ov.py --ncbi-bin /home/kawato/micromamba/bin   # = for each shape X:
+makeblastdb -in ov_X.faa -dbtype prot -out ov_X -title "overlapping masks X" -mask_data ov_X.asnt && rm -f ov_X.pjs
+python3 ../../make_dbmaskp_ovatha.py --atha ATHA_FAA --ncbi-bin /home/kawato/micromamba/bin   # ov_atha, qova.faa, qova.fna
+```
+
+`ov_e3` (masks [40,60) [55,70), `WWW` at 60 and 70: NCBI's two-hit scan pairs the word at 70 with the stale diagonal entry of
+the word at 60) and its control `ov_e3c` (touching masks [60,70), the same letters), `ov_g3` (two consecutive inverted chunks;
+NCBI's gapped two-hit BLASTP search of it never ends, so those runs are rejection rows), `ov_nest` (a mask inside the previous
+one), `ov_big` (overlap 60 > the window 40), `ov_s2` (an inverted chunk, then a chunk of 2 letters shorter than the word: a seed
+saved there), `ov_r37` and `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different
+words) and `ov_lk` (two subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan
+(`-window_size 0`) NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads
+(the row of B at 38-40 is missing); LOSAT refuses `ov_lk` at every window (its chunks reach diagonal entries older than the
+sequence), so all its rows are refusals). `ov_atha` at `-window_size 0` is refused too: 6 of its 40 proteins (AT1G02550.1, AT1G02800.1,
+AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) leave diagonal entries that the next subject reads (decision 52); `ov_athaw`
+(`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for `ov_atha`) gives the one-hit rows
+`.ov_athaw.21.w0.6` their NCBI bytes. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every
+frozen row. `ov_atha` holds 40 proteins of the A. thaliana TAIR10 set (150-600 letters) whose
+`segmasker` masks (`-outfmt maskinfo_asn1_bin`, algorithm 21) overlap: the first ten by name with two or more consecutive
+overlaps, the first five of the rest with a nested mask and then the first with an overlap up to 40, none with a mask that
+reaches the last letter (`make_dbmaskp_ovatha.py` has the rule); `qova.faa` is the four with the most overlaps and `qova.fna`
+their back-translation (seed 20261122). The rows run the default two-hit search, `-evalue 1000`, `-window_size 0` and
+`-ungapped -comp_based_stats 0 -evalue 1000`, outfmt 6 with the long field list, and `ov_atha` also outfmt 0 at the default.
+
 ## `dbmaskt/`: database masks of TBLASTN and TBLASTX searches (line NP, series M, M4b PR 2)
 
 Rows `db.tmask.*` (`tblastn.tmask.tsv`, `tblastx.tmask.tsv`: `-db_soft_mask`, `-db_hard_mask`). The inputs are written by

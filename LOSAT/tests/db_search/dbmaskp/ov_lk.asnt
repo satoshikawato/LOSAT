@@ -1,0 +1,29 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program seg,
+  algo-options "overlap lk",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 40,
+          to 199,
+          id local id 1
+        },
+        {
+          from 60,
+          to 237,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 230,
+          to 234,
+          id local id 2
+        }
+      }
+    },
+    more FALSE
+  }
+}

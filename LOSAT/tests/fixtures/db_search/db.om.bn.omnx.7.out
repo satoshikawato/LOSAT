@@ -1,0 +1,11 @@
+# BLASTN 2.17.0+
+# Query: qn1
+# Database: tests/db_search/oidmask/omnx
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+qn1	NM_000001.1	100.000	426	0	0	1	426	1	426	0.0	787
+qn1	NM_000004.1	98.592	426	6	0	1	426	1	426	0.0	754
+qn1	nloc5	98.582	423	6	0	4	426	1	423	0.0	749
+qn1	NR_000008.1	94.131	426	25	0	1	426	1	426	0.0	649
+qn1	AJ000007.1	92.958	426	30	0	1	426	1	426	0.0	621
+# BLAST processed 1 queries

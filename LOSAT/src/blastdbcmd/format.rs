@@ -141,8 +141,9 @@ impl FormatSpec {
         if !self.get_defline {
             return print(None, &mut line);
         }
-        // A null set writes nothing; a set of no lines writes `%d`'s empty document, no line
-        // of the others, and throws for a target (probes e1-e8, z1-z9 of line RG-Dbc).
+        // A null set writes nothing; a set of no lines (stored so, or emptied by the alias files'
+        // `OID_MASK_TYPE`, line RG D1b-2) writes `%d`'s empty document, no line of the others,
+        // and throws for a target (probes e1-e8, z1-z9 of line RG-Dbc).
         let Some(set) = source.deflines(oid)? else {
             return Ok(());
         };

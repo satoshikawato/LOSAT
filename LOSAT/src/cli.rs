@@ -235,12 +235,11 @@ pub trait ProgramParser: Parser {
     }
 }
 
-/// `Cli` reads a command line with the arguments of its program only: the first word that names a
-/// program (`program_word`; the words before it are the top level's help and version flags), so
-/// that each option of another program costs a run nothing.
+/// `Cli` reads a command line with the arguments of its program only, the program that the reader
+/// reads (`read_program`), so that each option of another program costs a run nothing.
 impl ProgramParser for Cli {
     fn program_command(words: &[OsString]) -> clap::Command {
-        let program = program_word(words, <Commands as Subcommand>::has_subcommand);
+        let program = read_program(words, <Commands as Subcommand>::has_subcommand);
         cli_command::<false>(|name| Some(name) == program)
     }
 }
@@ -250,23 +249,32 @@ pub(crate) fn command_of(program: &str) -> clap::Command {
     cli_command::<false>(|name| name == program)
 }
 
-/// The word of `words` (`losat <words>`) that names the program whose arguments the parser reads
-/// (`parse_command`): the first that `is_program` takes. The top level has no option of its own
-/// but its help and version flags, so a word before the program's name that is neither ends the
-/// parse there, with no program's arguments.
-fn program_word(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option<&str> {
-    words
+/// The words that LOSAT's reader takes at the top level (`parse_command`), before the program's
+/// name: its help and version flags. The top level has no option of its own
+/// (`Cli::command().get_arguments()` is empty before clap builds it).
+const TOP_LEVEL_FLAGS: [&str; 4] = ["-help", "--help", "-h", "--version"];
+
+/// The program whose arguments LOSAT's reader reads in `words` (`losat <words>`,
+/// `parse_command`): the first word after the top level's flags (`TOP_LEVEL_FLAGS`), when
+/// `is_program` takes it. The reader rejects any other word there, before it reads a program, so
+/// such a command line reads no program's arguments. The command that `Cli` is read with has the
+/// arguments of this program only (`program_command`), and the reader checks that the program it
+/// enters is this one, with its arguments.
+fn read_program(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option<&str> {
+    let word = words
         .iter()
         .skip(1)
-        .filter_map(|word| word.to_str())
-        .find(|word| is_program(word))
+        .find(|word| !TOP_LEVEL_FLAGS.iter().any(|flag| word.as_os_str() == *flag))?;
+    word.to_str().filter(|word| is_program(word))
 }
 
 /// `Cli`'s command (`augment_args`, or `augment_args_for_update` with `UPDATE`) where the programs
 /// whose names `selected` takes have their arguments (`program_args`). The others have their
-/// names, descriptions and help template, which the top level's help lists; clap adds their
-/// arguments if it builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant
-/// so that a program that never calls `command_for_update` carries none of its code.
+/// names, descriptions and help template, which the top level's help lists, and no arguments to
+/// LOSAT's reader, which reads a program's arguments before clap builds anything
+/// (`parse_command`): it reads only a selected program. clap adds the others' arguments where it
+/// builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant so that a
+/// program that never calls `command_for_update` carries none of its code.
 fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Command {
     let command = clap::Command::new("losat");
     let (mut command, program_args) = if UPDATE {
@@ -299,13 +307,15 @@ fn no_args(command: clap::Command) -> clap::Command {
 /// (`PROGRAM_ARGS_FOR_UPDATE`).
 type ProgramArgs = fn(clap::Command) -> clap::Command;
 
-// clap_derive 4.6.7: src/derives/subcommand.rs:288-350 (a variant's command: its description and
+// clap_derive 4.6.7: src/derives/subcommand.rs:288-358 (a variant's command: its description and
 // help template, `final_from_attrs`, after its `Args`, or before them when deferred)
 /// The arguments of the program whose command is `command` (`A::augment_args`, or
 /// `augment_args_for_update` with `UPDATE`), as clap's derive adds them where it does not defer
 /// them: the description stays the variant's. A deferred `Args` comes after the variant's
 /// description, and the doc comment of an `Args` (`RpsbprocArgs`, `MakedbArgs` and the groups that
-/// the programs flatten) is a description to clap.
+/// the programs flatten) is a description to clap. Every variant has a description and no `Args`
+/// sets a help template (`cli_tests`), so the rest of the variant's command stays as the derive
+/// writes it.
 fn program_args<A: clap::Args, const UPDATE: bool>(command: clap::Command) -> clap::Command {
     use clap::builder::Resettable;
     let about = Resettable::from(command.get_about().cloned());
@@ -512,12 +522,12 @@ where
             "the start of another program"
         );
     }
-    // The toolkit's file arguments of the program that the reader reads (the program of `tokens`,
-    // `program_word`), the only one whose arguments it reads.
-    let program = program_word(&tokens, |word| command.find_subcommand(word).is_some())
+    // The program that the reader reads (`read_program`), the only one whose arguments it reads,
+    // with the toolkit's file arguments.
+    let read = read_program(&tokens, |word| command.find_subcommand(word).is_some())
         .and_then(|word| command.find_subcommand(word))
         .map(|program| program.get_name().to_string());
-    let command = with_toolkit_file_args(command, |name| Some(name) == program.as_deref());
+    let command = with_toolkit_file_args(command, |name| Some(name) == read.as_deref());
     // NCBI's application reads its own toolkit words before the program's arguments; the
     // argument reader gets the words that are left (`ncbi_environment::preparse`).
     if let Some(program) = tokens
@@ -592,6 +602,18 @@ where
             token.to_str().unwrap_or("")
         };
         if let Some(subcommand) = scope.find_subcommand(text) {
+            // The program that `read_program` names, whose arguments the command has
+            // (`ProgramParser::program_command`): the reader looks its options up itself.
+            debug_assert_eq!(
+                Some(subcommand.get_name()),
+                read.as_deref(),
+                "{translated:?}"
+            );
+            debug_assert!(
+                subcommand.get_arguments().next().is_some(),
+                "{} read without its arguments",
+                subcommand.get_name()
+            );
             scope = subcommand;
             translated.push(token);
             if scope.get_name() == "rpstblastn" {
@@ -1132,22 +1154,11 @@ where
     S: Into<OsString>,
 {
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    // The programs' names, none of their arguments.
-    let command = cli_command::<false>(|_| false);
-    let program = command.find_subcommand(tokens.get(1)?.to_str()?)?;
-    let name = match program.get_name() {
-        "blastn" => "blastn",
-        "blastp" => "blastp",
-        "blastx" => "blastx",
-        "tblastn" => "tblastn",
-        "tblastx" => "tblastx",
-        "psiblast" => "psiblast",
-        "rpsblast" => "rpsblast",
-        "rpstblastn" => "rpstblastn",
-        "makeblastdb" => "makeblastdb",
-        "rpsbproc" => "rpsbproc",
-        _ => return None,
-    };
+    // A program's name (`Commands`), with no command built.
+    let name = tokens
+        .get(1)?
+        .to_str()
+        .filter(|word| <Commands as Subcommand>::has_subcommand(word))?;
     // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
     // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
     // logs to the file `-version`).

@@ -499,18 +499,40 @@ fn a_command_line_builds_the_arguments_of_its_program_only() {
             }
         }
     }
+    // A word that the reader rejects at the top level, before any program (`read_program`).
     for words in [
         &["losat"][..],
         &["losat", "-help"],
         &["losat", "nosuch", "blastp"],
+        &["losat", "-x", "blastn", "blastp"],
+        &["losat", "-help-full", "blastp"],
+        &["losat", "--", "blastp"],
     ] {
         let words: Vec<OsString> = words.iter().map(OsString::from).collect();
         let program = Cli::program_command(&words)
             .get_subcommands()
             .find(|program| program.get_arguments().next().is_some())
             .map(|program| program.get_name().to_string());
-        let expected = (words.len() == 3).then(|| "blastp".to_string());
-        assert_eq!(program, expected, "{words:?}");
+        assert_eq!(program, None, "{words:?}");
+    }
+}
+
+// The reader takes only its help and version flags before the program's name, so the program
+// it reads is the first word after them (`read_program`): the top level has no option of its
+// own, which another word there could be the value of.
+#[test]
+fn the_top_level_has_no_option_of_its_own() {
+    assert!(Cli::command().get_arguments().next().is_none());
+    for flag in TOP_LEVEL_FLAGS {
+        let words = [
+            OsString::from("losat"),
+            OsString::from(flag),
+            "blastn".into(),
+        ];
+        assert_eq!(
+            read_program(&words, |word| word == "blastn"),
+            Some("blastn")
+        );
     }
 }
 
@@ -594,6 +616,145 @@ fn program_args_are_the_arguments_that_commands_defers() {
             long_about.as_ref(),
             "{}",
             by_us.get_name()
+        );
+    }
+}
+
+// Every variant of `Commands` has a description, which `program_args` keeps as the derive's
+// final attributes do, and no program's `Args` sets the help template: the variant's command is
+// the derive's where clap defers the arguments too.
+#[test]
+fn every_program_keeps_its_description_and_help_template() {
+    let programs = Commands::augment_subcommands(clap::Command::new("losat"));
+    assert_eq!(programs.get_subcommands().count(), PROGRAM_ARGS.len());
+    for (program, args) in programs.get_subcommands().zip(PROGRAM_ARGS) {
+        assert!(program.get_about().is_some(), "{}", program.get_name());
+        let mut alone = args(clap::Command::new("alone").help_template("T"));
+        assert_eq!(
+            alone.render_help().to_string().trim_end(),
+            "T",
+            "{}",
+            program.get_name()
+        );
+    }
+}
+
+// A program that is not selected is deferred (`cli_command`); where clap builds it, it has every
+// argument and help text of the program's command among every program.
+#[test]
+fn a_deferred_program_is_built_with_its_arguments() {
+    let mut deferred = cli_command::<false>(|_| false);
+    deferred.build();
+    let mut every = Cli::command();
+    every.build();
+    assert_eq!(
+        deferred.get_subcommands().count(),
+        every.get_subcommands().count()
+    );
+    for (by_clap, ours) in deferred
+        .get_subcommands_mut()
+        .zip(every.get_subcommands_mut())
+    {
+        let name = ours.get_name().to_string();
+        assert_eq!(by_clap.get_name(), name);
+        let arguments = |program: &clap::Command| -> Vec<String> {
+            program
+                .get_arguments()
+                .map(|arg| format!("{arg:?}"))
+                .collect()
+        };
+        assert_eq!(arguments(by_clap), arguments(ours), "{name}");
+        assert_eq!(
+            by_clap.render_help().to_string(),
+            ours.render_help().to_string(),
+            "{name}"
+        );
+        assert_eq!(
+            by_clap.render_long_help().to_string(),
+            ours.render_long_help().to_string(),
+            "{name}"
+        );
+    }
+}
+
+/// What LOSAT's reader makes of a command line (`try_parse_from`): the parsed command, or the
+/// error's kind, its text on the command line (`command_line_message`) and the text printed in
+/// place of a run (`printed_text`).
+fn read_text(read: Result<Cli, clap::Error>, rpsbproc: bool) -> String {
+    match read {
+        Ok(cli) => format!("parsed {:?}", cli.command),
+        Err(error) => format!(
+            "{:?}\n{}\n{:?}",
+            error.kind(),
+            command_line_message(&error, rpsbproc),
+            printed_text(&error, rpsbproc)
+        ),
+    }
+}
+
+// The reader reads every command line with the command of its program as it reads it with every
+// program's command (`Cli::command()`): the same parse, error, help and printed text.
+#[test]
+fn the_reader_reads_a_command_line_as_with_every_program() {
+    let mut lines: Vec<Vec<String>> = [
+        &[][..],
+        &["-help"],
+        &["--help"],
+        &["-h"],
+        &["--version"],
+        &["-version"],
+        &["-help-full"],
+        &["nosuch"],
+        &["nosuch", "blastp"],
+        &["-x", "blastn", "blastp", "-query", "q"],
+        &["help", "blastp"],
+        &["--", "blastp"],
+    ]
+    .iter()
+    .map(|words| words.iter().map(|word| word.to_string()).collect())
+    .collect();
+    for name in program_names() {
+        for words in [
+            &[][..],
+            &["-h"],
+            &["-help"],
+            &["-help-full"],
+            &["--help"],
+            &["-xmlhelp"],
+            &["-nosuch_option"],
+            &["--dust", "no"],
+            &["-evalue", "abc"],
+            &["-out"],
+            &["-version"],
+            &["-logfile", "log"],
+            &["-query", "q", "-subject", "s"],
+            &["-i", "x", "-e", "abc"],
+        ] {
+            let mut line = vec![name.clone()];
+            line.extend(words.iter().map(|word| word.to_string()));
+            lines.push(line);
+        }
+        for (before, after) in [
+            (&["-help"][..], &["-evalue", "1"][..]),
+            (&["-h"][..], &["-query", "x"][..]),
+            (&["--version"][..], &[][..]),
+        ] {
+            let mut line: Vec<String> = before.iter().map(|word| word.to_string()).collect();
+            line.push(name.clone());
+            line.extend(after.iter().map(|word| word.to_string()));
+            lines.push(line);
+        }
+    }
+    for line in lines {
+        let argv: Vec<String> = std::iter::once("losat".to_string()).chain(line).collect();
+        let rpsbproc = argv.iter().any(|word| word == "rpsbproc");
+        assert_eq!(
+            read_text(try_parse_from::<Cli, _, _>(&argv), rpsbproc),
+            read_text(
+                try_parse_from_command::<Cli, _, _>(Cli::command(), &argv),
+                rpsbproc
+            ),
+            "{argv:?}"
         );
     }
 }

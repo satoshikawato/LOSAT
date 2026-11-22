@@ -1273,6 +1273,38 @@ describe('SearchDraft submit', () => {
     expect(draft.printsKind()).toBeNull();
   });
 
+  // Line WQA's D20 round 3, F2: the validation answers after the debounce, so for that interval the page must not read the
+  // answer for the older argv: neither the line under the button nor the run count.
+  it('says nothing of a print that an edit has not been validated for', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    draft.setExtra('-version');
+    // The edit is not answered yet: the draft still holds the answer for the older argv, which is no print.
+    expect(draft.state.get().validationStale).toBe(true);
+    expect(draft.printsKind()).toBeNull();
+    expect(draft.runCount()).toBe(2);
+    await draft.idle();
+    expect(draft.state.get().validationStale).toBe(false);
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    // The word goes: the older answer (a print) is not read for the new argv.
+    draft.setExtra('');
+    expect(draft.state.get().validation.state).toBe('ok');
+    expect(draft.printsKind()).toBeNull();
+    expect(draft.runCount()).toBe(2);
+    await draft.idle();
+    expect(draft.printsKind()).toBeNull();
+    expect(draft.runCount()).toBe(2);
+  });
+
   // A pin of the current behaviour, not a regression test: runCount() and submit() both read `inputGroups()`, which leaves out a
   // query file whose records are all excluded, so the label and the runs agreed before line WQA's D20 too (the Open case of
   // sweep 3, Firefox seed 31 walk 1).

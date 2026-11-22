@@ -195,7 +195,8 @@ const programText = computed(() => {
   if (run === undefined) return '';
   const task = loaded.value?.run.snapshot.runId === run.snapshot.runId ? loaded.value.task : undefined;
   const label = programById(run.snapshot.program).label;
-  return task === undefined ? label : `${label} (task ${task})`;
+  // A run that printed the command line's help or version used no task (line WQA's D20 round 3, 2026-11-23).
+  return task === undefined || run.snapshot.prints !== undefined ? label : `${label} (task ${task})`;
 });
 const units = computed(() => {
   const program = selected.value === undefined ? undefined : programById(selected.value.snapshot.program);

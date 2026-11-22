@@ -228,6 +228,34 @@ fn seed_lean_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCSEEDLEAN"))
 }
 
+/// PROBE (line FD s1, not for a PR): the value 0-9 of an environment variable (0 when unset).
+fn x_fd_digit(name: &str) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// PROBE (line FD s1): LOSAT_X_FDRR=1 deals the blocks of `csr_on_pool_steps` round robin.
+fn x_fd_rr() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| x_fd_digit("LOSAT_X_FDRR") == 1)
+}
+
+/// PROBE (line FD s1): LOSAT_X_FDQPF=1 prefetches the `qs` place 8 entries ahead in the place
+/// passes.
+pub(super) fn x_fd_qpf() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| x_fd_digit("LOSAT_X_FDQPF") == 1)
+}
+
+/// PROBE (line FD s1): LOSAT_X_FDSPLIT=b (b > 0) builds a CSR off the pool by `x_build_split`
+/// with `2^b` cell ranges.
+pub(super) fn x_fd_split() -> u32 {
+    static ON: OnceLock<u32> = OnceLock::new();
+    *ON.get_or_init(|| x_fd_digit("LOSAT_X_FDSPLIT"))
+}
+
 /// No NCBI counterpart: the number of workers of the fill when `on`, i.e. the size of the
 /// current search pool when there is one of two threads or more; `None` runs the original loop.
 fn parts_for(on: bool) -> Option<usize> {
@@ -1796,7 +1824,7 @@ unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: 
 unsafe fn steps_pass(
     c: &StepCtx<'_, '_>,
     span: &impl Fn(usize, usize) -> (usize, usize),
-    mut op: impl FnMut(Entry, Option<u32>),
+    mut op: impl FnMut(&[Entry], usize),
 ) {
     let (t, parts) = (c.t, c.sets[0].parts);
     for k in 0..=c.chunks {
@@ -1811,7 +1839,7 @@ unsafe fn steps_pass(
                 // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
                 let es = unsafe { set.at(a, t) };
                 for j in 0..es.len() {
-                    op(es[j], es.get(j + 16).map(|e| e.value));
+                    op(es, j);
                 }
             }
         }
@@ -1853,17 +1881,26 @@ fn csr_on_pool_steps(
         "a block must own whole counters and presence-vector words"
     );
     let blocks = owner.len();
-    for (b, o) in owner.iter_mut().enumerate() {
-        *o = (b * parts / blocks) as u8;
+    // PROBE (LOSAT_X_FDRR): keep `plan`'s round-robin deal.
+    let rr = x_fd_rr();
+    if !rr {
+        for (b, o) in owner.iter_mut().enumerate() {
+            *o = (b * parts / blocks) as u8;
+        }
     }
     // Owner `o`'s cells `own[o].0 .. own[o].1` (empty when it has no block).
     let mut own = vec![(0usize, 0usize); parts];
-    for (b, &o) in owner.iter().enumerate().rev() {
-        let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
-        let e = &mut own[o as usize];
-        *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+    if !rr {
+        for (b, &o) in owner.iter().enumerate().rev() {
+            let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
+            let e = &mut own[o as usize];
+            *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+        }
+        assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
     }
-    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    let mut x_block_words = vec![0u32; if rr { blocks } else { 0 }];
+    let x_bw = Shared::new(&mut x_block_words);
+    let qpf = x_fd_qpf();
     // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
     assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
@@ -1908,7 +1945,7 @@ fn csr_on_pool_steps(
     rayon::broadcast(|ctx| {
         let t = ctx.index();
         let _poison = Poison(bar);
-        let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
+        let (ob, qb, pv, helper, own_w, x_bw) = (ob, qb, pv, helper, own_w, x_bw);
         let (c0, c1) = own[t];
         let c = StepCtx {
             t,
@@ -1927,35 +1964,80 @@ fn csr_on_pool_steps(
         // which lie in `base .. base + its words` (disjoint from the other owners'), as in
         // `csr_on_pool`.
         unsafe {
-            std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
-            let mut got = 0u64;
-            steps_pass(&c, &span, |e, ahead| {
-                if let Some(cell) = ahead {
-                    prefetch(ob.ptr.wrapping_add(cell as usize));
+            let x_range = |b: usize| (b << block_shift)..((b + 1) << block_shift).min(cells);
+            if rr {
+                for b in (t..blocks).step_by(parts) {
+                    let r = x_range(b);
+                    std::ptr::write_bytes(ob.ptr.add(r.start), 0, r.end - r.start);
                 }
-                let cell = e.value as usize;
+            } else {
+                std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
+            }
+            let mut got = 0u64;
+            steps_pass(&c, &span, |es, j| {
+                if let Some(a) = es.get(j + 16) {
+                    prefetch(ob.ptr.wrapping_add(a.value as usize));
+                }
+                let cell = es.get_unchecked(j).value as usize;
                 ob.set(cell, ob.get(cell) + 1);
                 got += 1;
             });
             own_w.set(t, got);
-            bar.wait();
-            let base: u64 = (0..t).map(|p| own_w.get(p)).sum();
-            if c0 < c1 {
-                sum_cells(
-                    pv.ptr,
-                    pv.len,
-                    helper.ptr,
-                    ob.ptr,
-                    base as u32,
-                    c0,
-                    c1,
-                    pv_array_bts,
-                );
-            }
-            steps_pass(&c, &span, |e, ahead| {
-                if let Some(cell) = ahead {
-                    prefetch(ob.ptr.wrapping_add(cell as usize));
+            if rr {
+                for b in (t..blocks).step_by(parts) {
+                    let r = x_range(b);
+                    let mut n = 0u32;
+                    for cell in r {
+                        n = n.wrapping_add(ob.get(cell));
+                    }
+                    x_bw.set(b, n);
                 }
+            }
+            bar.wait();
+            if rr {
+                let mut base = 0u32;
+                for b in 0..blocks {
+                    if b % parts == t {
+                        let r = x_range(b);
+                        sum_cells(
+                            pv.ptr,
+                            pv.len,
+                            helper.ptr,
+                            ob.ptr,
+                            base,
+                            r.start,
+                            r.end,
+                            pv_array_bts,
+                        );
+                    }
+                    base = base.wrapping_add(x_bw.get(b));
+                }
+            } else {
+                let base: u64 = (0..t).map(|p| own_w.get(p)).sum();
+                if c0 < c1 {
+                    sum_cells(
+                        pv.ptr,
+                        pv.len,
+                        helper.ptr,
+                        ob.ptr,
+                        base as u32,
+                        c0,
+                        c1,
+                        pv_array_bts,
+                    );
+                }
+            }
+            steps_pass(&c, &span, |es, j| {
+                if let Some(a) = es.get(j + 16) {
+                    prefetch(ob.ptr.wrapping_add(a.value as usize));
+                }
+                if qpf {
+                    if let Some(a) = es.get(j + 8) {
+                        let p = ob.get(a.value as usize);
+                        prefetch(qb.ptr.wrapping_add((p as usize).wrapping_sub(1)));
+                    }
+                }
+                let e = *es.get_unchecked(j);
                 let cell = e.value as usize;
                 let p = ob.get(cell) - 1;
                 ob.set(cell, p);
@@ -1973,6 +2055,113 @@ fn csr_on_pool_steps(
         ob.set(cells, n_words as u32);
         assemble(offsets, qs, cells, n_words as usize)
     }
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+/// PROBE (line FD s1, LOSAT_X_FDSPLIT): `x_dc_csr::build`'s CSR (the same count, sum and place
+/// passes over the same words in the same order) with each chunk's words first put into `2^bits`
+/// buckets by cell range (reading order kept within a bucket), so the counts and places of a
+/// bucket stay in one range of `offsets` and of `qs`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_build_split(
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+    bits: u32,
+) -> super::x_dc_csr::Csr {
+    use super::x_dc_csr::{assemble, prefetch, sum_cells};
+    assert!(!words.two_templates && cells.is_multiple_of(2048) && pv_array_bts >= 5);
+    assert_eq!(helper_array.len(), cells >> 11);
+    let (segments, total) = segments(words);
+    assert!(total <= u32::MAX as usize);
+    let lg = usize::BITS - (cells - 1).leading_zeros();
+    let shift = lg.saturating_sub(bits);
+    let v = ((cells - 1) >> shift) + 1;
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
+    let ob = offsets.as_mut_ptr();
+    // SAFETY: `cells + 1` elements of the capacity, written before any read.
+    unsafe { std::ptr::write_bytes(ob, 0, cells + 1) };
+    let mut buckets: Vec<Vec<Entry>> = (0..v).map(|_| Vec::new()).collect();
+    const X_SPLIT_CHUNK: usize = 1 << 16;
+    let chunks = total.div_ceil(X_SPLIT_CHUNK);
+    let read = |k: usize, buckets: &mut Vec<Vec<Entry>>| {
+        for b in buckets.iter_mut() {
+            b.clear();
+        }
+        let s0 = k * X_SPLIT_CHUNK;
+        let s1 = total.min(s0 + X_SPLIT_CHUNK);
+        lean_words(words, &segments, s0, s1, |cell, index| {
+            assert!((cell as usize) < cells);
+            // SAFETY: `cell < cells`, so `cell >> shift < v`.
+            unsafe { buckets.get_unchecked_mut((cell as usize) >> shift) }
+                .push(Entry { index, value: cell });
+        });
+    };
+    let mut n_words = 0usize;
+    for k in 0..chunks {
+        read(k, &mut buckets);
+        for b in buckets.iter() {
+            for j in 0..b.len() {
+                if let Some(a) = b.get(j + 16) {
+                    prefetch(ob.wrapping_add(a.value as usize));
+                }
+                // SAFETY: asserted `< cells`.
+                unsafe { *ob.add(b[j].value as usize) += 1 };
+            }
+            n_words += b.len();
+        }
+    }
+    assert!(n_words <= u32::MAX as usize);
+    // SAFETY: as `x_dc_csr::build`'s sum pass.
+    let tot = unsafe {
+        sum_cells(
+            pv_array.as_mut_ptr(),
+            pv_array.len(),
+            helper_array.as_mut_ptr(),
+            ob,
+            0,
+            0,
+            cells,
+            pv_array_bts,
+        )
+    };
+    debug_assert_eq!(tot as usize, n_words);
+    // SAFETY: `offsets[cells]` is no cell's end.
+    unsafe { *ob.add(cells) = tot };
+    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    let qb = qs.as_mut_ptr();
+    let qpf = x_fd_qpf();
+    for k in 0..chunks {
+        read(k, &mut buckets);
+        for b in buckets.iter() {
+            for j in 0..b.len() {
+                if let Some(a) = b.get(j + 16) {
+                    prefetch(ob.wrapping_add(a.value as usize));
+                }
+                // SAFETY: as `x_dc_csr::build`'s place pass.
+                unsafe {
+                    if qpf {
+                        if let Some(a) = b.get(j + 8) {
+                            let p = *ob.add(a.value as usize);
+                            prefetch(qb.wrapping_add((p as usize).wrapping_sub(1)));
+                        }
+                    }
+                    let e = b[j];
+                    let p = *ob.add(e.value as usize) - 1;
+                    *ob.add(e.value as usize) = p;
+                    *qb.add(p as usize) = e.index;
+                }
+            }
+        }
+    }
+    // SAFETY: `offsets` written in full, the runs partition `0 .. n_words`.
+    unsafe { assemble(offsets, qs, cells, n_words) }
 }
 
 /// No NCBI counterpart (scheduling only): when the prefault round runs and which pages it touches

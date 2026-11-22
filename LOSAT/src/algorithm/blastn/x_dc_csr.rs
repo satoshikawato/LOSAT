@@ -800,6 +800,25 @@ pub(super) fn build(
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
 ) -> Csr {
+    // PROBE (line FD s1, LOSAT_X_FDSPLIT).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    {
+        let bits = super::x_disc_lookup_par::x_fd_split();
+        if bits > 0 {
+            return super::x_disc_lookup_par::x_build_split(
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                x_offsets,
+                bits,
+            );
+        }
+    }
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(!words.two_templates && cells.is_multiple_of(2048) && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);

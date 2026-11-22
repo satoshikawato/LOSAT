@@ -307,8 +307,10 @@
   1.71 2026-11-22 (psiblast and tblastn `-in_pssm` of a PSSM in ASN.1 binary, line RG item D3c-3a:
   the explicit rejections, rule 3, of a binary PSSM's string whose length passes the end of the
   file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are missing or
-  whose number is not its Seq-inst's `length`, on which NCBI crashes; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.70, line RG item D1b-2)
+  whose number is not its Seq-inst's `length`, on which NCBI crashes; and a refusal that is not a
+  rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
+  yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.70, line RG item D1b-2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2034,7 +2036,15 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   states the length 255 (SIGSEGV) or 4,294,967,295 (SIGABRT). Not a rule-3 item but a refusal:
   with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps in a
   delay buffer and reads again only while it writes them, where that read posts a message or
-  fails (NCBI reports it in the middle of the file it writes; not ported). Tests:
+  fails (NCBI reports it in the middle of the file it writes; not ported). Also not a rule-3 item
+  but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
+  `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
+  whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,
+  E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) ..."). NCBI goes on with them
+  (E-values 0.0, bit scores `inf` or -1.0); LOSAT's search wrote NaN or found other hits, and its
+  arithmetic of these values belongs to line PS (hand-off `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`
+  of line RG), which lifts the refusal when it computes NCBI's output. `MINUS-INFINITY` stays in the
+  refusal of a negative gapped value above. Tests:
   `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
   `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
   `db.ber.ps.*` and `db.ber.tbn.*`.

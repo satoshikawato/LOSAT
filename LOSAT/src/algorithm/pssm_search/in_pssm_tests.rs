@@ -1064,3 +1064,123 @@ fn a_binary_string_past_the_end_is_reserved_as_ncbi_reserves_it() {
     };
     assert!(what.starts_with("a string whose length (1073741"), "{what}");
 }
+
+// Line RG D3c-3a: Karlin-Altschul values that are not finite numbers, in ASN.1 text and in its
+// binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY `09 01 41`,
+// NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each (probes
+// `D/d3/c3a/probe/realtext`, rows `db.ber.*.real_*`); LOSAT refuses where its search does not yet
+// compute NCBI's hits, E-values and bit scores, and searches where it does (gapped `kappa` and `h`
+// of PLUS-INFINITY; tblastn's `lambdaUngapped` of PLUS-INFINITY).
+#[test]
+fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_compute_it() {
+    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
+    let tblastn = PssmReader {
+        program: "TBLASTN",
+        matrix_name: "BLOSUM62",
+        strategy: false,
+        database: true,
+        archive: None,
+    };
+    let refusal = |kind: &str, name: &str, what: &str, program: &str| {
+        format!(
+            "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet \
+             compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) \
+             is not supported by LOSAT's {program}"
+        )
+    };
+    let search = |pssm: PssmWithParameters, reader: PssmReader<'static>| {
+        psi_search_and_object(pssm, reader)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    let base = String::from_utf8(fixture("db_search/db.ps.asn.rnd.6.asn")).unwrap();
+    let text = |name: &str, value: &str| {
+        let at = base.find(&format!("      {name} ")).unwrap();
+        let end = at + base[at..].find('\n').unwrap();
+        let comma = if base[at..end].ends_with(',') {
+            ","
+        } else {
+            ""
+        };
+        let edited = format!("{}      {name} {value}{comma}{}", &base[..at], &base[end..]);
+        read_pssm(edited.as_bytes()).result.unwrap()
+    };
+    for (name, value, what) in [
+        ("lambda", "PLUS-INFINITY", "infinite"),
+        ("lambda", "NOT-A-NUMBER", "not a number"),
+        ("kappa", "NOT-A-NUMBER", "not a number"),
+        ("h", "NOT-A-NUMBER", "not a number"),
+    ] {
+        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
+            assert_eq!(
+                search(text(name, value), reader),
+                Err(refusal("gapped", name, what, program)),
+                "{name} {value}"
+            );
+        }
+    }
+    assert_eq!(
+        search(
+            text("lambdaUngapped", "PLUS-INFINITY"),
+            PssmReader::PSIBLAST
+        ),
+        Err(refusal(
+            "ungapped",
+            "lambdaUngapped",
+            "infinite",
+            "PSIBLAST"
+        ))
+    );
+    for (name, value) in [
+        ("kappa", "PLUS-INFINITY"),
+        ("h", "PLUS-INFINITY"),
+        ("kappaUngapped", "PLUS-INFINITY"),
+        ("hUngapped", "PLUS-INFINITY"),
+    ] {
+        assert_eq!(
+            search(text(name, value), PssmReader::PSIBLAST),
+            Ok(()),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        search(text("lambdaUngapped", "PLUS-INFINITY"), tblastn),
+        Ok(())
+    );
+    // An ungapped value that is not a number makes NCBI's ungapped block invalid first: the
+    // engine's error of a query without Karlin-Altschul parameters, not this refusal.
+    let mut nan = text("lambda", "NOT-A-NUMBER");
+    let ungapped = text("lambdaUngapped", "NOT-A-NUMBER");
+    nan.pssm.final_data.as_mut().unwrap().lambda_ungapped =
+        ungapped.pssm.final_data.unwrap().lambda_ungapped;
+    assert_eq!(search(nan, PssmReader::PSIBLAST), Ok(()));
+    // The binary twins: the same values, the same answers; MINUS-INFINITY is negative.
+    let binary = |name: &str| {
+        read_pssm_binary(&fixture(&format!("pssm/ps9_ber_{name}.asnb")))
+            .result
+            .unwrap()
+    };
+    for (name, what) in [
+        ("real_pinf", "infinite"),
+        ("real_inf_text", "infinite"),
+        ("real_nan", "not a number"),
+    ] {
+        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
+            assert_eq!(
+                search(binary(name), reader),
+                Err(refusal("gapped", "lambda", what, program)),
+                "{name}"
+            );
+        }
+    }
+    assert_eq!(
+        search(binary("real_ninf"), PssmReader::PSIBLAST),
+        Err(
+            "a PSSM whose gapped Karlin-Altschul parameter lambda is negative (NCBI BLAST+ 2.17.0 \
+             goes on with a Karlin-Altschul block that it holds invalid) is not supported by \
+             LOSAT's PSIBLAST"
+                .to_string()
+        )
+    );
+    assert_eq!(search(binary("real_negzero"), PssmReader::PSIBLAST), Ok(()));
+}

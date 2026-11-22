@@ -5,3 +5,6 @@
   host can hold). LOSAT refused every binary PSSM. Still refused: a PSSM in XML, a string whose
   length passes the end of the file and whose allocation of 1 GiB or more succeeds or fails by
   the host's memory, and a query whose letters are not its stated length, on which NCBI crashes.
+- psiblast and tblastn `-in_pssm`: a PSSM whose gapped `lambda` is infinite or whose gapped
+  `lambda`, `kappa` or `h` is not a number (psiblast also an infinite `lambdaUngapped`), in ASN.1
+  text or binary, is refused; LOSAT wrote E-values NaN or other hits than NCBI BLAST+ 2.17.0.

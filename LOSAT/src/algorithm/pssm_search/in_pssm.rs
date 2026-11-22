@@ -876,30 +876,60 @@ pub(crate) fn psi_search_and_object_of(
     // cutoff of 1, E-values of -1), an output without meaning, refused as a PSSM whose scaling gives
     // no Karlin-Altschul parameters is (line PS DECISIONS 28), unless the setup stops first. NCBI's
     // check of the PSSM's file (`validation_error`) comes first.
-    let negative = |values: [(&'static str, Option<f64>); 3]| {
-        values
-            .into_iter()
-            .find(|(_, value)| value.is_some_and(|value| value < 0.0))
+    //
+    // A value that is not a finite number (ASN.1 `PLUS-INFINITY`, `MINUS-INFINITY`,
+    // `NOT-A-NUMBER`, in text or binary) NCBI takes in the same way: an ungapped one that is not
+    // above 0 (`NOT-A-NUMBER` too) makes `kbp_psi` invalid, as `PsiSearch::ungapped_karlin_valid`
+    // holds it. Where NCBI then goes on, LOSAT's search does not yet compute what NCBI computes
+    // from a gapped `lambda` of `PLUS-INFINITY`, a gapped `NOT-A-NUMBER` or psiblast's
+    // `lambdaUngapped` of `PLUS-INFINITY` (line RG D3c-3a, `D/d3/c3a/probe/realtext`: NCBI's
+    // E-values 0.0 and bit scores `inf` or -1.0, its hits; handed to line PS,
+    // `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`): refused with the negative values. Gapped `kappa`
+    // and `h` of `PLUS-INFINITY` and the other ungapped values of `PLUS-INFINITY` give NCBI's
+    // output; tblastn reads `lambdaUngapped` only for its word X-drop, where it gives NCBI's too.
+    let ungapped_invalid = [
+        stats.lambda_ungapped,
+        stats.kappa_ungapped,
+        stats.h_ungapped,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.is_nan() || value <= 0.0);
+    let unusable = |name: &'static str, value: Option<f64>| match value {
+        Some(value) if value < 0.0 => Some((name, "negative")),
+        Some(value) if value.is_nan() => Some((name, "not a number")),
+        Some(value) if value == f64::INFINITY && name == "lambda" => Some((name, "infinite")),
+        _ => None,
     };
-    let ungapped_invalid = negative([
-        ("lambdaUngapped", stats.lambda_ungapped),
-        ("kappaUngapped", stats.kappa_ungapped),
-        ("hUngapped", stats.h_ungapped),
-    ])
-    .is_some();
-    let gapped_negative = negative([
-        ("lambda", stats.lambda),
-        ("kappa", stats.kappa),
-        ("h", stats.h),
-    ]);
-    if let (Some((name, _)), true, false) = (
-        gapped_negative,
-        validation_error.is_none() && scores_error.is_none() && setup_error.is_none(),
-        ungapped_invalid,
-    ) {
-        return Err(reader.refuse(format!(
-            "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
-        )));
+    let gapped_unusable = unusable("lambda", stats.lambda)
+        .or_else(|| unusable("kappa", stats.kappa))
+        .or_else(|| unusable("h", stats.h));
+    let ungapped_unusable = (reader.program == PssmReader::PSIBLAST.program
+        && stats.lambda_ungapped == Some(f64::INFINITY))
+    .then_some(("lambdaUngapped", "infinite"));
+    if validation_error.is_none()
+        && scores_error.is_none()
+        && setup_error.is_none()
+        && !ungapped_invalid
+    {
+        match (gapped_unusable, ungapped_unusable) {
+            (Some((name, "negative")), _) => {
+                return Err(reader.refuse(format!(
+                    "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
+                )));
+            }
+            (Some((name, what)), _) | (None, Some((name, what))) => {
+                let kind = if name == "lambdaUngapped" {
+                    "ungapped"
+                } else {
+                    "gapped"
+                };
+                return Err(reader.refuse(format!(
+                    "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it)"
+                )));
+            }
+            (None, None) => {}
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-557
     // The search strategy's request holds the object that the application read, which

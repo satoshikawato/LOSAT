@@ -369,6 +369,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM of frequency ratios only, written by row. NCBI reads the scores it computes for it in the wrong order.
 - A PSSM whose position-based scaling gives score frequencies but no Karlin-Altschul parameters. NCBI goes on with a Lambda of -1.
 - A PSSM with a negative gapped Karlin-Altschul value (`lambda`, `kappa` or `h`). NCBI goes on with a block it holds invalid. A negative ungapped value (`lambdaUngapped`, `kappaUngapped` or `hUngapped`) gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
+- A PSSM whose gapped `lambda` is infinite (`PLUS-INFINITY`), whose gapped `lambda`, `kappa` or `h` is not a number (`NOT-A-NUMBER`), or, with psiblast, whose `lambdaUngapped` is infinite, in ASN.1 text or binary. NCBI goes on with these values; LOSAT does not yet compute the hits, E-values and bit scores that NCBI computes from them. `MINUS-INFINITY` is a negative value (above); an ungapped value that is not a number gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
 - A PSSM of frequency ratios only from which NCBI's PSSM engine makes no scaled scores. NCBI does not finish or stops with an error.
 - A query without a Seq-id, with a Geninfo import id (`gim|`, which NCBI cannot resolve), or with a database ordinal (`gnl|BL_ORD_ID|n`).
 - A query with a local Seq-id among other Seq-ids (NCBI's reports then show it as no FASTA query is shown), with an empty local id, or with a Seq-id that has neither an accession nor a name.

@@ -24,25 +24,36 @@ use crate::report::tabular::SubjectFetch;
 
 /// Whether `error` may fail one batch, after the reports of the batches before, rather than the
 /// run: the errors `batch_failure` reads (a read of the database, the batch's setup, LOSAT's
-/// refusal of the setup where NCBI's crashes). The batches searched ahead are then searched again
-/// one at a time, so that the batch that fails does in its place (`batch_failure` decides).
+/// refusal of the setup where NCBI's crashes, and a batch whose search fails after the reports of
+/// the batches before: the failed or endless Smith-Waterman redo of `-use_sw_tback`). The batches
+/// searched ahead are then searched again one at a time, so that the batch that fails does in its
+/// place (`batch_failure` decides).
 fn fails_one_batch(error: &anyhow::Error) -> bool {
-    error.is::<XReadError>() || error.is::<SetupEngineError>() || error.is::<SetupRefusal>()
+    error.is::<XReadError>()
+        || error.is::<SetupEngineError>()
+        || error.is::<SetupRefusal>()
+        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
 }
 
 /// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
-/// subject length), or LOSAT's refusal of the setup where NCBI's crashes
-/// (`stage_d_pipeline::SetupRefusal`). LOSAT's other refusals (and any other error) are returned
-/// as `Err` to stop the run.
+/// subject length), LOSAT's refusal of the setup where NCBI's crashes
+/// (`stage_d_pipeline::SetupRefusal`), and an error of the batch's search that comes after the
+/// reports of the batches before (`app::ErrorAfterBatchReports`: the failed or endless
+/// Smith-Waterman redo of `-use_sw_tback`, `match_redo`), as it is. LOSAT's other refusals (and
+/// any other error) are returned as `Err` to stop the run.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
         return Ok(crate::blastinput::app::engine_error(text));
     }
     let error = match error.downcast::<SetupRefusal>() {
         Ok(SetupRefusal(refusal)) => return Ok(refusal),
+        Err(error) => error,
+    };
+    let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+        Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => return Ok(error),
         Err(error) => error,
     };
     let error = match error.downcast::<XReadError>() {
@@ -541,19 +552,10 @@ impl TblastnArgs {
                 }
             }
         }
-        let flushed = std::io::Write::flush(&mut stream);
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
         // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && (pairwise || tax_report) {
-            return Err(crate::cli::NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".into(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
+        // aborts and LOSAT reports the error (`cli::ReportStream::finish`).
+        stream.finish(result, pairwise || tax_report)
     }
 }
 
@@ -1919,9 +1921,9 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches were searched ahead, or a batch
-        // whose setup failed (`SetupEngineError`, `SetupRefusal`): they are searched again one at a
-        // time below, so that the batch that fails does after the reports of the batches before.
+        // An error that may fail one batch while the batches were searched ahead
+        // (`fails_one_batch`): they are searched again one at a time below, so that the batch
+        // that fails does after the reports of the batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,

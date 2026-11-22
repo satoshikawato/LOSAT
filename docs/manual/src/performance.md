@@ -117,7 +117,10 @@ development build `095ff0c16`.
 ## Memory
 
 Memory use grows with the size of the query batch, the database volume being searched and the
-number of threads. If a large search runs out of memory:
+number of threads. With more than 64 threads, a search in which NCBI BLAST+'s memory does not grow
+with `-num_threads` (a `-subject` search, which it runs on one thread) can use more memory in LOSAT
+than in NCBI BLAST+: up to 1.44 times at 128 threads in the v0.2.0 tests of the development build `ff07c6a7d` (see
+[Threads with `-subject`](differences.md#threads-with--subject)). If a large search runs out of memory:
 
 - lower `-num_threads`: memory use rises with the thread count;
 - split a very large query file into several runs.

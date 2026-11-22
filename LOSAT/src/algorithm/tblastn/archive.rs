@@ -68,6 +68,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.sum_stats = args.sum_stats;
+    inputs.use_sw_tback = args.use_sw_tback;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).

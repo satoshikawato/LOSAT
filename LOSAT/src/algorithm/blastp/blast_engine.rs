@@ -1122,7 +1122,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
@@ -4397,23 +4396,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
-    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
-    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
-    if (stream.failed || badbit) && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // report's where NCBI's buffer writes it (`cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote

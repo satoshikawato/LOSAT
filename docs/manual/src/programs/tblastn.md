@@ -51,7 +51,13 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
 - The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
-- Also refused with `-in_pssm`: `-ungapped`, `-use_sw_tback`, `-db_gencode 32`, `-outfmt 11`, `-mt_mode 1` with more than one thread and `-db`, and a PSSM whose query `-seg` masks completely.
+- Also refused with `-in_pssm`:
+  - `-ungapped`;
+  - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
+  - `-db_gencode 32`;
+  - `-outfmt 11`;
+  - `-mt_mode 1` with more than one thread and `-db`;
+  - a PSSM whose query `-seg` masks completely.
 
 ## Common options
 
@@ -69,6 +75,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-matrix` | `BLOSUM62` | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
 | `-gapopen`, `-gapextend` | 11, 1 | Gap costs |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
@@ -114,7 +121,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped` and `-use_sw_tback`.
+- `-ungapped`.
+- With `-use_sw_tback`, the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.

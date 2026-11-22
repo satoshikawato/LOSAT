@@ -131,7 +131,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
-| `windowmasker` | Masks repeats of nucleotide sequences with a unit counts file (`-ustat`) | intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
+| `windowmasker` | Makes the unit counts file of a genome (`-mk_counts`), converts it (`-convert`), masks repeats of nucleotide sequences with it (`-ustat`) | counts files, intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
 | `segmasker` | Masks low-complexity protein regions | intervals, FASTA, mask files for `makeblastdb` | [segmasker](docs/manual/src/programs/segmasker.md) |
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
@@ -172,7 +172,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `psiblast -phi_pattern`, and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `psiblast -phi_pattern` and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributor guide](AGENTS.md)
 
 ## References

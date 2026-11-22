@@ -205,7 +205,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
     /// Translated nucleotide query vs protein subject (blastx)
@@ -1386,7 +1386,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "html",
     "negative_gilist",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {
@@ -1560,6 +1559,35 @@ impl ReportStream {
             ),
             failed: false,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// The end of a run whose report went to this stream, `result` being the run's: what the
+    /// report wrote stays (a flush, also after an error, such as the outfmt 0 prolog). Where the
+    /// report's stream throws (`throws`: the stream of the outfmt 0 to 4 formatter,
+    /// blast_format.cpp:118-119, and the organism report's, `NcbiReportBuffer`), a write that
+    /// failed (`failed`) or an insertion that set the stream's `badbit` (`BadbitInsertion`) is
+    /// NCBI's "BLAST failed to write output", exit status 6. For the other formats NCBI aborts and
+    /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
+    /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
+    pub(crate) fn finish(
+        &mut self,
+        result: anyhow::Result<()>,
+        throws: bool,
+    ) -> anyhow::Result<()> {
+        use anyhow::Context;
+        let flushed = std::io::Write::flush(self);
+        let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
+        if (self.failed || badbit) && throws {
+            return Err(NativeError {
+                exit: 6,
+                message: "BLAST failed to write output\n".into(),
+            }
+            .into());
+        }
+        result?;
+        flushed.context("failed to write the output")
     }
 }
 
@@ -1824,10 +1852,11 @@ impl<'a> NcbiOstream<'a> {
 
     /// A format's sink opened as its report's stream (`OutputSink::open`): the caller's writer as
     /// it is, which the command line of blastn, blastp, tblastn and tblastx makes its
-    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`) and which a
-    /// library caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's
-    /// `Stdout` and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's
-    /// either: the report's bytes are NCBI's, the times at which they reach the device are not).
+    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`), which the
+    /// library's `run_to_file` makes the same (`api::local_blast::OutFile`) and which a library
+    /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's `Stdout`
+    /// and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's either: the
+    /// report's bytes are NCBI's, the times at which they reach the device are not).
     pub(crate) fn sink(
         sink: &'a mut crate::api::local_blast::OutputSink<'_>,
     ) -> std::io::Result<Self> {

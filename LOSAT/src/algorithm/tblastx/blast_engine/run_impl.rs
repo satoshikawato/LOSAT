@@ -1002,21 +1002,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
-    // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
+    // `cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote

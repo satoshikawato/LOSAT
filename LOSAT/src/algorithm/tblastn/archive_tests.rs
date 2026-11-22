@@ -8,9 +8,8 @@ use crate::report::serial::real::double_to_string_posix;
 // archive adds: the name, the options given besides the inputs, and the list as
 // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
 // in its limits (word sizes 2 and 4, matrices, gap costs,
-// `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-use_sw_tback`): the
-// list that NCBI would record is what the archive's model knows
-// about them, pinned here.
+// `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`): the list that NCBI would
+// record is what the archive's model knows about them, pinned here.
 const CASES: &[(&str, &[&str], &str)] = &[
     ("def", &[], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("cbs0", &["-comp_based_stats", "0"], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:0 SmithWatermanMode=boolean:False"),
@@ -120,25 +119,14 @@ fn render(params: &[crate::report::archive::options::Param]) -> String {
         .join(" ")
 }
 
-/// The recorded inputs of a command line. The options that LOSAT's TBLASTN does not accept
-/// (they stop at the command line) are applied to the inputs by hand.
+/// The recorded inputs of a command line, as LOSAT's TBLASTN parses it (`-parse_deflines`, which
+/// the archive does not record, left out).
 fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
-    let mut parsed: Vec<&str> = Vec::new();
-    let mut by_hand: Vec<(&str, &str)> = Vec::new();
-    let mut index = 0;
-    while index < extra.len() {
-        match extra[index] {
-            "-use_sw_tback" => {
-                by_hand.push((extra[index], ""));
-                index += 1;
-            }
-            "-parse_deflines" => index += 1,
-            other => {
-                parsed.push(other);
-                index += 1;
-            }
-        }
-    }
+    let parsed: Vec<&str> = extra
+        .iter()
+        .copied()
+        .filter(|&option| option != "-parse_deflines")
+        .collect();
     let mut argv = vec!["losat", "tblastn", "-query", "q.fa", "-subject", "s.fa"];
     argv.extend_from_slice(&parsed);
     argv.extend_from_slice(&["-outfmt", "11"]);
@@ -146,11 +134,7 @@ fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
     let Commands::Tblastn(args) = cli.command else {
         return None;
     };
-    let mut inputs = option_inputs(&args);
-    for _ in by_hand {
-        inputs.use_sw_tback = true;
-    }
-    Some(inputs)
+    Some(option_inputs(&args))
 }
 
 // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as

@@ -1,0 +1,6 @@
+# TBLASTN 2.17.0+
+# Query: qpre20
+# Database: tests/db_search/x4b/fail
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qpre20	AB300001.1	95.000	20	1	0	1	20	1	60	7.03e-10	40.4

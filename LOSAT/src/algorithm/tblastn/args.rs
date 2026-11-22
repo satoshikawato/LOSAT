@@ -171,6 +171,11 @@ pub struct TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI's flag, off by default: the Smith-Waterman redo of each match
+    // (`match_redo::SmithWatermanRedo`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
+    #[arg(long)]
+    pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
@@ -314,6 +319,8 @@ pub struct ResolvedTblastnArgs {
     pub seg: SegSpec,
     pub soft_masking: bool,
     pub lcase_masking: bool,
+    /// `-use_sw_tback` (NCBI's `SetSmithWatermanMode`, blast_args.cpp:885).
+    pub use_sw_tback: bool,
     /// The matrix name as typed (the report prints it so).
     pub matrix_name: String,
     pub threshold: f64,
@@ -602,6 +609,7 @@ impl TblastnArgs {
             seg,
             soft_masking,
             lcase_masking: self.lcase_masking,
+            use_sw_tback: self.use_sw_tback,
             matrix_name,
             threshold,
             window_size,
@@ -748,6 +756,10 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
+            // NCBI's traceback runs the redo when composition-based statistics are on or the
+            // traceback is Smith-Waterman: `-use_sw_tback` runs the redo with or without them.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+            smith_waterman: args.use_sw_tback,
         },
     })
 }

@@ -1,5 +1,18 @@
 use super::*;
 use crate::algorithm::blastp::hsp::BlastpHspList;
+use crate::core::composition_adjustment::smith_waterman_match::SwRedoFailed;
+
+/// A batch status, failed (`failed`, a failed Smith-Waterman redo before) or not.
+fn status(failed: bool) -> SwBatchStatus {
+    let mut status = SwBatchStatus::default();
+    if failed {
+        let redone =
+            status.redone::<()>(Err(SwRedoFailed.into()), || anyhow::anyhow!("not endless"));
+        assert!(matches!(redone, Ok(None)));
+    }
+    assert_eq!(status.failed(), failed);
+    status
+}
 
 // Line RG item X4-excl: at a list whose fetch is excluded the Smith-Waterman status is cleared
 // unless the early termination test holds (every heap of the batch filled to its cutoff and
@@ -33,10 +46,15 @@ fn an_excluded_list_clears_the_status_unless_the_redo_terminates_early() {
         (&mixed[..], 0.04, true),
     ] {
         for failed_before in [true, false] {
-            let mut failed = failed_before;
-            fetch_excluded_reached(&mark(best_evalue), heaps, &mut failed);
+            let mut sw_status = status(failed_before);
+            fetch_excluded_reached(&mark(best_evalue), heaps, &mut sw_status);
             let expected = failed_before && !cleared;
-            assert_eq!(failed, expected, "{best_evalue} {}", heaps.len());
+            assert_eq!(
+                sw_status.failed(),
+                expected,
+                "{best_evalue} {}",
+                heaps.len()
+            );
         }
     }
 }
@@ -87,10 +105,15 @@ fn only_excluded_lists_after_the_last_status_count() {
         (Vec::new(), None, &empty[..], false),
     ] {
         for failed_before in [true, false] {
-            let mut failed = failed_before;
-            query_fetch_excluded_reached(&marks, status_position, heaps, &mut failed);
+            let mut sw_status = status(failed_before);
+            query_fetch_excluded_reached(&marks, status_position, heaps, &mut sw_status);
             let expected = failed_before && !cleared;
-            assert_eq!(failed, expected, "{status_position:?} {}", marks.len());
+            assert_eq!(
+                sw_status.failed(),
+                expected,
+                "{status_position:?} {}",
+                marks.len()
+            );
         }
     }
 }

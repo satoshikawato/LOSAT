@@ -1122,7 +1122,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the

@@ -1603,6 +1603,7 @@ fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
+            smith_waterman: false,
         },
         Some(&mut boundary),
     )

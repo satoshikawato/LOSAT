@@ -1299,7 +1299,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {

@@ -41,7 +41,7 @@ With reward 0 and penalty 0 (`-task rmblastn`, or `-reward 0 -penalty 0` with an
 
 | Option | Default | Meaning |
 |:---|:---|:---|
-| `-task` | `megablast` | One of the four tasks above |
+| `-task` | `megablast` | One of the five tasks above |
 | `-evalue` | 10 (1000 for `blastn-short`) | Report hits with an E-value at or below this value |
 | `-outfmt` | 0 | Output format; see [Output](#output) |
 | `-out` | standard output | Write the report to a file |

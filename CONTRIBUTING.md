@@ -47,7 +47,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 ### 2. Standalone Pure-Rust Implementation
 - LOSAT is a pure-Rust application. It must never embed, link, or invoke external NCBI BLAST+ binaries or C/C++ shared libraries at runtime or build time.
-- Official NCBI BLAST+ executables (v2.17.0+) are used strictly as an **external validation oracle** during parity testing and benchmarks.
+- Official NCBI BLAST+ executables (2.17.0) are used strictly as an **external validation oracle** during parity testing and benchmarks.
 - Unsupported options must fail fast with an explicit error message rather than degrading silently or delegating to external tools.
 
 ### 3. Bit-Perfect Output Parity
@@ -68,7 +68,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 When reporting an issue or output discrepancy against NCBI BLAST+, please provide:
 
-1. **Exact command lines** used for both `LOSAT` and the matching NCBI BLAST+ program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` or `blastdbcmd`).
+1. **Exact command lines** used for both `LOSAT` and the matching NCBI BLAST+ program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `rpsbproc`, `makeblastdb` or `blastdbcmd`).
 2. **Minimal reproducible FASTA inputs** (synthetic or non-sensitive sequences).
 3. **Exact diff of outputs**, highlighting discrepancies in coordinates, scores, or E-values.
 4. **Environment details**: OS, architecture, LOSAT version/commit, and NCBI BLAST+ version.
@@ -87,6 +87,18 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo build --release
+```
+
+For manual and documentation changes:
+
+```bash
+python3 -m unittest tests/test_check_manual_links.py
+python3 scripts/check_manual_links.py docs/manual/src --repo-root . \
+  --repo-readme README.md --repo-readme benchmarks/README.md \
+  --repo-readme benchmarks/v0.2.0/README.md --repo-readme docs/release/v0.2.0.md \
+  --repo-readme packaging/bioconda/README.md \
+  --package-readme LOSAT/README.md --package-readme python/README.md \
+  --package-readme web/packages/losat/README.md --check-figure-sync
 ```
 
 For packaging changes:
@@ -115,7 +127,7 @@ python3 LOSAT/tests/check_public_api.py update
 
 ## Parity Evidence & Testing
 
-Any behavioral change to search, scoring, or filtering algorithms must be compared with the output of official NCBI BLAST+ (v2.17.0+):
+Any behavioral change to search, scoring, or filtering algorithms must be compared with the output of official NCBI BLAST+ (2.17.0):
 
 1. **Run Comparison Suite**:
    ```bash
@@ -139,7 +151,7 @@ Any behavioral change to search, scoring, or filtering algorithms must be compar
 
 ## Pull Request Checklist
 
-Before opening a PR, please verify:
+Before opening a PR, please check:
 - [ ] An issue was opened and approved by the maintainer for non-trivial changes.
 - [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.

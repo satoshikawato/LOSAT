@@ -3092,6 +3092,30 @@ mod tests {
             "repeats",
         ];
         validate(&repeats).unwrap();
+        // A repeat database whose files are absent: NCBI posts the missing-database error as a
+        // batch warning after the engine prefix (as on the CLI; under WebAssembly its search path
+        // names `/work::`, abi_v2.md §3).
+        let dna = b">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        let (q_nuc, _) = crate::store::register("blastn", 0, true, dna).unwrap();
+        let (s_nuc, _) = crate::store::register("blastn", 1, true, dna).unwrap();
+        let missing_repeats = crate::store::with_inputs(
+            Program::Blastn,
+            q_nuc,
+            s_nuc,
+            &repeats,
+            Some(true),
+            |queries, end, subjects| run(&repeats, queries, end, subjects),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            missing_repeats.starts_with(&ncbi_in_losat_words(
+                "BLAST engine error: Warning: No alias or index file found for nucleotide database [repeats]"
+            )),
+            "{missing_repeats}"
+        );
+        crate::store::release(q_nuc).unwrap();
+        crate::store::release(s_nuc).unwrap();
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));

@@ -6,12 +6,13 @@
 // search (LOSAT/tests/fixtures/db_search) in LOSAT's words (LOSAT/tests/losat_wording.py map-output, line NW2). Skips
 // without LOSAT_WEB_REACTORS.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { closeSync, openAsBlob, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { DirectoryFile } from '../src/domain/run-files.ts';
-import { DISCARD_STREAM, ROLE_QUERY } from '../src/infra/reactor/abi.ts';
+import { DISCARD_STREAM, ROLE_QUERY, ROLE_SUBJECT } from '../src/infra/reactor/abi.ts';
 import { compileReactor, instantiateSerial } from '../src/infra/reactor/instance.ts';
 import { RunDirectory, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
@@ -26,12 +27,42 @@ interface Row {
   readonly extra: readonly string[];
 }
 
+interface RegressionRow {
+  readonly id: string;
+  readonly argv: readonly string[];
+  readonly stdoutSha256: string;
+}
+
+/** A frozen NCBI output file in LOSAT's words, as LOSAT writes it. */
+function frozenFileInLosatWords(fixturePath: string, label: string): Buffer {
+  const mapped = spawnSync('python3', ['-I', join(LOSAT, 'tests/losat_wording.py'), 'map-output', fixturePath]);
+  if (mapped.error) throw mapped.error;
+  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${label}: ${mapped.stderr.toString()}`);
+  return mapped.stdout;
+}
+
 /** A row's frozen NCBI outfmt 6 (LOSAT/tests/fixtures/db_search) in LOSAT's words, as LOSAT writes it. */
 function frozenInLosatWords(id: string): Buffer {
-  const mapped = spawnSync('python3', ['-I', join(LOSAT, 'tests/losat_wording.py'), 'map-output', join(LOSAT, 'tests/fixtures/db_search', `${id}.out`)]);
-  if (mapped.error) throw mapped.error;
-  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${id}: ${mapped.stderr.toString()}`);
-  return mapped.stdout;
+  return frozenFileInLosatWords(join(LOSAT, 'tests/fixtures/db_search', `${id}.out`), id);
+}
+
+/** A row of LOSAT/tests/fixtures/blastn_regression/manifest.tsv by its case_id. */
+function blastnRegressionRow(caseId: string): RegressionRow {
+  const lines = readFileSync(join(LOSAT, 'tests/fixtures/blastn_regression/manifest.tsv'), 'utf8')
+    .split('\n')
+    .filter((line) => line !== '' && !line.startsWith('#'));
+  const header = lines[0]!.split('\t');
+  for (const line of lines.slice(1)) {
+    const cells = Object.fromEntries(line.split('\t').map((cell, i) => [header[i], cell])) as Record<string, string>;
+    if (cells['case_id'] === caseId) {
+      return {
+        id: caseId,
+        argv: cells['argv']!.split(' '),
+        stdoutSha256: cells['stdout_sha256']!,
+      };
+    }
+  }
+  throw new Error(`blastn_regression manifest row not found: ${caseId}`);
 }
 
 /** The rows of LOSAT/tests/db_search_manifest by their ID. */
@@ -139,6 +170,50 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       console.log(`${row.id}: read ${reader.bytes() - before} bytes: ${read.join(', ')}`);
       expect([...reader.byFile.keys()].filter((path) => !own.has(path)), row.id).toEqual([]);
     }
+    // A -subject search with BLASTN -filtering_db reads the repeat database from the run's directory while taking
+    // the query and subject through registered handles (line RG item D4).
+    const repeatSubject = blastnRegressionRow('rpt.megablast');
+    const repeatQueryPath = repeatSubject.argv[repeatSubject.argv.indexOf('-query') + 1]!;
+    const repeatSubjectPath = repeatSubject.argv[repeatSubject.argv.indexOf('-subject') + 1]!;
+    const repeatDbName = repeatSubject.argv[repeatSubject.argv.indexOf('-filtering_db') + 1]!;
+    const repeatFiles = await folder(dirname(repeatDbName), paths);
+    directory.open(repeatFiles);
+    const repeatArgv = ['blastn', ...repeatSubject.argv, '-num_threads', '1'];
+    const repeatValidation = abi.validate(repeatArgv);
+    expect(repeatValidation, repeatSubject.id).toEqual({ ok: true, dataLoaders: true });
+    const repeatStarted = abi.start(repeatArgv);
+    expect(repeatStarted.ok && !repeatStarted.start.database, repeatSubject.id).toBe(true);
+    const repeatQuery = abi.register('blastn', ROLE_QUERY, true, readFileSync(join(LOSAT, repeatQueryPath)));
+    const repeatTarget = abi.register('blastn', ROLE_SUBJECT, true, readFileSync(join(LOSAT, repeatSubjectPath)));
+    const repeatBefore = reader.bytes();
+    reader.byFile.clear();
+    let repeatOutfmt6: Uint8Array[] = [];
+    abi.run(repeatArgv, repeatQuery.handle, repeatTarget.handle, (stream, bytes) => {
+      if (stream === 6) repeatOutfmt6.push(bytes.slice());
+      else if (stream === DISCARD_STREAM) repeatOutfmt6 = [];
+    });
+    abi.release(repeatQuery.handle);
+    abi.release(repeatTarget.handle);
+    const repeatOutput = Buffer.concat(repeatOutfmt6);
+    const repeatFrozen = frozenFileInLosatWords(join(LOSAT, 'tests/fixtures/blastn_regression', `${repeatSubject.id}.out`), repeatSubject.id);
+    expect(repeatOutput.equals(repeatFrozen), repeatSubject.id).toBe(true);
+    expect(createHash('sha256').update(repeatOutput).digest('hex'), repeatSubject.id).toBe(repeatSubject.stdoutSha256);
+    const repeatOwn = new Set(repeatFiles.filter(({ name }) => name.startsWith(`${repeatDbName}.`)).map(({ name }) => join(LOSAT, name)));
+    const repeatRead = [...reader.byFile].map(([path, bytes]) => `${path.slice(LOSAT.length + 1)} ${bytes}/${statSync(path).size}`);
+    console.log(`${repeatSubject.id}: read ${reader.bytes() - repeatBefore} bytes: ${repeatRead.join(', ')}`);
+    expect(reader.byFile.size, repeatSubject.id).toBeGreaterThan(0);
+    expect([...reader.byFile.keys()].filter((path) => !repeatOwn.has(path)), repeatSubject.id).toEqual([]);
+    // A repeat database whose files are omitted from the directory: the CLI's batch warning, with `/work::` as its
+    // search path (abi_v2.md §3; line RG item D4).
+    directory.open([]);
+    const nucQuery = abi.register('blastn', ROLE_QUERY, true, new TextEncoder().encode('>q\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
+    const nucSubject = abi.register('blastn', ROLE_SUBJECT, true, new TextEncoder().encode('>s\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
+    const missingRepeats = ['blastn', '-query', 'q.fna', '-subject', 's.fna', '-filtering_db', repeatDbName, '-num_threads', '1'];
+    expect(() => abi.run(missingRepeats, nucQuery.handle, nucSubject.handle, () => undefined)).toThrow(
+      `LOSAT engine error: Warning: No alias or index file found for nucleotide database [${repeatDbName}] in search path [/work::].`,
+    );
+    abi.release(nucQuery.handle);
+    abi.release(nucSubject.handle);
     // A database that the directory does not hold: the CLI's message.
     directory.open([]);
     const argv = ['blastp', '-db', 'tests/db_search/paja', '-query', 'q.faa', '-num_threads', '1'];

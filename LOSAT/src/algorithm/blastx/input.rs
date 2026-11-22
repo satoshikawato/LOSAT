@@ -471,7 +471,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         let line = if is_header {
             header
         } else {
-            // `NStr::TruncateSpaces_Unsafe(*++GetLineReader())` (`eTrunc_Both`, fasta.cpp:376).
+            // `NStr::TruncateSpaces_Unsafe` of the next line of `GetLineReader()` (`eTrunc_Both`, fasta.cpp:376).
             truncate_spaces(line)
         };
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:399-408
@@ -569,7 +569,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 None => None,
             };
             // The `isspace` skip before the title (`eTrunc_Begin`), then
-            // `NStr::TruncateSpacesInPlace(processed_title)` at its end (fasta.cpp:2038).
+            // `NStr::TruncateSpacesInPlace` of `processed_title` at its end (fasta.cpp:2038).
             let title_bytes = match &believed {
                 Some(defline) => truncate_spaces_begin(&line[defline.title_search..]),
                 None => truncate_spaces_begin(&line[1..]),
@@ -1017,8 +1017,9 @@ struct ReaderBatch<'r> {
 
 impl ReaderBatch<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    /// The index of the next record (`Query_<index + 1>`): the reader's one id generator counts
-    /// every record read before it, kept, dropped once delivered, or skipped by the range.
+    /// The index of the next record (its id is `Query_` followed by that index plus 1): the
+    /// reader's one id generator counts every record read before it, kept, dropped once delivered,
+    /// or skipped by the range.
     fn number(&self, records: &[FastaRecord]) -> usize {
         self.released + records.len() + self.skipped
     }
@@ -1120,7 +1121,7 @@ pub(crate) struct FastaStream<R: Read> {
     /// area); false for `cin`, whose `stdio_sync_filebuf` has no get area
     /// (`fasta_reader::stream::InputBackend::of`).
     get_area: bool,
-    /// Whether the input has no stream position, as a pipe has none (`tellg() < 0` of
+    /// Whether the input has no stream position, as a pipe has none (a negative `tellg()` in
     /// `IsIStreamEmpty`; `input_files::has_stream_position`): then it is never empty.
     no_position: bool,
     /// `-parse_deflines` (`fasta_reader::believed`).

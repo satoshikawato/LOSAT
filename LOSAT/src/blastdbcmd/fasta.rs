@@ -153,8 +153,8 @@ impl FastaFormatter {
 }
 
 /// The id of a `-target_only` target as `GetBioseq` gets it: the GI of a number
-/// (`GetBioseq(oid, gi)`, which `x_GetTaxDefline` makes a `CSeq_id(e_Gi, gi)`), else the
-/// Seq-id of the text.
+/// (`GetBioseq` with `oid` and `gi`, which `x_GetTaxDefline` makes a `CSeq_id` of type `e_Gi` with
+/// the number `gi`), else the Seq-id of the text.
 fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
     match numeric_target(target) {
         Some(number) => Ok(ParsedSeqId::Gi(number)),
@@ -162,7 +162,7 @@ fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
     }
 }
 
-/// The ids `CSeq_id::ParseIDs(ids, text, fParse_PartialOK)` gives (none when it throws).
+/// The ids `CSeq_id::ParseIDs` gives for `text` with `fParse_PartialOK` (none when it throws).
 /// `Err`: a parse that posts a warning NCBI prints (an id of several parts of which one
 /// fails), whose line LOSAT does not reproduce; blastdbcmd filters out the warning of extra
 /// parts (`CSeq_id` 1306.10) alone.
@@ -241,7 +241,7 @@ fn rejoin_defline_title(title: &[u8], use_ctrl_a: bool) -> Result<Vec<u8>, Stop>
     Ok(retval)
 }
 
-/// `NStr::Split(text, pattern, tokens, fSplit_ByPattern)`: the pieces between the
+/// `NStr::Split` of `text` at `pattern` with the flag `fSplit_ByPattern`: the pieces between the
 /// occurrences of the whole pattern, empty pieces kept.
 fn split_by_pattern<'a>(text: &'a [u8], pattern: &[u8]) -> Vec<&'a [u8]> {
     let mut tokens = Vec::new();
@@ -323,12 +323,13 @@ fn short_header(
 // then (`report::defline::adjust_protein_title_suffix`; a ` [ ]` also without a name: probe of line
 // RG T5c, `T/t5c/out/bdc`, `zeta protein, partial [ ]` -> `zeta protein [Bacillus sp.]`, without
 // a name `zeta protein`; `psi protein, partial []` stays, as an empty name matches nothing).
-/// The title `CDeflineGenerator::GenerateDefline(fFastaFormat | fNoExpensiveOps)` makes of
-/// the Bioseq's title descriptor `title` (`report::defline::generate_bioseq_defline`, with
-/// the suffix adjustment of a protein with a source, and an empty title made from the name of
-/// the source), the Bioseq's ids those of `set`'s first line and its first source's taxid
-/// `source_taxid` (`DeflineSet::first_source_taxid`), whose names are looked up for a title made
-/// from the source and for every protein, as `GetBioseq` looks them up.
+/// The title that `CDeflineGenerator::GenerateDefline` makes (with the flags `fFastaFormat` and
+/// `fNoExpensiveOps`) of the Bioseq's title descriptor `title`
+/// (`report::defline::generate_bioseq_defline`, with the suffix adjustment of a protein with a
+/// source, and an empty title made from the name of the source), the Bioseq's ids those of `set`'s
+/// first line and its first source's taxid `source_taxid` (`DeflineSet::first_source_taxid`), whose
+/// names are looked up for a title made from the source and for every protein, as `GetBioseq` looks
+/// them up.
 fn generated_title(
     source: &Source,
     set: &DeflineSet,

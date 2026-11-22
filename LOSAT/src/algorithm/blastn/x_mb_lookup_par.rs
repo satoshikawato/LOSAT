@@ -7,7 +7,7 @@
 //!
 //! Why the table is the same. The update above reads and writes only the cell `ecode` of
 //! `hashtable`, the presence-vector word `ecode >> pv_array_bts`, the counter
-//! `ecode / kCompressionFactor` and `next_pos[index]`, where `index` is the word's own
+//! `ecode` divided by `kCompressionFactor` and `next_pos[index]`, where `index` is the word's own
 //! (unique) query offset. The cells are cut into blocks of `2^block_shift` cells, with
 //! `2^block_shift` a multiple of both `kCompressionFactor` (2048) and `2^pv_array_bts`, so a
 //! block owns whole presence-vector words and whole counters. Every worker reads the whole

@@ -303,8 +303,8 @@ fn integer_keys_convert_as_ncbi_s_reader() {
         string_to_int8_message("").unwrap_err(),
         "Cannot convert string '' to Int8"
     );
-    // NCBI reads up to a NUL (`while (char ch = str[pos])`, `CHECK_ENDPTR` sees the NUL): a
-    // batch line `12\0x` is 12.
+    // NCBI reads up to a NUL (its loop runs while the character at `str[pos]` is not zero,
+    // `CHECK_ENDPTR` sees the NUL): a batch line `12\0x` is 12.
     assert_eq!(string_to_int8_message("12\u{0}x"), Ok(12));
     assert_eq!(
         string_to_int8_message("\u{0}1").unwrap_err(),

@@ -10,7 +10,7 @@ use super::CountsSource;
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:73
 const STAT_FILE_NAME: &str = "wmasker.obinary";
 
-/// `WindowMaskerTaxidToDb(taxid)`: the counts file of `taxid` under `directory` (the registry
+/// `WindowMaskerTaxidToDb` of `taxid`: the counts file of `taxid` under `directory` (the registry
 /// entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`,
 /// `ncbi_environment::WindowMaskerRegistry::path`; `None` or empty: the current
 /// directory), or `None` when `source` has no file (or link to one) at that path (the file

@@ -23,10 +23,12 @@ use crate::utils::seg::{SegMasker, SegParams};
 
 /// How a run stops early.
 enum Failure {
-    /// An NCBI exception that `Run` catches: `cerr << e.what() << endl`, exit status 1.
+    /// An NCBI exception that `Run` catches: `Run` writes `e.what()` and a line end to `cerr`, exit
+    /// status 1.
     Caught(NcbiException),
-    /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, "Application's execution failed: "
-    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, cited at dustmasker's `report`).
+    /// A `std::exception` that leaves `Run`: an error posted (`ERR_POST_X`, subcode 7) with
+    /// "Application's execution failed: " and `e.what()`, exit status 3 (ncbiapp.cpp:675-679, cited
+    /// at dustmasker's `report`).
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
@@ -131,7 +133,8 @@ fn run_masks(
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
-    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`.
+    // A `CSegMasker` made from the `window` argument as an integer, the `locut` argument as a
+    // double, and the other values.
     let double = |name| args.double(name).expect("an eDouble key with a default");
     let window = args.integer("window").expect("-window has a default");
     let (locut, hicut) = (double("locut"), double("hicut"));
@@ -181,9 +184,9 @@ fn run_masks(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52
-/// `CSegMasker(window, locut, hicut)`: `SegParametersNewAa` with the three values as given;
-/// `SeqBufferSeg` checks them (`s_SegParametersCheck`: `SegParams::new`, a window not above 0
-/// is 12) and keeps `overlaps` `FALSE` (`SegMasker::seq_buffer_seg::<false>`). The `maxbogus`
+/// `CSegMasker` of `window`, `locut` and `hicut`: `SegParametersNewAa` with the three values as
+/// given; `SeqBufferSeg` checks them (`s_SegParametersCheck`: `SegParams::new`, a window not above
+/// 0 is 12) and keeps `overlaps` `FALSE` (`SegMasker::seq_buffer_seg::<false>`). The `maxbogus`
 /// of 2 is not lowered to a window of 1 as NCBI's check does: a window of one letter has at most
 /// one, so no window has more than either.
 fn seg_masker(window: i32, locut: f64, hicut: f64) -> SegMasker {

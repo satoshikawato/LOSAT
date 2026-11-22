@@ -22,11 +22,12 @@ fn textseq(
     }
 }
 
-/// The first parse of makeblastdb (`fParse_PartialOK | fParse_AnyLocal | fParse_RawText`).
+/// The first parse of makeblastdb (the flags `fParse_PartialOK`, `fParse_AnyLocal` and
+/// `fParse_RawText` together).
 const FIRST: u32 = PARTIAL_OK | ANY_LOCAL | RAW_TEXT;
-/// `ParseFastaIds` of the second parse (`fParse_RawText | fParse_AnyLocal`).
+/// `ParseFastaIds` of the second parse (`fParse_RawText` and `fParse_AnyLocal` together).
 const SECOND_TAGGED: u32 = RAW_TEXT | ANY_LOCAL;
-/// The bare id of the second parse (`fParse_RawText | fParse_ValidLocal`).
+/// The bare id of the second parse (`fParse_RawText` and `fParse_ValidLocal` together).
 const SECOND_BARE: u32 = RAW_TEXT | VALID_LOCAL;
 
 fn ids(s: &str) -> Vec<Option<ParsedSeqId>> {

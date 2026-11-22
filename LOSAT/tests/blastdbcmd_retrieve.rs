@@ -681,7 +681,7 @@ fn ncbi_unit_case(db: &str, entry: &str, fmt: &str, expected: &str) {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:534-575 GetBioseqN
-/// `GetBioseq(2)` of `seqn`: `ncbi4na` data (the sequence has an ambiguous base).
+/// `GetBioseq` of OID 2 on `seqn`: `ncbi4na` data (the sequence has an ambiguous base).
 #[test]
 fn get_bioseq_of_ncbi_s_seqn_is_its_unit_test_s_text() {
     ncbi_unit_case(
@@ -728,7 +728,7 @@ fn get_bioseq_of_ncbi_s_seqn_is_its_unit_test_s_text() {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:577-617 GetBioseqP
-/// `GetBioseq(2)` of `seqp`: `ncbistdaa` data.
+/// `GetBioseq` of OID 2 on `seqp`: `ncbistdaa` data.
 #[test]
 fn get_bioseq_of_ncbi_s_seqp_is_its_unit_test_s_text() {
     ncbi_unit_case(
@@ -773,7 +773,7 @@ fn get_bioseq_of_ncbi_s_seqp_is_its_unit_test_s_text() {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:619-639 GetHdrN
-/// `GetHdr(0)` of `seqn`.
+/// `GetHdr` of OID 0 on `seqn`.
 #[test]
 fn get_hdr_of_ncbi_s_seqn_is_its_unit_test_s_text() {
     ncbi_unit_case(
@@ -798,7 +798,7 @@ fn get_hdr_of_ncbi_s_seqn_is_its_unit_test_s_text() {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:641-661 GetHdrP
-/// `GetHdr(0)` of `seqp`.
+/// `GetHdr` of OID 0 on `seqp`.
 #[test]
 fn get_hdr_of_ncbi_s_seqp_is_its_unit_test_s_text() {
     ncbi_unit_case(

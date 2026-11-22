@@ -10,7 +10,7 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::encoder::Encoder;
 use crate::seqid::{BlastDefline, DeflineSet};
 
-/// Writes the document of the set `set` (`MSerial_AsnText << *df_set`).
+/// Writes the document of the set `set` (what `MSerial_AsnText` writes for `df_set`).
 pub fn write_defline_set_document<E: Encoder>(enc: &mut E, set: &DeflineSet) {
     enc.begin_document("Blast-def-line-set");
     enc.begin_named("Blast-def-line-set");
@@ -24,7 +24,7 @@ pub fn write_defline_set_document<E: Encoder>(enc: &mut E, set: &DeflineSet) {
     enc.end_document();
 }
 
-/// Writes the document of the definition line `defline` (`MSerial_AsnText << dl`).
+/// Writes the document of the definition line `defline` (what `MSerial_AsnText` writes for `dl`).
 pub fn write_defline_document<E: Encoder>(enc: &mut E, defline: &BlastDefline) {
     enc.begin_document("Blast-def-line");
     write_defline(enc, defline);

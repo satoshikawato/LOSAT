@@ -18,10 +18,12 @@ use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
 
 /// How a run stops early.
 enum Failure {
-    /// An NCBI exception that `Run` catches: `cerr << e.what() << endl`, exit status 1.
+    /// An NCBI exception that `Run` catches: `Run` writes `e.what()` and a line end to `cerr`, exit
+    /// status 1.
     Caught(NcbiException),
-    /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, "Application's execution failed: "
-    /// << e.what())`, exit status 3 (ncbiapp.cpp:675-679, cited at dustmasker's `report`).
+    /// A `std::exception` that leaves `Run`: an error posted (`ERR_POST_X`, subcode 7) with
+    /// "Application's execution failed: " and `e.what()`, exit status 3 (ncbiapp.cpp:675-679, cited
+    /// at dustmasker's `report`).
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
@@ -144,8 +146,8 @@ fn run_masks(
     )
 }
 
-/// `x_GetWriter`: `CMaskWriterBlastDbMaskInfo(output, format, 0, prog, masking_options)`, the
-/// program named by `-masking_algorithm` in lower case.
+/// `x_GetWriter`: makes a `CMaskWriterBlastDbMaskInfo` from `output`, `format`, a 0, the program
+/// `prog` and `masking_options`; the program is named by `-masking_algorithm` in lower case.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:199-217
 /// (`AsOutputFile` opens `-out` first: `run_masks` opens it before this. `NStr::ToLower` is
@@ -183,7 +185,8 @@ struct MaskFromFasta<'a> {
 }
 
 impl<'a> MaskFromFasta<'a> {
-    /// `x_GetReader`: `new CMaskFromFasta(args["in"].AsInputFile(), args["parse_seqids"])`.
+    /// `x_GetReader`: a new `CMaskFromFasta` over the input file of `-in` (`AsInputFile`) and the
+    /// `-parse_seqids` flag.
     /// The constructor of `CFastaReader` over a stream reads the line reader's first buffer
     /// (cited at `seqmasks_io::fasta_reader::MaskFastaReader::new`): a failed read throws
     /// there, before `-out` is opened.
@@ -205,9 +208,9 @@ impl<'a> MaskFromFasta<'a> {
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:67-74
     /// `HasMask()` is whether `GetMask()` has an interval (each interval sets it). `GetBestID`
-    /// is the id that `ParseDefLine` chose (`FindBestChoice(GetIDs(), CSeq_id::BestRank)`,
-    /// fasta.cpp:593): with `-parse_seqids` among the record's ids, else the local id that the
-    /// reader generated.
+    /// is the id that `ParseDefLine` chose (`FindBestChoice` over `GetIDs()` with
+    /// `CSeq_id::BestRank`, fasta.cpp:593): with `-parse_seqids` among the record's ids, else the
+    /// local id that the reader generated.
     fn next_sequence(&mut self) -> Result<Option<MaskedRecord>, Failure> {
         let Some(reader) = &mut self.reader else {
             return Ok(None);

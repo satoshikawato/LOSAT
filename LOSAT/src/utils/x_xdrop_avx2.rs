@@ -28,8 +28,9 @@
 //!   block. The 128-bit kernel uses shifted maxima with decay; this file uses the identity
 //!   `max_j sat(v[j] - (i-1-j)g) = sat(max_j (v[j] + (j+1)g) - i*g)` (a plain prefix maximum),
 //!   exact because `v + 15g` (16-bit) or `v + 31g` (8-bit) fits the lane, which is checked
-//!   (otherwise None). The carry to the next block is `max(carry - L*g, max(F_in[L-1] - g,
-//!   v[L-1]))`, the same value as the 128-bit kernel's `max(H - gap_open_extend, F - g)`.
+//!   (otherwise None). The carry to the next block is the largest of the carry less `L` gaps
+//!   (`g` each), the last lane of `F_in` less one gap, and the last lane of `v`, the same value as
+//!   the 128-bit kernel's `max(H - gap_open_extend, F - g)`.
 //! - Running best: the per-lane exclusive prefix maximum of the row, as in the 128-bit kernel.
 //! - Band steps: the blocks of a row start at `first_b_index + 16k`, as in the 128-bit kernels,
 //!   and past the band (`b_size`) a row stops at the first such point where the row gap entering

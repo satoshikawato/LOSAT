@@ -141,8 +141,8 @@ pub(crate) struct Arguments {
     /// The order in which NCBI's `Init` described them (`m_KeyFlagArgs`), which `x_PostCheck`
     /// follows, is the one of the usage (`usage_position`).
     descs: Span,
-    /// `AddAlias(alias, name)` (`CArgDesc_Alias`, `<alias>`): another name of the argument (rows
-    /// of `ALIASES`).
+    /// `AddAlias` of an alias and a name (`CArgDesc_Alias`, `<alias>`): another name of the
+    /// argument (rows of `ALIASES`).
     aliases: Span,
     /// NCBI's `m_Dependencies` (`<dependencies>`, rows of `DEPENDENCIES`): the `multimap` that
     /// `SetDependency` fills, an exclusion in both directions; its `eRequires` entries, then its
@@ -302,7 +302,7 @@ fn descs(arguments: Arguments) -> impl Iterator<Item = &'static Desc> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2718-2734
-/// `x_Find(name)`: the description of the argument `name`, or of the argument that `name` is an
+/// `x_Find`: the description of the argument `name`, or of the argument that `name` is an
 /// alias of.
 fn find_desc(arguments: Arguments, name: &str) -> Option<&'static Desc> {
     let name = arguments
@@ -331,7 +331,7 @@ pub(crate) struct ArgException {
 }
 
 impl ArgException {
-    /// `NCBI_THROW(CArgException, code, message)`.
+    /// `NCBI_THROW` of a `CArgException` with `code` and `message`.
     pub(crate) fn new(code: &'static str, message: impl Into<Vec<u8>>) -> Self {
         ArgException {
             code,
@@ -688,7 +688,7 @@ struct Created {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3338-3365
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1786-1789
-/// `CArgDescriptions::VerifyName(name)`: whether `name` can be an argument's name (ASCII letters
+/// `CArgDescriptions::VerifyName`: whether `name` can be an argument's name (ASCII letters
 /// and digits, `_` and `-`, not `-` alone or starting with `--`; the empty name can).
 fn is_argument_name(name: &str) -> bool {
     let bytes = name.as_bytes();

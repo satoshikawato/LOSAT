@@ -123,8 +123,8 @@ pub(crate) fn print_stats() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1385-1399
-// The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
-// `desired_re` with `desired_re > 0.0`).
+// The arguments of this call that determine its result (`q`, which is `mat_b`, `row_probs`,
+// `col_probs`, and `desired_re` with the flag that it is above 0.0).
 /// The `q` of the inputs of one batch: one copy of the workspace's `mat_b`, shared by them.
 pub(crate) type NewtonQ = std::rc::Rc<[f64; NN]>;
 
@@ -178,7 +178,7 @@ trait LaneVec: Copy + Index<usize, Output = f64> + IndexMut<usize> {
     fn neg(self) -> Self;
     fn abs(self) -> Self;
     fn sqrt(self) -> Self;
-    /// Per lane: `m ? a : b` (bit select; no arithmetic on either value).
+    /// Per lane: `a` where `m` is set, else `b` (bit select; no arithmetic on either value).
     fn select(m: Self::Mask, a: Self, b: Self) -> Self;
 }
 
@@ -444,9 +444,11 @@ fn move_lane<A: LaneVec, B: LaneVec>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
 // `Nlm_EuclideanNorm` per lane. The branch taken by each lane is chosen by a select: when no lane
-// has a new maximum, only the `else` branch is evaluated (lanes with `v[i] == 0.0` keep `sum`);
-// otherwise both branches are evaluated and selected per lane. `sum * (scale/absvi) * (scale/absvi)`
-// is `(sum * r) * r`; `v[i] != 0.0` is true for NaN, and `scale < NaN` is false, as in C.
+// has a new maximum, only the `else` branch is evaluated (lanes whose `v[i]` is 0.0 keep `sum`);
+// otherwise both branches are evaluated and selected per lane. In the branch of a new maximum,
+// `sum` is multiplied by the ratio of `scale` to `absvi` and then by that ratio again (one factor
+// at a time, in that order) before 1 is added; a NaN `v[i]` passes the test that it is not 0.0, and
+// `scale` is never below a NaN, as in C.
 /// `Nlm_EuclideanNorm` of `V::L` vectors.
 #[inline(always)]
 fn euclidean_norm<V: LaneVec>(v: &[V]) -> V {
@@ -801,9 +803,9 @@ impl LaneSlots {
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
 // The Newton loop for a queue of problems, `V::L` lanes at a time. In each round every lane with a
 // problem performs one pass of the loop body of `x_newton_exact::optimize` (residuals, stopping
-// test, iteration count, Newton step); a lane whose problem ends (converged or `its > maxits`)
-// writes its result and takes the next queued problem in the next round. The loop starts from the
-// lanes and the queue position it is given, and ends when no lane holds a problem or, with
+// test, iteration count, Newton step); a lane whose problem ends (converged or `its` above
+// `maxits`) writes its result and takes the next queued problem in the next round. The loop starts
+// from the lanes and the queue position it is given, and ends when no lane holds a problem or, with
 // `hand_over_at` above zero, when the queue is empty and at most `hand_over_at` lanes hold one.
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]

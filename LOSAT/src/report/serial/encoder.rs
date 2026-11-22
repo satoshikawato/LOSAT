@@ -99,7 +99,8 @@ pub enum StreamPosition {
 }
 
 /// A byte of a VisibleString that NCBI's object stream writes as `#` and reports with
-/// `ERR_POST_X(7, message)` of `Serial_IStream` (error 803.7: the function is in objistr.cpp).
+/// `ERR_POST_X` of subcode 7 with a message, from `Serial_IStream` (error 803.7: the function is in
+/// objistr.cpp).
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
 /// The text and binary streams pass the whole string as `str`, the XML stream `kEmptyStr`.
@@ -139,7 +140,7 @@ impl ReplacedChar {
     pub const ERR_CODE: (u32, u32) = (803, 7);
 
     /// The message of the post: the stack trace, `Bad char [0x<hex>] in string at <position>`
-    /// (the hex digits in upper case without padding, `NumericToString(c, 0, 16)`) and the
+    /// (the hex digits in upper case without padding, `NumericToString` of `c` in base 16) and the
     /// string when there is one.
     pub fn message(&self) -> Vec<u8> {
         let position = match self.position {
@@ -182,7 +183,7 @@ pub trait Encoder {
     fn writes_defaults(&self) -> bool {
         false
     }
-    /// `WriteFileHeader(type)`: the start of a document whose top-level object is of the
+    /// `WriteFileHeader` of a type: the start of a document whose top-level object is of the
     /// ASN.1 type `type_name` (`Seq-annot`).
     fn begin_document(&mut self, type_name: &str);
     /// `EndOfWrite` and the separator after the top-level object.
@@ -204,7 +205,7 @@ pub trait Encoder {
     }
     /// `EndNamedType`.
     fn end_named(&mut self) {}
-    /// `BeginClassMember(id)`: member `name` (position `tag`) of the current SEQUENCE.
+    /// `BeginClassMember` of an `id`: member `name` (position `tag`) of the current SEQUENCE.
     fn member(&mut self, name: &str, tag: u8);
     /// `EndClassMember`.
     fn end_member(&mut self);
@@ -214,7 +215,7 @@ pub trait Encoder {
     fn element(&mut self);
     /// `EndContainer`.
     fn end_list(&mut self);
-    /// `BeginChoice` and `BeginChoiceVariant(id)`: a CHOICE value of the ASN.1 type
+    /// `BeginChoice` and `BeginChoiceVariant` of an `id`: a CHOICE value of the ASN.1 type
     /// `type_name` with variant `name` (position `tag`). Only the XML stream reads the type
     /// name (in its standard-XML mode it writes `<Type>` and the variant as a member).
     fn variant(&mut self, type_name: &str, name: &str, tag: u8);
@@ -263,15 +264,15 @@ pub trait Encoder {
     /// annotations; `report::serial::asn_types::write`): `NULL` in ASN.1 text, the tag 0x05 and the
     /// length 0 in ASN.1 binary.
     fn null(&mut self);
-    /// `WriteString(str, eStringTypeUTF8)` of a UTF8String: NCBI's stream writes it with
-    /// `eFNP_Allow` (no byte is replaced or reported; in ASN.1 text a zero byte is left out, a
+    /// `WriteString` of a string with `eStringTypeUTF8`, for a UTF8String: NCBI's stream writes it
+    /// with `eFNP_Allow` (no byte is replaced or reported; in ASN.1 text a zero byte is left out, a
     /// `"` doubled and the line wrapped as a VisibleString's).
     fn utf8_str(&mut self, value: &[u8]);
-    /// `WriteClassMember(id, const CDelayBuffer&)` of a member that NCBI's reader kept in a delay
-    /// buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read, copied as
-    /// they are (`COStreamBuffer::Write(CByteSourceReader&)`, which leaves the line length as it
-    /// was). The other streams parse the buffer first (`CDelayBuffer::Update`), which LOSAT does
-    /// not: their error (`SerialError::Unwritten`).
+    /// `WriteClassMember` of an `id` and a `CDelayBuffer`, for a member that NCBI's reader kept in
+    /// a delay buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read,
+    /// copied as they are (`COStreamBuffer::Write` from a `CByteSourceReader`, which leaves the line
+    /// length as it was). The other streams parse the buffer first (`CDelayBuffer::Update`), which
+    /// LOSAT does not: their error (`SerialError::Unwritten`).
     fn delayed(&mut self, text: &[u8]);
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {

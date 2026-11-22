@@ -175,7 +175,8 @@ impl<R: Read> Read for TextReader<R> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-720 (`-` is `cin`, set to the
-// text mode on Windows: `NcbiSys_setmode(NcbiSys_fileno(stdin), ... O_TEXT)`)
+// text mode on Windows: `NcbiSys_setmode` on the file number of stdin (`NcbiSys_fileno`), with
+// `O_TEXT`)
 /// The standard input of a run (`cin`): the process's on the command line, the caller's reader
 /// in the library API (`api::run_dustmasker`, `api::run_blastdbcmd`), read in the text mode of
 /// LOSAT's platform. It is one stream for the whole run, as `cin` is: a second argument `-`
@@ -239,7 +240,7 @@ pub(crate) fn open_input_file<'a>(
     Ok(InputFile { source })
 }
 
-/// The file `path` opened as a program's own `CNcbiIfstream(path)` opens it (not an argument's
+/// The file `path` opened as a program's own `CNcbiIfstream` of `path` opens it (not an argument's
 /// stream): read in the text mode of LOSAT's platform; `Err` when it does not open (on Linux a
 /// directory opens, and its reads fail).
 pub(crate) fn open_text_file(path: &str) -> std::io::Result<Box<dyn Read>> {
@@ -269,8 +270,8 @@ pub(crate) fn read_input_file(
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:90-104
-// The loops of blastdbcmd that read lines so skip the empty ones (`if ( !line.empty() )`,
-// blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
+// The loops of blastdbcmd that read lines so skip the empty ones (a test that the line is not
+// empty, blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
 // `\r\n` that NCBI takes for one end leaves no other line.
 /// The lines of an input file (`bytes` as `read_input_file` gives them) that the loops of
 /// `NcbiGetlineEOL` read on `platform`, without the empty ones.

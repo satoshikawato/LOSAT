@@ -29,7 +29,7 @@ use crate::writedb::fasta_source::reader::ReaderWarning;
 pub struct BelievedIds {
     /// `CBioseq::GetId()`: the Bioseq of the archive.
     pub ids: Vec<ParsedSeqId>,
-    /// `FindBestChoice(ids, BestRank)`: the id of the record's Seq-aligns.
+    /// `FindBestChoice` of `ids` with `BestRank`: the id of the record's Seq-aligns.
     pub best: ParsedSeqId,
     /// `qseqid`, `qacc` and `qaccver` (`s_GetSeqIdListString`).
     pub tabular: [Vec<u8>; 3],
@@ -37,7 +37,7 @@ pub struct BelievedIds {
     pub gi: i64,
     /// `id->GetSeqIdString()`: the id of the record in NCBI's warnings.
     pub warning_id: Vec<u8>,
-    /// `IsLocalId(best)` (blast_aux.cpp:1094-1108): the archive then holds the Bioseqs.
+    /// `IsLocalId` of `best` (blast_aux.cpp:1094-1108): the archive then holds the Bioseqs.
     pub local: bool,
     /// The strand of the record's Seq-loc.
     pub strand: SeqLocStrand,
@@ -57,8 +57,8 @@ impl BelievedIds {
 
     /// The ids `ids` (at least one) of a Bioseq that is the query as it is (the PSSM's of
     /// `-in_pssm`): its Seq-aligns and warnings take the first, of which NCBI makes the query's
-    /// Seq-loc (psiblast_app.cpp:540, `sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().
-    /// GetFirstId())`), where a FASTA query's Seq-loc takes `FindBestChoice` of the ids it read
+    /// Seq-loc (psiblast_app.cpp:540, where `SetWhole().Assign` takes the first id of the PSSM's query
+    /// Seq), where a FASTA query's Seq-loc takes `FindBestChoice` of the ids it read
     /// (`new`).
     pub(crate) fn of_bioseq(ids: Vec<ParsedSeqId>, strand: SeqLocStrand) -> Self {
         let first = ids.first().cloned().expect("a Bioseq with a Seq-id");
@@ -98,7 +98,7 @@ impl BelievedIds {
         }
     }
 
-    /// `CAlignFormatUtil::GetSeqIdString(ids, true)`: the id of `Query=` and of the XML query.
+    /// `CAlignFormatUtil::GetSeqIdString` of `ids` with `true`: the id of `Query=` and of the XML query.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4944-4956
     /// The record as the Seq-loc of the archive's `seq-loc-list`, `None` for a local id.

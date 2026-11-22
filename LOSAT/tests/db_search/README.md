@@ -2290,8 +2290,12 @@ one), `ov_big` (overlap 60 > the window 40), `ov_s2` (an inverted chunk, then a 
 saved there), `ov_r37` and `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different
 words) and `ov_lk` (two subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan
 (`-window_size 0`) NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads
-(the row of B at 38-40 is missing): those rows are refusals, the default two-hit rows are frozen). NCBI BLAST+ 2.17.0 gave the same stdout
-bytes at 1 thread twice and at 4 threads for every frozen row. `ov_atha` holds 40 proteins of the A. thaliana TAIR10 set (150-600 letters) whose
+(the row of B at 38-40 is missing); LOSAT refuses `ov_lk` at every window (its chunks reach diagonal entries older than the
+sequence), so all its rows are refusals). `ov_atha` at `-window_size 0` is refused too: 6 of its 40 proteins (AT1G02550.1, AT1G02800.1,
+AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) leave diagonal entries that the next subject reads (decision 52); `ov_athaw`
+(`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for `ov_atha`) gives the one-hit rows
+`.ov_athaw.21.w0.6` their NCBI bytes. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every
+frozen row. `ov_atha` holds 40 proteins of the A. thaliana TAIR10 set (150-600 letters) whose
 `segmasker` masks (`-outfmt maskinfo_asn1_bin`, algorithm 21) overlap: the first ten by name with two or more consecutive
 overlaps, the first five of the rest with a nested mask and then the first with an overlap up to 40, none with a mask that
 reaches the last letter (`make_dbmaskp_ovatha.py` has the rule); `qova.faa` is the four with the most overlaps and `qova.fna`

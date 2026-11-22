@@ -13,7 +13,7 @@ seed 20261122, the code of make_dbmaskp_ov.py). Headers keep the sequence name o
 
     python3 make_dbmaskp_ovatha.py --atha PATH/atha.faa [--out DIR] [--ncbi-bin DIR]
 
-writes DIR/ov_atha.faa, DIR/qova.faa, DIR/qova.fna, and with --ncbi-bin `segmasker -in ov_atha.faa -infmt fasta
+writes DIR/ov_atha.faa, DIR/ov_athaw.faa (without the six proteins of WITHOUT), DIR/qova.faa, DIR/qova.fna, and with --ncbi-bin `segmasker -in ov_atha.faa -infmt fasta
 -outfmt maskinfo_asn1_bin -out ov_atha.asnb` and `makeblastdb -in ov_atha.faa -dbtype prot -out ov_atha -title
 "overlapping seg masks" -mask_data ov_atha.asnb` (BLAST_USAGE_REPORT=false) and removes ov_atha.pjs.
 """
@@ -24,6 +24,10 @@ import subprocess
 from pathlib import Path
 
 from make_dbmaskp_ov import back_translate
+
+# `ov_athaw` (decision 52): ov_atha without the six proteins whose masks leave diagonal entries that the next subject
+# reads in the one-hit scan (-window_size 0), which LOSAT refuses before the search.
+WITHOUT = ("AT1G02550.1", "AT1G02800.1", "AT1G04080.2", "AT1G04080.5", "AT1G06760.1", "AT1G09460.1")
 
 
 def read_fasta(path):
@@ -100,12 +104,17 @@ def main():
     nest = sum(1 for n in pick if cand[n][1] >= 1)
     print(f"picked 40: {two} with >= 2 consecutive overlaps, {nest} with a nested mask; queries {top}")
     exe = Path(args.ncbi_bin)
-    subprocess.run([str(exe / "segmasker"), "-in", "ov_atha.faa", "-infmt", "fasta", "-outfmt", "maskinfo_asn1_bin",
-                    "-out", "ov_atha.asnb"], cwd=out, env=env, check=True)
-    subprocess.run([str(exe / "makeblastdb"), "-in", "ov_atha.faa", "-dbtype", "prot", "-out", "ov_atha", "-title",
-                    "overlapping seg masks", "-mask_data", "ov_atha.asnb"], cwd=out, env=env, check=True,
-                   stdout=subprocess.DEVNULL)
-    (out / "ov_atha.pjs").unlink(missing_ok=True)
+    with open(out / "ov_athaw.faa", "w") as f:
+        for n in pick:
+            if n not in WITHOUT:
+                s = seqs[n]
+                f.write(f">{n}\n" + "\n".join(s[i:i + 60] for i in range(0, len(s), 60)) + "\n")
+    for db, title in (("ov_atha", "overlapping seg masks"), ("ov_athaw", "overlapping seg masks without six")):
+        subprocess.run([str(exe / "segmasker"), "-in", f"{db}.faa", "-infmt", "fasta", "-outfmt", "maskinfo_asn1_bin",
+                        "-out", f"{db}.asnb"], cwd=out, env=env, check=True)
+        subprocess.run([str(exe / "makeblastdb"), "-in", f"{db}.faa", "-dbtype", "prot", "-out", db, "-title", title,
+                        "-mask_data", f"{db}.asnb"], cwd=out, env=env, check=True, stdout=subprocess.DEVNULL)
+        (out / f"{db}.pjs").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

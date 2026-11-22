@@ -183,9 +183,11 @@ impl RedoMatch<'_> {
         };
         let (matrix, gap, x_dropoff) = (&run.matrix, &mut run.scratch, run.x_dropoff);
         let (gap_open, gap_extend) = (run.gap_open, run.gap_extend);
+        // One window per profile: the query (the profile) has no alignment at its start.
         let redone = smith_waterman_redo_window(
             &window,
             significance,
+            true,
             |evalue, score| heap.would_insert(evalue, score, oid),
             |query, subject_span, score| {
                 pssm_sw_xdrop_traceback(

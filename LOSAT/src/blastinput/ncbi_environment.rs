@@ -2542,8 +2542,8 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
 /// `-window_masker_taxid` (`window_masker_path_of`).
 ///
 /// An application start has these (`ApplicationStart::settings`) after it has written what
-/// NCBI writes about the files: the command line's entry, and each call of LOSAT's library that
-/// reads NCBI's settings (`api::start`).
+/// NCBI writes about the files: the command line's entry, and each search call of LOSAT's library
+/// at its beginning (`api::start`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1254-1259
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1648

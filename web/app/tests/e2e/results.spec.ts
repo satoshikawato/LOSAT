@@ -1475,7 +1475,7 @@ test('many queries; view filters change the view, not the search; the notices te
   if (BUILD_HAS_ENGINE) {
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
     // accept it (the engine registers every record the reader returns), and the run ends with
-    // NCBI's `BLAST engine error: The average subject length is too short`, as the CLI does
+    // `LOSAT engine error: The average subject length is too short`, as the CLI does
     // (screens.spec.ts has the same input).
     const sequence = dna(7, 300);
     // A view filter of run 1 is not carried to the next run that opens.
@@ -1495,7 +1495,7 @@ test('many queries; view filters change the view, not the search; the notices te
     await expect(status).toHaveAttribute('data-run-status', 'failed');
     await expect(status).toHaveAttribute('data-phase', 'unavailable');
     await expect(status).toContainText('Run 2 failed: ');
-    await expect(status).toContainText('A failed run keeps no results.');
+    await expect(status).toContainText('It keeps the outputs written before the error.');
     // The header block still says which run this is.
     await expect(page.getByTestId('results-program')).toHaveText('TBLASTX');
     await expect(page.getByTestId('results-download-all')).toHaveCount(0);
@@ -2527,6 +2527,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await program(page, 'blastn');
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
   const inputs = {
     blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],

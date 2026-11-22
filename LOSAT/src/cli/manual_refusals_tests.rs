@@ -275,3 +275,50 @@ fn every_blast_formatter_refusal_is_in_its_manual_section() {
     }
     assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
 }
+
+/// The `-in_msa` refusals of an input that the code names by a cause (each `pub(crate)` constant
+/// is the text after "is not supported by LOSAT's PSIBLAST:"), and a phrase of the row of
+/// refusals.md that tells the user of it. The page's rows of `-in_msa` input refusals are those of
+/// this list and the three that spell their cause where they refuse (a master sequence that is the
+/// start of a longer one above it, one of X or O alone, `-matrix IDENTITY`): a refusal added to the
+/// code needs its row, and a row needs its refusal.
+#[test]
+fn the_in_msa_input_refusals_of_the_code_are_listed_in_the_manual() {
+    let refusals: [(&str, &str); 5] = [
+        (
+            crate::blastinput::aln_reader::phylip::ZERO_COUNT,
+            "a PHYLIP header of 0 sequences",
+        ),
+        (
+            crate::blastinput::aln_reader::nexus::EMPTY_COMMAND,
+            "an empty command (a lone `;`) in a NEXUS file",
+        ),
+        (
+            crate::algorithm::psiblast::in_msa::SHORT_ROW_READ,
+            "a FASTA alignment whose rows have different lengths",
+        ),
+        (
+            crate::blastinput::aln_reader::mods::BACKWARD_RANGE,
+            "`secondary-accession` range that runs backwards",
+        ),
+        (
+            crate::blastinput::aln_reader::mods::RANGE_OVERFLOW,
+            "a number of more than 18 digits",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (cause, phrase) in refusals {
+        let row = PAGE
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(phrase));
+        match row {
+            None => wrong.push(format!("refusals.md has no row with \"{phrase}\"")),
+            Some(row) if !row.contains("Refused") => {
+                wrong.push(format!("the row with \"{phrase}\" does not say Refused"))
+            }
+            Some(_) if cause.is_empty() => wrong.push(format!("\"{phrase}\": the cause is empty")),
+            Some(_) => {}
+        }
+    }
+    assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+}

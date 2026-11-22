@@ -7,25 +7,7 @@
 //! that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-//! ```c
-//! if (H->prev != NULL &&
-//!     ((H->hsp->context/strand_factor) !=
-//!      (H->prev->hsp->context/strand_factor) ||
-//!      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-//! { /* If frame switches, then start new list. */
-//!    hp_frame_number[cur_frame]--;
-//!    hp_frame_number[++cur_frame]++;
-//!    hp_frame_start[cur_frame] = H;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-//! ```c
-//! for (frame_index=0; frame_index<num_query_frames; frame_index++)
-//! {
-//!    hp_start = s_LinkHSPStructReset(hp_start);
-//!    hp_start->next = hp_frame_start[frame_index];
-//!    hp_frame_start[frame_index]->prev = hp_start;
-//!    number_of_hsps = hp_frame_number[frame_index];
-//! ```
 //! The expected report (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was
 //! produced by NCBI BLAST+ 2.17.0.
 //!
@@ -151,14 +133,6 @@ fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
 // The default search: the report is NCBI's, both linking calls link their groups as slices, and
 // the numbers are the same at every thread count.
 #[test]
@@ -180,14 +154,6 @@ fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,483-486
-// ```c
-// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-// ...
-// /* Sort by (reverse) position. */
-// if (kTranslatedQuery) {
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
 // The slices together with the other variables of the linking call: the literal port
 // (LOSAT_LINKING_LEGACY: its groups are linked on copies of the slices and written back, never
 // handed back to the cut) and the literal port beside the default kernel

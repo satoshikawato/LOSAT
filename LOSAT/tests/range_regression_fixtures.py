@@ -174,7 +174,8 @@ def command_freeze(args) -> int:
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
                      "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env,
                      "oracle_env": oracle_env})
-        print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
+        line_count = result.stdout.count(b"\n")
+        print(f"{case_id}\texit {result.returncode}\t{line_count} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen -query_loc/-subject_loc outputs of {version} (comparison oracle only; see range_regression_fixtures.py).\n")
         handle.write("# Run from LOSAT/: env <env> <argv> (LOSAT: losat <argv> <losat_extra>). Written by `freeze`; do not edit.\n")

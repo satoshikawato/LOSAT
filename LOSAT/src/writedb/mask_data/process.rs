@@ -112,47 +112,10 @@ impl std::error::Error for MaskDataError {}
 
 impl MaskDataError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-171
-    // ```c++
-    // #define CATCH_ALL(exit_code)                                                \
-    //     catch (const CInvalidDataException& e) {                                \
-    //         LOG_POST(Error << "BLAST options error: " << e.GetMsg());           \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:212-215
-    // ```c++
-    //     catch (const CWriteDBException& e) {                                    \
-    //         LOG_POST(Error << "BLAST Database creation error: " << e.GetMsg()); \
-    //         exit_code = BLAST_INPUT_ERROR;                                      \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:236-247
-    // ```c++
-    //     catch (const CIOException& e) {                                         \
-    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-263
-    // ```c++
-    //     catch (const std::bad_alloc&) {                                         \
-    //         LOG_POST(Error << "BLAST ran out of memory");                       \
-    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-    //     }                                                                       \
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     /// Where each outcome of `x_ProcessMaskData` becomes makeblastdb's (exit status, message);
     /// the only place that decides it. `None` is a run that ends with status 0 and no message.
     ///
@@ -181,41 +144,6 @@ impl MaskDataError {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
-// ```c++
-//     void Do(TContainer&     target,
-//             TPosContainer&  token_pos,
-//             const TString&  empty_str = TString())
-//     {
-//         auto target_initial_size = target.size();
-//
-//         // Special cases
-//         if (m_Str.empty()) {
-//             return;
-//         } else if (m_Delim.empty()) {
-//             target.push_back(m_Str);
-//             token_pos.push_back(0);
-// ...
-//
-//         CTempStringList part_collector(m_Storage);
-//         SIZE_TYPE prev_pos;
-//         SIZE_TYPE delim_pos = NPOS;
-//         m_Pos = 0;
-//         do {
-//             Advance(&part_collector, &prev_pos, &delim_pos);
-//             target.push_back(empty_str); // reserve space for value added next line
-//             part_collector.Join(&target.back());
-//             part_collector.Clear();
-//             token_pos.push_back(prev_pos);
-//         } while ( !AtEnd() );
-//
-//         if ( (m_Flags & NStr::fSplit_Truncate_End) == 0 ) {
-//             // account training delimiter
-//             if (delim_pos != NPOS) {
-//                 // add empty token after last delimiter
-//                 target.push_back(empty_str);
-//                 token_pos.push_back(delim_pos + 1);
-//             }
-// ```
 /// `NStr::Split(text, ",", list)` (no flags): the empty string gives no token, any other string
 /// one token for each comma plus one, empty tokens included ("," gives two, "a," gives "a" and
 /// ""). The tokens are not trimmed.
@@ -228,26 +156,7 @@ fn split_commas(text: &str) -> Vec<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:897-909
-// ```c++
-//         // make sure this is not a numeric id
-//         for (unsigned int i = 0; i < id_list.size(); ++i) {
-//             Int4 nid(-1);
-//             if (NStr::StringToNumeric(id_list[i], &nid, NStr::fConvErr_NoThrow, 10)) {
-//                 NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                    "mask_id can not be numeric.");
-//             }
-//         }
-// ```
-// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3611-3616
-// ```c++
-//     template <typename TNumeric>
-//     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), bool>::type
-//     x_StringToNumeric(const CTempString str, TNumeric* value, TStringToNumFlags flags, int base)
-//     {
-//         *value = StringToInt(str, flags, base);
-//         return (*value || !errno);
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3611-3616,3663-3668
 /// `NStr::StringToNumeric<Int4>(text, &nid, fConvErr_NoThrow, 10)`: whether `text` converts
 /// (`StringToInt` with no flag, `ncbi_str::string_to_int`; with `fConvErr_NoThrow` a failed
 /// conversion gives 0 and sets errno).
@@ -260,135 +169,7 @@ fn options_error(message: &str) -> MaskDataError {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:876-1000
-// ```c++
-// void CMakeBlastDBApp::x_ProcessMaskData()
-// {
-//     const CArgs & args = GetArgs();
-//
-//     const CArgValue & files    = args["mask_data"];
-//     const CArgValue & ids      = args["mask_id"];
-//     const CArgValue & descs    = args["mask_desc"];
-//     const CArgValue & gi_names = args["gi_mask_name"];
-//
-//     vector<string> file_list;
-//     vector<string> id_list;
-//     vector<string> desc_list;
-//     vector<string> gi_mask_names;
-//
-//     if (! files.HasValue()) return;
-//     NStr::Split(NStr::TruncateSpaces(files.AsString()), ",", file_list);
-//     if (! file_list.size()) {
-//         NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                 "mask_data option found, but no files were specified.");
-//     }
-//
-//     if (ids.HasValue()) {
-//         NStr::Split(NStr::TruncateSpaces(ids.AsString()), ",", id_list);
-//         if (file_list.size() != id_list.size()) {
-//             NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                 "the size of mask_id does not match that of mask_data.");
-//         }
-//         // make sure this is not a numeric id
-//         ...
-//     }
-//
-//     if (descs.HasValue()) {
-//         NStr::Split(NStr::TruncateSpaces(descs.AsString()), ",", desc_list);
-//         if (file_list.size() != desc_list.size()) {
-//             NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                 "the size of mask_desc does not match that of mask_data.");
-//         }
-//     } else {
-//         // description is optional
-//         vector<string> default_desc(id_list.size(), "");
-//         desc_list.swap(default_desc);
-//     }
-//
-//     if (gi_names.HasValue()) {
-//         NStr::Split(NStr::TruncateSpaces(gi_names.AsString()), ",", gi_mask_names);
-//         if (file_list.size() != gi_mask_names.size()) {
-//             NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                 "the size of gi_mask_name does not match that of mask_data.");
-//         }
-//     }
-//
-//     for (unsigned int i = 0; i < file_list.size(); ++i) {
-//         if ( !CFile(file_list[i]).Exists() ) {
-//             ERR_POST(Error << "Ignoring mask file '" << file_list[i]
-//                            << "' as it does not exist.");
-//             continue;
-//         }
-//
-//         CNcbiIfstream mask_file(file_list[i].c_str(), ios::binary);
-//         CFormatGuess::EFormat mask_file_format = CFormatGuess::eUnknown;
-//         {{
-//              CFormatGuess fg(mask_file);
-//              ...
-//              mask_file_format = fg.GuessFormat();
-//          }}
-//
-//         int algo_id = -1;
-//         while (true) {
-//             CRef<CBlast_db_mask_info> first_obj;
-//
-//             try {
-//                 s_ReadObject(mask_file, mask_file_format, first_obj, "mask data in '" + file_list[i] + "'");
-//             }
-//             catch (CEofException&) {
-//                 // must be end of file
-//                 break;
-//             }
-//
-//             if (algo_id < 0) {
-//                 *m_LogFile << "Mask file: " << file_list[i] << endl;
-//                 string opts = first_obj->GetAlgo_options();
-//                 if (id_list.size())  {
-//                     algo_id = m_DB->RegisterMaskingAlgorithm(id_list[i], desc_list[i], opts);
-//                 } else {
-//                     EBlast_filter_program prog_id =
-//                         static_cast<EBlast_filter_program>(first_obj->GetAlgo_program());
-//                     string name = gi_mask_names.size() ? gi_mask_names[i] : file_list[i];
-//                     algo_id = m_DB->RegisterMaskingAlgorithm(prog_id, opts, name);
-//                 }
-//             }
-//
-//             CRef<CBlast_mask_list> masks(& first_obj->SetMasks());
-//             first_obj.Reset();
-//
-//             while(1) {
-//                 if (m_Ranges.Empty() && ! masks->GetMasks().empty()) {
-//                     m_Ranges.Reset(new CMaskedRangeSet);
-//                     m_DB->SetMaskDataSource(*m_Ranges);
-//                 }
-//
-//                 ITERATE(CBlast_mask_list::TMasks, iter, masks->GetMasks()) {
-//                     CConstRef<CSeq_id> seqid((**iter).GetId());
-//
-//                     if (seqid.Empty()) {
-//                         NCBI_THROW(CInvalidDataException, eInvalidInput,
-//                                      "Cannot get masked range Seq-id");
-//                     }
-//
-//                     m_Ranges->Insert(algo_id, *seqid, **iter);
-//                 }
-//
-//                 if (! masks->GetMore())
-//                     break;
-//
-//                 s_ReadObject(mask_file, mask_file_format, masks, "mask data (continuation)");
-//             }
-//         }
-//     }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp (include/corelib/ncbifile.hpp:4039-4042)
-// ```c++
-// inline
-// bool CFile::Exists(void) const
-// {
-//     return IsFile();
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp (c++/include/corelib/ncbifile.hpp:4038-4042)
 // `CFile::Exists` is true for a regular file (a link is followed); a directory, a device and a
 // FIFO "do not exist" (the oracle prints "Ignoring mask file '/dev/null' as it does not
 // exist."). A file that exists and cannot be opened is a failed stream, which the format guess
@@ -547,54 +328,5 @@ fn open_mask_file(path: &Path, name: &Path) -> Result<MaskFileReader, MaskDataEr
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spaces_and_commas_are_split_as_ncbi_does() {
-        assert_eq!(truncate_spaces_str(" \t a b \n"), "a b");
-        assert_eq!(truncate_spaces_str(" \u{a0}"), "\u{a0}");
-        assert_eq!(truncate_spaces_str("  "), "");
-        assert!(split_commas("").is_empty());
-        assert_eq!(split_commas(","), ["", ""]);
-        assert_eq!(split_commas("a,"), ["a", ""]);
-        assert_eq!(split_commas("a,,b"), ["a", "", "b"]);
-        assert_eq!(split_commas("a, b"), ["a", " b"]);
-    }
-
-    /// The answers of makeblastdb 2.17.0 (`-mask_id` with one or two mask files).
-    #[test]
-    fn numeric_ids_are_those_that_stringtonumeric_converts() {
-        for numeric in [
-            "0",
-            "5",
-            "007",
-            "+5",
-            "-0",
-            "-5",
-            "2147483647",
-            "-2147483648",
-        ] {
-            assert!(is_numeric_int4(numeric), "{numeric}");
-        }
-        for not_numeric in [
-            "",
-            "+",
-            "-",
-            " 5",
-            "5 ",
-            "5a",
-            "a5",
-            "1e3",
-            "0x10",
-            "٣",
-            "+-5",
-            "2147483648",
-            "-2147483649",
-            "99999999999999999999",
-            "9223372036854775808",
-        ] {
-            assert!(!is_numeric_int4(not_numeric), "{not_numeric}");
-        }
-    }
-}
+#[path = "process_tests.rs"]
+mod tests;

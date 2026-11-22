@@ -19,7 +19,7 @@ print(outcome.reports[0].text)          # the -outfmt 6 report, as `losat blastn
 outcome.reports[1].bytes                # the bytes of -outfmt 0
 hits = polars.DataFrame(outcome.hsps)   # one row per HSP, the numbers not rounded
 outcome.query_stats[0].eff_space        # what fixed the E-values of the first query
-outcome.diagnostics                     # what the command line writes to its standard error
+outcome.diagnostics                     # what the command line writes to its standard error (bytes: diagnostics_bytes)
 ```
 
 ## Installation
@@ -28,7 +28,7 @@ outcome.diagnostics                     # what the command line writes to its st
 pip install pylosat
 ```
 
-PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
+PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64; glibc 2.17 or later), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
 
 To build a wheel from the repository instead, use [maturin](https://www.maturin.rs/):
 
@@ -44,13 +44,13 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 ## Programs
 
-`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `blast_formatter` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
+`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
 
 ## Options
 
 `Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's parser checks the rest, so an option means, and fails, as it does there (`ArgumentError`).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 
 ## Inputs
 
@@ -61,6 +61,8 @@ A `Sequences` is one FASTA input, and the search reads it with the command line'
 - `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
 
 A PSSM takes the place of the query of psiblast and tblastn: `Pssm.from_file(path)` is `-in_pssm path` (a PSSM file as `-out_pssm` writes it). Its one query is the PSSM's sequence: `q_idx` 0.
+
+An alignment takes the place of the query of psiblast: `Alignment.from_file(path)` is `-in_msa path` (a multiple sequence alignment; the search reads it as the command line does). Its one query is the alignment's master: `q_idx` 0. `msa_master_idx` and `ignore_msa_master` are options of `Search`, as on the command line, and choose the master.
 
 A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as the command line finds it (`BLASTDB`, `.ncbirc`). The options of a database search (`taxids`, `seqidlist`, ...) go to `Search` with the others. Then `hsp.s_idx` is the sequence's ordinal id, the same in every search of that database.
 
@@ -81,7 +83,7 @@ psiblast's rounds of each query follow one another in the table, round 1 first: 
 
 ## Files
 
-`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command line writes to its standard error.
+`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns a `FileOutcome`: what the command line writes to its standard error, as `diagnostics_bytes` and as the text `diagnostics`.
 
 ## Long searches
 
@@ -108,11 +110,13 @@ print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options
 print(pylosat.blast_formatter("-archive", "results.asn", "-outfmt", "8").text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, the lower case letters of FASTA in memory turned into masking information, and the reports of a BLAST archive (`-outfmt 11`) written again.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information, and the reports of a BLAST archive (`-outfmt 11`) written again.
 
 ## Errors
 
-`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure.
+`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure: `message_bytes` holds its bytes, and `str(error)` is the text.
+
+Every text that pylosat gives of what the command line writes (`str(error)`, `outcome.diagnostics`, `batch.diagnostics`, `ToolOutput.diagnostics` and `.text`, `FileOutcome.diagnostics` from `run_to_file`) has one U+FFFD per maximal ill-formed subpart of its bytes, as `bytes.decode("utf-8", "replace")` gives; the bytes are `message_bytes`, `diagnostics_bytes` and `ToolOutput.bytes`.
 
 ## Development
 
@@ -120,4 +124,4 @@ See [`python/AGENTS.md`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/pyth
 
 ## License
 
-LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

@@ -8,6 +8,7 @@
 //! `-gilist` and `-negative_gilist` stay refused; NCBI's exclusions with them are therefore
 //! not declared here.
 
+use crate::wording::DATABASE_ERROR;
 use std::collections::BTreeSet;
 use std::io::Write;
 
@@ -20,100 +21,18 @@ use crate::cli::NativeError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
-use crate::seqdb::tax_sqlite::TaxonomySqlite;
+use crate::seqdb::lmdb_read::ReadError;
+use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
 use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2263-2299
-// ```c++
-//         arg_desc.AddOptionalKey(kArgTaxIdList, "taxids",
-//                                 "Restrict search of database to include only "
-//                                 "the specified taxonomy IDs and their descendants "
-//                                 "(multiple IDs delimited by ',')",
-//                                 CArgDescriptions::eString);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgGiList);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgSeqIdList);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgRemote);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
-//         arg_desc.SetDependency(kArgTaxIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdListFile);
-//
-//         arg_desc.AddOptionalKey(kArgNegativeTaxIdList, "taxids",
-//                                 "Restrict search of database to everything"
-//                                 " except the specified taxonomy IDs and their descendants "
-//                                 "(multiple IDs delimited by ',')",
-//                                 CArgDescriptions::eString);
-//         arg_desc.SetDependency(kArgNegativeTaxIdList, CArgDescriptions::eExcludes, kArgGiList);
-//         arg_desc.SetDependency(kArgNegativeTaxIdList, CArgDescriptions::eExcludes, kArgSeqIdList);
-//         arg_desc.SetDependency(kArgNegativeTaxIdList, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgNegativeTaxIdList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgNegativeTaxIdList, CArgDescriptions::eExcludes, kArgRemote);
-//
-//         arg_desc.AddOptionalKey(kArgTaxIdListFile, "filename",
-//                                 "Restrict search of database to include only "
-//                                 "the specified taxonomy IDs and their descendants ",
-//                                 CArgDescriptions::eString);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgGiList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgSeqIdList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgRemote);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgTaxIdList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
-//         arg_desc.SetDependency(kArgTaxIdListFile, CArgDescriptions::eExcludes, kArgNegativeTaxIdListFile);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2299
 // The exclusions of the four lists with one another, with `-subject` and (on the
 // programs' `-subject_loc`) with `-subject_loc` are clap's: LOSAT's parser reports them with
 // its own text and exit status 2 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, as `-db` with
 // `-subject`; NCBI: usage, `Incompatible with argument`, exit 1).
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2246-2259
-// ```c++
-//         // SeqId list
-//         arg_desc.AddOptionalKey(kArgSeqIdList, "filename",
-//                                 "Restrict search of database to list of SeqIDs",
-//                                 CArgDescriptions::eString);
-//         // Negative GI list
-//         arg_desc.AddOptionalKey(kArgNegativeGiList, "filename",
-//                                 "Restrict search of database to everything"
-//                                 " except the specified GIs",
-//                                 CArgDescriptions::eString);
-//
-//         // Negative SeqId list
-//         arg_desc.AddOptionalKey(kArgNegativeSeqidList, "filename",
-//                                 "Restrict search of database to everything"
-//                                 " except the specified SeqIDs",
-//                                 CArgDescriptions::eString);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2245-2259
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2283-2289
-// ```c++
-//         arg_desc.AddFlag(kArgNoTaxIdExpansion, "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ", true);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgSubject);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgSubjectLocation);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgGiList);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgSeqIdList);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgNoTaxIdExpansion, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2318
-// ```c++
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgSeqIdList);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgTaxIdList);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgTaxIdListFile);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
-//         arg_desc.SetDependency(kArgGiList, CArgDescriptions::eExcludes, kArgNegativeTaxIdListFile);
-//
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgTaxIdList);
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgTaxIdListFile);
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeGiList);
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
-//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdListFile);
-//
-//         arg_desc.SetDependency(kArgNegativeGiList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
-//         arg_desc.SetDependency(kArgNegativeGiList, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
-// ```
 /// The list options of a search program's command line.
 #[derive(Args, Debug, Clone, Default)]
 pub struct DbFilterArgs {
@@ -185,42 +104,17 @@ pub const DB_FILTER_OPTIONS: [&str; 7] = [
     "no_taxid_expansion",
 ];
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2428-2431
-// ```c++
-//         catch(CException &){
-//             LOG_POST(Warning << "The -taxids command line option requires additional data files. Please see the section 'Taxonomic filtering for BLAST databases' in https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.");
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2426-2431
 pub(crate) const NO_TAXONOMY_WARNING: &str =
     "The -taxids command line option requires additional data \
      files. Please see the section 'Taxonomic filtering for BLAST databases' in \
      https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.\n";
 
-/// NCBI's default name of the taxonomy file (`kDefaultName`, tax4blastsqlite.cpp).
+/// NCBI's default name of the taxonomy file (`kDefaultName`, c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp).
 pub(crate) const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
 
 impl DbFilterArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2486-2503
-    // ```c++
-    //         } else if (args.Exist(kArgSeqIdList) && args[kArgSeqIdList]) {
-    //             string fn(SeqDB_ResolveDbPath(args[kArgSeqIdList].AsString()));
-    //             m_SearchDb->SetGiList(CRef<CSeqDBGiList> (new CSeqDBFileGiList(fn,
-    //                              CSeqDBFileGiList::eSiList)));
-    //         } else if (args.Exist(kArgNegativeSeqidList) && args[kArgNegativeSeqidList]) {
-    //             string fn(SeqDB_ResolveDbPath(args[kArgNegativeSeqidList].AsString()));
-    //             m_SearchDb->SetNegativeGiList(CRef<CSeqDBGiList> (new CSeqDBFileGiList(fn,CSeqDBFileGiList::eSiList)));
-    //         } else if (args.Exist(kArgTaxIdList) && args[kArgTaxIdList]) {
-    //         	s_GetTaxIDList(args[kArgTaxIdList].AsString(), false, false, m_SearchDb,args[kArgNoTaxIdExpansion].AsBoolean());
-    //
-    //         } else if (args.Exist(kArgTaxIdListFile) && args[kArgTaxIdListFile]) {
-    //         	s_GetTaxIDList(args[kArgTaxIdListFile].AsString(), true, false, m_SearchDb, args[kArgNoTaxIdExpansion].AsBoolean());
-    //
-    //         } else if (args.Exist(kArgNegativeTaxIdList) && args[kArgNegativeTaxIdList]) {
-    //         	s_GetTaxIDList(args[kArgNegativeTaxIdList].AsString(), false, true, m_SearchDb, args[kArgNoTaxIdExpansion].AsBoolean());
-    //
-    //         } else if (args.Exist(kArgNegativeTaxIdListFile) && args[kArgNegativeTaxIdListFile]) {
-    //         	s_GetTaxIDList(args[kArgNegativeTaxIdListFile].AsString(), true, true, m_SearchDb,args[kArgNoTaxIdExpansion].AsBoolean());
-    // ```
     /// Whether the command line gives one of the six lists.
     pub fn given(&self) -> bool {
         self.seqid_list().is_some() || self.list().is_some()
@@ -253,68 +147,12 @@ impl DbFilterArgs {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2403-2459
-    // ```c++
-    // static void s_GetTaxIDList(const string & in, bool isFile, bool isNegativeList, CRef<CSearchDatabase> & sdb, bool isTargetOnly )
-    // {
-    //     vector<string> ids;
-    //     if (isFile) {
-    //         string filename(SeqDB_ResolveDbPath(in));
-    //         if(filename == kEmptyStr) {
-    //             NCBI_THROW(CInputException, eInvalidInput, "File is not acessible: "+ in );
-    //         }
-    //         CNcbiIfstream instream(filename.c_str());
-    //         CStreamLineReader reader(instream);
-    //
-    //         while (!reader.AtEOF()) {
-    //             reader.ReadLine();
-    //             ids.push_back(reader.GetCurrentLine());
-    //         }
-    //     } else {
-    //         NStr::Split(in, ",", ids, NStr::fSplit_Tokenize);
-    //     }
-    //     unique_ptr<ITaxonomy4Blast> tb;
-    //     if( !isTargetOnly ) {
-    //         try{
-    //             tb.reset(new CTaxonomy4BlastSQLite());
-    //         }
-    //         catch(CException &){
-    //             LOG_POST(Warning << "The -taxids command line option requires additional data files. Please see the section 'Taxonomic filtering for BLAST databases' in https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.");
-    //         }
-    //     }
-    //     set<TTaxId> tax_ids;
-    //     for (auto id : ids) {
-    //         try {
-    //             if (NStr::IsBlank(id)) {
-    //                 continue;
-    //             }
-    //             auto taxid = NStr::StringToNumeric<TTaxId>(id, NStr::fAllowLeadingSpaces | NStr::fAllowTrailingSpaces);
-    //             if( isTargetOnly ) {
-    //                 tax_ids.insert(taxid);
-    //             } else if (tb) {
-    //                 tax_ids.insert(taxid);
-    //                 vector<int> desc;
-    //                 tb->GetLeafNodeTaxids(taxid, desc);
-    //                 for (auto i: desc)
-    //                     tax_ids.insert( static_cast<TTaxId>(i) );
-    //             }
-    //         } catch(CException &){
-    //             NCBI_THROW(CInputException, eInvalidInput, "Invalid taxidlist file ");
-    //         }
-    //     }
-    // ```
     // Without the taxonomy file NCBI reads every id and keeps none: the set is empty and the
     // search runs on the whole database (DI-8 DECISIONS 2 and 11, the Owner's decision of
     // 2026-10-29). A taxid whose descendants loop back to it (taxid 1, whose parent is 1)
     // never ends NCBI's recursive query; LOSAT visits each taxid once and ends with every
     // taxid below it (DECISIONS 10, `TaxonomySqlite::descendants`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:458-469
-    // ```c++
-    //     CRef<CSeqDBGiList>& gilist = const_cast<CRef<CSeqDBGiList>& > (db->GetGiList());
-    //     if (gilist.NotEmpty()) {
-    //         vector<TTaxId> taxids((gilist->GetTaxIdsList().begin()), gilist->GetTaxIdsList().end());
-    //         ...
-    //         x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_TaxidList), int_taxids);
-    // ```
     /// The `program-options` parameter of the BLAST archive for the list option of the command
     /// line: NCBI's list object is there for each option, so the parameter is written also when
     /// no id came of it, or the list is a seqid list, without ids. `taxids` are the ids of NCBI's
@@ -323,28 +161,31 @@ impl DbFilterArgs {
         &self,
         taxids: &[i32],
     ) -> Option<crate::report::archive::options::Param> {
+        use crate::report::archive::fields;
         use crate::report::archive::options::{Param, ParamValue};
         let negative = match (self.seqid_list(), self.list()) {
             (Some((_, negative)), _) | (None, Some((_, _, negative))) => negative,
             (None, None) => return None,
         };
-        Some(Param {
-            name: if negative {
-                "NegativeTaxidList"
+        Some(Param::new(
+            if negative {
+                fields::NEGATIVE_TAXID_LIST
             } else {
-                "TaxidList"
+                fields::TAXID_LIST
             },
-            value: ParamValue::IntegerList(taxids.to_vec()),
-        })
+            ParamValue::IntegerList(taxids.to_vec()),
+        ))
     }
 
     /// The list of the command line, read (and a taxid list expanded) as NCBI reads it, with
     /// the warnings NCBI writes while reading (a missing taxonomy file, a dropped token of a
-    /// seqid list) written to `warnings`. `Ok(None)`: no list, or one without an id (NCBI
-    /// then searches the whole database).
+    /// seqid list, the taxonomy file's read error) written to `warnings` as the application
+    /// `program` (its diagnostic prefix) writes them. `Ok(None)`: no list, or one without an id
+    /// (NCBI then searches the whole database).
     pub fn resolve(
         &self,
         settings: &ApplicationSettings,
+        program: &str,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
         if self.seqid_list().is_none() && self.list().is_none() {
@@ -392,7 +233,9 @@ impl DbFilterArgs {
         let taxonomy = match &source {
             Some(file) => match TaxonomySqlite::open(file) {
                 Ok(taxonomy) => Some(taxonomy),
-                Err(_) => {
+                // Every exception of NCBI's constructor, a read that SQLite fails included
+                // (`tax_sqlite::QueryReadFailure`; review 1 of line WQA D18b, L3).
+                Err(ReadError::Unreadable(_) | ReadError::Format(_)) => {
                     warnings.write_all(NO_TAXONOMY_WARNING.as_bytes())?;
                     None
                 }
@@ -412,7 +255,17 @@ impl DbFilterArgs {
                 tax_ids.insert(taxid);
             } else if let Some(taxonomy) = &taxonomy {
                 tax_ids.insert(taxid);
-                tax_ids.extend(taxonomy.descendants(taxid).map_err(|_| invalid())?);
+                match taxonomy.descendants(taxid) {
+                    Ok(descendants) => tax_ids.extend(descendants),
+                    // A read that SQLite fails: the statement's destructor posts the error before
+                    // the per-id `catch` (`tax_sqlite::QueryReadFailure`; review 1 of line WQA
+                    // D18b, L3).
+                    Err(ReadError::Unreadable(_)) => {
+                        warnings.write_all(&QueryReadFailure::finalize_post(program))?;
+                        return Err(invalid());
+                    }
+                    Err(ReadError::Format(_)) => return Err(invalid()),
+                }
             }
         }
         if tax_ids.is_empty() {
@@ -426,29 +279,7 @@ impl DbFilterArgs {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1667-1692
-    // ```c++
-    // CSeqDBFileGiList::CSeqDBFileGiList(const string & fname, EIdType idtype)
-    // {
-    //     bool in_order = false;
-    //     switch(idtype) {
-    //         case eGiList:
-    //             SeqDB_ReadGiList(fname, m_GisOids, & in_order);
-    //             break;
-    //         case eTiList:
-    //             SeqDB_ReadTiList(fname, m_TisOids, & in_order);
-    //             break;
-    //         case eSiList:
-    //             SeqDB_ReadSiList(fname, m_SisOids, & in_order, m_ListInfo);
-    //             break;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:254-258
-    // ```c++
-    //     if (m_GiList.NotEmpty() && !m_GiList->Empty()) {
-    //         m_SeqDb.Reset(new CSeqDB(m_DbName, seqtype, m_GiList));
-    //     } else if (m_NegativeGiList.NotEmpty() && !m_NegativeGiList->Empty()) {
-    //         m_SeqDb.Reset(new CSeqDB(m_DbName, seqtype, m_NegativeGiList));
-    //     } else {
-    // ```
     // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file
     // that is not there resolves to the empty name, whose memory map throws a
     // `CFileException` (not a database error): the search program reports it as
@@ -469,7 +300,7 @@ impl DbFilterArgs {
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {text}\n"),
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
         })?;
         for line in cerr {
             warnings.write_all(line.as_bytes())?;
@@ -482,17 +313,7 @@ impl DbFilterArgs {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5749-5755
-// ```c++
-//     Int8 file_size = GetFileSize();
-//     if ( file_size < 0 ) {
-//         if ( m_Attrs ) {
-//             delete m_Attrs;
-//             m_Attrs = 0;
-//         }
-//         NCBI_THROW(CFileException, eMemoryMap,
-//                    "To be memory mapped the file must exist: '" + m_FileName +"'");
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5748-5755
 // NCBI 2.17.0 (the conda build) writes `Error: NCBI C++ Exception:\n    T0
 // "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754:
 // Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory
@@ -516,15 +337,6 @@ fn missing_seqidlist_exception() -> NcbiException {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172
-// ```c++
-//     switch (m_EOLStyle) {
-//     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-//     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-//     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-//     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-//     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-//     }
-// ```
 // NCBI's reader takes the end-of-line style of the file from its first line (LF, CRLF or a
 // lone CR, and both when they mix); LOSAT ends a line at each of them. A carriage return that
 // NCBI leaves at an end of a line is white space, which `StringToNumeric` allows around the
@@ -561,49 +373,5 @@ fn stream_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:458-469`).
-    #[test]
-    fn the_archive_parameter_follows_the_list_option() {
-        use crate::report::archive::options::ParamValue;
-        let filter = |taxids: bool, negative: bool| DbFilterArgs {
-            taxids: (taxids && !negative).then(|| "1".to_string()),
-            negative_taxids: (taxids && negative).then(|| "1".to_string()),
-            seqidlist: (!taxids && !negative).then(|| "f".to_string()),
-            negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
-            ..DbFilterArgs::default()
-        };
-        let param = filter(true, false)
-            .archive_parameter(&[9606, 10090])
-            .unwrap();
-        assert_eq!(param.name, "TaxidList");
-        assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
-        // A missing taxonomy file: the list object of NCBI has no id.
-        let param = filter(true, false).archive_parameter(&[]).unwrap();
-        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-        let param = filter(false, true).archive_parameter(&[]).unwrap();
-        assert_eq!(param.name, "NegativeTaxidList");
-        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-        assert!(DbFilterArgs::default().archive_parameter(&[]).is_none());
-    }
-
-    #[test]
-    fn lines_end_as_ncbis_stream_reader_ends_them() {
-        let lines = |text: &str| -> Vec<String> {
-            stream_lines(text.as_bytes())
-                .into_iter()
-                .map(|line| String::from_utf8(line).unwrap())
-                .collect()
-        };
-        assert_eq!(lines("9606\n10090\n"), ["9606", "10090"]);
-        assert_eq!(
-            lines("9606\r\n\r\n  10090  \r\n\n"),
-            ["9606", "", "  10090  ", ""]
-        );
-        assert_eq!(lines("9606"), ["9606"]);
-        assert_eq!(lines("1\r2"), ["1", "2"]);
-        assert!(lines("").is_empty());
-    }
-}
+#[path = "db_filter_tests.rs"]
+mod tests;

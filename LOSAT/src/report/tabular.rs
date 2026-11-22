@@ -5,27 +5,11 @@
 //! reads the field list, writes the comment lines of outfmt 7, the header line of outfmt 20 and
 //! the rows.
 //!
-//! `TabularSpec::of` returns `None` for the default reports (outfmt 6 and 7 with the `std` fields
-//! and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with their
-//! own writers.
+//! `TabularSpec::of_app` returns `None` for the default reports (outfmt 6 and 7 with the `std`
+//! fields and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with
+//! their own writers.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eTabular ||
-//!         m_FormatType == CFormattingArgs::eTabularWithComments ||
-//!         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-//!         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-//!
-//!       const CBlastTabularInfo::EFieldDelimiter kDelim =
-//!             ((m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-//!               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
-//!              ? CBlastTabularInfo::eComma : CBlastTabularInfo::eTab);
-//!
-//!         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-//!         if(!m_CustomDelim.empty()) {
-//!             tabinfo.SetCustomDelim(m_CustomDelim);
-//!         }
-//! ```
 
 use std::io::{self, Write};
 
@@ -97,19 +81,8 @@ use TabularField::*;
 /// The field names of `-outfmt` (`sc_FormatSpecifiers`) and the names of outfmt 7's
 /// `# Fields:` line (`PrintFieldNames`), by field.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:47-198
-/// ```c++
-/// const SFormatSpec sc_FormatSpecifiers[kNumTabularOutputFormatSpecifiers] = {
-///     SFormatSpec("qseqid",
-///                 "Query Seq-id",
-///                 eQuerySeqId),
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:44-198
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1111-1236
-/// ```c++
-///         switch (*iter) {
-///         case eQuerySeqId:
-///             m_Ostream << "query id"; break;
-/// ```
 const FIELDS: [(&str, TabularField, &str); 50] = [
     ("qseqid", QuerySeqId, "query id"),
     ("qgi", QueryGi, "query gi"),
@@ -170,12 +143,6 @@ const FIELDS: [(&str, TabularField, &str); 50] = [
 /// The fields of `std` and of a list without a known field.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-43
-/// ```c++
-/// const char* kDfltArgTabularOutputFmt =
-///     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-///     "evalue bitscore";
-/// const char* kDfltArgTabularOutputFmtTag("std");
-/// ```
 pub const STD_FIELDS: [TabularField; 12] = [
     QueryAccessionVersion,
     SubjectAccessionVersion,
@@ -226,30 +193,6 @@ impl TabularField {
 /// NCBI's field list of a custom specification (`x_SetFieldsToShow`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:70-99
-/// ```c++
-///     vector<string> format_tokens;
-///     NStr::Split(format, " ", format_tokens);
-///
-///     if (format_tokens.empty())
-///         x_AddDefaultFieldsToShow();
-///
-///     ITERATE (vector<string>, iter, format_tokens) {
-///         if (*iter == kDfltArgTabularOutputFmtTag)
-///             x_AddDefaultFieldsToShow();
-///         else if ((*iter)[0] == '-') {
-///             string field = (*iter).substr(1);
-///             if (m_FieldMap.count(field) > 0)
-///                 x_DeleteFieldToShow(m_FieldMap[field]);
-///         } else {
-///             if (m_FieldMap.count(*iter) > 0)
-///                 x_AddFieldToShow(m_FieldMap[*iter]);
-///         }
-///     }
-///
-///     if (m_FieldsToShow.empty()) {
-///         x_AddDefaultFieldsToShow();
-///     }
-/// ```
 pub fn parse_fields(spec: &str) -> Vec<TabularField> {
     let mut fields: Vec<TabularField> = Vec::new();
     let add = |fields: &mut Vec<TabularField>, field| {
@@ -279,28 +222,6 @@ pub fn parse_fields(spec: &str) -> Vec<TabularField> {
 /// NCBI's check that a custom delimiter is not the separator of a field's entries.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2753-2792
-/// ```c++
-/// static void s_ValidateCustomDelim(const string& customFmtSpec,const string& customDelim)
-/// {
-///     bool error = false;
-///     string checkfield;
-///     auto custom_fmt_spec = NStr::TruncateSpaces(customFmtSpec);
-///     if(custom_fmt_spec.empty()) return;
-///
-///     //Check if delim is already used
-///     const string kFieldsWithSemicolSeparator = "sallseqid staxids sscinames scomnames sblastnames sskingdoms";//sep = ";"
-///     const string kFramesField = "frames"; //sep = "/"
-///     const string kAllTitlesField ="salltitles"; //sep = "<>""
-///
-///     if(customDelim == ";") {
-///         ...
-///             if(NStr::Find(custom_fmt_spec,tokens[i]) != NPOS) {
-///     ...
-///     if(error) {
-///         string msg("Your custom record separator (" + customDelim + ") is also used by the format specifier (" + checkfield +
-///                                                                 ") to separate multiple entries. Please use a different record separator (delim keyword).");
-///         NCBI_THROW(CInputException, eInvalidInput, msg);
-/// ```
 /// Returns NCBI's message; the field list (`spec`) is searched as text, as NCBI does.
 pub fn custom_delimiter_conflict(spec: &str, delimiter: &str) -> Option<String> {
     let spec = crate::ncbi_str::truncate_spaces(spec.as_bytes());
@@ -415,12 +336,6 @@ impl SubjectFetch {
 // first; `CBlastTabularInfo::x_SetQueryCovSubject`, tabular.cpp:707-719, writes it on the later
 // rows of the same FASTA id and `N/A` on the others).
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:808-811
-// ```c++
-//     // Extract the full list of subject ids
-//     bool setSubjectIds = (x_IsFieldRequested(eSubjectAllSeqIds) ||
-//     					  x_IsFieldRequested(eSubjectAllGis) ||
-//                           x_IsFieldRequested(eSubjectAllAccessions));
-// ```
 /// The subject ids that a tabular report prints of those that NCBI's `GetSeqIdList` makes, in
 /// which the first word of the subject Bioseq's generated title can replace an id
 /// (`ParsedSubject::check_printed_word`): `sseqid`, `sacc` and `saccver` of the subject (the
@@ -478,10 +393,42 @@ impl TabularNeeds {
 }
 
 impl TabularSpec {
-    /// The tabular report of `format` with the custom specification of `choice`, or `None` for
-    /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which BLASTX writes with `std`'s spec and the other programs with their own writers.
-    pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:186-189
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:183-186
+    /// The tabular report of `format` with the custom specification of `choice` as the formatter
+    /// of `app`'s application writes it, or `None` for a format that is not tabular and for the
+    /// default outfmt 6 and 7 (the `std` fields and a tab), which BLASTX writes with `std`'s spec
+    /// and the other programs with their own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
+    /// tblastx hand `-outfmt`'s custom delimiter to their formatter (`SetCustomDelimiter`,
+    /// blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266, tblastx_app.cpp:169);
+    /// psiblast's, rpsblast's and rpstblastn's never do, so their reports keep the format's own
+    /// delimiter, the tab or the comma (blast_format.cpp:783-785 above), and a `delim=` with the
+    /// `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=` is still checked
+    /// against the fields (`custom_delimiter_conflict`). The one reading of a tabular `-outfmt`
+    /// value, of the command line and the library, for every program: no other function makes a
+    /// spec of a format choice.
+    pub fn of_app(
+        format: ReportFormat,
+        choice: &FormatChoice,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Option<Self> {
+        use crate::report::archive::options::RequestKind;
+        let delimiter = match app {
+            RequestKind::Psiblast | RequestKind::Rpsblast | RequestKind::Rpstblastn => "",
+            RequestKind::Blastn
+            | RequestKind::Blastp
+            | RequestKind::Blastx
+            | RequestKind::Tblastn
+            | RequestKind::PsiTblastn
+            | RequestKind::Tblastx => &choice.delimiter,
+        };
+        Self::of_fields(format, &choice.spec, delimiter)
+    }
+
+    /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
+    fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
@@ -497,12 +444,13 @@ impl TabularSpec {
             }
             _ => return None,
         };
-        let fields = parse_fields(&choice.spec);
-        let delimiter = if choice.delimiter.is_empty() {
-            default_delimiter.to_string()
+        let fields = parse_fields(spec);
+        let delimiter = if delimiter.is_empty() {
+            default_delimiter
         } else {
-            choice.delimiter.clone()
-        };
+            delimiter
+        }
+        .to_string();
         let default_report = matches!(kind, TabularKind::Tabular | TabularKind::Commented)
             && fields == STD_FIELDS
             && delimiter == "\t";
@@ -514,16 +462,10 @@ impl TabularSpec {
     }
 
     /// The default report of outfmt 6 or 7 (`commented`): the `std` fields and a tab, for which
-    /// `of` gives `None` (BLASTX writes it with this module as any field list,
+    /// `of_app` gives `None` (BLASTX writes it with this module as any field list,
     /// `algorithm::blastx::args::ResolvedOptions::tabular_report`). Made once per process.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81
-    /// ```c++
-    ///     NStr::Split(format, " ", format_tokens);
-    ///
-    ///     if (format_tokens.empty())
-    ///         x_AddDefaultFieldsToShow();
-    /// ```
     pub fn std(commented: bool) -> &'static TabularSpec {
         static TABULAR: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
         static COMMENTED: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
@@ -576,24 +518,6 @@ impl TabularSpec {
     /// Seq-align has no `hsp_percent_coverage`): one of the query's id fields or `qcovhsp`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:778-800
-    /// ```c++
-    ///     if (x_IsFieldRequested(eQuerySeqId) || x_IsFieldRequested(eQueryGi) ||
-    ///         x_IsFieldRequested(eQueryAccession) ||
-    ///         x_IsFieldRequested(eQueryAccessionVersion) ||
-    ///         x_IsFieldRequested(eQueryCovSeqalign)) {
-    ///         try {
-    ///             ...
-    ///             x_SetQueryCovSeqalign(align, m_QueryLength);
-    ///         } catch (const CException&) {
-    ///             list<CRef<CSeq_id> > query_ids;
-    ///             CRef<CSeq_id> id(new CSeq_id());
-    ///             id->Assign(align.GetSeq_id(0));
-    ///             query_ids.push_back(id);
-    ///             SetQueryId(query_ids);
-    ///             bioseqs_found = false;
-    ///         }
-    ///     }
-    /// ```
     pub fn reads_query(&self) -> bool {
         self.has_any(&[
             QuerySeqId,
@@ -610,18 +534,6 @@ impl TabularSpec {
     /// an `slen` of 0 without one of them.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-842
-    /// ```c++
-    ///     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
-    ///        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
-    ///     {
-    ///         try {
-    ///        		const CBioseq_Handle& subject_bh =
-    ///                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    ///             if(setSubjectId) {
-    ///             	SetSubjectId(subject_bh);
-    ///             }
-    ///             m_SubjectLength = subject_bh.GetBioseqLength();
-    /// ```
     pub fn reads_subject_bioseq(&self) -> bool {
         self.has_any(&[
             SubjectAllSeqIds,
@@ -654,17 +566,6 @@ impl TabularSpec {
     /// `x_ResetFields`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
-    /// ```c++
-    ///     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-    ///         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-    ///         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-    ///         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-    ///         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-    ///         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
-    ///         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
-    ///         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-    ///         x_IsFieldRequested(eSubjectStrand)) {
-    /// ```
     /// Inline, and the count by reference so that it is read only where the condition reaches it:
     /// `TabularWriter::row` evaluates it for every row as the expression it replaced (no NCBI
     /// counterpart: code placement only).
@@ -690,41 +591,26 @@ impl TabularSpec {
         ]) || (self.has(NumIdentical) && *num_ident > 0)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837 and 973-980
-    // ```c++
-    //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
-    //        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
-    //     {
-    //         try {
-    //        		const CBioseq_Handle& subject_bh =
-    //     ...
-    //     if (x_IsFieldRequested(eQuerySeq) ||
-    //         x_IsFieldRequested(eSubjectSeq) ||
-    //         x_IsFieldRequested(ePositives) ||
-    //         x_IsFieldRequested(ePercentPositives) ||
-    //         x_IsFieldRequested(eBTOP) ||
-    //         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
-    //         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
-    //         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
+    /// Whether NCBI's formatter reads the query's and the subject's letters for a row of this field
+    /// list (`CAlnVec::GetWholeAlnSeqString`) in psiblast, whose formatter fetches sequences
+    /// (`kNoFetchSequence` is false): `qseq`, `sseq`, `positive`, `ppos`, `btop`, `nident`,
+    /// `mismatch` and `pident`, and so the default fields.
+    pub fn reads_sequences(&self) -> bool {
+        self.has_any(&[
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+            NumIdentical,
+            Mismatches,
+            PercentIdentical,
+        ])
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837,973-980 and 973-980
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908,915,1078-1082
-    // ```c++
-    //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-    //         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-    //         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-    //         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-    //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-    //     ...
-    //         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-    //         x_IsFieldRequested(eSubjectStrand)) {
-    //     ...
-    //     const bool kTranslated = align.GetSegs().IsStd();
-    //     ...
-    //         if (x_IsFieldRequested(eSubjFrame) || x_IsFieldRequested(eFrames)) {
-    //             subject_frame = CAlignFormatUtil::
-    //                 GetFrame (s_start - 1, ds.GetSeqStrand(kSubjectRow),
-    //                           scope.GetBioseqHandle(align.GetSeq_id(1)));
-    // ```
     /// Which of `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
     /// taxonomy where no prefetch loaded it before (`PRE_FETCH_SEQS_LIMIT`): every row for the
     /// subject's ids, taxonomy, titles and strand, and the alignment's letters, also for the
@@ -739,13 +625,6 @@ impl TabularSpec {
     pub fn subject_fetch(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
         use crate::blastinput::app::Program;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
-        // ```c++
-        //         try {
-        //             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
-        //             if( !handle ) continue;
-        //
-        //             const CRef<CBlast_def_line_set> bdlRef =  CSeqDB::ExtractBlastDefline(handle);
-        // ```
         // The organism report reads the Bioseq of each HSP that it does not skip.
         if self.kind == TabularKind::TaxReport {
             return SubjectFetch::Every;
@@ -815,12 +694,6 @@ impl TabularSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898
-    // ```c++
-    //     if (x_IsFieldRequested(eSubjectLength) && m_SubjectLength == 0) {
-    //         ...
-    //         m_SubjectLength = sequence::GetLength(align.GetSeq_id(1), &scope);
-    //     }
-    // ```
     /// Whether `program`'s rows read the sequence that NCBI's formatter finds by the subject's
     /// Seq-align id: its Bioseq or letters on some row ([`TabularSpec::subject_fetch`]), or its
     /// length (`slen`, which the scope looks up by that id without loading the Bioseq). A table
@@ -832,31 +705,9 @@ impl TabularSpec {
         self.subject_fetch(program) != SubjectFetch::Never || self.has(SubjectLength)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875
-    // ```c++
-    //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
-    //        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
-    //     {
-    //         try {
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    //     ...
-    //         } catch (const CException&) {
-    //             list<CRef<CSeq_id> > subject_ids;
-    //             CRef<CSeq_id> id(new CSeq_id());
-    //             id->Assign(align.GetSeq_id(1));
-    //             subject_ids.push_back(id);
-    //             SetSubjectId(subject_ids);
-    //             bioseqs_found = false;
-    //         }
-    //
-    //     }
-    //     ...
-    //     if (!bioseqs_found)
-    //         return -1;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-878
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
-    // every application, quoted at `cli::NativeError::exception`)
+    // every application, cited at `cli::NativeError::exception`)
     // Where a batch's prefetch is off, the formatter loads each row's subject by its Seq-align id
     // and a lookup that throws on a file throws at each such load (probe of line DBID pfoff-2,
     // `R/pfoff/p2`; DECISIONS 62 (12)).
@@ -897,7 +748,21 @@ impl TabularSpec {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (quoted at
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1050-1055
+    /// Whether `program`'s report of this field list writes what it writes with a readable
+    /// taxonomy database where every load of a database sequence with a positive taxid and every
+    /// taxid lookup throw (a file of that database does not open, `SeqDbError::TaxdbThrows`): a
+    /// table whose rows load no subject's Bioseq ([`TabularSpec::subject_fetch`]; `slen` is read
+    /// without it), and the organism report, whose `catch` leaves out each HSP whose load or lookup
+    /// throws, as it leaves out one whose taxid is not found, as LOSAT does
+    /// (`tax_report::TaxLookups`; such a lookup finds nothing, and every load that throws is of a
+    /// subject with a positive taxid, whose lookup throws too).
+    pub fn unchanged_by_load_throws(&self, program: crate::blastinput::app::Program) -> bool {
+        self.kind == TabularKind::TaxReport || self.subject_fetch(program) == SubjectFetch::Never
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (cited at
     // `report::tax_report::organism_report`: the `catch` of each HSP's load, `continue`)
     /// What the report does with a subject whose lookup throws where its batch's prefetch is off
     /// (`report::db_subject::FormatThrow`, `row_throw` of its rows, at its `throw_rows`): a table
@@ -960,21 +825,7 @@ impl TabularSpec {
     /// Whether NCBI writes the taxonomy database's warning each time it builds the report's
     /// formatter (`x_CheckTaxDB`: only for the plural names) when `taxdb.bti` is not found.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-    /// ```c++
-    /// void CBlastTabularInfo::x_CheckTaxDB()
-    /// {
-    ///    	if( x_IsFieldRequested(eSubjectSciNames) ||
-    ///     	x_IsFieldRequested(eSubjectCommonNames) ||
-    ///     	x_IsFieldRequested(eSubjectBlastNames) ||
-    ///     	x_IsFieldRequested(eSubjectSuperKingdoms))
-    ///    	{
-    ///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-    ///    		if(resolved.empty())
-    ///    			ERR_POST(Warning << "Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz");
-    ///    	}
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-135
     pub fn checks_taxdb(&self) -> bool {
         self.has_any(&[
             SubjectSciNames,
@@ -995,28 +846,6 @@ impl TabularSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:808-811,828-851
-    // ```c++
-    //     bool setSubjectIds = (x_IsFieldRequested(eSubjectAllSeqIds) ||
-    //     					  x_IsFieldRequested(eSubjectAllGis) ||
-    //                           x_IsFieldRequested(eSubjectAllAccessions));
-    //     ...
-    //     bool setSubjectId = (x_IsFieldRequested(eSubjectSeqId) ||
-    //     		 	 	 	 x_IsFieldRequested(eSubjectGi) ||
-    //     		 	 	 	 x_IsFieldRequested(eSubjectAccession) ||
-    //     		 	 	 	 x_IsFieldRequested(eSubjAccessionVersion));
-    //     ...
-    //             if(setSubjectId) {
-    //             	SetSubjectId(subject_bh);
-    //             }
-    //             m_SubjectLength = subject_bh.GetBioseqLength();
-    //
-    //             if(setSubjectIds || setSubjectTaxInfo || setSubjectTitle || setSubjectTaxInfoAll) {
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //             	if(setSubjectIds) {
-    //             		x_SetSubjectIds(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// Where `SetFields` stops for a row of a subject with the lookup `lookup`: `None` where the
     /// lookup does not fail or no field of the list makes it (the organism report writes no rows).
     pub fn failed_stage(&self, lookup: SubjectLookup<'_>) -> Option<FailedStage> {
@@ -1085,30 +914,7 @@ impl TabularSpec {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185
-// ```c++
-//     case CBlastTabularInfo::eAccession:
-//     {
-//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
-//         break;
-//     }
-//     case CBlastTabularInfo::eAccVersion:
-//     {
-//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-//         accid->GetLabel(&id_str, CSeq_id::eContent, CSeq_id::fLabel_Version);
-//         break;
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:262-268
-// ```c++
-// void CBlastTabularInfo::x_PrintSubjectTaxId()
-// {
-// 	if(m_SubjectTaxId == ZERO_TAX_ID) {
-// 		m_Ostream << NA;
-// 		return;
-// 	}
-// 	m_Ostream << m_SubjectTaxId;
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:262-272
 /// Why NCBI has no result for a tabular report of `spec` (`None`: the default fields, whose
 /// `saccver` is the first case) with a row whose subject lookups fail as `failure` says, the row
 /// being the first of its result set when `first`: `sacc` and `saccver` of the empty
@@ -1222,7 +1028,7 @@ pub fn failed_database_subject(
     match thrown {
         Some(exception) => format!(
             "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
-            exception.get_msg()
+            String::from_utf8_lossy(exception.get_msg())
         ),
         None => failed_database_title(oid),
     }
@@ -1311,18 +1117,7 @@ impl DeflineIds {
     /// `FastaRecord::shown_id`), as `word`. `GetSeqIdList`, which makes `sseqid`, does not run
     /// there, so a title that `GenerateDefline` changes (`Subject_4.`) keeps its first word.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:557-564
-    /// ```c++
-    ///     } else {
-    ///         // Blast-def-line is not filled, hence retrieve all Seq-ids directly
-    ///         // from the Bioseq handle's Seq-id.
-    ///         list<CRef<objects::CSeq_id> > subject_id_list;
-    ///         ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
-    ///             CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), m_ParseLocalIds);
-    ///             subject_id_list.push_back(next_id);
-    ///         }
-    ///         m_SubjectIds.push_back(subject_id_list);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:557-565
     pub fn of_record(word: &[u8]) -> Vec<DeflineIds> {
         vec![DeflineIds {
             id: word.to_vec(),
@@ -1346,34 +1141,7 @@ impl TabularTaxonomy {
     /// The taxonomy of a database sequence with the definition lines `deflines`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:590-603
-    /// ```c++
-    ///     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    ///     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    ///             if((*itr)->IsSetTaxid()) {
-    ///                     if((*itr)->GetTaxid() != ZERO_TAX_ID) {
-    ///                     	m_SubjectTaxId = (*itr)->GetTaxid();
-    ///                     	break;
-    ///                     }
-    ///             }
-    ///     	}
-    ///     }
-    ///
-    ///     if(m_SubjectTaxId == ZERO_TAX_ID) {
-    ///           m_SubjectTaxId = sequence::GetTaxId(handle);
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:647-655
-    /// ```c++
-    ///     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    ///     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    ///     		CBlast_def_line::TTaxIds t = (*itr)->GetTaxIds();
-    ///     		m_SubjectTaxIds.insert(t.begin(), t.end());
-    ///     	}
-    ///     }
-    ///
-    ///     if(m_SubjectTaxIds.empty()) {
-    ///             CSeqdesc_CI desc_s(handle, CSeqdesc::e_Source);
-    /// ```
     /// The fallbacks read the Bioseq's sources, which the BLAST database loader makes of the
     /// definition lines' positive `taxid` members only (`CSeqDBVol::x_GetTaxonomy`), so they add
     /// nothing that the definition lines did not give.
@@ -1403,21 +1171,6 @@ impl TabularTaxonomy {
 /// database.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:669-695
-/// ```c++
-///             for(; itr !=  m_SubjectTaxIds.end(); ++itr) {
-///             	try {
-///                     SSeqDBTaxInfo taxinfo;
-///                     CSeqDB::GetTaxInfo(*itr, taxinfo);
-///                     m_SubjectSciNames.push_back(taxinfo.scientific_name);
-///                     m_SubjectCommonNames.push_back(taxinfo.common_name);
-///                     if(s_IsValidName(taxinfo.blast_name))
-///                             m_SubjectBlastNames.insert(taxinfo.blast_name);
-///
-///                     if(s_IsValidName(taxinfo.s_kingdom))
-///                             m_SubjectSuperKingdoms.insert(taxinfo.s_kingdom);
-///
-///             	} catch (const CException&) {
-/// ```
 #[derive(Debug)]
 pub struct TabularNames {
     /// The program's name in lower case, as NCBI's messages show it.
@@ -1601,33 +1354,7 @@ impl TabularSubject<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
-// ```c++
-//         if (((*itr)->IsGeneral() &&
-//             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-//             != string::npos) ||
-// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-//             vector<string> title_tokens;
-//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-875
-// ```c++
-//         } catch (const CException&) {
-//             list<CRef<CSeq_id> > subject_ids;
-//             CRef<CSeq_id> id(new CSeq_id());
-//             id->Assign(align.GetSeq_id(1));
-//             subject_ids.push_back(id);
-//             SetSubjectId(subject_ids);
-//             bioseqs_found = false;
-//         }
-//
-//     }
-//
-//     // If Bioseq has not been found for one or both of the sequences, all
-//     // subsequent computations cannot proceed. Hence don't set any of the other
-//     // fields.
-//     if (!bioseqs_found)
-//         return -1;
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-878
 /// Whether NCBI's `GetSeqIdList` makes a subject's tabular ids, or throws: it puts the first word
 /// of the subject Bioseq's generated title in the place of a `gnl|BL_ORD_ID` id or an id with
 /// `lcl|Subject_`, and `GenerateDefline` throws for a title in no encoding that
@@ -1674,7 +1401,7 @@ impl FailedLookup<'_> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875 (cited at
 // `TabularSpec::row_throw`)
 /// A subject whose load by its Seq-align id throws where the query's batch has its prefetch off
 /// (`SubjectLookup::Throws`; `report::db_subject::HitLoad::Throws`): the Seq-align id that the
@@ -1761,29 +1488,7 @@ fn kept_by_failed_row(field: TabularField) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:780-786
-// ```c++
-//         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-//         if(!m_CustomDelim.empty()) {
-//             tabinfo.SetCustomDelim(m_CustomDelim);
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:101-114
-// ```c++
-// void CBlastTabularInfo::x_ResetFields()
-// {
-//     m_QueryLength = m_SubjectLength = 0U;
-//     m_Score = m_AlignLength = m_NumGaps = m_NumGapOpens = m_NumIdent =
-//     m_NumPositives = m_QueryStart = m_QueryEnd = m_SubjectStart =
-//     m_SubjectEnd = m_QueryFrame = m_SubjectFrame = 0;
-//     m_BitScore = NcbiEmptyString;
-//     m_Evalue = NcbiEmptyString;
-//     m_QuerySeq = NcbiEmptyString;
-//     m_SubjectSeq = NcbiEmptyString;
-//     m_BTOP = NcbiEmptyString;
-//     m_SubjectStrand = NcbiEmptyString;
-//     m_QueryCovSeqalign = -1;
-// }
-// ```
 /// What NCBI's formatter of one result set (a query's report, or a psiblast round's: one
 /// `CBlastTabularInfo` each) keeps from row to row: the subject ids of `sall*` (`m_SubjectIds`,
 /// to which a row whose lookup fails adds its Seq-align id) and the fields that such a row leaves
@@ -1828,7 +1533,7 @@ impl TabularRows {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875
-    // (quoted at `TabularSpec::row_throw`: the subject block's `catch`, `return -1`)
+    // (cited at `TabularSpec::row_throw`: the subject block's `catch`, `return -1`)
     /// Writes the default fields' row (outfmt 6 and 7 without a field list,
     /// `outfmt6::write_hit_fields_bytes`) of the query `query_id` whose subject's load throws where
     /// its batch's prefetch is off (`report::db_subject::HitLoad::Throws`): the catch of the
@@ -1925,8 +1630,38 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 
 const NA: &[u8] = b"N/A";
 
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:548
+/// The exception that ends a tabular report at its first row when the query's Bioseq has the
+/// molecule `other` (psiblast's `-in_msa` with `[molecule=other]`, or `-in_pssm` of such a PSSM):
+/// the object manager reads the query's letters of the coding number `coding` (iupacaa 2, ncbieaa 8,
+/// ncbistdaa 10) as the coding of a nucleotide sequence
+/// (`Incompatible sequence codings: <coding> -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
+/// are read ([`TabularSpec::reads_sequences`]). The report's text before the row stays; the run
+/// ends with NCBI's exception (exit status 255).
+pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiException {
+    crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/objmgr/seq_vector_ci.cpp",
+            line: 548,
+            kind: "CSeqVectorException::eCodingError",
+            function: Some("ncbi::objects::CSeqVector_CI::x_FillCache"),
+        },
+        format!("Incompatible sequence codings: {coding} -> 1"),
+    )
+}
+
+/// The end of a report at a row that reads the letters of a query whose molecule is `other`
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
+/// flushed, and the exception is the run's error.
+pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
+    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
-// every application, quoted at `cli::NativeError::exception`)
+// every application, cited at `cli::NativeError::exception`)
 /// The end of the run at a row whose subject's load throws outside the subject block
 /// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`,
 /// ends the reads (`end_reads`: `QueryWarnings::end_run`, `ReadCursor::end_run`; NCBI loads
@@ -1963,29 +1698,9 @@ impl<'a> TabularWriter<'a> {
     /// `utils::matrix::protein_display_score`), not the XML's `CBlastFormattingMatrix`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
-    /// ```c++
-    ///     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-830
-    /// ```c++
-    ///                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
-    /// ```c++
-    ///                     if (matrix && !matrix->GetData().empty() &&
-    ///                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
-    ///                         ++num_positives;
-    ///                     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449
-    /// ```c++
-    /// inline void CBlastTabularInfo::x_PrintPercentPositives(void)
-    /// {
-    ///     double perc_positives =
-    ///         (m_AlignLength > 0 ? ((double)m_NumPositives)/m_AlignLength * 100 : 0);
-    ///     m_Ostream << NStr::DoubleToString(perc_positives, 2);
-    /// }
-    /// ```
     /// The count of the positives is read only by `positive` and `ppos` (`x_PrintNumPositives`,
     /// `x_PrintPercentPositives`): the writer of a report without them keeps no matrix, so its
     /// rows score no pair of letters (the same bytes; decided once for the writer, not per row).
@@ -2033,13 +1748,6 @@ impl<'a> TabularWriter<'a> {
     /// round after the program's.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1294-1298
-    /// ```c++
-    ///     m_Ostream << "# ";
-    ///     m_Ostream << program_version << "\n";
-    ///
-    ///     if (iteration != numeric_limits<unsigned int>::max())
-    ///         m_Ostream << "# Iteration: " << iteration << "\n";
-    /// ```
     pub fn round_query_header(
         &self,
         out: &mut dyn Write,
@@ -2145,40 +1853,7 @@ impl<'a> TabularWriter<'a> {
     /// and the kept members of the result set (`TabularRows`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:771-797
-    /// ```c++
-    ///     if (x_IsFieldRequested(eQuerySeqId) || x_IsFieldRequested(eQueryGi) ||
-    ///         x_IsFieldRequested(eQueryAccession) ||
-    ///         x_IsFieldRequested(eQueryAccessionVersion) ||
-    ///         x_IsFieldRequested(eQueryCovSeqalign)) {
-    ///         try {
-    ///             // FIXME: do this only if the query has changed
-    ///             const CBioseq_Handle& query_bh =
-    ///                 scope.GetBioseqHandle(align.GetSeq_id(0));
-    ///             SetQueryId(query_bh);
-    ///             if(m_QueryRange.NotEmpty())
-    ///             	m_QueryLength = m_QueryRange.GetLength();
-    ///             else
-    ///             	m_QueryLength = query_bh.GetBioseqLength();
-    ///             x_SetQueryCovSeqalign(align, m_QueryLength);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-194
-    /// ```c++
-    ///     case CBlastTabularInfo::eAccession:
-    ///     {
-    ///         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-    ///         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
-    ///         break;
-    ///     }
-    ///     ...
-    ///     case CBlastTabularInfo::eGi:
-    ///         id_str = NStr::NumericToString(FindGi(id));
-    ///         break;
-    ///     default: break;
-    ///     }
-    ///
-    ///     if (id_str == NcbiEmptyString)
-    ///         id_str = "Unknown";
-    /// ```
     /// `sseqid` of the empty `m_SubjectId` (`SetSubjectId` threw) is `Unknown` and `sgi` 0;
     /// `sacc` and `saccver` read a null `FindBestChoice` (NCBI stops: `failed_lookup_stop`, before
     /// the report), so no row of this writer prints them. Where only `x_SetSubjectIds` threw, the
@@ -2406,16 +2081,6 @@ impl<'a> TabularWriter<'a> {
                 SubjectAccessionVersion => out.extend_from_slice(subject.accession_version),
                 SubjectGi => push_num(out, subject.gi),
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
-                // ```c++
-                // void CBlastTabularInfo::x_PrintSubjectAllSeqIds(void)
-                // {
-                //     ITERATE(vector<list<CRef<CSeq_id> > >, iter, m_SubjectIds) {
-                //         if (iter != m_SubjectIds.begin())
-                //             m_Ostream << ";";
-                //         m_Ostream << s_GetSeqIdListString(*iter, eFullId);
-                //     }
-                // }
-                // ```
                 // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264)
                 // are the same loop with `eGi` and `eAccession`.
                 SubjectAllSeqIds | SubjectAllGis | SubjectAllAccessions => {
@@ -2446,10 +2111,7 @@ impl<'a> TabularWriter<'a> {
                     format_percent_identity_ncbi(num_ident, hsp.length, 3).as_bytes(),
                 ),
                 NumIdentical => push_num(out, num_ident),
-                // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:543-547
-                // ```c++
-                //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
-                // ```
+                // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
                 Mismatches => push_num(out, hsp.length as i64 - num_ident as i64 - hsp.gaps as i64),
                 Positives => push_num(out, positives),
                 GapOpenings => push_num(out, hsp.gap_opens),
@@ -2475,13 +2137,7 @@ impl<'a> TabularWriter<'a> {
                 | SubjectBlastNames | SubjectSuperKingdoms | SubjectTitle | SubjectAllTitles => {
                     self.subject_field(out, *field, subject, &names)
                 }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1064-1070
-                // ```c++
-                //         	if(!subject_is_na)
-                //         		m_SubjectStrand = NA;
-                //         	else
-                //         		m_SubjectStrand = ((s_start - s_end) > 0 )? "minus":"plus";
-                // ```
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1063-1070
                 SubjectStrand => out.extend_from_slice(if !subject.nucleotide {
                     NA
                 } else if hsp.s_start - hsp.s_end > 0 {
@@ -2528,31 +2184,6 @@ impl<'a> TabularWriter<'a> {
             // plural names `N/A`; the scientific, common and blast names are quoted in a CSV
             // (`NStr::Quote`, so `N/A` too and an empty name not), the super kingdoms never.
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:337-359
-            // ```c++
-            // void CBlastTabularInfo::x_PrintSubjectSciName()
-            // {
-            // 	if(m_SubjectSciName == kEmptyStr) {
-            // 		m_Ostream << NA;
-            // 		return;
-            // 	}
-            // 	m_Ostream << (x_IsCsv() ? NStr::Quote(m_SubjectSciName) : m_SubjectSciName);
-            // }
-            //
-            // void CBlastTabularInfo::x_PrintSubjectSciNames()
-            // {
-            //     CNcbiOstrstream oss;
-            // 	if(m_SubjectSciNames.empty()) {
-            // 		oss << NA;
-            // 	} else {
-            //         ITERATE(vector<string>, iter, m_SubjectSciNames) {
-            //              if (iter != m_SubjectSciNames.begin())
-            //                  oss << ";";
-            //              oss << *iter;
-            //         }
-            //     }
-            //     const string output = CNcbiOstrstreamToString(oss);
-            //     m_Ostream << (x_IsCsv() ? NStr::Quote(output) : output);
-            // ```
             SubjectSciName | SubjectCommonName | SubjectBlastName | SubjectSuperKingdom => {
                 let name = match field {
                     SubjectSciName => names.sci,
@@ -2587,47 +2218,6 @@ impl<'a> TabularWriter<'a> {
                 }
             }
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
-            // ```c++
-            // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
-            // {
-            // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-            // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-            // 	{
-            // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-            // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
-            // 		for(; iter != defline.end(); ++iter)
-            // 		{
-            // 			if (iter != defline.begin())
-            // 						 m_Ostream << "<>";
-            //
-            // 			if((*iter)->IsSetTitle())
-            // 			{
-            // 				if((*iter)->GetTitle().empty())
-            // 					m_Ostream << NA;
-            // 				else
-            // 					m_Ostream << (*iter)->GetTitle();
-            // 			}
-            // 			else
-            // 				m_Ostream << NA;
-            // 		}
-            // 	}
-            // 	else
-            // 		m_Ostream << NA;
-            //
-            // }
-            //
-            // void CBlastTabularInfo::x_PrintSubjectTitle()
-            // ...
-            // 			if(defline.front()->IsSetTitle())
-            // 			{
-            // 				if(defline.front()->GetTitle().empty())
-            // 					m_Ostream << NA;
-            // 				else
-            // 					m_Ostream << defline.front()->GetTitle();
-            // 			}
-            // 			else
-            // 				m_Ostream << NA;
-            // ```
             // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
             // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
             // `N/A`.
@@ -2686,30 +2276,6 @@ fn push_defline_id(out: &mut Vec<u8>, field: TabularField, ids: &DeflineIds) {
 /// scientific and common names with `N/A` so that their list matches the taxids.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:612-633
-/// ```c++
-///         try {
-///         	SSeqDBTaxInfo taxinfo;
-///             CSeqDB::GetTaxInfo(m_SubjectTaxId, taxinfo);
-///             m_SubjectSciName = taxinfo.scientific_name;
-///             m_SubjectCommonName = taxinfo.common_name;
-///             if(s_IsValidName(taxinfo.blast_name)) {
-///             	m_SubjectBlastName = taxinfo.blast_name;
-///             }
-///
-///             if(s_IsValidName(taxinfo.s_kingdom)) {
-///             	m_SubjectSuperKingdom = taxinfo.s_kingdom;
-///             }
-///
-///         } catch (const CException&) {
-///         	//only put fillers in if we are going to show tax id
-///             // the fillers are put in so that the name list would
-///             // match the taxid list
-///             if(x_IsFieldRequested(eSubjectTaxIds) ) {
-///             	m_SubjectSciName = NA;
-///                 m_SubjectCommonName = NA;
-///             }
-///         }
-/// ```
 #[derive(Default)]
 struct RowNames<'a> {
     sci: &'a [u8],
@@ -2800,22 +2366,6 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 /// The BTOP string of two rows.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1001-1027
-/// ```c++
-///             for (unsigned int i = 0;
-///                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
-///                  ++i) {
-///                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
-///                     ++num_ident;
-///                     ++num_positives;
-///                     ++num_matches;
-///                 } else {
-///                     if(num_matches > 0) {
-///                         btop_string +=  NStr::Int8ToString(num_matches);
-///                         num_matches=0;
-///                     }
-///                     btop_string += m_QuerySeq[i];
-///                     btop_string += m_SubjectSeq[i];
-/// ```
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
 /// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
 /// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
@@ -2878,13 +2428,6 @@ fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
-// ```c++
-//         alnVec->SetGapChar('-');
-//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-//         alnVec->SetGenCode(m_DbGeneticCode, 1);
-//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-// ```
 /// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
 /// the tabular writer does not set) for its end gaps (`end_gap_span`, whose `-` is no residue of
 /// `stored`: `TabularHsp::stored_gaps`), where it has some (`end_gaps`, `TabularHsp::end_gaps`).
@@ -2909,17 +2452,7 @@ fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool, stored: &[u
 /// (inclusive, 0-based, any order): the length of their union in percent of `query_length`,
 /// 0.5 added below 99, cut to an integer; -1 (`N/A`) when nothing is covered.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:629-640
-/// ```c++
-///        	if((check_type & eQueryCovPerSubj)) {
-///        		int master_coverage = align_format::CAlignFormatUtil::GetMasterCoverage(tmp_align_set);
-///        		if (master_coverage)
-///         	{
-///            		double subj_coverage = 100.0 * (double) master_coverage/ (double) query_len;
-///            		if(subj_coverage < 99)
-///            			subj_coverage +=0.5;
-///            		(*left_it)->SetNamedScore ("seq_percent_coverage", (int) subj_coverage);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:629-643
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2940-2985
 /// (`s_MergeRangeList`: sorted by start, a range that intersects the last is merged).
 pub fn coverage_percent(covered: usize, query_length: usize) -> i32 {
@@ -2963,1132 +2496,5 @@ pub fn hsp_coverage(query_span: i32, query_length: i32) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fields_follow_ncbis_rules() {
-        assert_eq!(parse_fields(""), STD_FIELDS.to_vec());
-        assert_eq!(parse_fields("bogus"), STD_FIELDS.to_vec());
-        assert_eq!(
-            parse_fields("qseqid  sseqid qseqid -qseqid evalue"),
-            vec![SubjectSeqId, Evalue]
-        );
-        let mut std_less = STD_FIELDS.to_vec();
-        std_less.retain(|field| *field != Evalue);
-        std_less.push(QueryCovHsp);
-        assert_eq!(parse_fields("std -evalue qcovhsp"), std_less);
-        for (index, (name, field, _)) in FIELDS.iter().enumerate() {
-            assert_eq!(*field as usize, index);
-            assert_eq!(TabularField::from_name(name), Some(*field));
-        }
-    }
-
-    // Line DBID P1: with NCBI's prefetch off, the rows read the subject's Bioseq (and look its
-    // taxids up) only for these fields (review 1 of P1, field by field against NCBI 2.17.0); P2
-    // (review 1): in the translated programs also for the subject's frame with a coordinate; L1
-    // (review 2 of P2): `nident` without another field of the block only on rows with identities.
-    #[test]
-    fn rows_read_the_subject_for_its_ids_taxonomy_titles_strand_and_letters() {
-        use crate::blastinput::app::Program;
-        let spec = |fields: &str| TabularSpec {
-            kind: TabularKind::Tabular,
-            fields: parse_fields(fields),
-            delimiter: "\t".into(),
-        };
-        let fetch = |fields: &str, no_fetch: bool| {
-            spec(fields).subject_fetch(if no_fetch {
-                Program::Blastn
-            } else {
-                Program::Blastp
-            })
-        };
-        for (fields, translated) in [
-            ("qseqid sframe", SubjectFetch::Never),
-            ("qseqid frames qcovs", SubjectFetch::Never),
-            ("qseqid sstart sframe", SubjectFetch::Every),
-            ("qseqid qframe frames", SubjectFetch::Every),
-            ("qseqid length sframe", SubjectFetch::Every),
-            ("qseqid qstart qframe slen", SubjectFetch::Never),
-            ("qseqid nident sframe", SubjectFetch::WithIdentities),
-            ("qseqid nident frames sstart", SubjectFetch::Every),
-        ] {
-            for program in [Program::Blastx, Program::Tblastn, Program::Tblastx] {
-                assert_eq!(spec(fields).subject_fetch(program), translated, "{fields}");
-            }
-            let protein = match translated {
-                SubjectFetch::Every if !fields.contains("nident") => SubjectFetch::Never,
-                fetch => fetch,
-            };
-            assert_eq!(
-                spec(fields).subject_fetch(Program::Blastp),
-                protein,
-                "{fields}"
-            );
-            assert_eq!(
-                spec(fields).subject_fetch(Program::Blastn),
-                SubjectFetch::Never,
-                "{fields}"
-            );
-        }
-        for fields in [
-            "qseqid evalue",
-            "qseqid qacc qlen slen qstart qend sstart send evalue bitscore score length gaps gapopen",
-            "qseqid qframe sframe frames qcovs qcovhsp qcovus",
-        ] {
-            assert_eq!(fetch(fields, false), SubjectFetch::Never, "{fields}");
-        }
-        for fields in [
-            "std",
-            "qseqid sseqid",
-            "qseqid sallacc",
-            "qseqid staxid",
-            "qseqid sskingdoms",
-            "qseqid salltitles",
-            "qseqid sstrand",
-            "qseqid sseq",
-            "qseqid btop",
-            "qseqid ppos",
-            "qseqid nident sseqid",
-        ] {
-            assert_eq!(fetch(fields, false), SubjectFetch::Every, "{fields}");
-            assert_eq!(fetch(fields, true), SubjectFetch::Every, "{fields}");
-        }
-        for fields in ["qseqid mismatch", "qseqid pident", "qseqid nident length"] {
-            assert_eq!(fetch(fields, false), SubjectFetch::Every, "{fields}");
-            assert_eq!(fetch(fields, true), SubjectFetch::Never, "{fields}");
-        }
-        for fields in ["qseqid nident", "nident evalue qcovs slen"] {
-            assert_eq!(
-                fetch(fields, false),
-                SubjectFetch::WithIdentities,
-                "{fields}"
-            );
-            assert_eq!(fetch(fields, true), SubjectFetch::Never, "{fields}");
-        }
-        assert!(!SubjectFetch::WithIdentities.reads(0) && SubjectFetch::WithIdentities.reads(1));
-        assert!(SubjectFetch::Every.reads(0) && !SubjectFetch::Never.reads(1));
-    }
-
-    // Line DBID tabfields: a table reads the sequence that NCBI finds by the subject's Seq-align
-    // id where its rows read the Bioseq or letters, or its length (`slen`); NCBI 2.17.0 writes
-    // every other list the same for a subject it finds as another sequence or not at all (probe
-    // `blastdb-ids-20261021/R/tabfields`).
-    #[test]
-    fn tables_read_the_found_sequence_for_the_bioseq_its_letters_and_slen() {
-        use crate::blastinput::app::Program;
-        let spec = |fields: &str| TabularSpec {
-            kind: TabularKind::Tabular,
-            fields: parse_fields(fields),
-            delimiter: "\t".into(),
-        };
-        let all = [
-            Program::Blastp,
-            Program::Blastn,
-            Program::Blastx,
-            Program::Tblastn,
-            Program::Tblastx,
-        ];
-        assert!(all.iter().all(|&program| reads_subject(None, program)));
-        for fields in [
-            "qseqid evalue",
-            "qseqid qlen qstart qend sstart send evalue bitscore score length gaps gapopen qcovhsp",
-            "qseqid qcovs qcovus",
-        ] {
-            for program in all {
-                assert!(!spec(fields).reads_subject(program), "{fields} {program:?}");
-                assert!(!reads_subject(Some(&spec(fields)), program), "{fields}");
-            }
-        }
-        for fields in [
-            "std",
-            "qseqid sseqid",
-            "qseqid slen",
-            "evalue stitle",
-            "qseqid sseq",
-        ] {
-            for program in all {
-                assert!(spec(fields).reads_subject(program), "{fields} {program:?}");
-            }
-        }
-        // BLASTN's formatter counts the identities without the letters; the translated
-        // programs read the subject for its frame.
-        for fields in ["qseqid pident", "qseqid nident", "qseqid mismatch length"] {
-            assert!(!spec(fields).reads_subject(Program::Blastn), "{fields}");
-            assert!(spec(fields).reads_subject(Program::Blastp), "{fields}");
-        }
-        assert!(spec("qseqid sstart sframe").reads_subject(Program::Tblastn));
-        assert!(!spec("qseqid sstart sframe").reads_subject(Program::Blastp));
-    }
-
-    #[test]
-    fn delimiter_conflicts_are_ncbis() {
-        assert!(custom_delimiter_conflict("qseqid staxids", ";")
-            .unwrap()
-            .contains("(staxids)"));
-        assert!(custom_delimiter_conflict("std -frames", "/").is_some());
-        assert!(custom_delimiter_conflict("salltitles", "<>").is_some());
-        assert!(custom_delimiter_conflict("qseqid", ";").is_none());
-        assert!(custom_delimiter_conflict("  ", ";").is_none());
-    }
-
-    #[test]
-    fn default_reports_have_no_spec() {
-        let choice = |spec: &str, delimiter: &str| FormatChoice {
-            number: 6,
-            spec: spec.to_string(),
-            delimiter: delimiter.to_string(),
-        };
-        assert!(TabularSpec::of(ReportFormat::Tabular, &choice("", "")).is_none());
-        assert!(TabularSpec::of(ReportFormat::Tabular, &choice("std", "\t")).is_none());
-        assert!(TabularSpec::of(ReportFormat::TabularWithComments, &choice("", "")).is_none());
-        let csv = TabularSpec::of(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
-        assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
-        let piped = TabularSpec::of(ReportFormat::Tabular, &choice("std", "|")).unwrap();
-        assert_eq!(piped.delimiter, "|");
-    }
-
-    #[test]
-    fn coverage_merges_touching_ranges() {
-        assert_eq!(union_length(&mut [(10, 19), (0, 9), (30, 39)]), 30);
-        assert_eq!(union_length(&mut [(0, 9), (5, 14)]), 15);
-        assert_eq!(coverage_percent(0, 100), -1);
-        assert_eq!(coverage_percent(50, 100), 50);
-        assert_eq!(coverage_percent(995, 1000), 99);
-        assert_eq!(coverage_percent(1000, 1000), 100);
-    }
-
-    // NCBI tabular.cpp:626-633 and 693-700: without the taxonomy database's names, `staxids`
-    // brings `N/A` fillers, quoted in a CSV (the singular names only for a non-zero taxid, the
-    // plural ones once per taxid).
-    #[test]
-    fn taxonomy_names_get_ncbis_fillers() {
-        let row = |format: ReportFormat,
-                   fields: &str,
-                   taxonomy: &TabularTaxonomy,
-                   names: Option<&TabularNames>| {
-            let choice = FormatChoice {
-                number: 10,
-                spec: fields.to_string(),
-                delimiter: String::new(),
-            };
-            let spec = TabularSpec::of(format, &choice).unwrap();
-            let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
-            let subject = TabularSubject {
-                id: b"s",
-                accession: b"s",
-                accession_version: b"s",
-                gi: 0,
-                all_ids: &[],
-                length: 10,
-                titles: None,
-                taxonomy,
-                names,
-                nucleotide: true,
-                qcovs: -1,
-                qcovus: -1,
-                lookup: SubjectLookup::Found,
-                index: 0,
-            };
-            let hsp = TabularHsp {
-                q_start: 1,
-                q_end: 10,
-                s_start: 1,
-                s_end: 10,
-                evalue: 1e-5,
-                bit_score: 20.0,
-                score: 10,
-                length: 10,
-                gap_opens: 0,
-                gaps: 0,
-                num_ident: 10,
-                q_frame: 1,
-                s_frame: 1,
-                rows: None,
-                end_gaps: true,
-                stored_gaps: [&[], &[]],
-                qcovhsp: 100,
-            };
-            let mut out = Vec::new();
-            writer.row(
-                &mut out,
-                &mut TabularRows::default(),
-                &TabularQuery::local(b"q", 10),
-                &subject,
-                None,
-                &hsp,
-            );
-            String::from_utf8(out).unwrap()
-        };
-        let two = TabularTaxonomy {
-            taxid: 9606,
-            taxids: vec![9606, 10090],
-        };
-        let fields =
-            "ssciname scomname sblastname sskingdom sscinames scomnames sblastnames sskingdoms";
-        assert_eq!(
-            row(
-                ReportFormat::CommaSeparatedValues,
-                &format!("{fields} staxids"),
-                &two,
-                None
-            ),
-            "\"N/A\",\"N/A\",N/A,N/A,\"N/A;N/A\",\"N/A;N/A\",\"N/A\",N/A,9606;10090\n"
-        );
-        assert_eq!(
-            row(
-                ReportFormat::Tabular,
-                &format!("{fields} staxids"),
-                &two,
-                None
-            ),
-            "N/A\tN/A\tN/A\tN/A\tN/A;N/A\tN/A;N/A\tN/A\tN/A\t9606;10090\n"
-        );
-        assert_eq!(
-            row(ReportFormat::CommaSeparatedValues, fields, &two, None),
-            "N/A,N/A,N/A,N/A,\"N/A\",\"N/A\",\"N/A\",N/A\n"
-        );
-        let none = TabularTaxonomy {
-            taxid: 0,
-            taxids: vec![0],
-        };
-        assert_eq!(
-            row(
-                ReportFormat::CommaSeparatedValues,
-                "ssciname sscinames staxid staxids",
-                &none,
-                None
-            ),
-            "N/A,\"N/A\",N/A,0\n"
-        );
-        // NCBI tabular.cpp:612-624 and 669-680 with the names found (RESULTS.md §3 of line OF
-        // taxdb): the plural blast names and super kingdoms are sorted sets, `-` and
-        // `unclassified` are dropped, an empty common name stays empty in the plural list and is
-        // `N/A` alone; a taxid not found gets the fillers.
-        let entry = |taxid, sci: &str, common: &str, blast: &str, kingdom: &str| {
-            let names = crate::seqdb::taxdb::TaxNames {
-                taxid,
-                scientific_name: sci.into(),
-                common_name: common.into(),
-                blast_name: blast.into(),
-                super_kingdom: Ok(kingdom.into()),
-            };
-            (taxid, (Some(names), Vec::new()))
-        };
-        let found = TabularNames {
-            program: "blastp".into(),
-            open: Vec::new(),
-            opened: std::cell::Cell::new(false),
-            answers: [
-                entry(9606, "Homo sapiens", "human", "primates", "Eukaryota"),
-                entry(7777, "Quote \"x\", y; z", "", "-", "Eukaryota"),
-                entry(32630, "synthetic construct", "", "unclassified", "-"),
-            ]
-            .into_iter()
-            .collect(),
-            report: None,
-        };
-        let three = TabularTaxonomy {
-            taxid: 9606,
-            taxids: vec![7777, 9606, 10090, 32630],
-        };
-        assert_eq!(
-            row(
-                ReportFormat::CommaSeparatedValues,
-                &format!("{fields} staxids"),
-                &three,
-                Some(&found)
-            ),
-            "\"Homo sapiens\",\"human\",\"primates\",Eukaryota,\"Quote \\\"x\\\", y; z;Homo sapiens;N/A;synthetic construct\",\";human;N/A;\",\"primates\",Eukaryota,7777;9606;10090;32630\n"
-        );
-        let quote = TabularTaxonomy {
-            taxid: 7777,
-            taxids: vec![7777],
-        };
-        assert_eq!(
-            row(ReportFormat::Tabular, fields, &quote, Some(&found)),
-            "Quote \"x\", y; z\tN/A\tN/A\tEukaryota\tQuote \"x\", y; z\t\tN/A\tEukaryota\n"
-        );
-    }
-
-    // NCBI writes the texts of opening at the first lookup of the report, and a lookup's own
-    // texts at each lookup: the plural names' lookups before the singular one's.
-    #[test]
-    fn row_messages_follow_the_lookups() {
-        let spec = TabularSpec::of(
-            ReportFormat::Tabular,
-            &FormatChoice {
-                number: 6,
-                spec: "ssciname sscinames".to_string(),
-                delimiter: String::new(),
-            },
-        )
-        .unwrap();
-        let names = TabularNames {
-            program: "blastn".into(),
-            open: vec!["open".into()],
-            opened: std::cell::Cell::new(false),
-            answers: [
-                (99990, (None, vec!["offset".into()])),
-                (9606, (None, Vec::new())),
-            ]
-            .into_iter()
-            .collect(),
-            report: None,
-        };
-        let none = TabularTaxonomy::default();
-        assert!(names.row_messages(&spec, &none).is_empty());
-        let last = TabularTaxonomy {
-            taxid: 99990,
-            taxids: vec![9606, 99990],
-        };
-        assert_eq!(
-            String::from_utf8(names.row_messages(&spec, &last)).unwrap(),
-            "Error: [blastn] open\nError: [blastn] offset\nError: [blastn] offset\n"
-        );
-        assert_eq!(
-            String::from_utf8(names.row_messages(&spec, &last)).unwrap(),
-            "Error: [blastn] offset\nError: [blastn] offset\n"
-        );
-    }
-
-    // NCBI tabular.cpp:900-908 (the frames only with a field of `SetCounts`' block, `num_ident >
-    // 0` for `nident`), tabular.cpp:1003-1021 (the positives of the rows by the formatter's
-    // matrix, `GetAsciiProteinMatrix`: U and C count as C-C, a J pair not, `*` with `*` is 1)
-    // and tabular.cpp:1293-1298 (psiblast's round).
-    #[test]
-    fn protein_rows_frames_and_rounds_are_ncbis() {
-        let spec = |format: ReportFormat, fields: &str| {
-            TabularSpec::of(
-                format,
-                &FormatChoice {
-                    number: 6,
-                    spec: fields.to_string(),
-                    delimiter: String::new(),
-                },
-            )
-            .unwrap()
-        };
-        let taxonomy = TabularTaxonomy::default();
-        let subject = TabularSubject {
-            id: b"s",
-            accession: b"s",
-            accession_version: b"s",
-            gi: 0,
-            all_ids: &[],
-            length: 10,
-            titles: None,
-            taxonomy: &taxonomy,
-            names: None,
-            nucleotide: false,
-            qcovs: -1,
-            qcovus: -1,
-            lookup: SubjectLookup::Found,
-            index: 0,
-        };
-        let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
-            let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
-            let hsp = TabularHsp {
-                q_start: 1,
-                q_end: 6,
-                s_start: 1,
-                s_end: 6,
-                evalue: 1e-5,
-                bit_score: 20.0,
-                score: 10,
-                length: 6,
-                gap_opens: 0,
-                gaps: 0,
-                num_ident,
-                q_frame: 1,
-                s_frame: 1,
-                rows,
-                end_gaps: true,
-                stored_gaps: [&[], &[]],
-                qcovhsp: 100,
-            };
-            let mut out = Vec::new();
-            writer.row(
-                &mut out,
-                &mut TabularRows::default(),
-                &TabularQuery::local(b"q", 6),
-                &subject,
-                None,
-                &hsp,
-            );
-            String::from_utf8(out).unwrap()
-        };
-        let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
-        assert_eq!(row(&frames, 3, None), "q\t0/0\t0\n");
-        let counted = spec(ReportFormat::Tabular, "nident frames sframe");
-        assert_eq!(row(&counted, 0, None), "0\t0/0\t0\n");
-        assert_eq!(row(&counted, 3, None), "3\t1/1\t1\n");
-        let positives = spec(ReportFormat::Tabular, "nident positive mismatch sstrand");
-        assert_eq!(
-            row(&positives, 1, Some((b"UCJ*KA", b"CUJ*IA"))),
-            "3\t5\t3\tN/A\n"
-        );
-        assert_eq!(row(&positives, 1, Some((b"UJ", b"UI"))), "1\t1\t5\tN/A\n");
-        // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449 and
-        // :482-485 (`ppos` and `positive` print the count of the positives, quoted at
-        // `TabularWriter::new`): either field alone keeps the matrix (U-C, C-U, J-J, *-*, A-A
-        // of 6; K-I is -3), so a writer that kept it for one of them only would print 50.00 / 3.
-        let percent = spec(ReportFormat::Tabular, "ppos");
-        assert_eq!(row(&percent, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "83.33\n");
-        let count = spec(ReportFormat::Tabular, "positive");
-        assert_eq!(row(&count, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "5\n");
-        let commented = spec(ReportFormat::TabularWithComments, "qseqid");
-        let writer = TabularWriter::new(
-            &commented,
-            "PSIBLAST 2.17.0+",
-            Some(ScoringMatrix::Blosum62),
-        );
-        let mut out = Vec::new();
-        writer
-            .round_query_header(&mut out, Some(1), b"q1 title", b"db", Some(0))
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            "# PSIBLAST 2.17.0+\n# Iteration: 1\n# Query: q1 title\n# Database: db\n# 0 hits found\n"
-        );
-    }
-
-    // NCBI tabular.cpp:219-255 (`sseqid`, `sacc`, `saccver`, `sgi`: the subject's own ids) and
-    // :387-439 (`salltitles` joined by `<>`, `stitle` the first title, an empty one `N/A`); a local
-    // query's id is its `qseqid`, `qacc` and `qaccver` alike.
-    #[test]
-    fn id_columns_are_the_subject_s_own() {
-        let spec = TabularSpec::of(
-            ReportFormat::Tabular,
-            &FormatChoice {
-                number: 6,
-                spec: "qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_string(),
-                delimiter: String::new(),
-            },
-        )
-        .unwrap();
-        let taxonomy = TabularTaxonomy::default();
-        let titles: [&[u8]; 2] = [b"first title", b""];
-        let subject = TabularSubject {
-            id: b"gb|AE000111.1|",
-            accession: b"AE000111",
-            accession_version: b"AE000111.1",
-            gi: 42,
-            all_ids: &[],
-            length: 10,
-            titles: Some(&titles),
-            taxonomy: &taxonomy,
-            names: None,
-            nucleotide: false,
-            qcovs: -1,
-            qcovus: -1,
-            lookup: SubjectLookup::Found,
-            index: 0,
-        };
-        let hsp = TabularHsp {
-            q_start: 1,
-            q_end: 6,
-            s_start: 1,
-            s_end: 6,
-            evalue: 1e-5,
-            bit_score: 20.0,
-            score: 10,
-            length: 6,
-            gap_opens: 0,
-            gaps: 0,
-            num_ident: 6,
-            q_frame: 1,
-            s_frame: 1,
-            rows: None,
-            end_gaps: true,
-            stored_gaps: [&[], &[]],
-            qcovhsp: 100,
-        };
-        let mut out = Vec::new();
-        TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
-            &mut out,
-            &mut TabularRows::default(),
-            &TabularQuery::local(b"q1", 6),
-            &subject,
-            None,
-            &hsp,
-        );
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"
-        );
-    }
-
-    /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
-    /// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
-    fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
-        let spec = TabularSpec::of(
-            ReportFormat::Tabular,
-            &FormatChoice {
-                number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
-            },
-        )
-        .unwrap();
-        let hsp = TabularHsp {
-            q_start: 1,
-            q_end: 450,
-            s_start: 1,
-            s_end: 450,
-            evalue: 0.0,
-            bit_score: 812.0,
-            score: 900,
-            length: 450,
-            gap_opens: 0,
-            gaps: 0,
-            num_ident: 450,
-            q_frame: 1,
-            s_frame: 1,
-            rows: None,
-            end_gaps: true,
-            stored_gaps: [&[], &[]],
-            qcovhsp: 50,
-        };
-        let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
-        let mut rows = TabularRows::default();
-        let mut out = Vec::new();
-        for subject in subjects {
-            // The kept subject of a failed row: the last found one, by its index.
-            let kept = rows
-                .last_found()
-                .and_then(|index| subjects.iter().find(|subject| subject.index == index));
-            writer.row(
-                &mut out,
-                &mut rows,
-                &TabularQuery::local(b"nq1", 900),
-                subject,
-                kept.filter(|_| writer.fails(subject)),
-                &hsp,
-            );
-        }
-        String::from_utf8(out).unwrap()
-    }
-
-    // NCBI tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
-    // NCBI BLAST+ 2.17.0 `blastn -subject` with two titles `Subject_9 bad x\x81y title`,
-    // `Subject_7 other \x8dz` (probe `remaining-gaps-20261112/T/t7`, `s.bb.blastn.f6wide`), and a
-    // found subject before a failed one (`s.gb`): `sseqid` Unknown, `sgi` 0, the Seq-align ids added
-    // to `sall*` row by row, the counts of `x_ResetFields`, `slen` 0, the scores, the query's ids
-    // and coverages real, the titles and taxonomy of the last found row.
-    #[test]
-    fn failed_lookups_write_ncbis_catch_row() {
-        let taxonomy = TabularTaxonomy::default();
-        let subject = |id: &'static [u8], failed: Option<&'static [u8]>, index| TabularSubject {
-            id,
-            accession: id,
-            accession_version: id,
-            gi: 0,
-            all_ids: &[],
-            length: 1350,
-            titles: None,
-            taxonomy: &taxonomy,
-            names: None,
-            nucleotide: true,
-            qcovs: 99,
-            qcovus: -1,
-            lookup: match failed {
-                Some(align_id) => SubjectLookup::Failed(FailedLookup {
-                    full: align_id,
-                    accession: align_id,
-                    subject_id: true,
-                    all_ids: None,
-                }),
-                None => SubjectLookup::Found,
-            },
-            index,
-        };
-        let wide = "qseqid sseqid evalue bitscore pident length mismatch qstart sstart slen qlen \
-                    nident sgi sallseqid sallgi sallacc stitle salltitles staxids sscinames \
-                    sstrand qcovs qcovhsp";
-        let bad = |n: &'static [u8]| subject(b"", Some(n), 9);
-        let fallback = "\t0.0\t812\t0.000\t0\t0\t0\t0\t0\t900\t0\t0\t";
-        let tail = "\tN/A\tN/A\tN/A\tN/A\tN/A\t99\t50\n";
-        assert_eq!(
-            failed_rows(
-                wide,
-                &[bad(b"Subject_1"), bad(b"Subject_1"), bad(b"Subject_2")]
-            ),
-            format!(
-                "nq1\tUnknown{fallback}Subject_1\t0\tSubject_1{tail}\
-                 nq1\tUnknown{fallback}Subject_1;Subject_1\t0;0\tSubject_1;Subject_1{tail}\
-                 nq1\tUnknown{fallback}Subject_1;Subject_1;Subject_2\t0;0;0\t\
-                 Subject_1;Subject_1;Subject_2{tail}"
-            )
-        );
-        let rows = failed_rows(wide, &[subject(b"s2", None, 1), bad(b"Subject_2")]);
-        assert_eq!(
-            rows.lines().nth(1).unwrap(),
-            format!(
-                "nq1\tUnknown{fallback}s2;Subject_2\t0;0\ts2;Subject_2{}",
-                tail.trim_end()
-            )
-        );
-        // Without `sseqid`, `sgi`, `sacc` and `saccver` a `-subject` record's lookup does not run
-        // (`x_SetSubjectIds` of a record has no `GetSeqIdList`): the row is the found one's.
-        assert_eq!(
-            failed_rows(
-                "qseqid sallseqid evalue",
-                &[subject(b"Subject_9", Some(b"Subject_1"), 0)]
-            ),
-            "nq1\tSubject_9\t0.0\n"
-        );
-    }
-
-    // NCBI tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
-    // where the load of the subject throws (`DB contains no accession info.`, a batch whose
-    // prefetch is off; probe of line DBID pfoff-2, `R/pfoff/p2`, `bp.U2.*`, DECISIONS 62 (12)):
-    // the row keeps the last loaded row's ids, titles and taxonomy, `sall*` add the Seq-align id
-    // (its GI in `sallgi`), `slen` and the counts are `x_ResetFields`' 0, `qlen` comes only with
-    // a field of the query block; before any loaded row `sseqid` is `Unknown`, the titles and
-    // names `N/A` (quoted in CSV).
-    #[test]
-    fn a_load_that_throws_writes_the_kept_row() {
-        let exception = crate::report::db_subject::LookupFailure::ncbi(
-            crate::seqdb::tax_files::NO_ACCESSION_INFO,
-        )
-        .exception()
-        .unwrap();
-        let taxonomy = TabularTaxonomy {
-            taxid: 9606,
-            taxids: vec![9606],
-        };
-        let none = TabularTaxonomy::default();
-        let titles: [&[u8]; 1] = [b"found title"];
-        let all_ids = [DeflineIds {
-            id: b"gb|AAA00001.1|".to_vec(),
-            gi: 7,
-            accession: b"AAA00001".to_vec(),
-        }];
-        let found = TabularSubject {
-            id: b"gb|AAA00001.1|",
-            accession: b"AAA00001",
-            accession_version: b"AAA00001.1",
-            gi: 7,
-            all_ids: &all_ids,
-            length: 1350,
-            titles: Some(&titles),
-            taxonomy: &taxonomy,
-            names: None,
-            nucleotide: true,
-            qcovs: 99,
-            qcovus: -1,
-            lookup: SubjectLookup::Found,
-            index: 0,
-        };
-        let thrown = TabularSubject {
-            id: b"",
-            accession: b"",
-            accession_version: b"",
-            gi: 0,
-            all_ids: &[],
-            length: 0,
-            titles: None,
-            taxonomy: &none,
-            names: None,
-            nucleotide: true,
-            qcovs: 98,
-            qcovus: -1,
-            lookup: SubjectLookup::Throws(ThrownLookup {
-                full: b"gi|5|gb|BBB00002.1|",
-                gi: 5,
-                accession: b"BBB00002",
-                exception: &exception,
-            }),
-            index: 1,
-        };
-        assert!(thrown.throws() && !found.throws());
-        assert_eq!(
-            failed_rows(
-                "qseqid sseqid sacc saccver sgi slen qlen length pident evalue stitle staxids \
-                 sstrand qcovs",
-                &[found, thrown]
-            )
-            .lines()
-            .nth(1)
-            .unwrap(),
-            "nq1\tgb|AAA00001.1|\tAAA00001\tAAA00001.1\t7\t0\t900\t0\t0.000\t0.0\tfound title\t9606\tN/A\t98"
-        );
-        // `qlen` without a field of the query block keeps `x_ResetFields`' 0.
-        assert_eq!(
-            failed_rows("sseqid qlen slen evalue", &[found, thrown])
-                .lines()
-                .nth(1)
-                .unwrap(),
-            "gb|AAA00001.1|\t0\t0\t0.0"
-        );
-        // `sall*`: the kept lists and the Seq-align id, row by row.
-        assert_eq!(
-            failed_rows("qseqid sallseqid sallgi sallacc", &[found, thrown, thrown]),
-            "nq1\tgb|AAA00001.1|\t7\tAAA00001\n\
-             nq1\tgb|AAA00001.1|;gi|5|gb|BBB00002.1|\t7;5\tAAA00001;BBB00002\n\
-             nq1\tgb|AAA00001.1|;gi|5|gb|BBB00002.1|;gi|5|gb|BBB00002.1|\t7;5;5\t\
-             AAA00001;BBB00002;BBB00002\n"
-        );
-        // Before any loaded row: `Unknown`, `sgi` 0, the titles `N/A`.
-        assert_eq!(
-            failed_rows("qseqid sseqid sgi stitle sallseqid evalue", &[thrown]),
-            "nq1\tUnknown\t0\tN/A\tgi|5|gb|BBB00002.1|\t0.0\n"
-        );
-        // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
-        // or `staxid`; a later one has a result.
-        let spec = |fields: &str| {
-            TabularSpec::of(
-                ReportFormat::Tabular,
-                &FormatChoice {
-                    number: 6,
-                    spec: fields.to_string(),
-                    delimiter: String::new(),
-                },
-            )
-            .unwrap()
-        };
-        let thrown = LookupFailure::thrown();
-        assert!(failed_lookup_stop(None, thrown, true).is_some());
-        assert!(failed_lookup_stop(None, thrown, false).is_none());
-        assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, true).is_some());
-        assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, false).is_none());
-        assert!(failed_lookup_stop(Some(&spec("staxid")), thrown, true).is_some());
-        assert!(failed_lookup_stop(Some(&spec("qseqid sseqid")), thrown, true).is_none());
-        assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
-    }
-
-    // NCBI tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
-    // line DBID pfoff-2, `R/pfoff/p2`, `*.U2.dflt.6`; review 2, M3): the one writer of the
-    // default tables' rows of a subject whose load throws (BLASTP's, BLASTN's, TBLASTN's and
-    // TBLASTX's, `TabularRows::write_thrown_default`; BLASTX's are the `std` fields of
-    // `TabularWriter::row`) prints `saccver` of the query's last loaded row
-    // (`TabularRows::found`), the counts and coordinates 0 and the scores; a new
-    // query's formatter keeps none. The end of the run (`run_end`) writes the rows before it,
-    // ends the reads and gives NCBI's exception (exit status 2).
-    #[test]
-    fn the_default_row_of_a_throw_keeps_the_last_loaded_subject() {
-        let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
-        let saccver = |index: usize| ["AAA00001.1", "BBB00002.1"][index];
-        let mut rows = TabularRows::default();
-        assert!(rows.kept_id().is_none());
-        rows.found(1);
-        assert_eq!(rows.kept_id(), Some(1));
-        let mut out = Vec::new();
-        rows.write_thrown_default(&mut out, b"q1", saccver, 1e-30, 55.4, &config)
-            .unwrap();
-        rows.found(0);
-        rows.write_thrown_default(&mut out, b"q1", saccver, 0.5, 120.7, &config)
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            "q1\tBBB00002.1\t0.000\t0\t0\t0\t0\t0\t0\t0\t1.00e-30\t55.4\n\
-             q1\tAAA00001.1\t0.000\t0\t0\t0\t0\t0\t0\t0\t0.50\t120\n"
-        );
-        let exception = crate::report::db_subject::LookupFailure::ncbi(
-            crate::seqdb::tax_files::NO_ACCESSION_INFO,
-        )
-        .exception()
-        .unwrap();
-        let (mut written, mut ended) = (Vec::new(), false);
-        let error = run_end(&mut written, b"rows before\n", &exception, || ended = true);
-        assert_eq!(written, b"rows before\n");
-        assert!(ended);
-        let native = error.downcast::<crate::cli::NativeError>().unwrap();
-        assert_eq!(native.exit, 2);
-        assert!(
-            native.message.contains("DB contains no accession info."),
-            "{}",
-            native.message
-        );
-    }
-
-    // NCBI tabular.cpp:833-898: which rows end the run where the load throws (`slen`, the
-    // letters after the subject block), which are written (a field of that block), and which
-    // read nothing; `nident` alone reads only on rows with identities.
-    #[test]
-    fn a_rows_fields_say_what_its_throw_does() {
-        use crate::blastinput::app::Program;
-        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
-        let spec = |fields: &str| {
-            TabularSpec::of(
-                ReportFormat::CommaSeparatedValues,
-                &FormatChoice {
-                    number: 10,
-                    spec: fields.to_string(),
-                    delimiter: String::new(),
-                },
-            )
-            .unwrap()
-        };
-        let row = |fields: &str, program, ident| spec(fields).row_throw(program, ident);
-        assert_eq!(
-            row("qseqid stitle slen", Program::Blastp, 1),
-            Some(AfterThrow::WritesRow)
-        );
-        assert_eq!(
-            row("qseqid slen", Program::Blastn, 1),
-            Some(AfterThrow::EndsRun)
-        );
-        assert_eq!(
-            row("qseqid sseq", Program::Tblastx, 1),
-            Some(AfterThrow::EndsRun)
-        );
-        assert_eq!(
-            row("qseqid nident", Program::Blastx, 1),
-            Some(AfterThrow::EndsRun)
-        );
-        assert_eq!(row("qseqid nident", Program::Blastx, 0), None);
-        assert_eq!(row("qseqid nident", Program::Blastn, 1), None);
-        assert_eq!(row("qseqid evalue qcovs", Program::Tblastn, 1), None);
-        assert_eq!(
-            spec("qseqid nident").format_throw(Program::Blastx),
-            FormatThrow::Writes(RunThrow {
-                after: AfterThrow::EndsRun,
-                rows: SubjectFetch::WithIdentities,
-            })
-        );
-        // `slen` and a field of the alignment block read the subject at every row.
-        for every in ["qseqid nident slen", "qseqid nident qstart"] {
-            assert_eq!(spec(every).throw_rows(Program::Blastx), SubjectFetch::Every);
-            assert_eq!(
-                spec(every).format_throw(Program::Blastx),
-                FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsRun)),
-                "{every}"
-            );
-            assert_eq!(
-                spec(every).row_throw(Program::Blastx, 0),
-                Some(AfterThrow::EndsRun)
-            );
-        }
-        // The organism report (outfmt 18) leaves out the HSPs of a throwing subject and goes on.
-        let report = TabularSpec::of(
-            ReportFormat::TaxFormat,
-            &FormatChoice {
-                number: 18,
-                spec: String::new(),
-                delimiter: String::new(),
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            report.format_throw(Program::Blastp),
-            FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
-        );
-        assert_eq!(
-            spec("qseqid evalue").format_throw(Program::Blastx),
-            FormatThrow::Unread
-        );
-    }
-
-    // NCBI BLAST+ 2.17.0 `blastn -db` of a sequence with an empty title and a taxid whose
-    // name has 0x81 after one of Homo sapiens (probe `t.tx_bh.blastn.f6all|f6wide`): without
-    // `sseqid` the lookup fails in `x_SetSubjectIds`, which clears `m_SubjectIds` first, so the
-    // Seq-align id is the list alone and `slen` is set; the taxonomy is the last found row's.
-    #[test]
-    fn a_database_lookup_failing_in_x_set_subject_ids_keeps_the_length() {
-        let homo = TabularTaxonomy {
-            taxid: 9606,
-            taxids: vec![9606],
-        };
-        let none = TabularTaxonomy::default();
-        let titles: [&[u8]; 1] = [b""];
-        let subject = |id: &'static [u8], taxonomy, failed: bool, index| TabularSubject {
-            id,
-            accession: id,
-            accession_version: id,
-            gi: 0,
-            all_ids: &[],
-            length: 660,
-            titles: Some(&titles),
-            taxonomy,
-            names: None,
-            nucleotide: true,
-            qcovs: 100,
-            qcovus: -1,
-            lookup: if failed {
-                SubjectLookup::Failed(FailedLookup {
-                    full: b"gnl|BL_ORD_ID|0",
-                    accession: b"BL_ORD_ID:0",
-                    subject_id: true,
-                    all_ids: Some(&[]),
-                })
-            } else {
-                SubjectLookup::Found
-            },
-            index,
-        };
-        let found = subject(b"Homo", &homo, false, 1);
-        let failed = subject(b"", &none, true, 0);
-        assert_eq!(
-            failed_rows("qseqid sallseqid sallacc slen staxids", &[found, failed]),
-            "nq1\tHomo\tHomo\t660\t9606\nnq1\tgnl|BL_ORD_ID|0\tBL_ORD_ID:0\t660\t9606\n"
-        );
-        assert_eq!(
-            failed_rows("qseqid sseqid slen staxids", &[found, failed]),
-            "nq1\tHomo\t660\t9606\nnq1\tUnknown\t0\t9606\n"
-        );
-    }
-
-    // NCBI BLAST+ 2.17.0 `blastn -db` of a `-parse_seqids` sequence with the definition lines
-    // `gb|AB000001.1|` and `lcl|Subject_9`, an empty title and a taxid whose name has 0x81 (probe
-    // `T/t7/review` `B.gbs9.blastn.f6wide`): `SetSubjectId` finds the Bioseq's `gb` id, and
-    // `x_SetSubjectIds` throws at the second line after it pushed the first one's ids, so `sall*`
-    // are the first line's and the Seq-align id; `slen` is set, the counts are `x_ResetFields`'.
-    #[test]
-    fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
-        let none = TabularTaxonomy::default();
-        let titles: [&[u8]; 2] = [b"", b""];
-        let before = [DeflineIds {
-            id: b"gb|AB000001.1|".to_vec(),
-            gi: 0,
-            accession: b"AB000001".to_vec(),
-        }];
-        let subject = TabularSubject {
-            id: b"gb|AB000001.1|",
-            accession: b"AB000001",
-            accession_version: b"AB000001.1",
-            gi: 0,
-            all_ids: &before,
-            length: 1350,
-            titles: Some(&titles),
-            taxonomy: &none,
-            names: None,
-            nucleotide: true,
-            qcovs: 99,
-            qcovus: -1,
-            lookup: SubjectLookup::Failed(FailedLookup {
-                full: b"gb|AB000001.1|",
-                accession: b"AB000001",
-                subject_id: false,
-                all_ids: Some(&before),
-            }),
-            index: 0,
-        };
-        assert_eq!(
-            failed_rows("qseqid sseqid slen sallseqid sallgi sallacc evalue", &[subject; 2]),
-            "nq1\tgb|AB000001.1|\t1350\tgb|AB000001.1|;gb|AB000001.1|\t0;0\tAB000001;AB000001\t0.0\n"
-                .repeat(2)
-        );
-        // `saccver` is the Bioseq's: no stop where only `x_SetSubjectIds` throws.
-        assert_eq!(
-            failed_rows("qseqid saccver sallseqid", &[subject]),
-            "nq1\tAB000001.1\tgb|AB000001.1|;gb|AB000001.1|\n"
-        );
-    }
-
-    // NCBI tabular.cpp:174-185 (`FindBestChoice` of the empty `m_SubjectId`, a null pointer:
-    // NCBI BLAST+ 2.17.0 exits 255) and :262-268 (`staxid` of an `m_SubjectTaxId` that no row set:
-    // a different number in each run, probe of line RG T7 `6 qseqid sseqid staxid`).
-    #[test]
-    fn failed_lookups_stop_where_ncbi_has_no_result() {
-        let spec = |fields: &str| {
-            TabularSpec::of(
-                ReportFormat::CommaSeparatedValues,
-                &FormatChoice {
-                    number: 10,
-                    spec: fields.to_string(),
-                    delimiter: String::new(),
-                },
-            )
-            .unwrap()
-        };
-        let stop = |fields: Option<&str>, all_ids: bool, first: bool| {
-            let spec = fields.map(spec);
-            let failure = LookupFailure {
-                subject_id: true,
-                all_ids,
-                bioseq: false,
-            };
-            failed_lookup_stop(spec.as_ref(), failure, first).is_some()
-        };
-        assert!(stop(None, false, false));
-        assert!(stop(Some(""), false, false));
-        assert!(stop(Some("qseqid sacc"), false, false));
-        assert!(stop(Some("qseqid saccver"), true, false));
-        assert!(!stop(Some("qseqid sseqid evalue"), false, true));
-        assert!(stop(Some("qseqid sseqid staxid"), false, true));
-        assert!(!stop(Some("qseqid sseqid staxid"), false, false));
-        assert!(!stop(Some("qseqid sallseqid staxid"), false, true));
-        assert!(stop(Some("qseqid sallseqid staxid"), true, true));
-        // `SetSubjectId` finds the ids where only `x_SetSubjectIds` throws: no null pointer.
-        let only_all = LookupFailure {
-            subject_id: false,
-            all_ids: true,
-            bioseq: false,
-        };
-        assert!(
-            failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none()
-        );
-        assert!(failed_lookup_stop(None, only_all, true).is_none());
-        assert!(!may_stop_at_failed_lookup(Some(&spec(
-            "qseqid sseqid sallseqid evalue"
-        ))));
-        assert!(may_stop_at_failed_lookup(None));
-        let record = |s_idx| (s_idx == 1).then(|| LookupFailure::of_plain(false));
-        let result = check_failed_lookups(
-            Some(&spec("qseqid sseqid staxid")),
-            [vec![0, 1], vec![1, 0]],
-            record,
-            |s_idx| failed_record_title(s_idx, b"Subject_9"),
-            "BLASTN",
-        );
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .starts_with("subject record 2 (Subject_9) has a title"));
-        assert!(check_failed_lookups(
-            Some(&spec("qseqid sseqid staxid")),
-            [vec![0, 1], vec![0, 1]],
-            record,
-            |s_idx| failed_record_title(s_idx, b"x"),
-            "BLASTN",
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn btop_counts_runs() {
-        let mut out = Vec::new();
-        write_btop(&mut out, b"ACGT-A", b"ACCTTA", true, [&[], &[]]);
-        assert_eq!(out, b"2GC1-T1");
-    }
-
-    // tabular.cpp:982-1027 (quoted at `push_alignment_row` and `write_btop`): a row's end gaps
-    // are spaces, its inner gaps `-`; an end-gap column of `btop` is a letter and a space.
-    #[test]
-    fn end_gaps_are_spaces_in_the_rows_and_btop() {
-        let mut out = Vec::new();
-        push_alignment_row(&mut out, b"---AC-DE--", true, &[]);
-        assert_eq!(out, b"   AC-DE  ");
-        out.clear();
-        push_alignment_row(&mut out, b"MKV-L", true, &[]);
-        assert_eq!(out, b"MKV-L");
-        out.clear();
-        write_btop(&mut out, b"MQLAC-D", b"---ACKD", true, [&[], &[]]);
-        assert_eq!(out, b"M Q L 2-K1");
-        out.clear();
-        write_btop(&mut out, b"AC-DKK", b"ACGD--", true, [&[], &[]]);
-        assert_eq!(out, b"2-G1K K ");
-        // Rows whose `-` fill a segment (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
-        // and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
-        out.clear();
-        push_alignment_row(&mut out, b"TCG-", false, &[]);
-        assert_eq!(out, b"TCG-");
-        out.clear();
-        write_btop(&mut out, b"TCG-", b"TANX", false, [&[], &[]]);
-        assert_eq!(out, b"1CAGN-X");
-        // A `-` that is a residue (a PSSM query's gap residue, a database's stored gap
-        // character) is no end gap (M4a-1c LG probe `ts_std0first.f2`: NCBI's qseq `-ASLG...`
-        // and BTOP `-M23...` for a query whose first residue is the gap residue).
-        out.clear();
-        push_alignment_row(&mut out, b"-ASL-", true, &[0]);
-        assert_eq!(out, b"-ASL ");
-        out.clear();
-        write_btop(&mut out, b"-ASL", b"MASL", true, [&[0], &[]]);
-        assert_eq!(out, b"-M3");
-        out.clear();
-        write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
-        assert_eq!(out, b"4K-");
-    }
-}
+#[path = "tabular_tests.rs"]
+mod tests;

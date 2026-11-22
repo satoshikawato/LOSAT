@@ -182,11 +182,11 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 static TOOL: Tool = Tool {
     program: "blast_formatter",
     refusal_name: PROGRAM,
-    version: crate::NCBI_BLAST_VERSION,
     help: HELP,
     descs: DESCS,
     dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
@@ -363,7 +363,7 @@ fn run_body(
 fn catch_all(diag: &mut Diag, error: anyhow::Error) -> i32 {
     match error.downcast_ref::<NativeError>() {
         Some(native) => {
-            diag.write_text(native.message.as_bytes());
+            diag.write_text(&native.message);
             native.exit
         }
         None => diag.refuse(&format!("{error:#}")),

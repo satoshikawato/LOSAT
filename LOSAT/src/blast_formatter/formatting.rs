@@ -110,6 +110,7 @@ pub(crate) fn extract_formatting(
         line_length: options.line_length,
         sort_hits: options.sort_hits,
         sort_hsps: options.sort_hsps,
+        hitlist_start: None,
     };
     let warnings = counts.posted_warnings(None, outfmt, options.num_descriptions.is_some(), &given);
     let pairwise_family = outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES;
@@ -122,6 +123,7 @@ pub(crate) fn extract_formatting(
             sort_hsps: given
                 .sort_hsps
                 .filter(|_| outfmt == output_format::PAIRWISE),
+            hitlist_start: None,
         },
         show_gis,
         html,

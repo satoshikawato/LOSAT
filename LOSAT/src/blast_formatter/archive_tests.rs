@@ -24,7 +24,10 @@ fn exception(kind: &'static str, msg: &str) -> NcbiException {
 /// The exit status and text of an error as `catch_all` ends the run with it.
 fn native(error: anyhow::Error) -> (i32, String) {
     let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 #[test]

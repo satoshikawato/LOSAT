@@ -103,20 +103,6 @@ fn refusal(program: &str, role: &str, line: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-151
-// ```c++
-//     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
-//
-//         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-//         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-//             try {
-//                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
-// 							CSeq_id::fParse_ValidLocal)));
-// ...
-//             } catch (const CSeqIdException& e) {
-//                 if (NStr::Find(e.GetMsg(), "Malformatted ID") != NPOS) {
-//                     // This is probably just plain fasta, so just
-//                     // defer to CFastaReader
-// ```
 // Every program refuses the line in the query and in the subject with the same text and exit
 // status, with and without `-parse_deflines`; the white space around the line is trimmed, as
 // NCBI trims it. The refusal comes when the reader reads the line: a subject's before any byte, a
@@ -161,7 +147,11 @@ fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
                         assert_eq!(status, 1, "{what}: {stderr}");
                         let report = String::from_utf8_lossy(&stdout);
                         if outfmt == "0" && role == "query" {
-                            let prolog = format!("{} 2.17.0+\n", program.to_uppercase());
+                            let prolog = format!(
+                                "{} (LOSAT {})\n",
+                                program.to_uppercase(),
+                                env!("CARGO_PKG_VERSION")
+                            );
                             assert!(
                                 report.starts_with(&prolog) && !report.contains("Query="),
                                 "{what}: {report}"
@@ -179,27 +169,6 @@ fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:76-92
-// ```c++
-// SDataLoaderConfig::x_LoadDataLoadersConfig(const CMetaRegistry::SEntry& sentry)
-// {
-//     _ASSERT(sentry.registry);
-//
-//     static const string kDataLoadersConfig("DATA_LOADERS");
-//
-//     if (sentry.registry->HasEntry("BLAST", kDataLoadersConfig)) {
-//         const string& loaders = sentry.registry->Get("BLAST", kDataLoadersConfig);
-//         if (NStr::FindNoCase(loaders, "blastdb") == NPOS) {
-//             m_UseBlastDbs = false;
-//         }
-//         if (NStr::FindNoCase(loaders, "genbank") == NPOS) {
-//             m_UseGenbank = false;
-//         }
-//         if (NStr::FindNoCase(loaders, "none") != NPOS) {
-//             m_UseBlastDbs = false;
-//             m_UseGenbank = false;
-//         }
-//     }
-// ```
 // With the data loaders off, by the environment or by a registry file, BLASTX reads the line as
 // the letters of a first record without a defline (NCBI's bytes), and under `-parse_deflines` it
 // stops there with NCBI's error of the query or of the subjects; the other programs give the
@@ -262,12 +231,12 @@ fn with_the_data_loaders_off_the_line_is_read_as_ncbi_reads_it() {
                     ("query", true) => (
                         1,
                         b"",
-                        "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1\n",
+                        "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment around line 1\n",
                     ),
                     _ => (
                         1,
                         b"",
-                        "BLAST query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the LOSAT user manual.\n",
+                        "LOSAT query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the LOSAT user manual.\n",
                     ),
                 };
                 let (status, stdout, stderr) = &runs[0];
@@ -330,14 +299,7 @@ fn only_a_first_line_that_ncbi_takes_as_a_seq_id_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
-// ```c
-//     // Setup some debugging features from environment variables.
-//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-//         SetDiagTrace(eDT_Enable, eDT_Enable);
-//     }
-//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 // NCBI's application layer reads its environment and registry files (the data loaders among
 // them) before the program's own code: every program refuses the settings that LOSAT does not
 // reproduce with one text, before its run checks an option or opens a file (BLASTX reads them at

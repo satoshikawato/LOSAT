@@ -1,7 +1,7 @@
 //! The library API: a search of FASTA records in memory, with the command line's options and
 //! the command line's output bytes.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
 //! is `docs/losat_library_surface_plan.md`.
 //!
 //! # Use
@@ -10,6 +10,7 @@
 //! use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 //!
 //! # fn main() -> Result<(), losat::api::Error> {
+//! // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 //! let query = read_fasta(Program::Blastp, Role::Query, b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let subject = read_fasta(Program::Blastp, Role::Subject, b">s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "2"])?;
@@ -127,13 +128,24 @@
 //! - A PSSM query of psiblast and tblastn (the command line's `-in_pssm`) is an input:
 //!   [`Inputs::pssm`] and [`Inputs::pssm_database`] name the file, which the search reads; its one
 //!   query is the PSSM's sequence, query 0 of the results, in one batch of [`run_batches`].
+//! - A query alignment of psiblast (the command line's `-in_msa`) is an input the same way:
+//!   [`Inputs::msa`] and [`Inputs::msa_database`] name the alignment file, which the search reads
+//!   as the command line reads it, errors included; its one query is the alignment's master,
+//!   query 0 of the results, in one batch of [`run_batches`]. `-msa_master_idx` and
+//!   `-ignore_msa_master` are options of the argv ([`validate`] takes them; a search of other
+//!   inputs fails with the parser's message, as the command line does without `-in_msa`).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
+//!   A search strategy file is an input of the API: [`Search::read_strategy`] reads its bytes (the
+//!   command line's `-import_search_strategy FILE`, through the same import), [`Inputs::strategy`]
+//!   gives the queries and the subjects (or the database) that it carries, and
+//!   `-import_search_strategy` in an argv is refused ([`validate`]).
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
-//!   protein), [`run_convert2blastmask`] the converter of lower case masks and
-//!   [`run_blast_formatter`] the formatter of BLAST archives: the command line's words, with the
-//!   caller's reader and writers for its standard streams.
+//!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions,
+//!   [`run_convert2blastmask`] the converter of lower case masks, [`run_makembindex`] the
+//!   writer of megablast indices and [`run_blast_formatter`] the formatter of BLAST archives: the
+//!   command line's words, with the caller's reader and writers for its standard streams.
 //!
 //! # Items
 //!
@@ -141,12 +153,13 @@
 //!   [`ValueKind`]
 //! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`],
 //!   [`Inputs`]
-//! - The options: [`validate`], [`Search`], [`API_OWNED`]
+//! - The options: [`validate`], [`Search`], [`API_OWNED`], [`Strategy`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
 //!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_convert2blastmask`], [`run_blast_formatter`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`],
+//!   [`run_blast_formatter`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -163,6 +176,7 @@ mod program;
 mod run;
 mod search;
 pub(crate) mod start;
+pub(crate) mod strategy;
 mod tools;
 mod view;
 
@@ -178,23 +192,13 @@ pub use run::{
 };
 pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
+pub use strategy::Strategy;
 pub use tools::{
     run_blast_formatter, run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb,
-    run_segmasker,
+    run_makembindex, run_segmasker, run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57
-// ```c++
-// /// Keeps track of the version of the BLAST engine in the NCBI C++ toolkit.
-// /// Used to perform run-time version checks
-// ///
-// /// For reference, please refer to http://apr.apache.org/versioning.html
-// class CBlastVersion : public CVersionInfo {
-// public:
-//     CBlastVersion()
-//         : CVersionInfo(kBlastMajorVersion,
-//                        kBlastMinorVersion,
-// ```
 /// The version of the engine: what `losat --version` prints after the name.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

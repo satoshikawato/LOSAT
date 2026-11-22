@@ -1,0 +1,8 @@
+BLAST Database error: Filtering algorithm ID 0 is not supported.
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+21           seg                                     window=12; locut=2.2; hicut=2.5         
+22           seg                                     window=8; locut=1.8; hicut=2.1          
+

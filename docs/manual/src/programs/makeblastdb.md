@@ -1,6 +1,6 @@
 # makeblastdb
 
-`losat makeblastdb` builds a BLAST database from FASTA files. Build a database when you search the same sequences many times, when you need NCBI-style sequence ids, taxonomy ids or masks in the search, or when you want to read sequences back with [`blastdbcmd`](blastdbcmd.md).
+`losat makeblastdb` builds a BLAST database from FASTA files, or from existing BLAST databases (`-input_type blastdb`). Build a database when you search the same sequences many times, when you need NCBI-style sequence ids, taxonomy ids or masks in the search, or when you want to read sequences back with [`blastdbcmd`](blastdbcmd.md).
 
 The files it writes are the files of NCBI's `makeblastdb`. NCBI BLAST+ and LOSAT read each other's databases. The default is format version 5, as in `makeblastdb` 2.17.0. `-blastdb_version 4` writes the older layout.
 
@@ -18,16 +18,16 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - Name several files in one `-in` value, separated by spaces: `-in "a.faa b.faa"`. Their sequences go into one database.
 - A name ending in `.gz`, `.bz2` or `.zst` is read through gzip, bzip2 or zstd while the database is built. Files made of several gzip members, bzip2 streams or zstd frames (the output of `bgzip`, `pbzip2` and `pzstd`) are read to the end.
 - `-dbtype` is required: `nucl` or `prot`.
-- Only FASTA is read. `-input_type` accepts `fasta`; the other values NCBI lists are refused (see below).
+- `-input_type` is `fasta` (the default) or `blastdb` (see [Copying databases](#copying-databases)). `asn1_txt` and `asn1_bin` are refused (see below).
 
 ## Common options
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `-in` | `-` | FASTA input file or files. |
+| `-in` | `-` | FASTA input file or files, or the databases to copy with `-input_type blastdb`. |
 | `-dbtype` | required | `nucl` or `prot`. |
 | `-out` | the `-in` name | Name of the database to write. |
-| `-title` | the `-in` name | Title stored in the database and shown by the search programs. |
+| `-title` | the `-in` name (with `-input_type blastdb`, the input database's title) | Title stored in the database and shown by the search programs. |
 | `-blastdb_version` | `5` | Format version: `5` or `4`. |
 | `-parse_seqids` | off | Parse the ids of the definition lines and store them, so that `-entry`, `-seqidlist` and similar lookups find sequences by accession. |
 | `-taxid` | none | One tax id for every sequence. |
@@ -38,6 +38,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-mask_desc` | none | Comma-separated free-text descriptions of the algorithms. |
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
+| `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
+| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ reads for an alias file with `OID_MASK_TYPE 1` (LOSAT refuses that alias key for now). |
 
 For every option: `losat makeblastdb -help`.
 
@@ -62,7 +64,7 @@ Tax ids are what `-taxids` and `-taxidlist` filters, the tabular `staxid` field 
 
 To search a database with `-db_soft_mask` or `-db_hard_mask`, or to read masked FASTA with `blastdbcmd -mask_sequence_with`, add masks when you build it:
 
-1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
+1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins), [`windowmasker`](windowmasker.md) (repeats of nucleotides, with a counts file) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
 2. Give it to `makeblastdb` with `-mask_data`. Add `-mask_id` to name the algorithm and `-mask_desc` to describe it.
 3. Look up the numeric algorithm id with `blastdbcmd -db DB -info` (the table "Available filtering algorithms").
 
@@ -77,6 +79,17 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 ### Volumes
 
 `-max_file_sz` is the size, in bytes, at which a database is cut into volumes. A database in several volumes has an alias file (`.pal` or `.nal`) that lists them. The search programs and `blastdbcmd` take the alias name like any database name.
+
+### Copying databases
+
+`-input_type blastdb` writes the sequences of existing databases into a new one. Use it to merge databases, to change the format version (`-blastdb_version`), to cut the volumes at another size, or to add tax ids, masks or a hash index without the original FASTA files.
+
+- `-in` names one database or several, separated by spaces, as `-db` does for the search programs. Alias names work. `-out` is required and must not be the `-in` value.
+- Without `-title` the new database takes the title of the input database. With several input databases, give `-title`.
+- The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
+- `-taxid`, `-taxid_map`, `-mask_data`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` still needs `-parse_seqids` on the command line.
+- `-randomize` (hidden in `makeblastdb`'s help, and in LOSAT's) copies the sequences in a random order, which depends on the second of the clock. LOSAT reads the clock when the build starts; `makeblastdb` reads it when the copy starts, after reading the input's definition lines. With the same second the order is the one `makeblastdb` 2.17.0 gives on Linux. `makeblastdb` on Windows and macOS shuffles with other C++ libraries, whose order has not been compared. With another `-input_type`, `-randomize` stops with `makeblastdb`'s error.
+- With `-title` or several names, an input name that is not a database is reported (`Unable to open input NAME as BLAST db`), and the build stops with the database error. A single name without `-title` that is not a database stops the build earlier, when its title is read, with the database error alone. Both are as in `makeblastdb`.
 
 ## Output
 
@@ -100,14 +113,14 @@ The sequence and header files have the same bytes as NCBI's. The index and metad
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end. NCBI's `makeblastdb` stops after the first stream and drops the rest without a message. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - When the database path (`-out`) contains a space or a double quote, or when an old database of the same name has to be replaced, LOSAT removes and replaces the old files as one database, where `makeblastdb` treats the path as a list of names. Normal names are not affected. See [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
-- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there.
+- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
 The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks` and `-metadata_output_prefix`: each stops with an error that names the option.
-- `-input_type blastdb`, `asn1_txt` and `asn1_bin`. Only `fasta` works.
+- `-gi_mask` and `-gi_mask_name`: each stops with an error that names the option.
+- `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).
 
@@ -162,5 +175,5 @@ losat blastdbcmd -db split_db -entry all -outfmt "%o %l" | tail -n 3
 
 - [BLAST databases](../databases.md)
 - [blastdbcmd](blastdbcmd.md): read sequences and information back
-- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [convert2blastmask](convert2blastmask.md): make masks
+- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [windowmasker](windowmasker.md), [convert2blastmask](convert2blastmask.md): make masks
 - [What LOSAT refuses](../refusals.md)

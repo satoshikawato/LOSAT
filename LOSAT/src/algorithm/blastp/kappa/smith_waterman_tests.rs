@@ -203,6 +203,7 @@ fn whole_matrix_best(rows: &[[i32; 28]], subject: &[u8], open: i32, extend: i32)
     best
 }
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const QUERY: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAV";
 const SPACER: &str = "PGSNPGSNPGSNPGSNPGSN";
 

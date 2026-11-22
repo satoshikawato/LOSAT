@@ -208,9 +208,6 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
-// ```c++
-//         formatter.PrintProlog();
-// ```
 // BLASTP's query-anchored formats 1 to 4 read the queries as outfmt 0 does: the refusal of a query
 // with a subject's id comes with the query's batch, after the prolog that NCBI's application writes
 // before its first batch, the same bytes as outfmt 0's (line RG T3a review D3). The reference bytes
@@ -233,7 +230,9 @@ fn blastp_formats_1_to_4_refuse_a_query_with_a_subject_s_id_after_outfmt_0_s_pro
     };
     let (status, prolog, stderr) = refuse("0");
     assert_eq!(status, 1, "{stderr}");
-    assert!(prolog.starts_with(b"BLASTP 2.17.0+\n"));
+    assert!(
+        prolog.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n").as_bytes())
+    );
     assert!(!prolog.windows(6).any(|window| window == b"Query="));
     for outfmt in ["1", "2", "3", "4"] {
         let (status, stdout, stderr) = refuse(outfmt);
@@ -463,14 +462,14 @@ fn the_same_files_without_the_option_are_searched() {
 /// (probe `ncbi-parity-20261019/SM/subnodef`, the `*.s.*.pd.f11` runs of the five programs).
 fn no_defline_archive(line: u64) -> String {
     format!(
-        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the LOSAT user manual.\"\n    }}\n  }}\n}}\n"
+        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"LOSAT query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the LOSAT user manual.\"\n    }}\n  }}\n}}\n"
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 and
 // c++/src/app/blast/blast_app_util.hpp:172-176: the subjects' `GetAllSeqs` turns the reader's
 // `eNoDefline` into a `CInputException` (the NUL of `ends` stays in the text on standard error,
-// the archive drops it); the queries keep the reader's `BLAST query error` (blast_app_util.hpp:
+// the archive drops it); the queries keep the reader's `LOSAT query error` (NCBI's `BLAST query error`) (blast_app_util.hpp:
 // 181-184). The subjects are read first. Expected bytes: NCBI 2.17.0 n1 (probe `SM/subnodef`).
 #[test]
 fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs() {
@@ -520,7 +519,7 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
         };
         for (subject, line) in &subjects {
             let message = format!(
-                "BLAST query/options error: Query input doesn't start with a defline or comment, \
+                "LOSAT query/options error: Query input doesn't start with a defline or comment, \
                  line {line}\0\nPlease refer to the LOSAT user manual.\n"
             );
             for threads in ["1", "4", "8", "16"] {
@@ -546,7 +545,7 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
             (
                 1,
                 String::new(),
-                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment \
                  around line 1\n"
                     .to_string()
             ),
@@ -556,14 +555,6 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 // The `Run` of each of the five programs ends so. `CATCH_ALL` posts the error, which the handler
 // writes to standard error at once (blast_aux.cpp:1155-1159), before `PrintErrorArchive` writes the
 // error archive: in one stream of both (`2>&1`) the error comes between the archives written
@@ -587,7 +578,7 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
         let cases: [(&PathBuf, &str, usize); 2] = [
             (
                 &bad_gi,
-                "BLAST query error: Could not construct seq-id from 'gi|abc'\n",
+                "LOSAT query error: Could not construct seq-id from 'gi|abc'\n",
                 1,
             ),
             (
@@ -714,7 +705,7 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
     for threads in ["1", "4"] {
         for (query, line) in &no_defline {
             let message = format!(
-                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment \
                  around line {line}\n"
             );
             for outfmt in ["5", "11", "15", "16"] {
@@ -735,7 +726,7 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
                 (status, stderr.as_str()),
                 (
                     1,
-                    "BLAST query error: Could not construct seq-id from 'gi|abc'\n"
+                    "LOSAT query error: Could not construct seq-id from 'gi|abc'\n"
                 ),
                 "gi|abc outfmt {outfmt} n{threads}"
             );
@@ -825,7 +816,7 @@ fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
         assert_eq!(status, 1, "blocks n{threads}: {stderr}");
         assert!(stderr.contains(refusal), "blocks n{threads}: {stderr}");
         assert!(
-            stdout.starts_with("BLASTP 2.17.0+\n")
+            stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                 && stdout.contains("\nQuery= qa query protein alpha\n")
                 && !stdout.contains("Query= selfseg3"),
             "blocks n{threads}: {stdout}"
@@ -887,7 +878,8 @@ fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
                 "outfmt {outfmt} n{threads}: {stderr}"
             );
             assert!(
-                stdout.starts_with("BLASTN 2.17.0+\n") && !stdout.contains("Query="),
+                stdout.starts_with(concat!("BLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+                    && !stdout.contains("Query="),
                 "outfmt {outfmt} n{threads}: {stdout}"
             );
         }
@@ -923,7 +915,8 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
             assert_eq!(status, 1, "{db} outfmt {outfmt}: {stderr}");
             assert!(stderr.contains(refusal), "{db} outfmt {outfmt}: {stderr}");
             assert!(
-                stdout.starts_with("BLASTN 2.17.0+\n") && !stdout.contains("Query="),
+                stdout.starts_with(concat!("BLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+                    && !stdout.contains("Query="),
                 "{db} outfmt {outfmt}: {stdout}"
             );
         }
@@ -938,8 +931,16 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
 #[test]
 fn blastx_and_tblastx_query_anchored_refuse_a_database_sequence_named_as_a_query() {
     for (program, prefix, version) in [
-        ("blastx", "bx", "BLASTX 2.17.0+\n"),
-        ("tblastx", "tx", "TBLASTX 2.17.0+\n"),
+        (
+            "blastx",
+            "bx",
+            concat!("BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"),
+        ),
+        (
+            "tblastx",
+            "tx",
+            concat!("TBLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"),
+        ),
     ] {
         let query = format!("{prefix}q.fa");
         for (db, refusal) in [
@@ -1118,7 +1119,10 @@ fn tblastx_query_anchored_ends_with_ncbi_s_exception_where_its_merge_throws() {
             };
             assert_eq!(status, 255, "{what}: {stderr}");
             assert_eq!(&stderr, exception, "{what}");
-            assert!(stdout.starts_with("TBLASTX 2.17.0+\n"), "{what}: {stdout}");
+            assert!(
+                stdout.starts_with(concat!("TBLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n")),
+                "{what}: {stdout}"
+            );
             // The report ends with the query's description table, before its alignments.
             let last = &stdout[stdout.rfind("\n\n\nQuery= ").expect("a query's report")..];
             assert!(

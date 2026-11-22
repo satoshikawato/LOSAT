@@ -5,9 +5,6 @@ use crate::core::psi::{PsiDiagnostics, PsiPssm};
 
 /// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268
-// ```c
-//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
-// ```
 const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
     lambda: 0.267,
     k: 0.041,
@@ -18,7 +15,10 @@ fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .expect("a NativeError");
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPssmOptions {
@@ -29,13 +29,14 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
         in_pssm: None,
+        in_msa: None,
         versions: Default::default(),
         check_scope: Default::default(),
         rounds: None,
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1283-1303 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1283-1303 (cited at
 // `PsiblastPssmOptions::check`); NCBI 2.17.0 `tk.lastonly` and `tk.eachonly`.
 #[test]
 fn saving_a_pssm_needs_a_pssm_file() {
@@ -44,7 +45,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
         native(&error),
         (
             1,
-            "BLAST query/options error: save_pssm_after_last_round option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: save_pssm_after_last_round option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
                 .to_string()
         )
     );
@@ -58,7 +59,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
         native(&error),
         (
             1,
-            "BLAST query/options error: save_each_pssm option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: save_each_pssm option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
                 .to_string()
         )
     );
@@ -72,9 +73,9 @@ fn saving_a_pssm_needs_a_pssm_file() {
     assert!(asn_only.check().is_ok());
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-321 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-321 (cited at
 // `PsiblastPssmOptions::request`): without `-save_pssm_after_last_round` one round makes no PSSM.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608 (cited at
 // `PsiDiagnosticsRequest`): the frequency ratios always, the rest with `-out_ascii_pssm`.
 #[test]
 fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
@@ -162,7 +163,7 @@ fn row_letters(row: &[PsiMsaCell]) -> Vec<Option<u8>> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:283-323 and 363-408
-// (quoted at `input_msa` and `process_denseg`).
+// (cited at `input_msa` and `process_denseg`).
 #[test]
 fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
     let query = [1, 2, 3, 4, 5, 6];
@@ -207,7 +208,7 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:344-354 and 440-450
-// (quoted at `input_msa`): a Seq-align whose letters cannot be read (no sequence, or a range
+// (cited at `input_msa`): a Seq-align whose letters cannot be read (no sequence, or a range
 // that ends beyond the letters read by its id) makes its row the query's letters, also over the
 // cells that an earlier Seq-align of the row filled, and its subject is named for the warning.
 #[test]
@@ -245,7 +246,7 @@ fn an_unread_seq_align_makes_its_row_the_query() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-323 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-323 (cited at
 // `input_msa`): `msa_index` moves on after a subject that is not counted, and an HSP whose index
 // passes the rows NCBI allocates is written out of bounds (`_ASSERT` only). LOSAT refuses it.
 #[test]
@@ -304,7 +305,7 @@ fn key_of(ids: &'static [&'static str]) -> impl Fn(u32) -> SetKey {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:178-184 and 310-320
-// (quoted at `input_msa`): the rows are the handles of the counted Seq-align ids, and a
+// (cited at `input_msa`): the rows are the handles of the counted Seq-align ids, and a
 // Seq-align whose id `Match`es the previous one's takes its row (review 2 of line DBID
 // weakbatch, H1 and P2-P3; weakbatch DECISIONS 43 (4)).
 #[test]
@@ -382,7 +383,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
-// (`GetLowestEvalue`, quoted at `input_msa`): the e-value counts as at most
+// (`GetLowestEvalue`, cited at `input_msa`): the e-value counts as at most
 // BLAST_EXPECT_VALUE (10), and a NaN as 10.
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {
@@ -430,7 +431,7 @@ fn fixed_formats_as_the_c_library() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (cited at
 // `print_ascii_pssm`).
 #[test]
 fn the_ascii_pssm_has_ncbis_columns() {
@@ -584,7 +585,7 @@ fn believed_query(fasta: &str) -> crate::blastinput::fasta_reader::FastaRecord {
         .expect("a record")
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:150-155 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:150-155 (cited at
 // `fasta_query_id`). NCBI BLAST+ 2.17.0 `psiblast -parse_deflines -num_iterations 2 -out_pssm`
 // (line RG Q1's probe `q.<form>.it2.pssm` on `tests/db_search/taxfilter/tfp`): the PSSM's query
 // Bioseq has the record's Seq-align id alone (of `gi|123|gb|AAA1.1|` the gi), as these lines.
@@ -642,7 +643,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903 and
-// psi_pssm_input.cpp:166-171 (quoted at `query_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
+// psi_pssm_input.cpp:166-171 (cited at `query_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
 // the query record is X in the search's buffer, which is the PSSM's query, so the ASCII PSSM
 // prints X and the X branch of the gapless weight (`    0.00`) at that position.
 #[test]
@@ -699,7 +700,7 @@ fn an_o_in_the_query_prints_as_x() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1577-1600 and
-// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (quoted at `query_pssm`); NCBI 2.17.0
+// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (cited at `query_pssm`); NCBI 2.17.0
 // `db.ps.pssm.pcneg.7` and `db.ps.pssm.inc0.6`: the PSSM engine's options checks, the pseudocount
 // first, then the inclusion threshold.
 #[test]
@@ -717,12 +718,12 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
     };
     let pseudocount = (
         1,
-        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
+        "LOSAT options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
             .to_string(),
     );
     let inclusion = (
         1,
-        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
+        "LOSAT options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
             .to_string(),
     );
     assert_eq!(native(&run(-1, 0.002).unwrap_err()), pseudocount);
@@ -786,7 +787,7 @@ fn names(dir: &std::path::Path) -> Vec<String> {
     names
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (cited at
 // `OutputFileReset`); NCBI 2.17.0 `two.last`, `pre.nohit.keep`, `two.each.last`,
 // `err.baddir`.
 #[test]
@@ -818,7 +819,7 @@ fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321 (cited at
 // `run_resolved_in_pool`'s end): a run that fails before `SavePssmToFile` leaves every PSSM file
 // as it was (NCBI 2.17.0, `-out /dev/full`: the earlier file stays, none is made).
 #[test]
@@ -868,7 +869,7 @@ fn staged_asn_files_change_no_target_before_the_commit() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318 (cited at
 // `PssmVersions`): the two streams are made once per run, so `-save_each_pssm` numbers the files
 // over the run. Two calls whose requests share one `PssmVersions` (the library's query batches)
 // number their files as one call; a request of its own starts again at 1. The check of the names
@@ -912,7 +913,7 @@ fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (cited at
 // `OutputFileReset`): version 0 removes the file and makes it again, a numbered file is
 // truncated (`ofstream`), which keeps its inode and mode.
 #[cfg(unix)]
@@ -1157,7 +1158,7 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:302-321 and 440-450
-// (quoted at `input_msa`): each included Seq-align's subject is read in turn, the scope loading
+// (cited at `input_msa`): each included Seq-align's subject is read in turn, the scope loading
 // its sequence (and looking its taxids up) before the letters, whose failure warns.
 #[test]
 fn a_reads_taxonomy_texts_come_before_its_warnings_and_after_those_before_it() {

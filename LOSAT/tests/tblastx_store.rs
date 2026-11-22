@@ -8,13 +8,6 @@
 //! `run_local`'s records are never packed.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-//! ```c
-//!     virtual SBlastSequence GetCompressedPlusStrand() {
-//!         SBlastSequence retval(size());
-//!         string ncbi4na = kEmptyStr;
-//!         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//!         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-//! ```
 //! A store gives the frames of its record (the unit test of `subjects.rs` compares them in one
 //! process), so the property under test is that the reports and messages do not depend on the
 //! switch; that they equal NCBI's is the business of the fixture comparisons. `LOSAT_X_REACH`

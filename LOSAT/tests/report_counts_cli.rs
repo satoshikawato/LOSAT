@@ -92,7 +92,7 @@ fn run(work: &WorkDir, program: &str, extra: &[&str]) -> Output {
 
 const PROGRAMS: [&str; 5] = ["blastn", "blastp", "tblastn", "blastx", "tblastx"];
 
-// NCBI blast_options.c:1511-1517: a hit list size of 0 is an option error, after the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517: a hit list size of 0 is an option error, after the
 // warning for a hit list size below 5 (blast_args.cpp:2975-2977); nothing is searched.
 #[test]
 fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
@@ -126,7 +126,7 @@ fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
                 format!(
-                    "{ignored}Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
+                    "{ignored}Warning: [{program}] Examining 5 or more matches is recommended\nLOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
                 ),
                 "{program} {extra:?}"
             );
@@ -136,7 +136,7 @@ fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
     }
 }
 
-// NCBI blast_args.cpp:2949-2955,2975-2977: -num_descriptions is ignored (with a warning)
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2949-2955,2975-2977: -num_descriptions is ignored (with a warning)
 // for the formats above 4, and the hit list size below 5 is warned about; the hit list size
 // of outfmt 0 is the larger of the two counts, so -num_descriptions 3 does not warn.
 #[test]
@@ -169,7 +169,7 @@ fn the_warnings_of_the_formatting_handler() {
     }
 }
 
-// NCBI blast_args.cpp:2960-2973: the hit list size of a tabular format is -num_alignments,
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2973: the hit list size of a tabular format is -num_alignments,
 // so a subject limit of N shows at most N subjects for each query.
 #[test]
 fn a_tabular_format_shows_num_alignments_subjects() {

@@ -213,7 +213,12 @@ class ContractTests(unittest.TestCase):
 
     def test_contract_lists_rejected_tasks_and_toolchain(self) -> None:
         contract = release.load_contract(REPO_ROOT)
-        self.assertEqual(contract["public_cli"]["rejected_tasks"], ["rmblastn"])
+        # rmblastn runs since line RG X6 (matrix-only scoring, 2026-11-20).
+        self.assertEqual(contract["public_cli"]["rejected_tasks"], [])
+        self.assertEqual(
+            contract["public_cli"]["blastn_tasks"],
+            ["megablast", "blastn", "dc-megablast", "blastn-short", "rmblastn"],
+        )
         self.assertEqual(
             contract["public_cli"]["blastp_tasks"], ["blastp", "blastp-fast", "blastp-short"]
         )

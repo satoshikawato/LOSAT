@@ -9,6 +9,8 @@
 
 #[path = "../archive_replaced_bytes.rs"]
 mod archive_replaced_bytes;
+#[path = "../balanced_title.rs"]
+mod balanced_title;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -23,18 +25,26 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastn_mb_index_fixtures.rs"]
+mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
 mod compressed_clut_pairs;
+#[path = "../database_sequence_without_letters.rs"]
+mod database_sequence_without_letters;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
+#[path = "../db_taxdb_unreadable.rs"]
+mod db_taxdb_unreadable;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
+#[path = "../db_unreadable_files.rs"]
+mod db_unreadable_files;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../entry_names.rs"]
@@ -43,12 +53,20 @@ mod entry_names;
 mod export_search_strategy;
 #[path = "../function_size_limit.rs"]
 mod function_size_limit;
+#[path = "../import_search_strategy.rs"]
+mod import_search_strategy;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../library_strategy.rs"]
+mod library_strategy;
+#[path = "../llvm_profile.rs"]
+mod llvm_profile;
+#[path = "../makeblastdb_failed_index.rs"]
+mod makeblastdb_failed_index;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]
@@ -57,6 +75,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_fixtures.rs"]
+mod makembindex_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
@@ -73,6 +93,8 @@ mod ncbi_toolkit_version;
 mod ncbi_windows_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
+#[path = "../non_utf8_names.rs"]
+mod non_utf8_names;
 #[path = "../outfmt11_blastn.rs"]
 mod outfmt11_blastn;
 #[path = "../outfmt11_blastp.rs"]
@@ -119,6 +141,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rps_pipeline.rs"]
+mod rps_pipeline;
 #[path = "../rpsbproc_fixtures.rs"]
 mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]

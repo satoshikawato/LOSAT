@@ -64,6 +64,7 @@ fn a_gi_key_past_int8_is_an_exception() {
     let error = accession_to_key(b"99999999999999999999", &mut |_| {})
         .unwrap_err()
         .what();
+    let error = String::from_utf8(error).unwrap();
     // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
     assert!(
         error.ends_with(&*crate::wording::losat_text(

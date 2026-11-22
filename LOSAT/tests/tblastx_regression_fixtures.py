@@ -236,6 +236,56 @@ _CASES = [
                                " -culling_limit 2 -max_target_seqs 1 -outfmt 6", ""),
     ("culling.multi_cl5_evalue1000", f"-query {I}/culling_multi_query.fa -subject {I}/culling_multi_subject.fa"
                                      " -culling_limit 5 -evalue 1000 -outfmt 6", ""),
+    # -strand plus / minus (line NP, O2b): the query's contexts of the other strand have no
+    # letters (blast_setup_cxx.cpp:65-87, 200-215), but the linking's average query length
+    # still divides by the six contexts of every query (blast_parameters.c:1023-1026), per
+    # batch; queries of 3 and 4 nt, an unsearched batch, threads and the archive of a query
+    # with an accession (its Seq-loc carries the strand).
+    ("strand.minus_batch700", f"{B} -strand minus -outfmt 6", "", "BATCH_SIZE=700"),
+    ("strand.plus_batch22000_fmt0", f"{B} -strand plus -outfmt 0", "", "BATCH_SIZE=22000"),
+    ("strand.minus_batches_fmt7", f"{B} -strand minus -outfmt 7", ""),
+    ("strand.plus_batch700_threads4", f"{B} -strand plus -outfmt 6", "-num_threads 4", "BATCH_SIZE=700"),
+    ("strand.minus_batch300_invalid_fmt0.merged", f"{V} -strand minus -outfmt 0", "", "BATCH_SIZE=300"),
+    ("strand.plus_unsearched_fmt7.merged", f"{U} -strand plus -outfmt 7", ""),
+    ("strand.minus_short3_first", f"-query {I}/short3_query.fa {SUBJECTS} -strand minus -outfmt 6", ""),
+    ("strand.plus_short4_between_fmt7", f"-query {I}/short4_query.fa {SUBJECTS} -strand plus -outfmt 7", ""),
+    ("strand.minus_short3_first_searchsp_fmt11", f"-query {I}/short3_query.fa {SUBJECTS} -strand minus"
+                                                 " -searchsp 1000000 -outfmt 11", ""),
+    ("strand.minus_hitlist_threads4", f"{Y} -strand minus -outfmt 6", "-num_threads 4"),
+    ("strand.plus_hitlist_max5_fmt0_threads2", f"{Y} -strand plus -max_target_seqs 5 -outfmt 0", "-num_threads 2"),
+    ("strand.minus_ambig_threads4", f"{A} -strand minus -outfmt 6", "-num_threads 4"),
+    ("strand.minus_culling_multi_cl2", f"-query {I}/culling_multi_query.fa -subject {I}/culling_multi_subject.fa"
+                                       " -strand minus -culling_limit 2 -outfmt 6", ""),
+    ("strand.minus_rna_query", f"-query {I}/rna_query.fa -subject {O}/tblastx_code4_subject.fasta"
+                               " -query_gencode 4 -strand minus -outfmt 6", ""),
+    ("strand.minus_parse_deflines_fmt11", f"-query {O}/x3_q20.fna -subject {O}/x3_s20.fna -parse_deflines"
+                                          " -strand minus -outfmt 11", ""),
+    ("strand.plus_parse_deflines_qloc_fmt11", f"-query {O}/x3_q20.fna -subject {O}/x3_s20.fna -parse_deflines"
+                                              " -query_loc 2001-9000 -strand plus -outfmt 11", ""),
+    # A batch whose average query length is 0 (blast_parameters.c:1023-1026): one query of 1,200
+    # nt and 300 of 3 nt, one strand. NCBI's expected length is then 0 (the `long` of -inf, cut to
+    # Int4); with several subjects NCBI completes. With one subject (or other subjects of fewer than
+    # 3 bases in all) its big-gap cutoff is INT_MIN + 1 and NCBI crashes in the linking: approved
+    # exception 20 of PD-LOSAT-NCBI-DEFECTS (version 1.68), whose rows, LOSAT's alone, are those of
+    # tests/tblastx_avg0_one_subject.rs, not cases here. The `avg0_pad_subject` cases are the
+    # nearest runs that NCBI completes: that subject (Sa0mut) with a second one of 12 N, which makes
+    # the database 12 bases (4 protein letters) longer than the subject (a big-gap cutoff of -4),
+    # and -dbsize of the subject alone; `strand.both_avg0_pad_subject` searches both strands of a
+    # batch with 1,300 queries of 3 nt, which averages 0 too.
+    ("strand.plus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand plus"
+                         " -outfmt 6", ""),
+    ("strand.minus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand minus"
+                          " -outfmt 6", ""),
+    ("strand.plus_avg0_pad_subject", f"-query {I}/avg0_query.fa -subject {I}/avg0_pad_subject.fa -dbsize 3000"
+                                     " -strand plus -outfmt 6", ""),
+    ("strand.minus_avg0_pad_subject", f"-query {I}/avg0_query.fa -subject {I}/avg0_pad_subject.fa -dbsize 3000"
+                                      " -strand minus -outfmt 6", ""),
+    ("strand.both_avg0_pad_subject", f"-query {I}/avg0_both_query.fa -subject {I}/avg0_pad_subject.fa"
+                                     " -dbsize 3000 -outfmt 6", ""),
+    # A first query of 2 nt (no frame +1) with -searchsp: the archive's EffectiveSearchSpace is the
+    # option's value for every strand (split_query_aux_priv.cpp:157-161).
+    ("strand.both_short2_first_searchsp_fmt11", f"-query {I}/short2_query.fa {SUBJECTS} -searchsp 1000000"
+                                                " -outfmt 11", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument.
@@ -265,6 +315,28 @@ def command_generate(_args) -> int:
     multi = (ENGINE / O / "tblastx_multi_query.fasta").read_text()
     records = multi.split(">")[1:]
     (INPUTS / "short3_query.fa").write_text(">s3 three\nACG\n" + ">" + ">".join(records))
+    (INPUTS / "short2_query.fa").write_text(">s2 two\nAC\n" + ">" + ">".join(records))
+    # One query of 1,200 nt (the start of the first culling_multi query, committed) and 300 of 3
+    # nt: with one strand the batch's average query length is 0 (line NP, O2b).
+    culling = (INPUTS / "culling_multi_query.fa").read_text().split(">")[1]
+    first = "".join(culling.split("\n", 1)[1].split())[:1200]
+    long_query = ">long 1200 nt\n" + "".join(first[i:i + 60] + "\n" for i in range(0, 1200, 60))
+    (INPUTS / "avg0_query.fa").write_text(long_query + "".join(f">t{n}\nATG\n" for n in range(1, 301)))
+    # With 1,300 queries of 3 nt the batch averages 0 with both strands. The subject Sa0mut (of
+    # culling_multi, committed) alone, with a second subject of 2 nt (no codon: the database's
+    # length in protein letters stays Sa0mut's), and as the first 3,000 nt of a subject of 60,003 nt
+    # (the rest N, a search space past 8 windows squared, so NCBI's linking keeps small gaps), on
+    # which NCBI crashes (approved exception 20 of PD-LOSAT-NCBI-DEFECTS); and with a subject of 12 N
+    # after it, which has no hits (the nearest runs that NCBI completes).
+    (INPUTS / "avg0_both_query.fa").write_text(long_query + "".join(f">t{n}\nATG\n" for n in range(1, 1301)))
+    mutated = next(record for record in (INPUTS / "culling_multi_subject.fa").read_text().split(">")[1:]
+                   if record.startswith("Sa0mut"))
+    (INPUTS / "avg0_one_subject.fa").write_text(">" + mutated)
+    (INPUTS / "avg0_pad_subject.fa").write_text(">" + mutated + ">pad\n" + "N" * 12 + "\n")
+    (INPUTS / "avg0_two_subject.fa").write_text(">" + mutated + ">tiny\nAC\n")
+    letters = "".join(mutated.split("\n", 1)[1].split()) + "N" * 57003
+    (INPUTS / "avg0_long_subject.fa").write_text(
+        ">Sa0long Sa0mut and 57,003 N\n" + "".join(letters[i:i + 60] + "\n" for i in range(0, len(letters), 60)))
     (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
                                             + ">sN3 three N\nNNN\n>" + records[3])
     code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()
@@ -310,7 +382,8 @@ def command_freeze(args) -> int:
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
                      "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env,
                      "oracle_env": oracle_env})
-        print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
+        line_count = result.stdout.count(b"\n")
+        print(f"{case_id}\texit {result.returncode}\t{line_count} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen TBLASTX outputs of {version} (comparison oracle only; see tblastx_regression_fixtures.py).\n")
         handle.write("# Run from LOSAT/: env <env> tblastx <argv> (LOSAT: losat tblastx <argv> <losat_extra>). Written by `freeze`; do not edit.\n")

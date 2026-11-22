@@ -2,17 +2,6 @@
 //! `Encoder`, and BLAST's incremental document (`BlastXML_FormatReport`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
-//! ```c++
-//!     if( incremental_output && incremental_struct->m_IterationNum == 0) {
-//!         bool add_dtd_reference = true, add_xml_version = true;
-//!         s_SerializeAndSplitBy( bxmlout, "</BlastOutput_param>",
-//!                 serial_xml_start, serial_xml_end,
-//!                 add_dtd_reference, add_xml_version );
-//!         // incremental_output
-//!         *out_stream << serial_xml_start << "\n<BlastOutput_iterations>" ;
-//!         incremental_struct->m_SerialXmlEnd = "\n</BlastOutput_iterations>" + serial_xml_end;
-//!     }
-//! ```
 //! So a document is: once, the `BlastOutput` object (filled from the first formatted query)
 //! cut after `</BlastOutput_param>` and `\n<BlastOutput_iterations>`; per query the
 //! `Iteration` object cut after `</Iteration_query-len>`, `\n<Iteration_hits>\n`, each `Hit`
@@ -57,7 +46,7 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>) {
     }
     real_member(enc, "expect", 1, run.expect);
     if let Some((reward, penalty)) = run.reward_penalty {
-        // `if ((val = data->GetMatchReward()) != 0) params.SetSc_match(val);`
+        // NCBI writes sc-match only when `GetMatchReward` is not 0.
         if reward != 0 {
             int_member(enc, "sc-match", 3, reward);
         }
@@ -100,12 +89,6 @@ pub(crate) fn replaced_posts(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-// ```
 /// An exception of NCBI's XML stream, or of the making of a 13 or 14 side file's report, that ends
 /// the run (`CATCH_ALL`: `Error: `, `what()`, exit status 255; a `CSeqDBException` of a subject's
 /// lookup `BLAST Database error: `, its message, exit status 2; `cli::NativeError::exception`).
@@ -119,21 +102,8 @@ pub(crate) fn run_ending_exception(
     crate::cli::NativeError::exception(exception).into()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778,877-886 (cited at
 // `blast_xml2::Xml2Document::failed`), 877-888
-// ```c++
-// BlastJSON_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream )
-// {
-// 	blastxml2::CBlastOutput2 bxmlout;
-// 	try {
-// 		s_FillBlastOutput(bxmlout, data);
-// 		s_WriteJSONObjectNoHeader(bxmlout, out_stream);
-// 	}
-// 	catch(CException &e){
-// 	    ERR_POST(Error << e.GetMsg() << e.what() );
-// 	    return;
-// 	}
-// ```
 /// The outcome `written` of one query's structured report (`StructuredXml::query` of
 /// `document`): `Ok(None)` where the report is written; where it raised an exception that NCBI's
 /// report function catches (`CaughtException`: the stream forms of the XML2 and JSON documents,
@@ -154,7 +124,7 @@ pub fn caught_post<D: StructuredXml + ?Sized>(
                 Ok(Some(crate::ncbi_exception::error_post_line(
                     None,
                     Some(program),
-                    document.caught_message(&exception).as_bytes(),
+                    &document.caught_message(&exception),
                 )))
             }
             Err(error) => Err(error),
@@ -200,25 +170,12 @@ impl std::fmt::Display for IterationThrew {
 impl std::error::Error for IterationThrew {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:740-764
-// ```c++
-// 	query_label = string("Q(")+NStr::NumericToString(index) +
-// 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
-// 	try{
-//         s_BlastXMLAddIteration(bxmlout, data->GetAlignment(index), *seqloc,
-//         ...
-// 	}
-// 	catch(CException &e){
-// 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
-// 	    return;
-// 	}
-// ```
 /// The post of an exception in an `Iteration` or one of its `Hit`s: each query is formatted by
 /// itself (`CCmdLineBlastXMLReportData` of one result), so the label is always `Q(0/1` (sic).
 fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
     let message = thrown
         .exception()
-        .what_after("Failed s_BlastXMLAddIteration Q(0/1")
-        .into_bytes();
+        .what_after(b"Failed s_BlastXMLAddIteration Q(0/1");
     DocumentPost {
         at,
         text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
@@ -227,7 +184,7 @@ fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
 
 /// The `BlastOutput` object through `</BlastOutput_param>`, filled from the first formatted
 /// query (`BlastXML_FormatReport`, blastxml_format.cpp:679-720), then `\n<BlastOutput_iterations>`.
-/// NCBI serializes it into a string first, outside any `try` (blastxml_format.cpp:724-733): its
+/// NCBI serializes it into a string first, outside any `try` (c++/src/algo/blast/format/blastxml_format.cpp:724-733): its
 /// posts come before it, and an exception ends the run with nothing of it written: the exception
 /// is returned (`Ok(Some)`, `DocumentPosts::ends_run`), after the posts.
 fn write_header(
@@ -268,12 +225,6 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, stats: &XmlStats)
     enc.member("stat", 5);
     enc.begin_sequence("Statistics");
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119
-    // ```c++
-    // 		ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbInfo) {
-    // 			m_NumSequences += i->number_seqs;
-    // 			m_NumBases += i->total_length;
-    // 		}
-    // ```
     // `m_NumSequences` is an `int`: the `Int8` sum fits it (`XmlRun::db_num`).
     int_member(enc, "db-num", 0, run.db_num as i32);
     enc.member("db-len", 1);
@@ -332,31 +283,14 @@ pub trait StructuredXml {
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-763
-    // ```c++
-    // 	catch(CException &e){
-    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
-    // 	    return;
-    // 	}
-    // ```
     /// The message that NCBI posts (`ERR_POST(Error << ...)`, after the program's `Error: [name] `
     /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
     /// documents' `GetMsg()` and `what()`.
-    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> Vec<u8> {
         exception.what_after(exception.get_msg())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
-    // ```c++
-    //     if (m_FormatType >= CFormattingArgs::eXml) {
-    //     	if(m_FormatType == CFormattingArgs::eXml2_S) {
-    //     		BlastXML2_PrintHeader(&m_Outfile);
-    //     	}
-    //     	else if(m_FormatType == CFormattingArgs::eJson_S){
-    //     		BlastJSON_PrintHeader(&m_Outfile);
-    //     	}
-    //         return;
-    //     }
-    // ```
     /// Appends what `PrintProlog` writes of the document, once: the start of the XML2 and JSON
     /// documents of outfmt 16 and 15 (nothing for BLAST XML, whose header comes with its first
     /// query, and for the side-file forms). NCBI writes it before it reads the first query
@@ -402,22 +336,6 @@ pub trait StructuredXml {
 /// `StructuredXml::holds_back`, `Xml2Target::holds_back`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
-/// ```c++
-/// 	if((m_IsIterative) || (m_IsBl2Seq)) {
-/// 		if(m_AccumulatedResults.empty()) {
-/// 			...
-/// 			m_AccumulatedResults.push_back(res);
-/// 		...
-/// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
-/// 				m_AccumulatedResults.push_back(res);
-/// 			}
-/// 			else {
-/// 				CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
-/// 				if(m_IsBl2Seq) {
-/// 				    CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
-/// 				    		   	   	   	   	   	   	    m_Scope, m_SeqInfoSrc);
-/// 				    x_WriteXML2(report_data);
-/// ```
 /// A `-subject` report is written when the next query's results arrive, or in the epilog
 /// (`PrintEpilog`, blast_format.cpp:2206-2219), which a run that a later batch stops never
 /// reaches: NCBI never makes the last formatted query's report, so it never fails on a title
@@ -473,20 +391,11 @@ impl BlastXmlWriter {
 
 impl StructuredXml for BlastXmlWriter {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
-    // ```c++
-    // 	query_label = string("Q(")+NStr::NumericToString(index) +
-    // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
-    // 	...
-    // 	catch(CException &e){
-    // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
-    // 	    return;
-    // 	}
-    // ```
     /// BLAST XML's message: NCBI formats one query per call (blast_format.cpp:708-740), so the
     /// label is always `Q(0/1` (without its `)`), then `what()`. The `Iteration` stays open after
     /// the `Hit`s written before the failed one (each written alone, `Xml5Hits`).
-    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
-        exception.what_after("Failed s_BlastXMLAddIteration Q(0/1")
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> Vec<u8> {
+        exception.what_after(b"Failed s_BlastXMLAddIteration Q(0/1")
     }
 
     /// Appends the `Iteration` of one query to `out` (before it the document's header, for the
@@ -510,18 +419,6 @@ impl StructuredXml for BlastXmlWriter {
         }
         self.iterations += 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:572-589
-        // ```c++
-        //     string serial_xml_start, serial_xml_end;
-        //     if( incremental_output) {
-        //         s_SerializeAndSplitBy( *one_query_iter, "</Iteration_query-len>",
-        //                                serial_xml_start, serial_xml_end);
-        //         *out_stream << serial_xml_start << "\n<Iteration_hits>\n"; // PART BEFORE HITS
-        //     }
-        //     if (alnset) {
-        //         s_SeqAlignSetToXMLHits(one_query_iter->SetHits(), *alnset,
-        //         ...
-        //     if( incremental_output ) *out_stream << "</Iteration_hits>" << serial_xml_end;
-        // ```
         // The whole `Iteration` without its hits is serialized first, cut after its length, and
         // the Hit objects are written one by one between the two parts. Its posts come before
         // it; an exception leaves the whole `Iteration` out (its number still counts) and no
@@ -615,10 +512,6 @@ impl StructuredXml for BlastXmlWriter {
     /// remains.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-    /// ```c++
-    ///     if (m_FormatType == CFormattingArgs::eXml) {
-    ///         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
-    /// ```
     /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         if self.iterations > 0 {
@@ -642,15 +535,6 @@ impl<'a> HitSink<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
-    // ```c++
-    //         if (new_hit) {
-    //             new_hit->SetNum(index);
-    //             ++index;
-    //             if( !incremental_output ) hits.push_back(new_hit);
-    // 	    else
-    // 	    {
-    // 		CNcbiOstrstream  one_hit_os;
-    // ```
     /// Where NCBI loads the subject of the next `Hit`, in the query's output: what NCBI posts
     /// there (`report::query_warnings::HitPosts`) comes after the output before it. BLAST XML
     /// writes each `Hit` as NCBI makes it, and NCBI loads a `Hit`'s subject after the `Hit`s
@@ -741,7 +625,7 @@ impl HitWrite for Xml5Hits<'_> {
             enc.end_member();
             enc.end_sequence();
             enc.end_document();
-            // NCBI writes each `Hit` into a string stream of its own (blastxml_format.cpp:498-511)
+            // NCBI writes each `Hit` into a string stream of its own (c++/src/algo/blast/format/blastxml_format.cpp:498-511)
             // and then to the output: its posts come before it, and an exception leaves it out
             // and ends the `Iteration` (`IterationThrew`).
             let at = self.out.len();
@@ -838,11 +722,6 @@ pub(crate) fn count_hsp(
     );
     let (identity, positive) = recount(hsp.qrow, hsp.srow, positives, &mut scratch.midline);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:238-241
-    // ```c++
-    //         	if(!kTranslated)
-    //         	{
-    //         		num_gaps = kAlign.GetTotalGapCount();
-    // ```
     // The gaps of the Seq-align's segments (also for a translated search, lines 259-260): the
     // columns of the edit script's gaps, not the `-` letters of the rows, which a stored gap
     // character of a protein subject also is. Without an edit script, the `-` letters.
@@ -905,20 +784,5 @@ impl HspWrite for Xml5Hsps<'_, '_> {
 }
 
 #[cfg(test)]
-mod segment_tests {
-    use super::*;
-
-    #[test]
-    fn an_empty_edit_script_is_one_segment_like_no_script() {
-        let mut segments = Vec::new();
-        for ops in [None, Some(&[][..])] {
-            fill_segments(&mut segments, ops, 7);
-            assert_eq!(segments, [(0, 6)]);
-        }
-        fill_segments(&mut segments, Some(&[][..]), 0);
-        assert!(segments.is_empty());
-        let ops = [GapEditOp::Sub(3), GapEditOp::Ins(2), GapEditOp::Sub(4)];
-        fill_segments(&mut segments, Some(&ops), 9);
-        assert_eq!(segments, [(0, 2), (3, 4), (5, 8)]);
-    }
-}
+#[path = "writer_segment_tests.rs"]
+mod segment_tests;

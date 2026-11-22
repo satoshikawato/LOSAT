@@ -29,7 +29,7 @@ fn serial(root: u16, text: &str) {
 /// The report of the exception that stops the reader (`what()`), with the official build's tree.
 fn exception(root: u16, text: &str) -> String {
     match read(root, text).0 {
-        Err(ReadError::Exception(e)) => e.what(),
+        Err(ReadError::Exception(e)) => String::from_utf8(e.what()).unwrap(),
         other => panic!("{text}: {other:?}"),
     }
 }
@@ -79,7 +79,7 @@ fn inst_member(value: &Value, name: &str) -> Option<Value> {
     value.member(member_index(named::SEQ_INST, name)).cloned()
 }
 
-// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-700 (quoted at `read::get_number`):
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-700 (cited at `read::get_number`):
 // a sign right before the digits, leading zeros, the ranges of Int4 and Uint4 (`-` is not a sign
 // of an unsigned), Int8 for `TGi`. Probes c02 (`pct -0`), c10 (`+7`, `007`), c17 (`to +29`, gi
 // 5000000000), c18 (`length -1`).
@@ -129,7 +129,7 @@ fn integers_follow_their_storage() {
     assert_eq!(gi, Value::SeqId(Box::new(ParsedSeqId::Gi(5000000000))));
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704 (quoted at `read::integer`):
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704 (cited at `read::integer`):
 // `Int2` is an Int4 that must fit, else a `CSerialException`.
 #[test]
 fn an_int2_out_of_range_is_a_serial_exception() {
@@ -144,7 +144,7 @@ fn an_int2_out_of_range_is_a_serial_exception() {
     serial(named::SEQTABLE_MULTI_DATA, &table("32768"));
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737 (cited at
 // `read::enum_value`): an ENUMERATED by name or by a number with a name (c02 `topology 2`, c06
 // `topology 7`), an INTEGER with named values by name or any number (c01 `biomol 8`,
 // `completeness 099`); an Int4 overflow in either gets the line of `CEnumeratedTypeInfo::ReadEnum`
@@ -224,7 +224,7 @@ fn booleans_and_nulls_are_words() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912, 938-986 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912, 938-986 (cited at
 // `read::string`): a VisibleString's byte outside 0x20..0x7E is `#` with `ERR_POST_X(7)` naming
 // the stack's path, the line and the piece read (probe c09); a UTF8String keeps its bytes (c10);
 // `""` is a quote and the lines are joined.
@@ -290,7 +290,7 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1477-1538 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1477-1538 (cited at
 // `Reader::octets`): an odd last digit is the high nibble (c10 `'abc'H` -> `ABC0`).
 #[test]
 fn octets_take_an_odd_digit_as_a_high_nibble() {
@@ -305,7 +305,7 @@ fn octets_take_an_odd_digit_as_a_high_nibble() {
     assert_eq!(**list, Value::List(vec![Value::Octets(vec![0xab, 0xc0])]));
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (quoted at `Reader::real`):
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`):
 // the base is `ReadUint4`, so `-10` is `BadNumber` (NCBI 2.17.0 probe e06), and a base other than
 // 2 and 10 a `CSerialException`.
 #[test]
@@ -323,7 +323,7 @@ fn a_real_reads_its_base_as_an_unsigned() {
     serial(named::USER_FIELD, &field("real { 1, 3, 0 }"));
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-424 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-424 (cited at
 // `read::item_index`): a member named, in brackets, or by its tag in brackets; an id that starts
 // with a digit is `NStr::StringToInt`'s (a `CStringException` for `[3x]`, probe e03, whose frame
 // still names the member read before); an upper-case first letter (c21), an unknown member (c04)
@@ -438,7 +438,7 @@ fn the_report_has_a_line_per_frame() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (cited at
 // `Reader::choice`): a variant that is not one of the CHOICE's, or none, is a `CSerialException`.
 #[test]
 fn an_unknown_variant_is_a_serial_exception() {
@@ -475,7 +475,7 @@ fn the_end_of_the_text_is_an_eof_only_in_the_root_object() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:245-274 (quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:245-274 (cited at
 // `Reader::skip_white_space`): comments between values are white space (c16), and a `--` inside a
 // string is part of it.
 #[test]
@@ -495,15 +495,15 @@ fn comments_are_white_space() {
     assert_eq!(items.len(), 2);
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68 (cited at
 // `hooks::seq_descr_post_read`): an empty `Seq-descr` is NCBI's `CSerialException` (c23).
 #[test]
 fn an_empty_seq_descr_is_a_serial_exception() {
     serial(named::SEQ_DESCR, "Seq-descr ::= { }");
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869 and objistrasn.cpp:1024-1155
-// (quoted at `read::delayed`, `read::skip_number`, `read::string`): `Auth-list.names` is skipped
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869 and c++/src/serial/objistrasn.cpp:1024-1155
+// (cited at `read::delayed`, `read::skip_number`, `read::string`): `Auth-list.names` is skipped
 // and kept as read, from its first byte that is not white space (c11): comments and spacing stay,
 // a number is not range-checked (c12), a bad char is posted without the piece; the skip still
 // checks the grammar.
@@ -539,7 +539,7 @@ fn the_delayed_member_is_kept_as_read() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Variation_ref.cpp:56-151 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Variation_ref.cpp:56-151 (cited at
 // `hooks::variation_ref_post_read`): the deprecated members move into `variant-prop` (made with
 // version 5) or are dropped with NCBI's messages (c13, c13b, c13c).
 #[test]
@@ -617,7 +617,7 @@ fn a_seq_id_is_read_into_the_seq_id_model() {
     assert_eq!(dbtag.tag, ObjectId::Id(-3));
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-900 (quoted at `read::document`): the
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-900 (cited at `read::document`): the
 // type named before `::=` must be the root's.
 #[test]
 fn the_file_header_names_the_root() {
@@ -628,7 +628,7 @@ fn the_file_header_names_the_root() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527 (cited at
 // `hooks::pre_read_member`): a reserve above `max_size()` (2^61 - 1 elements) is NCBI's
 // `std::length_error` (NCBI 2.17.0 probes p5 d01-d12); the missing members come first.
 #[test]
@@ -664,7 +664,7 @@ fn dense_seg_reserve_above_max_size_is_a_length_error() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:703-765 and
-// c++/src/serial/objistr.cpp:1906-1923 (quoted at `hooks::pre_read_variant`): a negative
+// c++/src/serial/objistr.cpp:1906-1923 (cited at `hooks::pre_read_variant`): a negative
 // `num-rows` reserves above `max_size()` for the listed variants (NCBI 2.17.0, line RG D3-1 `om/`
 // cases t50, t62-t69); the Seq-table is found up to 5 class or choice frames above the variant.
 #[test]
@@ -893,7 +893,7 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             let Err(ReadError::Exception(exception)) = value else {
                 panic!("an exception");
             };
-            let report = exception.what();
+            let report = String::from_utf8(exception.what()).unwrap();
             assert!(
                 report.lines().count() > 2 * depth,
                 "{}",
@@ -909,4 +909,94 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
         .expect("a thread")
         .join()
         .expect("no overflow");
+}
+
+/// Numbers read (`get_number`: Int4, Uint4, Int8) and skipped (`skip_number`, in the delayed
+/// `Auth-list.names`), with the results that the reader gave before its position moved into
+/// locals (recorded from dev's reader, not from this one): ranges, signs, the overflow at the
+/// digit taken, bad numbers, a number at the end of the text, and line ends of every form before
+/// them (the line of each report).
+const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa,\n length 4294967295 }",
+        "(Ok(Sequence([(0, Enum(2)), (1, Enum(3)), (2, Int(4294967295))])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa,\r\n length 4294967296 }",
+        "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1396, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClass, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1393, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClassMember, Member name= length\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 2\", extra: None }])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa,\n\r length +5 }",
+        "(Ok(Sequence([(0, Enum(2)), (1, Enum(3)), (2, Int(5))])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa,\r\r length -1 }",
+        "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1396, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClass, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1393, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClassMember, Member name= length\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") }, message: \"bad number in line 3\", extra: None }])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa, fuzz pct -2147483648 }",
+        "(Ok(Sequence([(0, Enum(2)), (1, Enum(3)), (3, Choice(2, Int(-2147483648)))])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa,\n\n fuzz pct 2147483648 }",
+        "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1396, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClass, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1393, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClassMember, Member name= fuzz\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Int-fuzz\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= pct\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 3\", extra: None }])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa, fuzz pct\n- 5 }",
+        "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1396, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClass, Object type= Seq-inst\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1393, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStreamAsn::ReadClassSequential\") }, message: \" Frame type= eFrameClassMember, Member name= fuzz\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Int-fuzz\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= pct\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") }, message: \"bad number in line 2\", extra: None }])), [])",
+    ),
+    (
+        named::SEQ_INST,
+        "Seq-inst ::= { repr raw, mol aa, length 12",
+        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameClassMember, Member name= length\")), [])",
+    ),
+    (named::SEQ_ID, "Seq-id ::= gi 9223372036854775807", "(Ok(SeqId(Gi(9223372036854775807))), [])"),
+    (named::SEQ_ID, "Seq-id ::= gi\r\n9223372036854775808", "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-id\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Seq-id\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= gi\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 2\", extra: None }])), [])"),
+    (named::SEQ_ID, "Seq-id ::= gi -9223372036854775808", "(Ok(SeqId(Gi(-9223372036854775808))), [])"),
+    (
+        named::AUTH_LIST,
+        "Auth-list ::= { names std { { name dbtag { db \"x\", tag id\n\r 99999999999 } } } }",
+        "(Ok(Sequence([(0, Delayed([115, 116, 100, 32, 123, 32, 123, 32, 110, 97, 109, 101, 32, 100, 98, 116, 97, 103, 32, 123, 32, 100, 98, 32, 34, 120, 34, 44, 32, 116, 97, 103, 32, 105, 100, 10, 13, 32, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 57, 32, 125, 32, 125, 32, 125]))])), [])",
+    ),
+    (
+        named::AUTH_LIST,
+        "Auth-list ::= { names std { { name dbtag { db \"x\", tag id -\n5 } } } }",
+        "(Err(Serial(\"bad signed integer in line 1\")), [])",
+    ),
+    (
+        named::AUTH_LIST,
+        "Auth-list ::= { names std { { name dbtag { db \"x\", tag id 5",
+        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+    ),
+    (
+        named::AUTH_LIST,
+        "Auth-list ::= { names std { { name dbtag { db \"x\", tag id +",
+        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+    ),
+];
+
+/// `LITERAL_NUMBERS`: each document gives the recorded result and posts. On a difference the
+/// message lists every result as read, in the form of the table's last column.
+#[test]
+fn literal_numbers() {
+    let mut read_all = String::new();
+    let mut differ = Vec::new();
+    for (k, &(root, text, expected)) in LITERAL_NUMBERS.iter().enumerate() {
+        let got = format!("{:?}", read(root, text));
+        if got != expected {
+            differ.push(k);
+        }
+        read_all += &format!("number {k}: {got:?}\n");
+    }
+    assert!(
+        differ.is_empty(),
+        "documents {differ:?} differ; read:\n{read_all}"
+    );
 }

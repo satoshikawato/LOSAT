@@ -3,15 +3,6 @@
 //! on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-//! ```c
-//!             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//!                                      backup.full_range.right,
-//!                                      subject->gen_code_string, &translation_buffer,
-//!                                      &frame_offsets, NULL);
-//! ...
-//!             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//!             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-//! ```
 //! NCBI translates the six frames of a subject and each unit reads its chunk of a frame. With the
 //! switch, the plan of a packed subject whose first frame has 1 MiB or more (3,145,722 bases)
 //! made for its use alone (the search keeps no plan of it: fewer than four query batches, or a

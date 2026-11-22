@@ -23,6 +23,8 @@ use super::Tool;
 pub(crate) enum Kind {
     Flag,
     Text,
+    /// `eBoolean`: `CArg_Boolean` (`NStr::StringToBool`).
+    Boolean,
     Integer,
     /// `eDouble`: `CArg_Double` (`NStr::StringToDouble` with `fDecimalPosixOrLocal`).
     Double,
@@ -32,22 +34,12 @@ pub(crate) enum Kind {
 
 impl Kind {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2387-2400
-    // ```c++
-    //     static const char* s_TypeName[k_EType_Size] = {
-    //         "String",
-    //         "Boolean",
-    //         "Int8",
-    //         "Integer",
-    //         "IntId",
-    //         "Real",
-    //         "File_In",
-    //         "File_Out",
-    // ```
     /// `CArgDescriptions::GetTypeName` of a key's type.
     fn type_name(self) -> &'static str {
         match self {
             Kind::Flag => "Boolean",
             Kind::Text => "String",
+            Kind::Boolean => "Boolean",
             Kind::Integer => "Integer",
             Kind::Double => "Real",
             Kind::InputFile => "File_In",
@@ -56,9 +48,10 @@ impl Kind {
     }
 }
 
-/// The number of an `eInteger` or `eDouble` key.
+/// The converted value of an `eBoolean`, `eInteger` or `eDouble` key.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Number {
+    Boolean(bool),
     Integer(i32),
     Double(f64),
 }
@@ -73,6 +66,13 @@ pub(crate) enum Constraint {
     AtLeast(i64),
     /// `CArgAllowValuesBetween(min, max, true)`: from `min` to `max`, both included.
     Between(i64, i64),
+    /// `CArgAllow_Integers(min, max)`: an integer from `min` to `max` (`CArgAllow_Int8s::Verify`
+    /// reads the value with `s_StringToInt8`, as `CArg_Integer` does).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
+    Integers(i64, i64),
+    /// `CArgAllow_Doubles(min, max)`: a number from `min` to `max`, and its usage text
+    /// (`NStr::DoubleToString` of each end: `0..100`).
+    Doubles(f64, f64, &'static str),
 }
 
 impl Constraint {
@@ -105,6 +105,7 @@ impl Constraint {
     // (`NStr::DoubleToString` of a whole number writes it without a decimal point.)
     fn usage(self) -> String {
         match self {
+            Constraint::Doubles(_, _, usage) => usage.to_string(),
             Constraint::Strings(values) => values
                 .iter()
                 .map(|value| format!("`{value}'"))
@@ -112,12 +113,32 @@ impl Constraint {
                 .join(", "),
             Constraint::AtLeast(min) => format!(">={min}"),
             Constraint::Between(min, max) => format!("(>={min} and =<{max})"),
+            Constraint::Integers(min, max) => integers_usage(min, max),
         }
     }
 
     /// Whether the constraint compares the value as a number (`NStr::StringToDouble`).
     fn numeric(self) -> bool {
         matches!(self, Constraint::AtLeast(_) | Constraint::Between(..))
+    }
+}
+
+/// `CArgAllow_Integers::GetUsage` of one range: the number when `min == max`, a bound when the
+/// other is `int`'s limit, else `min..max` (`CArgAllow_Int8s::GetUsage`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4778-4794
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4698-4724
+fn integers_usage(min: i64, max: i64) -> String {
+    let (int_min, int_max) = (i64::from(i32::MIN), i64::from(i32::MAX));
+    if min == max {
+        min.to_string()
+    } else if min == int_min && max != int_max {
+        format!("less or equal to {max}")
+    } else if min != int_min && max == int_max {
+        format!("greater or equal to {min}")
+    } else if min == int_min && max == int_max {
+        String::new()
+    } else {
+        format!("{min}..{max}")
     }
 }
 
@@ -129,6 +150,19 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey`: the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+}
+
+#[cfg(test)]
+impl Desc {
+    /// The argument's name.
+    pub(crate) fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The usage of its constraint (`CArgAllow::GetUsage`), as `-help` prints it.
+    pub(crate) fn constraint_usage(&self) -> Option<String> {
+        self.constraint.map(Constraint::usage)
+    }
 }
 
 /// `AddFlag(name, comment, true)`: a flag that its word sets (every flag of LOSAT's programs).
@@ -171,21 +205,6 @@ pub(crate) const fn mandatory_key(name: &'static str, kind: Kind) -> Desc {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2207-2219
-// ```c++
-//     if ( m_AutoHelp ) {
-//         AddFlag(s_AutoHelp,
-//                 "Print USAGE and DESCRIPTION;  ignore all other parameters");
-//     }
-//     AddFlag(s_AutoHelpFull,
-//             "Print USAGE, DESCRIPTION and ARGUMENTS;"
-//             " ignore all other parameters");
-//     AddFlag(s_AutoHelpShowAll,
-//             "Print USAGE, DESCRIPTION and ARGUMENTS, including hidden ones;"
-//             " ignore all other parameters");
-//     AddFlag(s_AutoHelpXml,
-//             "Print USAGE, DESCRIPTION and ARGUMENTS in XML format;"
-//             " ignore all other parameters");
-// ```
 /// The arguments of every `CArgDescriptions` before the program's own: the four help flags of
 /// its constructor (`s_AutoHelp`, `s_AutoHelpFull`, `s_AutoHelpShowAll`, `s_AutoHelpXml`).
 /// `HideStdArgs` takes effect later (`x_AddDefaultArgs`, after a help or an argument error,
@@ -195,31 +214,7 @@ pub(crate) const fn mandatory_key(name: &'static str, kind: Kind) -> Desc {
 const HELP_FLAGS: &[Desc] = &[flag("h"), flag("help"), flag("help-full"), flag("xmlhelp")];
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1213-1218
-// ```c++
-//         if ( !m_DisableArgDesc ) {
-//             for(CArgDescriptions* desc : m_ArgDesc->GetAllDescriptions()) {
-//                 desc->AddDefaultFileArguments(m_DefaultConfig);
-//             }
-//         }
-//         m_Args.reset(arg_desc->CreateArgs(GetArguments()));
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242
-// ```c++
-// void CArgDescriptions::AddDefaultFileArguments(const string& default_config)
-// {
-//     if (!Exist(s_ArgLogFile + 1) ) {
-//         AddOptionalKey
-//             (s_ArgLogFile+1, "File_Name",
-//                 "File to which the program log should be redirected",
-//                 CArgDescriptions::eOutputFile);
-//     }
-//     if (!Exist(s_ArgCfgFile + 1) ) {
-//         if (default_config.empty()) {
-//             AddOptionalKey
-//                 (s_ArgCfgFile + 1, "File_Name",
-//                     "Program's configuration (registry) data file",
-//                     CArgDescriptions::eInputFile);
-// ```
 /// The arguments of every application after the program's own (`AddDefaultFileArguments`):
 /// the application opens `-logfile` itself (`ncbi_environment::diag_target`), and LOSAT refuses
 /// `-conffile` before the reader (`ncbi_environment::preparse`).
@@ -245,20 +240,6 @@ pub(crate) enum Dep {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2618-2629
-// ```c++
-// void CArgDescriptions::SetDependency(const string& arg1,
-//                                      EDependency   dep,
-//                                      const string& arg2)
-// {
-//     m_Dependencies.insert(TDependencies::value_type(arg1,
-//         SArgDependency(arg2, dep)));
-//     if (dep == eExcludes) {
-//         // Exclusions must work in both directions
-//         m_Dependencies.insert(TDependencies::value_type(arg2,
-//             SArgDependency(arg1, dep)));
-//     }
-// }
-// ```
 /// The dependencies of `tool` (its `SetDependency` calls, `Tool::dependencies`) as NCBI's
 /// `multimap` holds them: each exclusion in both directions, ordered by the first argument's
 /// name, and in the order of insertion among equal names. Which of several conflicts NCBI
@@ -320,13 +301,6 @@ fn invalid(code: &'static str, message: String) -> ArgsError {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
-// ```c++
-// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
-// {
-//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
-//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
-// }
-// ```
 pub(crate) fn arg_message(name: &str, what: &str, attr: &str) -> String {
     let name = if name.is_empty() { "...." } else { name };
     if attr.is_empty() {
@@ -337,14 +311,6 @@ pub(crate) fn arg_message(name: &str, what: &str, attr: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:207-209, 223-224
-// ```c++
-// #define THROW_CArg_NoValue \
-//     NCBI_THROW(CArgException,eNoValue, s_ArgExptMsg(GetName(), \
-//         "The argument has no value", ""));
-// ...
-// CNcbiIstream& CArg_NoValue::AsInputFile (CArgValue::TFileFlags) const { THROW_CArg_NoValue; }
-// CNcbiOstream& CArg_NoValue::AsOutputFile(CArgValue::TFileFlags) const { THROW_CArg_NoValue; }
-// ```
 /// The exception of a stream asked of the argument `name` that has no value.
 fn no_value(name: &str) -> ArgException {
     ArgException::new("eNoValue", no_value_message(name))
@@ -382,19 +348,24 @@ impl Args {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
-    // ```c++
-    // CArg_Flag::CArg_Flag(const string& name, bool value)
-    //     : CArg_Boolean(name, value)
-    // {
-    // }
-    // bool CArg_Flag::HasValue(void) const
-    // {
-    //     return AsBoolean();
-    // }
-    // ```
     /// `args[name]` (and `AsBoolean`) of the flag `name`: whether its word was given.
     pub(crate) fn flag(&self, name: &str) -> bool {
         self.given(name)
+    }
+
+    /// `args[name].AsString()` inside `Run`: the value of the key `name`, or NCBI's exception
+    /// of an argument without a value (`CArg_NoValue`), which the application reports as one of
+    /// the reader's (`Diag::run_arg_exception`).
+    pub(crate) fn as_string(&self, name: &str) -> Result<&str, ArgException> {
+        self.value(name).ok_or_else(|| no_value(name))
+    }
+
+    /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.
+    pub(crate) fn boolean(&self, name: &str) -> Option<bool> {
+        match self.numbers.get(name) {
+            Some(&Number::Boolean(value)) => Some(value),
+            _ => None,
+        }
     }
 
     /// `AsInteger()` of the `eInteger` key `name`: given, or its default.
@@ -431,52 +402,6 @@ impl Args {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2856-2932
-// ```c++
-// bool CArgDescriptions::x_CreateArg(const string& arg1,
-//                                    bool have_arg2, const string& arg2,
-//                                    unsigned* n_plain, CArgs& args) const
-// {
-//     ...
-//     if (*n_plain == kMax_UInt || m_PositionalMode == ePositionalMode_Loose) {
-//         // Check for the s_ArgDelimiter delimiter
-//         if (arg1.compare(s_ArgDelimiter) == 0) {
-//             if (*n_plain == kMax_UInt) {
-//                 *n_plain = 0;  // pos.args started
-//             }
-//             return false;
-//         }
-//         ...
-//         if ((arg1.length() > 1)  &&  arg1[0] == '-') {
-//             name = arg1.substr(1);
-//             ...
-//             // Check for '=' in the arg1
-//             size_t eq = name.find('=');
-//             if (eq != NPOS) {
-//                 name = name.substr(0, eq);
-//             }
-//             ...
-//         } else {
-//             ...
-//             if (*n_plain == kMax_UInt) {
-//                 *n_plain = 0;  // pos.args started
-//             }
-//         }
-//     }
-//     ...
-//     if (*n_plain != kMax_UInt && !is_keyflag) {
-//         ...
-//         (*n_plain)++;
-//
-//         // Check for too many positional arguments
-//         if (kMax_UInt - m_nExtraOpt > m_nExtra + m_PosArgs.size()  &&
-//             *n_plain > m_PosArgs.size() + m_nExtra + m_nExtraOpt) {
-//             NCBI_THROW(CArgException,eSynopsis,
-//                 "Too many positional arguments (" +
-//                 NStr::UIntToString(*n_plain) +
-//                 "), the offending value: "+ arg1);
-//         }
-//     }
-// ```
 /// Reads `words` (the command line after the program's name, without the words NCBI's
 /// application takes before the reader: `ncbi_environment::preparse`) as NCBI's
 /// `CArgDescriptions::CreateArgs` reads `tool`'s: each word in its order, then the dependencies
@@ -523,14 +448,6 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
         } = create_arg(tool, arg1, name, arg2)?;
         if values.contains_key(desc.name) {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1928-1941
-            // ```c++
-            //     CArgs::TArgsI arg_it = x_Find(arg->GetName());
-            //     if ( arg_it !=  m_Args.end()) {
-            //         ...
-            //                 NCBI_THROW(CArgException,eSynopsis,
-            //                    "Argument with this name is defined already: "
-            //                    + arg->GetName());
-            // ```
             return Err(invalid(
                 "eSynopsis",
                 format!("Argument with this name is defined already: {}", desc.name),
@@ -552,59 +469,6 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3007-3081
-// ```c++
-//     if (it == m_Args.end()) {
-//         if ( name.empty() ) {
-//             NCBI_THROW(CArgException,eInvalidArg,
-//                     "Unexpected extra argument, at position # " +
-//                     NStr::UIntToString(n_plain));
-//         } else {
-//             NCBI_THROW(CArgException,eInvalidArg,
-//                     "Unknown argument: \"" + name + "\"");
-//         }
-//     }
-//     ...
-//     if ( s_IsFlag(arg) ) {
-//         x_CheckAutoHelp(arg1);
-//         eq_separator = arg1.length() > name.length()  &&
-//             (arg1[name.length() + 1] == '=');
-//         if ( eq_separator ) {
-//             NCBI_THROW(CArgException,eInvalidArg, "Invalid argument: " + arg1);
-//         }
-//     }
-//
-//     // Check value separated by '='
-//     string arg_val;
-//     if ( s_IsKey(arg) && !confidential) {
-//         eq_separator = arg1.length() > name.length()  &&
-//             (arg1[name.length() + 1] == '=');
-//         ...
-//     }
-//
-//     // Get argument value
-//     string value;
-//     if ( !eq_separator  &&  !no_separator ) {
-//         if ( !s_IsKey(arg)  || (confidential && conf_method == 't')) {
-//             value = arg1;
-//         }
-//         else {
-//             // <key> <value> arg  -- advance from the arg.name to the arg.value
-//             if ( !have_arg2 ) {
-//                 ...
-//                 NCBI_THROW(CArgException,eNoArg,s_ArgExptMsg(arg1,
-//                     "Value is missing", kEmptyStr));
-//             }
-//             value = arg2;
-//             arg2_used = true;
-//         }
-//     }
-//     else {
-//         ...
-//             arg_val = arg1.substr(name.length() + 2);
-//         ...
-//         value = arg_val;
-//     }
-// ```
 /// One option word `arg1` with the name `name` (and the next word `arg2`, the value of a key
 /// written apart).
 fn create_arg(
@@ -614,15 +478,6 @@ fn create_arg(
     arg2: Option<&String>,
 ) -> Result<Created, ArgsError> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:921-929
-    // ```c++
-    // CArgDesc::CArgDesc(const string& name, const string& comment, CArgDescriptions::TFlags flags)
-    //     : m_Name(name), m_Comment(comment), m_Flags(flags)
-    // {
-    //     if ( !CArgDescriptions::VerifyName(m_Name) ) {
-    //         NCBI_THROW(CArgException,eInvalidArg,
-    //             "Invalid argument name: " + m_Name);
-    //     }
-    // ```
     // The lookup of `name` (`x_Find`) makes a `CArgDesc_NameOnly` of it, so a name that is no
     // argument name fails there.
     if !is_argument_name(name) {
@@ -633,21 +488,6 @@ fn create_arg(
     }
     let find = |name: &str| descs(tool).find(|desc| desc.name == name);
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
-    // ```c++
-    //     size_t dash = name.rfind('-');
-    //     if (it == m_Args.end() && dash != NPOS && dash != 0) {
-    //         string test(name.substr(0, dash));
-    //         string suffix(name.substr(dash+1));
-    //         if (NStr::strcasecmp(suffix.c_str(), "file") == 0 ||
-    //             NStr::strcasecmp(suffix.c_str(), "verbatim") == 0)
-    //         {
-    //             try {
-    //                 it = x_Find(test);
-    //             } catch (const CArgException&) {
-    //                 it = m_Args.end();
-    //             }
-    //             if (it != m_Args.end()) {
-    // ```
     // The confidential arguments read their value from a file (`-name-file`); LOSAT's programs
     // have none, but the lookup of the name before the dash stays: `-info-file` is `-info`, and
     // `-db-file NAME` is `-db NAME` (the separator is looked for after the whole name).
@@ -676,21 +516,6 @@ fn create_arg(
     let eq_separator = arg1.as_bytes().get(name.len() + 1) == Some(&b'=');
     if desc.kind == Kind::Flag {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
-        // ```c++
-        // void CArgDescriptions::x_CheckAutoHelp(const string& arg) const
-        // {
-        //     if (arg.compare(string("-") + s_AutoHelp) == 0) {
-        //         if (m_AutoHelp) {
-        //             NCBI_THROW(CArgHelpException,eHelp,kEmptyStr);
-        //         }
-        //     } else if (arg.compare(string("-") + s_AutoHelpFull) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpFull,kEmptyStr);
-        //     } else if (arg.compare(string("-") + s_AutoHelpXml) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpXml,kEmptyStr);
-        //     } else if (arg.compare(string("-") + s_AutoHelpShowAll) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpShowAll,kEmptyStr);
-        //     }
-        // ```
         match arg1 {
             "-h" => return Err(ArgsError::Usage),
             // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
@@ -740,39 +565,7 @@ struct Created {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3338-3365
-// ```c++
-// bool CArgDescriptions::VerifyName(const string& name, bool extended)
-// {
-//     if ( name.empty() )
-//         return true;
-//
-//     string::const_iterator it = name.begin();
-//     if (extended  &&  *it == '#') {
-//         ...
-//     } else {
-//         if (name[0] == '-') {
-//             // Prohibit names like '-' or '--foo'.
-//             // The second char must be present and may not be '-'.
-//             if (name.length() == 1  ||  name[1] == '-') {
-//                 return false;
-//             }
-//         }
-//         for ( ;  it != name.end();  ++it) {
-//             if ( !s_IsArgNameChar((unsigned char)(*it)) )
-//                 return false;
-//         }
-//     }
-//
-//     return true;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1786-1789
-// ```c++
-// inline bool s_IsArgNameChar(char c)
-// {
-//     return isalnum(c)  ||  c == '_'  ||  c == '-';
-// }
-// ```
 /// `CArgDescriptions::VerifyName(name)`: whether `name` can be an argument's name (ASCII letters
 /// and digits, `_` and `-`, not `-` alone or starting with `--`; the empty name can).
 fn is_argument_name(name: &str) -> bool {
@@ -786,28 +579,11 @@ fn is_argument_name(name: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1228-1262
-// ```c++
-//     // Check against additional (user-defined) constraints, if any imposed
-//     if ( m_Constraint ) {
-//         bool err = false;
-//         try {
-//             bool check = m_Constraint->Verify(value);
-//             ...
-//                 err = !check;
-//             ...
-//         if (err) {
-//             ...
-//                 string err_msg;
-//                 ...
-//                     err_msg = "Illegal value, expected ";
-//                 ...
-//                 NCBI_THROW(CArgException, eConstraint, s_ArgExptMsg(GetName(),
-//                            err_msg + m_Constraint->GetUsage(),value));
-// ```
 /// `CArgDesc::ProcessArgument` (and `ProcessDefault`): the conversion of `value` to the key's
 /// type, then its constraint; the number of an `eInteger` or `eDouble` key.
 fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> {
     let number = match desc.kind {
+        Kind::Boolean => Some(boolean_value(desc, value)?),
         Kind::Integer => Some(Number::Integer(integer_value(tool, desc, value)?)),
         Kind::Double => Some(double_value(desc, value)?),
         Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
@@ -820,12 +596,25 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
         Some(Constraint::AtLeast(min)) => match number {
             Some(Number::Integer(number)) => i64::from(number) >= min,
             Some(Number::Double(number)) => number >= min as f64,
-            None => false,
+            Some(Number::Boolean(_)) | None => false,
+        },
+        // `s_StringToInt8(value)` within the range: the integer `integer_value` converted
+        // (hexadecimal included).
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
+        Some(Constraint::Integers(min, max)) => match number {
+            Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
+            _ => false,
+        },
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
+        // (the conversion of `double_value`; a NaN is in no range.)
+        Some(Constraint::Doubles(min, max, _)) => match number {
+            Some(Number::Double(number)) => min <= number && number <= max,
+            _ => false,
         },
         Some(Constraint::Between(min, max)) => match number {
             Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
             Some(Number::Double(number)) => number >= min as f64 && number <= max as f64,
-            None => false,
+            _ => false,
         },
     };
     match desc.constraint {
@@ -842,45 +631,7 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129
-// ```c++
-// // Allow autodetection among decimal and hex, but NOT octal, in case
-// // anyone's been relying on leading zeros being meaningless.
-// inline
-// Int8 s_StringToInt8(const string& value)
-// {
-//     try {
-//         return NStr::StringToInt8(value);
-//     } catch (const CStringException&) {
-//         if (NStr::StartsWith(value, "0x", NStr::eNocase)) {
-//             return NStr::StringToInt8(value, 0, 16);
-//         } else {
-//             throw;
-//         }
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360, 383-390
-// ```c++
-// inline CArg_Int8::CArg_Int8(const string& name, const string& value)
-//     : CArg_String(name, value)
-// {
-//     try {
-//         m_Integer = s_StringToInt8(value);
-//     } catch (const CException& e) {
-//         NCBI_RETHROW(e, CArgException, eConvert, s_ArgExptMsg(GetName(),
-//             "Argument cannot be converted", value));
-//     }
-// }
-// ...
-// inline CArg_Integer::CArg_Integer(const string& name, const string& value)
-//     : CArg_Int8(name, value)
-// {
-//     if (m_Integer < kMin_Int  ||  m_Integer > kMax_Int) {
-//         NCBI_THROW(CArgException, eConvert, s_ArgExptMsg(GetName(),
-//             "Integer value is out of range", value));
-//     }
-// }
-// ```
 // The exception of the conversion is the predecessor of the reader's: its text (with the
 // position, `NcbiException::text`) is the first message (`Cannot convert string 'x' to Int8
 // (m_Pos = 0)`). A hexadecimal value is converted in base 16, whose exception is then the one
@@ -909,7 +660,7 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
         ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
-                error.text(),
+                String::from_utf8_lossy(&error.text()).into_owned(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })
@@ -922,19 +673,25 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
     })
 }
 
+/// The value of an `eBoolean` key (`CArg_Boolean`): `NStr::StringToBool`, whose exception
+/// (`String cannot be converted to bool`, position 0) is the predecessor of the reader's.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-498
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839
+fn boolean_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
+    match crate::ncbi_str::string_to_bool(value) {
+        Some(value) => Ok(Number::Boolean(value)),
+        None => Err(ArgsError::Invalid(ArgException {
+            code: "eConvert",
+            messages: vec![
+                crate::wording::losat_text("String cannot be converted to bool (m_Pos = 0)")
+                    .into_owned(),
+                arg_message(desc.name, "Argument cannot be converted", value),
+            ],
+        })),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
-// ```c++
-// inline CArg_Double::CArg_Double(const string& name, const string& value)
-//     : CArg_String(name, value)
-// {
-//     try {
-//         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
-//     } catch (const CException& e) {
-//         NCBI_RETHROW(e,CArgException,eConvert,
-//             s_ArgExptMsg(GetName(),"Argument cannot be converted",value));
-//     }
-// }
-// ```
 // As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
 // message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
 /// The number of an `eDouble` key (`CArg_Double`).
@@ -944,7 +701,7 @@ fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
         Err(error) => Err(ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
-                error.text(),
+                String::from_utf8_lossy(&error.text()).into_owned(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })),
@@ -952,55 +709,6 @@ fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
-// ```c++
-//     ITERATE(TDependencies, dep, m_Dependencies) {
-//         // Skip missing and empty arguments
-//         if (!args.Exist(dep->first)  ||  !args[dep->first]) {
-//             continue;
-//         }
-//         switch ( dep->second.m_Dep ) {
-//         case eRequires:
-//             require.insert(make_pair(dep->second.m_Arg,dep->first));
-//             ...
-//             break;
-//         case eExcludes:
-//             // Excluded exists and is not empty?
-//             if (args.Exist(dep->second.m_Arg)  &&  args[dep->second.m_Arg]) {
-//                 NCBI_THROW(CArgException, eConstraint,
-//                     s_ArgExptMsg(dep->second.m_Arg,
-//                     "Incompatible with argument", dep->first));
-//             }
-//             exclude.insert(dep->second.m_Arg);
-//             ...
-//     // Set default values (if available) for the arguments not defined
-//     // in the command line.
-//     ITERATE (list<const CArgDesc*>, it, def_args) {
-//         const CArgDesc& arg = **it;
-//
-//         // Nothing to do if defined in the command-line
-//         if ( args.Exist(arg.GetName()) ) {
-//             continue;
-//         }
-//
-//         if (require.find(arg.GetName()) != require.end() ) {
-//             string requester(require.find(arg.GetName())->second);
-//             // Required argument must be present
-//             NCBI_THROW(CArgException, eConstraint,
-//                 s_ArgExptMsg(arg.GetName(),
-//                 "Must be specified, as it is required by argument", requester));
-//         }
-//
-//         if (exclude.find(arg.GetName()) != exclude.end()) {
-//             CRef<CArg_ExcludedValue> arg_exvalue(
-//                 new CArg_ExcludedValue(arg.GetName()));
-//             // Add the excluded-value argument to "args"
-//             args.Add(arg_exvalue);
-//             continue;
-//         }
-//         // Use default argument value
-//         try {
-//             CRef<CArgValue> arg_value(arg.ProcessDefault());
-// ```
 /// `x_PostCheck`: the dependencies of the given arguments, then the defaults of the keys that
 /// were not given and that no given argument excludes.
 fn post_check(
@@ -1054,30 +762,7 @@ fn post_check(
             values.insert(desc.name, Some(default.to_string()));
         } else if desc.mandatory {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1158-1173,1270-1275
-            // ```c++
-            // string CArgDescMandatory::GetUsageCommentAttr(void) const
-            // {
-            //     CArgDescriptions::EType type = GetType();
-            //     // Print type name
-            //     string str = CArgDescriptions::GetTypeName(type);
-            //     ...
-            //     // Print constraint info, if any
-            //     string constr = GetUsageConstraint();
-            //     if ( !constr.empty() ) {
-            //         str += ", ";
-            //         str += constr;
-            //     }
-            //     return str;
-            // }
-            // ...
-            // CArgValue* CArgDescMandatory::ProcessDefault(void) const
-            // {
-            //     NCBI_THROW(CArgException, eNoArg,
-            //                s_ArgExptMsg(GetName(), "Mandatory value is missing",
-            //                             GetUsageCommentAttr()));
-            // }
-            // ```
-            // (`x_PostCheck`, quoted above, asks each argument that is not given for its
+            // (`x_PostCheck`, cited above, asks each argument that is not given for its
             // default in the order of the descriptions.)
             let mut attr = desc.kind.type_name().to_string();
             if let Some(constraint) = desc.constraint {

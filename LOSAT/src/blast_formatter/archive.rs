@@ -25,8 +25,8 @@ use crate::algorithm::common::database::{
     DatabaseOpenError,
 };
 use crate::blastinput::app::{
-    check_search_environment, engine_error, options_error, output_format, prefetch_seqs_limit,
-    xinclude_check_for,
+    check_search_environment, engine_error, options_error_bytes, output_format,
+    prefetch_seqs_limit, xinclude_check_for,
 };
 use crate::blastinput::db_mask::name_mask_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -895,14 +895,14 @@ fn open_database(
 /// A warning of the taxid list as blast_formatter posts it (no prefix: its `Run` sets none).
 fn list_warning(warning: ListWarning, out: &mut Vec<u8>) {
     match warning {
-        ListWarning::Log(text) => out.extend_from_slice(text.as_bytes()),
+        ListWarning::Log(text) => out.extend_from_slice(&text),
         ListWarning::Posted(text) => {
             out.extend_from_slice(b"Warning: ");
             out.extend_from_slice(text.as_bytes());
         }
         ListWarning::Error(text) => {
             out.extend_from_slice(b"Error: ");
-            out.extend_from_slice(text.as_bytes());
+            out.extend_from_slice(&text);
         }
         ListWarning::SeqId(warning) => {
             crate::writedb::fasta_source::defline_ids::post_seq_id_warning_of(
@@ -933,7 +933,7 @@ fn remote_database(error: &SeqDbError, name: &str) -> anyhow::Error {
 /// input of another format and for a `CSerialException` of the loop (`BLAST query/options
 /// error`, exit status 1).
 fn invalid_archive() -> anyhow::Error {
-    options_error("Invalid input format for BLAST Archive.")
+    options_error_bytes(b"Invalid input format for BLAST Archive.")
 }
 
 /// The archive reader's error, as the loop ends with it: a `CSerialException` is
@@ -980,11 +980,9 @@ fn stop_error(stop: Stop) -> anyhow::Error {
 //         }                                                                   \
 // ```
 /// An exception of NCBI's that leaves the loop, by its class: a serial exception is
-/// `invalid_archive`; `CInputException` and `CArgException` are their `CATCH_ALL` branches; a
-/// `CBlastException` (`CRemoteBlastException` is one, whose `GetErrCode()` is `eInvalid`) is
-/// `BLAST options error` for `eInvalidOptions`, `BLAST ran out of memory` for the texts of
-/// memory, else `BLAST engine error` (exit status 3); the others are
-/// `NativeError::exception`'s (`BLAST Database error`, or `Error: ` with `what()`).
+/// `invalid_archive`; `CInputException` and `CArgException` are their `CATCH_ALL` branches; the
+/// others are `NativeError::exception`'s (a `CBlastException`, `CRemoteBlastException` too, by its
+/// code and message; a `CSeqDBException`; `Error: ` with `what()`).
 fn exception_error(exception: &NcbiException) -> anyhow::Error {
     let kind = exception.kind();
     let class = kind.split("::").next().unwrap_or(kind);
@@ -992,25 +990,8 @@ fn exception_error(exception: &NcbiException) -> anyhow::Error {
     match class {
         "CSerialException" => invalid_archive(),
         class if crate::wording::SERIAL_EXCEPTION_CLASSES.contains(&class) => invalid_archive(),
-        "CInputException" => options_error(msg),
+        "CInputException" => options_error_bytes(msg),
         "CArgException" => command_line_argument_error(msg),
-        "CBlastException" | "CRemoteBlastException" => {
-            if kind == "CBlastException::eInvalidOptions" {
-                NativeError {
-                    exit: 1,
-                    message: format!("BLAST options error: {msg}\n"),
-                }
-                .into()
-            } else if msg.contains("Out of memory") || msg.contains("Failed to allocate") {
-                NativeError {
-                    exit: 4,
-                    message: format!("BLAST ran out of memory: {msg}\n"),
-                }
-                .into()
-            } else {
-                engine_error(msg)
-            }
-        }
         _ => NativeError::exception(exception).into(),
     }
 }
@@ -1036,7 +1017,7 @@ fn write_failure(error: anyhow::Error) -> anyhow::Error {
     }
     NativeError {
         exit: 6,
-        message: "BLAST failed to write output\n".to_string(),
+        message: b"BLAST failed to write output\n".to_vec(),
     }
     .into()
 }

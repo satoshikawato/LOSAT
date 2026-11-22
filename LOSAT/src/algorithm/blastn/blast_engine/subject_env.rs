@@ -26,6 +26,7 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::coordination::TaskConfig;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use crate::algorithm::blastn::scoring::{check_gapped_x_dropoffs, gap_x_dropoffs};
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::utils::threading::SearchPool;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressFinish, ProgressStyle};
@@ -38,11 +39,6 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressFinish, ProgressStyle};
 /// is cleared too, so nothing of it stays on the terminal.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-/// ```c++
-///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-/// 	    BLAST_PROF_START( APP.LOOP.PRE );
-///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-/// ```
 /// No NCBI counterpart: NCBI's blastn writes nothing to its standard error while it searches its
 /// query batches. The bar writes only to a terminal and is cleared when the batch's search ends,
 /// so the terminal then shows what NCBI leaves on it.
@@ -145,64 +141,25 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         context_karlin,
         search_karlin,
     } = inputs;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
-    // ```c
-    // db_length = BlastSeqSrcGetTotLen(seq_src);
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1409
     let subject_count = subjects.num_subjects() as u64;
     // The bar is the command line's (`BlastnArgs::progress_bar`): a search from memory
     // (`run_local`: the library API, the web entries) writes nothing to standard error.
     let progress_bar = (subjects_parallel && args.progress_bar)
         .then(|| batch_progress_bar(subject_count, ProgressDrawTarget::stderr()));
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
-    // ```c
-    // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
-    //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
-    // }
-    // m_NumDescriptions = hitlist_size;
-    // m_NumAlignments = hitlist_size;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     let hitlist_size = args.report_counts.hitlist_size;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
-    // ```c
-    // Int4
-    // GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats,
-    //                      Boolean gapped_calculation)
-    // {
-    //     ...
-    //     else if (gapped_calculation) {
-    //          prelim_hitlist_size = MIN(MAX(2 * prelim_hitlist_size, 10),
-    //                                   prelim_hitlist_size + 50);
-    //     }
-    //     return prelim_hitlist_size;
-    // }
-    // ```
-    let prelim_hitlist_size =
-        usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED))
-            .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
+    let prelim_hitlist_size = get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED);
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:350-692
-    // ```c
-    // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
-    // ...
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
-    // ...
-    // Blast_IntervalTreeReset(tree);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:350-692
     let blastn_trace_enabled = blastn_trace::enabled();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
-    // ```c
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
-    // ...
-    // m_DebugOutput = static_cast<bool>(args["verbose"]);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
     let verbose = args.verbose;
     let debug_window: Option<(usize, usize, usize, usize)> =
         crate::utils::xdiag::var("BLEMIR_DEBUG_WINDOW")
@@ -241,13 +198,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
-    // ```c
-    // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
-    //     ? bool(args[kArgUseLCaseMasking])
-    //     : kDfltArgUseLCaseMasking;
-    // m_Scope = ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     let lcase_masking = args.lcase_masking;
 
     // Capture config values for use in closure
@@ -259,20 +210,24 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let penalty = config.penalty;
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:455-463
-    // ```c
-    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-    //       params->gap_x_dropoff = (Int4)
-    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-    //     ...
-    //       params->gap_x_dropoff_final = (Int4)
-    //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-    // ```
-    let (x_drop_gapped, x_drop_final) =
-        gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
+    //
+    // Under matrix-only scoring the options' values are raw scores, and the final X-drop is not
+    // raised to the preliminary one.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:472-482
+    // The assignment converts the double option as a C cast (`ncbi_int4_from_double`).
+    let (x_drop_gapped, x_drop_final) = if config.matrix_only {
+        (
+            ncbi_int4_from_double(config.x_drop_gapped),
+            ncbi_int4_from_double(config.x_drop_final),
+        )
+    } else {
+        gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final)
+    };
     if !UNGAPPED {
         check_gapped_x_dropoffs(
             config.use_dp,
+            config.matrix_only,
             (config.x_drop_gapped, config.x_drop_final),
             (x_drop_gapped, x_drop_final),
             (config.reward, config.penalty),
@@ -322,59 +277,49 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     if x_qgroup_par::on() && !x_qgroup_batch {
         crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
-    // ```c
-    // return ((hsp->num_ident * 100.0 <
-    //         align_length * hit_options->percent_identity) ||
-    //         align_length < hit_options->min_hit_length) ;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
     let percent_identity = args.percent_identity_value();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
-    let score_matrix = build_blastna_matrix(reward, penalty);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
+    // The matrix and the score table below score with `sbp->reward`/`sbp->penalty`, the engine
+    // pair (1/-3 under matrix-only scoring, `coordination::engine_scoring_pair`); the option pair
+    // (`reward`, `penalty`) stays for the traceback's re-evaluation (blast_hits.c:627,637).
+    let score_matrix = build_blastna_matrix(config.score_reward, config.score_penalty);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
-    // ```c
-    // for (i = 0; i < 256; i++) {
-    //    Int4 score = 0;
-    //    if (i & 3) score += penalty; else score += reward;
-    //    if ((i >> 2) & 3) score += penalty; else score += reward;
-    //    if ((i >> 4) & 3) score += penalty; else score += reward;
-    //    if (i >> 6) score += penalty; else score += reward;
-    //    table[i] = score;
-    // }
-    // ```
-    let nucl_score_table = build_nucl_score_table(reward, penalty);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:236-259
+    let nucl_score_table = build_nucl_score_table(config.score_reward, config.score_penalty);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:218-221
-    // ```c
-    // p->cutoffs[context].x_dropoff_init =
-    //     (Int4)(sbp->scale_factor *
-    //            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // ```
-    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
-    // m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
-    // NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:218-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
     // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
-    // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
     // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
     // its raw X-drop is the subject's word cutoff in ParametersUpdate
     // (`batch_setup::batch_cutoffs`). `-xdrop_ungap` replaces the task's bits (`configure_task`).
     // The conversion is the protein programs' (`core::x_drop::ungapped_x_dropoff`, scale factor
     // 1): 0 bits and every value whose ceiling is 0 give 0, a value past `Int4` gives `INT_MIN`.
+    //
+    // Under matrix-only scoring the option's value is the raw X-drop (and `batch_cutoffs` keeps
+    // a 0 as 0).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:208-217
     let x_drop_ungapped_bits = config.x_drop_ungapped;
-    let x_dropoff_init: Vec<i32> = search_karlin
-        .iter()
-        .map(|blocks| {
-            crate::core::x_drop::ungapped_x_dropoff(
-                x_drop_ungapped_bits,
-                blocks.ungapped.lambda,
-                1.0,
-            )
-        })
-        .collect();
+    let x_dropoff_init: Vec<i32> = if config.matrix_only {
+        vec![ncbi_int4_from_double(x_drop_ungapped_bits); search_karlin.len()]
+    } else {
+        search_karlin
+            .iter()
+            .map(|blocks| {
+                crate::core::x_drop::ungapped_x_dropoff(
+                    x_drop_ungapped_bits,
+                    blocks.ungapped.lambda,
+                    1.0,
+                )
+            })
+            .collect()
+    };
     Ok(SubjectSearchEnv {
         progress_bar,
         hitlist_size,
@@ -491,9 +436,7 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
     if x_few_subj::on() && subjects_parallel && subjects.prepared().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_subjects);
     }
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     let use_parallel = subjects_parallel && !x_serial_subjects;
     crate::utils::threading::report_stage(
         "blastn",
@@ -509,164 +452,5 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
 }
 
 #[cfg(test)]
-mod tests {
-    //! No NCBI counterpart: the command line's progress bar (`batch_progress_bar`) on a terminal
-    //! kept in memory, which stands for the standard error on a terminal.
-
-    use super::batch_progress_bar;
-    use indicatif::{ProgressDrawTarget, TermLike};
-    use std::io;
-    use std::sync::{Arc, Mutex};
-
-    /// The rows of a terminal of 80 columns and its cursor (row, column).
-    #[derive(Debug, Default)]
-    struct Screen {
-        rows: Vec<Vec<char>>,
-        row: usize,
-        col: usize,
-    }
-
-    impl Screen {
-        fn put(&mut self, ch: char) {
-            while self.rows.len() <= self.row {
-                self.rows.push(Vec::new());
-            }
-            let line = &mut self.rows[self.row];
-            while line.len() <= self.col {
-                line.push(' ');
-            }
-            line[self.col] = ch;
-            self.col += 1;
-        }
-    }
-
-    /// A terminal kept in memory; a clone writes to the same screen.
-    #[derive(Debug, Clone, Default)]
-    struct MemoryTerm(Arc<Mutex<Screen>>);
-
-    impl MemoryTerm {
-        /// The rows that show something (trailing blanks dropped).
-        fn shown(&self) -> Vec<String> {
-            let screen = self.0.lock().unwrap();
-            screen
-                .rows
-                .iter()
-                .map(|row| row.iter().collect::<String>().trim_end().to_string())
-                .filter(|row| !row.is_empty())
-                .collect()
-        }
-
-        fn cursor(&self) -> (usize, usize) {
-            let screen = self.0.lock().unwrap();
-            (screen.row, screen.col)
-        }
-    }
-
-    impl TermLike for MemoryTerm {
-        fn width(&self) -> u16 {
-            80
-        }
-
-        fn move_cursor_up(&self, n: usize) -> io::Result<()> {
-            let mut screen = self.0.lock().unwrap();
-            screen.row = screen.row.saturating_sub(n);
-            Ok(())
-        }
-
-        fn move_cursor_down(&self, n: usize) -> io::Result<()> {
-            self.0.lock().unwrap().row += n;
-            Ok(())
-        }
-
-        fn move_cursor_right(&self, n: usize) -> io::Result<()> {
-            self.0.lock().unwrap().col += n;
-            Ok(())
-        }
-
-        fn move_cursor_left(&self, n: usize) -> io::Result<()> {
-            let mut screen = self.0.lock().unwrap();
-            screen.col = screen.col.saturating_sub(n);
-            Ok(())
-        }
-
-        fn write_line(&self, s: &str) -> io::Result<()> {
-            self.write_str(s)?;
-            self.write_str("\n")
-        }
-
-        fn write_str(&self, s: &str) -> io::Result<()> {
-            let mut screen = self.0.lock().unwrap();
-            for ch in s.chars() {
-                match ch {
-                    '\r' => screen.col = 0,
-                    '\n' => {
-                        screen.row += 1;
-                        screen.col = 0;
-                    }
-                    _ => screen.put(ch),
-                }
-            }
-            Ok(())
-        }
-
-        fn clear_line(&self) -> io::Result<()> {
-            let mut screen = self.0.lock().unwrap();
-            let row = screen.row;
-            if let Some(line) = screen.rows.get_mut(row) {
-                line.clear();
-            }
-            screen.col = 0;
-            Ok(())
-        }
-
-        fn flush(&self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// A bar drawn on `term` after three of five subjects.
-    fn drawn_bar(term: &MemoryTerm) -> indicatif::ProgressBar {
-        let bar = batch_progress_bar(5, ProgressDrawTarget::term_like(Box::new(term.clone())));
-        bar.inc(3);
-        bar.tick();
-        let shown = term.shown();
-        assert_eq!(shown.len(), 1, "the bar is one line: {shown:?}");
-        assert!(shown[0].contains("3/5"), "the bar shows 3/5: {shown:?}");
-        bar
-    }
-
-    #[test]
-    fn the_end_of_a_batch_clears_the_bar() {
-        let term = MemoryTerm::default();
-        let bar = drawn_bar(&term);
-        // What `search_query_batch` calls when the batch's search ends.
-        bar.finish_using_style();
-        assert!(bar.is_finished());
-        assert_eq!(
-            term.shown(),
-            Vec::<String>::new(),
-            "nothing of the bar stays"
-        );
-        assert_eq!(
-            term.cursor(),
-            (0, 0),
-            "the next output starts where the bar started"
-        );
-        // The drop after the end writes nothing more.
-        drop(bar);
-        assert_eq!(term.shown(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn a_search_that_stops_with_an_error_clears_the_bar() {
-        let term = MemoryTerm::default();
-        // A batch that returns an error drops its bar unfinished.
-        drop(drawn_bar(&term));
-        assert_eq!(
-            term.shown(),
-            Vec::<String>::new(),
-            "nothing of the bar stays"
-        );
-        assert_eq!(term.cursor(), (0, 0));
-    }
-}
+#[path = "subject_env_tests.rs"]
+mod tests;

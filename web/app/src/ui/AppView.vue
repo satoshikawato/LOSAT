@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
-import type { Attention } from '../application/attention';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watchEffect, type Ref } from 'vue';
+import { holdsResults, type Attention } from '../application/attention';
 import { withRemedy, type Availability } from '../application/availability';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -10,6 +10,7 @@ import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
+import { holdWhilePressed } from './press-hold';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -37,7 +38,7 @@ const availabilityState = useStore(props.availability.state);
  */
 const unavailable = computed(() => {
   const problem = availabilityState.value.problem;
-  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some((run) => run.status === 'completed'));
+  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some(holdsResults));
 });
 /** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
 const shown = ref<MainTab>('search');
@@ -129,6 +130,25 @@ async function arrived(): Promise<void> {
 }
 const onPopState = () => void arrived();
 
+/**
+ * From a press until its click, the main area keeps its height, and what the page says above the tabs stays as it was,
+ * so the page does not move under the press (press-hold.ts).
+ */
+const mainArea = ref<HTMLElement>();
+const pressing = ref(false);
+let stopHold: () => void = () => undefined;
+/** `source` as it was when a press started, until its click; as it is between presses. */
+function steady<T>(source: () => T): Readonly<Ref<T>> {
+  const shown = shallowRef(source());
+  watchEffect(() => {
+    const now = source();
+    if (!pressing.value) shown.value = now;
+  });
+  return shown;
+}
+const unavailableShown = steady(() => unavailable.value);
+const resumeShown = steady(() => attentionState.value.resume);
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -138,11 +158,18 @@ onMounted(() => {
   window.addEventListener('dragover', keep);
   window.addEventListener('drop', keep);
   window.addEventListener('popstate', onPopState);
+  stopHold = holdWhilePressed(
+    () => mainArea.value,
+    (now) => {
+      pressing.value = now;
+    },
+  );
 });
 onUnmounted(() => {
   window.removeEventListener('dragover', keep);
   window.removeEventListener('drop', keep);
   window.removeEventListener('popstate', onPopState);
+  stopHold();
 });
 </script>
 
@@ -154,13 +181,14 @@ onUnmounted(() => {
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
-  <p v-if="unavailable" class="error unavailable" role="alert" data-testid="losat-unavailable">{{ unavailable }}</p>
-  <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="dismissResume" />
+  <p v-if="unavailableShown" class="error unavailable" role="alert" data-testid="losat-unavailable">{{ unavailableShown }}</p>
+  <ResumeNotice v-if="resumeShown" :report="resumeShown" @dismiss="dismissResume" />
   <!-- The tabs stay in the page's navigation landmark, which they were before they were tabs (WA2-AX-12). -->
   <nav aria-label="Main">
     <TabList ref="mainTabs" v-model="tab" class="main-tabs" label="Main" :tabs="MAIN_TABS" />
   </nav>
-  <main class="layout">
+  <!-- data-losat: whether LOSAT works now, also while a press keeps the alert above as it was (the E2E tests wait for it). -->
+  <main ref="mainArea" class="layout" :data-losat="unavailable === undefined ? 'available' : 'unavailable'">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
       <SearchPanel

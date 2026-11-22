@@ -415,21 +415,6 @@ pub(crate) struct Dbi(usize);
 
 impl Env {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:78-112
-    // ```c++
-    // 		m_Filename(fname), m_FileType(file_type),m_Env(lmdb::env::create()), m_Count(1), m_ReadOnly(read_only)
-    // {
-    // 	const MDB_dbi num_db(3);
-    // 	m_Env.set_max_dbs(num_db);
-    // 	...
-    // 	else {
-    // 		LOG_POST(Info <<"Initial Map Size: " << map_size);
-    // 		/// map_size 0 means use lmdb default
-    // 		if(map_size != 0) {
-    // 			m_Env.set_mapsize(map_size);
-    // 		}
-    //         try {
-    //             m_Env.open(m_Filename.c_str(), MDB_NOSUBDIR , 0664);
-    // ```
     /// `CBlastLMDBManager::CBlastEnv` for writing: `mdb_env_create`,
     /// `mdb_env_set_maxdbs(3)`, `mdb_env_set_mapsize(map_size)` unless `map_size` is 0, and
     /// `mdb_env_open(path, MDB_NOSUBDIR, 0664)` on a new file, on the platform `platform`
@@ -1197,14 +1182,6 @@ impl Env {
     /// Close the environment (`mdb_env_close`, which writes nothing); the lock file goes
     /// with it (`Env::drop`), as `CWriteDB_LMDB` and `CWriteDB_TaxID` remove it after it.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72
-    // ```c++
-    // CWriteDB_LMDB::~CWriteDB_LMDB()
-    // {
-    // 	x_CreateOidToSeqidsLookupFile();
-    // 	x_CommitTransaction();
-    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
-    //     CFile(m_Db+"-lock").Remove();
-    // ```
     pub(crate) fn close(mut self) -> Result<(), LmdbError> {
         self.txn_abort();
         self.file.flush().map_err(|source| LmdbError::Io {
@@ -1215,10 +1192,6 @@ impl Env {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72,437-444
-// ```c++
-//     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
-//     CFile(m_Db+"-lock").Remove();
-// ```
 // The destructors of `CWriteDB_LMDB` and `CWriteDB_TaxID` remove the lock file whenever the
 // writer is destroyed, also when an exception of the build unwinds the stack; a writer whose
 // constructor did not finish (the data file that `mdb_env_open` could not create) has no

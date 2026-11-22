@@ -10,11 +10,9 @@ import { RunOutputReceiver } from 'losat';
 import {
   CUSTOM_OUTPUT,
   OUTPUT_FORMATS,
-  type FastaParserKind,
+  type FastaReader,
   type IndexedRecord,
-  type InputRole,
-  type MessagePlace,
-  type ProgramId,
+  type OutputPlace,
   type RecordKey,
   type RunOutput,
 } from 'losat/domain';
@@ -29,10 +27,12 @@ import {
   type RecordScanner,
 } from 'losat/ports';
 import { includedRecords, normalizeExclusion, recordKey, type DatasetRevision } from '../../domain/dataset';
+import { fastaParser, programById } from '../../domain/programs';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
 import type {
   CleanupState,
   DataGateway,
+  KeptRun,
   ResultSetRef,
   RunInput,
   SourceRef,
@@ -42,6 +42,7 @@ import type {
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { inflateFile } from './inflate';
+import { hasEntryBytes } from './zip-entries';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -92,7 +93,7 @@ interface StagedRun {
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
   /** The outputs that the engine said failed, with where their errors are (its discards, `clear`): `ResultSetRef.failed`. */
-  readonly failed: Map<RunOutput, MessagePlace>;
+  readonly failed: Map<RunOutput, OutputPlace>;
   /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
   /** The current line of stream 1 has a character other than white space. */
@@ -132,9 +133,10 @@ export class DataService implements DataGateway {
     return { sourceId, name: file.name, size: file.size };
   }
 
-  async indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision> {
+  async indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision> {
     const file = this.source(sourceId);
-    const { records } = await this.deps.scanner.scan(parser, readChunks(file, this.chunkBytes));
+    const parser = fastaParser(programById(reader.program), reader.role);
+    const { records } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
     checkRecordTable(records, file.size);
     const hashes = await this.hashRecords(file, records);
     return this.keep({
@@ -187,9 +189,9 @@ export class DataService implements DataGateway {
     return { bytes: concatBytes(parts), records: Object.freeze(records) };
   }
 
-  async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
+  async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
     const { bytes } = await this.runInputBytes(revisionIds);
-    return this.deps.checker.check(program, role, bytes);
+    return this.deps.checker.check(reader, bytes);
   }
 
   async dropSource(sourceId: string): Promise<void> {
@@ -268,6 +270,11 @@ export class DataService implements DataGateway {
       throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
+    return this.resultOf(runId, run);
+  }
+
+  /** The result of a run that was committed: the sizes of its outputs, its HSP records and the outputs that it could not write. */
+  private resultOf(runId: string, run: StagedRun): ResultSetRef {
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
     const custom = run.lengths[CUSTOM_OUTPUT];
     const byteLengths = { 0: run.lengths[0]!, 6: run.lengths[6]!, 7: run.lengths[7]!, ...(custom === undefined ? {} : { [CUSTOM_OUTPUT]: custom }) };
@@ -281,20 +288,51 @@ export class DataService implements DataGateway {
     await this.drop(runId, run);
   }
 
-  async discardFailedRun(runId: string): Promise<string> {
+  async keepFailedRun(runId: string): Promise<KeptRun | undefined> {
     const run = this.runs.get(runId);
-    if (run?.state !== 'staged') return '';
-    try {
-      // The chunks of a failed run, then its `fail`: stream 3 is whole once `fail` arrived.
-      const result = await run.receiver.finished;
-      if (result.state !== 'failed' || run.failure !== undefined || this.runs.get(runId) !== run) return '';
-      const length = await run.writers.get(DIAGNOSTICS_STREAM)!.seal();
-      if (length === 0) return '';
-      return new TextDecoder().decode(await this.deps.store.read(blockPath(run.token, DIAGNOSTICS_STREAM), 0, length));
-    } finally {
-      // As the callers of `discardRun` do, a failure to remove the blocks does not hide the warnings.
-      if (this.runs.get(runId) === run) await this.drop(runId, run).catch(() => undefined);
+    if (run?.state !== 'staged') return undefined;
+    // The chunks of a failed run, then its `fail`: the outputs and stream 3 are whole once `fail` arrived.
+    const result = await run.receiver.finished;
+    if (result.state === 'failed' && run.failure === undefined && this.runs.get(runId) === run) {
+      try {
+        for (const writer of run.writers.values()) await writer.seal();
+        const length = run.lengths[DIAGNOSTICS_STREAM]!;
+        const diagnostics =
+          length === 0 ? '' : new TextDecoder().decode(await this.deps.store.read(blockPath(run.token, DIAGNOSTICS_STREAM), 0, length));
+        if (this.runs.get(runId) === run) {
+          if (!(await this.keptBytes(run))) {
+            // Nothing was written to a kept output (an empty file, an archive of empty entries): the run keeps only
+            // its warnings, as a failed run did before version 7.
+            await this.drop(runId, run).catch(() => undefined);
+            return { diagnostics };
+          }
+          // The commit of a completed run: its outputs are read, and exported, as a completed run's are.
+          this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
+          return { diagnostics, result: this.resultOf(runId, run) };
+        }
+      } catch {
+        // The outputs could not be kept: the run is dropped, as a failed run was.
+      }
     }
+    // As the callers of `discardRun` do, a failure to remove the blocks does not hide why the run failed.
+    const current = this.runs.get(runId);
+    if (current !== undefined) await this.drop(runId, current).catch(() => undefined);
+    return undefined;
+  }
+
+  /**
+   * Whether a failed run wrote something to an output that it keeps: bytes of its own, or, for an archive (outfmt 13
+   * and 14), bytes in its entries, not in the archive's own records (the empty master file of a run that failed
+   * before writing it is an archive of 22 + 46 + 30 bytes of records and no data).
+   */
+  private async keptBytes(run: StagedRun): Promise<boolean> {
+    for (const output of [0, 6, 7, CUSTOM_OUTPUT] as const) {
+      const length = run.lengths[output] ?? 0;
+      if (length === 0 || run.failed.has(output)) continue;
+      const read = (start: number, end: number) => this.deps.store.read(blockPath(run.token, output), start, end - start);
+      if (await hasEntryBytes(read, length)) return true;
+    }
+    return false;
   }
 
   async readOutput(runId: string, output: RunOutput): Promise<Uint8Array> {
@@ -404,7 +442,7 @@ export class DataService implements DataGateway {
    * §5: it failed alone, or its search failed in a run of two searches), and drops what the run received of it: the
    * output stays empty. After a failure, the run keeps nothing.
    */
-  private clear(run: StagedRun, stream: RunOutput, error: MessagePlace): void {
+  private clear(run: StagedRun, stream: RunOutput, error: OutputPlace): void {
     if (run.failure !== undefined) return;
     try {
       const writer = run.writers.get(stream);

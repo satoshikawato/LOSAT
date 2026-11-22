@@ -167,7 +167,13 @@ const gapCostsLabel = (value: string): string => {
 };
 // NCBI's lists of BLASTN's two-sequence page (gapcosts_1-2 ...): each pair of scores has its own,
 // and megablast's "Linear" (0 0) is the default where it is listed.
-const MATCH_SCORES: PairSelect = { id: 'matchscores', separator: ',', lists: { '': ['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1'] } };
+// 0,0 is rmblastn's matrix-only scoring, which NCBI's page does not offer: LOSAT offers it with that task only.
+const MATCH_SCORES: PairSelect = {
+  id: 'matchscores',
+  separator: ',',
+  lists: { '': ['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1', '0,0'] },
+  only: { tasks: ['rmblastn'], values: ['0,0'] },
+};
 const NUCLEOTIDE_GAP_COSTS: PairSelect = {
   id: 'gapcosts',
   separator: ' ',
@@ -179,8 +185,11 @@ const NUCLEOTIDE_GAP_COSTS: PairSelect = {
     '2,-3': ['0 0', '4 4', '2 4', '0 4', '3 3', '6 2', '5 2', '4 2', '2 2'],
     '4,-5': ['0 0', '12 8', '6 5', '5 5', '4 5', '3 5'],
     '1,-1': ['5 2', '3 2', '2 2', '1 2', '0 2', '4 1', '3 1', '2 1'],
+    // Matrix-only scoring checks the gap costs against the matrix of reward 1 and penalty -3
+    // (NCBI's blast_setup.c:352-367), so it takes the list of 1,-3.
+    '0,0': ['0 0', '5 2', '2 2', '1 2', '0 2', '2 1', '1 1'],
   },
-  defaults: { '1,-2': '5 2', '1,-3': '5 2', '1,-4': '5 2', '2,-3': '5 2', '4,-5': '12 8', '1,-1': '5 2' },
+  defaults: { '1,-2': '5 2', '1,-3': '5 2', '1,-4': '5 2', '2,-3': '5 2', '4,-5': '12 8', '1,-1': '5 2', '0,0': '5 2' },
   only: { tasks: ['megablast'], values: ['0 0'] },
   labels: gapCostsLabel,
 };
@@ -263,6 +272,10 @@ const windowMaskerTaxid: ParameterField = {
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
+const subjectBestHit: ParameterField = { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' };
+// BLAST+'s Best Hit algorithm (-best_hit_overhang, -best_hit_score_edge): either turns it on, the other is then 0.1.
+const bestHitOverhang: ParameterField = { flag: '-best_hit_overhang', label: 'Best hit overhang', ...decimal };
+const bestHitScoreEdge: ParameterField = { flag: '-best_hit_score_edge', label: 'Best hit score edge', ...decimal };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
 const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
@@ -319,6 +332,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       'dc-megablast': 'optimized for more dissimilar sequences',
       blastn: 'optimized for somewhat similar sequences',
       'blastn-short': 'optimized for short sequences',
+      rmblastn: 'scores from the matrix alone',
     },
     ...PROGRAM_INPUTS.blastn,
     sections: [
@@ -327,7 +341,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         placement: 'program',
         fields: [
           // `describe` lists the tasks in the order of NCBI's page. LOSAT adds blastn-short,
-          // which NCBI's page replaces with its "Short queries" adjustment.
+          // which NCBI's page replaces with its "Short queries" adjustment, and rmblastn, a task
+          // of NCBI's command line that its page does not offer.
           {
             flag: '-task',
             label: 'Optimize for',
@@ -337,6 +352,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
               'dc-megablast': 'More dissimilar sequences (discontiguous megablast)',
               blastn: 'Somewhat similar sequences (blastn)',
               'blastn-short': 'Short sequences (blastn-short)',
+              rmblastn: 'Scores from the matrix alone (rmblastn)',
             },
           },
         ],
@@ -354,6 +370,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
               'dc-megablast': ['11', '12'],
               blastn: ['7', '11', '15'],
               'blastn-short': ['7', '11', '15'],
+              rmblastn: ['7', '11', '15'],
             },
           },
           cullingLimit,
@@ -404,7 +421,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           sortHsps,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
-          { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
+          subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -457,6 +476,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGap,
           xdropGapFinal,
           maxHsps,
+          subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -541,6 +563,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGap,
           xdropGapFinal,
           sumStats,
+          subjectBestHit,
         ],
       },
     ],
@@ -581,7 +604,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           threshold,
           windowSize,
           xdropUngap,
+          { flag: '-strand', label: 'Query strand', kind: 'choice' },
           sumStats,
+          subjectBestHit,
         ],
       },
     ],

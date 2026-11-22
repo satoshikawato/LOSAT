@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type MessagePlace, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type MessagePlace, type OutputFormat, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   runOutputFailedOf,
@@ -91,7 +91,7 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
@@ -101,6 +101,8 @@ class ManualEngine implements EngineGateway {
   shownIds?: ShownIds;
   /** Where the runs' messages go, as the engine says (`RuntimeInfo.messages`). */
   messages: MessagePlace = 'diagnostics';
+  /** The text that the next runs print in place of a search (`RuntimeInfo.printed`). */
+  printed?: Uint8Array;
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
@@ -110,7 +112,7 @@ class ManualEngine implements EngineGateway {
   }
   async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
     this.registries.push(registry);
-    return { ok: true };
+    return { ok: true, dataLoaders: true };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
@@ -130,6 +132,7 @@ class ManualEngine implements EngineGateway {
             messages: this.messages,
             ...(runFiles === undefined ? {} : { runFiles }),
             ...(this.shownIds === undefined ? {} : { shownIds: this.shownIds }),
+            ...(this.printed === undefined ? {} : { printed: this.printed }),
           });
         },
         reject,
@@ -153,13 +156,18 @@ class ManualEngine implements EngineGateway {
    * engine fails a run that began to write: it writes them to stream 3 and ends its output with `fail`,
    * then rejects (with `late`, it rejects first, as a slow port might deliver them after the rejection).
    */
-  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string, late = false) {
+  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string, late = false, kept?: { readonly output: OutputFormat; readonly text: string }) {
     const pending = this.pending.get(runId);
     if (pending === undefined) return;
     const error = new Error(message);
     const failed = diagnostics === undefined ? error : withRunOutputFailed(error);
     const write = () => {
       const writer = new RunOutputWriter(pending.output);
+      // The output that the CLI leaves before its error, and the others dropped (line WQA's sweep, D15, 2026-11-20).
+      if (kept !== undefined) {
+        writer.write(kept.output, new TextEncoder().encode(kept.text));
+        for (const format of OUTPUT_FORMATS) if (format !== kept.output) writer.discard(format, 'run');
+      }
       if (diagnostics !== '') writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(diagnostics));
       writer.fail();
     };
@@ -169,7 +177,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
@@ -339,10 +347,9 @@ describe('Coordinator', () => {
 
   it('does not queue an input that the index scan cannot read', async () => {
     const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: '>q\nACGT\n>?10\n' } })).toEqual({
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n$$$$$$\n' } })).toEqual({
       ok: false,
-      message:
-        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
+      message: "Query FASTA: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -577,7 +584,7 @@ describe('Coordinator', () => {
     const failed = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
     await waitFor(coordinator, failed, 'running');
     expect(held.has(failed)).toBe(true);
-    engine.fail(failed, 'BLAST engine error: x');
+    engine.fail(failed, 'LOSAT engine error: x');
     await waitFor(coordinator, failed, 'failed');
     expect(held.size).toBe(0);
     const cancelled = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
@@ -610,9 +617,9 @@ describe('Coordinator', () => {
 
   it('does not queue a request whose argv the engine cannot start, with its message', async () => {
     const engine = new ManualEngine();
-    engine.startResult = { ok: false, message: "error: unexpected argument '-version' found" };
+    engine.startResult = { ok: false, message: 'the engine cannot start this argv' };
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue({ ...request, extra: ['-version'] })).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
+    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({ ok: false, message: 'the engine cannot start this argv' });
     expect(engine.registries).toEqual([]);
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -650,6 +657,52 @@ describe('Coordinator', () => {
     }
   });
 
+  // Line WQA's D14, 2026-11-20: an argv with a help or version word prints the command line's text and searches nothing,
+  // as the CLI does. The run reads no input (none is chosen), keeps the text, and saves it under the run's names.
+  it("runs an argv that prints the command line's help or version without inputs, and keeps and saves its text", async () => {
+    const engine = new ManualEngine();
+    engine.startResult = startOf({ prints: 'version' });
+    engine.printed = new TextEncoder().encode('blastn: LOSAT 0.2.0\n');
+    const { coordinator, saved } = setup(engine);
+    const runId = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: ['-version'] })).runId!;
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
+    expect(snapshot.prints).toBe('version');
+    expect(snapshot.query).toMatchObject({ name: 'query.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    expect(snapshot.subject).toMatchObject({ name: 'subject.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    await waitFor(coordinator, runId, 'running');
+    engine.finish(runId);
+    await waitFor(coordinator, runId, 'completed');
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: LOSAT 0.2.0\n');
+    await coordinator.exportPrinted(runId);
+    expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: LOSAT 0.2.0\n', type: 'text/plain' }]);
+    // NCBI's XML and JSON are saved as what they are (the bytes unchanged).
+    for (const [word, kind, text, name, type] of [
+      ['-xmlhelp', 'help', '<?xml version="1.0"?>\n<ncbi_application/>\n', 'help.xml', 'application/xml'],
+      ['-version-full-json', 'version', '{\n  "appname": "blastn"\n}\n', 'version.json', 'application/json'],
+    ] as const) {
+      engine.printed = new TextEncoder().encode(text);
+      engine.startResult = startOf({ prints: kind });
+      const other = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: [word] })).runId!;
+      await waitFor(coordinator, other, 'running');
+      engine.finish(other);
+      await waitFor(coordinator, other, 'completed');
+      saved.length = 0;
+      await coordinator.exportPrinted(other);
+      expect(saved).toEqual([{ fileName: expect.stringMatching(new RegExp(`\\.${name.replace('.', '\\.')}$`)), text, type }]);
+    }
+
+    // A search has no printed text, and says nothing of one.
+    engine.startResult = startOf({});
+    delete engine.printed;
+    const search = (await coordinator.enqueue(request)).runId!;
+    expect('prints' in viewOf(coordinator, search)!.snapshot).toBe(false);
+    await waitFor(coordinator, search, 'running');
+    engine.finish(search);
+    await waitFor(coordinator, search, 'completed');
+    expect('printed' in viewOf(coordinator, search)!.record).toBe(false);
+    await expect(coordinator.exportPrinted(search)).rejects.toThrow('the run printed no text');
+  });
+
   it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {
     const engine = new ManualEngine();
     const { coordinator, saved } = setup(engine);
@@ -661,11 +714,11 @@ describe('Coordinator', () => {
 
     const failed = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, failed, 'running');
-    engine.fail(failed, 'BLAST engine error: The average subject length is too short', [logFile('BLAST engine error: The average subject length is too short\n')]);
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', [logFile('LOSAT engine error: The average subject length is too short\n')]);
     await waitFor(coordinator, failed, 'failed');
     expect(viewOf(coordinator, failed)!.record).toMatchObject({
-      error: 'BLAST engine error: The average subject length is too short',
-      runFiles: [logFile('BLAST engine error: The average subject length is too short\n')],
+      error: 'LOSAT engine error: The average subject length is too short',
+      runFiles: [logFile('LOSAT engine error: The average subject length is too short\n')],
     });
 
     const plain = (await coordinator.enqueue(request)).runId!;
@@ -686,7 +739,7 @@ describe('Coordinator', () => {
     await coordinator.exportRunFile(failed, 0);
     expect(saved).toEqual([
       { fileName: 'losat-run1-blastn-19700101T000001Z.logfile.run.log', text: 'Warning: [tblastx] Examining 5 or more matches is recommended\n', type: 'text/plain' },
-      { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
+      { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'LOSAT engine error: The average subject length is too short\n', type: 'text/plain' },
     ]);
     await expect(coordinator.exportRunFile(plain, 0)).rejects.toThrow('the run has no such file');
   });
@@ -701,31 +754,32 @@ describe('Coordinator', () => {
     const warning = 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n';
     const failed = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, failed, 'running');
-    engine.fail(failed, 'BLAST engine error: The average subject length is too short', undefined, warning);
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', undefined, warning);
     await waitFor(coordinator, failed, 'failed');
-    expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'BLAST engine error: The average subject length is too short', diagnostics: warning });
+    expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'LOSAT engine error: The average subject length is too short', diagnostics: warning });
     expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
-    // The staged run is discarded, as before: the record keeps the text.
+    // The run kept no output (none has bytes), so it is dropped as before version 7: only its record holds the warnings.
     await expect(data.readDiagnostics(failed)).rejects.toThrow();
-    await expect(data.discardFailedRun(failed)).resolves.toBe('');
+    await expect(data.keepFailedRun(failed)).resolves.toBeUndefined();
+    expect(viewOf(coordinator, failed)!.result).toBeUndefined();
 
     // The rejection before the chunks and the `fail`: the data layer waits for them.
     const late = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, late, 'running');
-    engine.fail(late, 'BLAST engine error: The average subject length is too short', undefined, warning, true);
+    engine.fail(late, 'LOSAT engine error: The average subject length is too short', undefined, warning, true);
     await waitFor(coordinator, late, 'failed');
     expect(viewOf(coordinator, late)!.record).toMatchObject({ diagnostics: warning });
 
     // A failed run whose output ended with `fail` but holds no warning keeps none.
     const silent = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, silent, 'running');
-    engine.fail(silent, 'BLAST engine error: Empty CBlastQueryVector', undefined, '');
+    engine.fail(silent, 'LOSAT engine error: Empty CBlastQueryVector', undefined, '');
     await waitFor(coordinator, silent, 'failed');
     expect('diagnostics' in viewOf(coordinator, silent)!.record).toBe(false);
 
     const plain = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, plain, 'running');
-    engine.fail(plain, 'BLAST engine error: Empty CBlastQueryVector');
+    engine.fail(plain, 'LOSAT engine error: Empty CBlastQueryVector');
     await waitFor(coordinator, plain, 'failed');
     expect('diagnostics' in viewOf(coordinator, plain)!.record).toBe(false);
 
@@ -735,6 +789,38 @@ describe('Coordinator', () => {
     engine.fail(cancelled, 'cancelled', undefined, warning);
     await waitFor(coordinator, cancelled, 'cancelled');
     expect('diagnostics' in viewOf(coordinator, cancelled)!.record).toBe(false);
+  });
+
+  // Line WQA's sweep, D15 (2026-11-20): a failed run keeps the output that the CLI leaves before its error, the bytes
+  // written to the output of the argv, and the engine drops the other outputs (stream 9, place `run`); the data layer
+  // commits the run as a completed run's, so that the output is read and exported as a completed run's is. A
+  // cancelled run keeps nothing.
+  it('keeps the output that a failed run wrote before its error, reads and exports it', async () => {
+    const engine = new ManualEngine();
+    const { coordinator, data, saved } = setup(engine);
+    const failed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, failed, 'running');
+    engine.fail(failed, 'LOSAT engine error: The average subject length is too short', undefined, 'Warning: one\n', false, { output: 0, text: 'BLASTN 2.17.0+\n\nDatabase: x\n' });
+    await waitFor(coordinator, failed, 'failed');
+    const view = viewOf(coordinator, failed)!;
+    expect(view.result).toMatchObject({ byteLengths: { 0: 28, 6: 0, 7: 0 }, hitCount: 0 });
+    expect(view.result!.failed).toEqual([
+      { output: 6, error: 'run' },
+      { output: 7, error: 'run' },
+    ]);
+    expect(await coordinator.readOutput(failed, 0)).toBe('BLASTN 2.17.0+\n\nDatabase: x\n');
+    expect(new TextDecoder().decode(await data.readOutput(failed, 6))).toBe('');
+    await coordinator.exportOutput(failed, 0);
+    expect(saved.at(-1)!.text).toBe('BLASTN 2.17.0+\n\nDatabase: x\n');
+    await expect(coordinator.readHits(failed)).rejects.toThrow('run is not completed');
+
+    const cancelled = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, cancelled, 'running');
+    coordinator.cancel(cancelled);
+    engine.fail(cancelled, 'cancelled', undefined, 'Warning: one\n', false, { output: 0, text: 'kept?' });
+    await waitFor(coordinator, cancelled, 'cancelled');
+    expect(viewOf(coordinator, cancelled)!.result).toBeUndefined();
+    await expect(coordinator.readOutput(cancelled, 0)).rejects.toThrow('run has no outputs');
   });
 
   it('gives the FakeEngine\'s failed run its marked warning', async () => {
@@ -850,7 +936,7 @@ describe('Coordinator', () => {
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
-      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true };
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
     expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
@@ -875,7 +961,7 @@ describe('Coordinator', () => {
     const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
-    const query = (await data.indexSource(source.sourceId, 1)).revisionId;
+    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     const result = await coordinator.enqueueAll([
       { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
     ]);
@@ -889,7 +975,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 1)).revisionId;
+      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');

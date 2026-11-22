@@ -41,7 +41,9 @@ test:
     - blastdbcmd -version
     - dustmasker -version
     - segmasker -version
+    - windowmasker -version
     - convert2blastmask -version
+    - makembindex -version
     - rpsbproc -version
     - blast_formatter -version
 
@@ -59,8 +61,8 @@ about:
     sequence search. It runs NCBI's command lines for blastn, blastp, blastx,
     tblastn, tblastx, psiblast, rpsblast and rpstblastn against FASTA subjects
     (-subject) or BLAST databases (-db), and provides makeblastdb, blastdbcmd,
-    dustmasker, segmasker, convert2blastmask, rpsbproc and blast_formatter. Its
-    output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
+    dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,
+    rpsbproc and blast_formatter. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
     scores, coordinates and every output format byte for byte), and it needs no
     BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT

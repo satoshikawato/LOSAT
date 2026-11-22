@@ -1037,7 +1037,10 @@ fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("not a NativeError: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 const NUC_TITLE_WARNING: &str = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";
@@ -1062,7 +1065,7 @@ fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() 
         native(&error),
         (
             1,
-            "BLAST query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the LOSAT user manual.\n".to_string()
+            "LOSAT query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the LOSAT user manual.\n".to_string()
         )
     );
     // s1's hyphen and title warnings and s2's title warning; s3 is never read.
@@ -1139,7 +1142,7 @@ fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
                 (
                     1,
                     format!(
-                        "BLAST query/options error: Query input doesn't start with a defline or \
+                        "LOSAT query/options error: Query input doesn't start with a defline or \
                          comment, line {line}\0\nPlease refer to the LOSAT user manual.\n"
                     )
                 ),
@@ -1166,7 +1169,7 @@ fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
                 (
                     1,
                     format!(
-                        "BLAST query error: CFastaReader: Input doesn't start with a defline or \
+                        "LOSAT query error: CFastaReader: Input doesn't start with a defline or \
                          comment around line {line}\n"
                     )
                 ),
@@ -1209,7 +1212,7 @@ fn read_subjects_reader_errors_end_the_program() {
         native(&error),
         (
             1,
-            "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n".to_string()
+            "LOSAT query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n".to_string()
         )
     );
     assert_eq!(written, NUC_TITLE_WARNING.as_bytes());

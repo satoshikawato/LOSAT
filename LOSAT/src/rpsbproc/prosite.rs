@@ -4,33 +4,7 @@
 //! parser's error returns and the quirks of its state machine (a pattern that ends inside a
 //! bracket or a repeat is accepted; an escape stays set across `(` and `)`).
 //!
-//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.hpp:7-76
-//! ```c++
-//! class CProSite
-//! {
-//! public:
-//! 	enum EParseError
-//! 	{
-//! 		eNoError,
-//! 		eInvalidChar,
-//! 		eSyntaxError,
-//! 		eUnexpectedEnd
-//! 	};
-//! 	...
-//! 	EParseError Parse(const std::string &expr, size_t &errorPos);
-//! 	size_t Match(const std::string &text, size_t tlen, size_t start_pos) const;
-//! 	// -- return a vector of minimal match length, with 'X' as generic, 'A' as alternative and S as strict.
-//! 	void GetMinimalXMap(std::string &minMap) const;
-//! private:
-//! 	struct TPatternPos
-//! 	{
-//! 		static const unsigned int NEGATIVE_FILTER = 0x1;
-//! 		static const unsigned int LAZY_MATCH = 0x2;
-//! 		unsigned int m_uiFlags;	//positive or negative select
-//! 		std::string m_strAltChars;
-//! 		size_t m_ulMinCount, m_ulMaxCount;
-//! 		size_t (TPatternPos::*m_pfnMatch)(const std::string &text, size_t tlen, size_t pos) const;
-//! ```
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.hpp:7-66
 //!
 //! NCBI's `Match` reads `text[pos]` for every `pos < tlen`, and rpsbproc passes the length of the
 //! whole query as `tlen` while the text holds only the mapped residues of a site (basedata.cpp:731).
@@ -66,12 +40,12 @@ pub(crate) const HOST_DEPENDENT_BYTES: u64 = 1 << 30;
 /// fails on every host and throws `std::bad_alloc`.
 pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
 
-// The growth of libstdc++'s string and vector in NCBI's motif check (`CxxString`, `Live::grow`).
+// The growth of the C++ library's string and vector in NCBI's motif check (`CxxString`, `Live::grow`).
 #[path = "prosite_growth.rs"]
 mod growth;
-pub(crate) use growth::{CxxString, MapEnd};
 #[cfg(test)]
-pub(crate) use growth::{BAD_ALLOC, LENGTH_ERROR};
+pub(crate) use growth::{events as growth_events, BAD_ALLOC, LENGTH_ERROR};
+pub(crate) use growth::{CxxString, MapEnd};
 
 /// `CProSite::EParseError` without `eNoError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,11 +72,6 @@ struct PatternPos {
 
 impl PatternPos {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:11-13
-    // ```c++
-    // CProSite::TPatternPos::TPatternPos(void):
-    // 	m_uiFlags(0), m_strAltChars(kPlainEmptyString), m_ulMinCount(1), m_ulMaxCount(1), m_pfnMatch(&TPatternPos::x_PosMatch)
-    // {};
-    // ```
     fn new() -> Self {
         PatternPos {
             flags: 0,
@@ -113,44 +82,6 @@ impl PatternPos {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:501-553
-    // ```c++
-    // void CProSite::TPatternPos::x_NormalizeAltChars(void)
-    // {
-    // 	if (!m_strAltChars.empty())
-    // 	{
-    // 		size_t idx = 0, ttl = m_strAltChars.size();
-    // 		vector<size_t> veciidx;
-    // 		veciidx.reserve(ttl);
-    // 		while (idx < ttl)
-    // 		{
-    // 			char currc = m_strAltChars[idx];
-    // 			if ('X' == currc)	//no matter others, just being the one
-    // 			{
-    // 				m_strAltChars.clear();
-    // 				m_strAltChars.push_back('X');
-    // 				break;
-    // 			}
-    // 			veciidx.clear();
-    //
-    // 			size_t rmv = 0;
-    // 			size_t idx2 = idx + 1;
-    // 			while (idx2 < ttl)
-    // 			{
-    // 				if (m_strAltChars[idx2] == currc)
-    // 					++rmv;
-    // 				else if (rmv > 0)
-    // 					m_strAltChars[idx2 - rmv] = m_strAltChars[idx2];
-    //
-    // 				++idx2;
-    // 			}
-    //
-    // 			ttl -= rmv;
-    // 			m_strAltChars.erase(ttl);	//erase m
-    // 			++idx;
-    // 		}
-    // 	}
-    // }
-    // ```
     fn normalize_alt_chars(&mut self) {
         if self.alt_chars.is_empty() {
             return;
@@ -237,38 +168,7 @@ const RECORD_BYTES: u64 = 8;
 /// allocation for the records is checked with what lives during it; NCBI's live memory of
 /// `HOST_DEPENDENT_BYTES` or more is `MatchError::Exhausted`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:471-492
-// ```c++
-// 	stack<x_TMatchRec> stkFlexStack;
-//
-// 	x_TMatchRec curr(m_vecCompiledPattern.begin());
-// 	...
-// 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
-// 		if (matched < 0)	//match failed
-// 		{
-// 			if (stkFlexStack.empty()) return string::npos;
-// 			curr = stkFlexStack.top();
-// 			stkFlexStack.pop();
-// 		}
-// 		else	//match success
-// 		{
-// 			if (matched > 0) stkFlexStack.push(curr);
-// 			start_pos = curr.flex.back();
-// 			++curr.iterPos;
-// 			curr.flex.clear();
-// 		}
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:723-731
-// ```c++
-// 			minMap.clear();	//borrow this for other use
-//
-// 			for (size_t i = 0; i < mappedLen; ++i)
-// 				if ((size_t)rMappedRes[i].curr < seqLen)
-// 				{
-// 					minMap.push_back(aaSeq[rMappedRes[i].curr]);
-// 				}
-//
-// 			size_t endPos = ps.Match(minMap, seqLen, 0);
-// ```
 // (`x_TMatchRec` is the vector `flex` and the iterator, prosite.hpp:54-60. The stack's deque of
 // 32-byte entries, at most one per position of the pattern, and the compiled pattern are not
 // counted.)
@@ -315,22 +215,6 @@ impl Live {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:480-492 (the
     // revisit that does not advance pushes its copy when counts are left, and the rest of the
     // pattern starts again from `curr.flex.back()`)
-    // ```c++
-    // 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
-    // 		if (matched < 0)	//match failed
-    // 		{
-    // 			if (stkFlexStack.empty()) return string::npos;
-    // 			curr = stkFlexStack.top();
-    // 			stkFlexStack.pop();
-    // 		}
-    // 		else	//match success
-    // 		{
-    // 			if (matched > 0) stkFlexStack.push(curr);
-    // 			start_pos = curr.flex.back();
-    // 			++curr.iterPos;
-    // 			curr.flex.clear();
-    // 		}
-    // ```
     fn retry(&mut self, copy: u64, rest: u64) -> Result<(), MatchError> {
         let stacked = self.stacked.saturating_add(copy).saturating_add(rest);
         self.skipped = self.skipped.max(stacked);
@@ -387,47 +271,6 @@ impl Record {
 
 impl PatternPos {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:554-592
-    // ```c++
-    // // -- negative position match
-    // size_t CProSite::TPatternPos::x_NegMatch(const string &text, size_t tlen, size_t pos) const
-    // {
-    // 	string::const_iterator iterChar = m_strAltChars.begin(), iterCharEnd = m_strAltChars.end();
-    // 	size_t adv = 0;
-    //
-    // 	while (iterCharEnd != iterChar)
-    // 	{
-    // 		switch (*iterChar)
-    // 		{
-    // 		case '<':	//start anchor
-    // 			if (0 == pos)	//matched, fail it
-    // 				return string::npos;
-    // 			break;
-    // 		case '>':	//end anchor
-    // 			if (pos == tlen)	//matched
-    // 				return string::npos;
-    // 			break;
-    // 		case 'X':
-    // 			if (pos < tlen)
-    // 				return string::npos;
-    // 			break;
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				adv = 1;
-    // 				if ('a' <= c && 'z' >= c) c -= 0x20;
-    // 				if (*iterChar == c)	//matched
-    // 					return string::npos;
-    // 			}
-    // 			else
-    // 				return string::npos;
-    // 		}
-    //
-    // 		++iterChar;
-    // 	}
-    // 	return adv;	//nothing matched, successful
-    // }
-    // ```
     fn neg_match(&self, m: &Matcher, pos: usize) -> Option<usize> {
         let mut adv = 0;
         for &ch in &self.alt_chars {
@@ -475,42 +318,6 @@ impl PatternPos {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:594-627
-    // ```c++
-    // // -- positive position match
-    // size_t CProSite::TPatternPos::x_PosMatch(const string &text, size_t tlen, size_t pos) const
-    // {
-    // 	string::const_iterator iterChar = m_strAltChars.begin(), iterCharEnd = m_strAltChars.end();
-    // 	while (iterCharEnd != iterChar)
-    // 	{
-    // 		switch (*iterChar)
-    // 		{
-    // 		case '<':	//start anchor
-    // 			if (0 == pos)	//matched
-    // 				return 0;
-    // 			break;
-    // 		case '>':	//end anchor
-    // 			if (pos == tlen)	//matched
-    // 				return 0;
-    // 			break;
-    // 		case 'X':	//match any
-    // 			if (pos < tlen)	//last,
-    // 				return 1;
-    // 			break;
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				if ('a' <= c && 'z' >= c) c -= 0x20;
-    // 				if (*iterChar == c)	//matched
-    // 					return 1;
-    // 			}
-    // 		}
-    //
-    // 		++iterChar;
-    // 	}
-    // 	return string::npos;
-    // }
-    // ```
     fn pos_match(&self, m: &Matcher, pos: usize) -> Option<usize> {
         for &ch in &self.alt_chars {
             match ch {
@@ -563,72 +370,6 @@ impl PatternPos {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:630-698
-    // ```c++
-    // int CProSite::TPatternPos::Match(const string &text, size_t tlen, vector<size_t> &rMatchRec, size_t start_pos) const
-    // {
-    // 	size_t matched = rMatchRec.size();	//assume: at least one [0] as the start position
-    //
-    // 	int retVal = 0;	//return 0: match success but no more flex, -1: match failed. >1: # of flex left
-    // 	if (m_uiFlags & LAZY_MATCH)	//do not clear rMatchRec
-    // 	{
-    // 		if (0 == matched)	//the first time
-    // 		{
-    // 			rMatchRec.push_back(start_pos);
-    // 			// -- first, must match to minimal count
-    // 			while (rMatchRec.size() <= m_ulMinCount)
-    // 			{
-    // 				size_t adv = (this->*m_pfnMatch)(text, tlen, start_pos);
-    // 				if (string::npos == adv)	//fail
-    // 				{
-    // 					return -1;
-    // 				}
-    // 				start_pos += adv;
-    // 				rMatchRec.push_back(start_pos);
-    // 			}
-    // 			if (m_ulMaxCount > m_ulMinCount) retVal = 1;
-    // 			else retVal = 0;
-    // 		}
-    // 		else if (matched <= m_ulMaxCount)	//still flex	//revisit
-    // 		{
-    // 			start_pos = rMatchRec[matched - 1];
-    // 			size_t adv = (this->*m_pfnMatch)(text, tlen, start_pos);
-    // 			if (string::npos == adv)	//successful
-    // 				retVal = -1;
-    // 			else
-    // 			{
-    // 				start_pos += adv;
-    // 				rMatchRec.push_back(start_pos);
-    // 				if (m_ulMaxCount > matched) retVal = 1;
-    // 				else retVal = 0;
-    // 			}
-    // 		}
-    // 	}
-    // 	else	//aggressive match
-    // 	{
-    // 		if (0 == matched)	//the first time
-    // 		{
-    // 			rMatchRec.push_back(start_pos);
-    // 			while ((matched = rMatchRec.size()) <= m_ulMaxCount)
-    // 			{
-    // 				size_t adv = (this->*m_pfnMatch)(text, tlen, start_pos);
-    // 				if (string::npos == adv)	//fail
-    // 					break;
-    // 				start_pos += adv;
-    // 				rMatchRec.push_back(start_pos);
-    // 			}
-    // 		}
-    // 		else
-    // 		{
-    // 			rMatchRec.pop_back();
-    // 			matched = rMatchRec.size();
-    // 		}
-    // 		if (matched < m_ulMinCount + 1) retVal = -1;	// minimal match not reached
-    // 		else if (matched > m_ulMinCount + 1) retVal = 1;	//with flex
-    // 		else retVal = 0;
-    // 	}
-    // 	return retVal;
-    // }
-    // ```
     // (A lazy position whose `matched` is above `m_ulMaxCount` on a revisit leaves `retVal` 0
     // and the record as it is.) `live` follows NCBI's memory (`Live`): `rMatchRec` is
     // `curr.flex`.
@@ -746,28 +487,9 @@ impl PatternPos {
 
     /// Whether a step can succeed without advancing: a positive position with an anchor (`<` at
     /// 0, `>` at `tlen`), or a negation of anchors and `X` only.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:558-591,
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:558-604,
     // 602-608 (`x_NegMatch`: `adv` becomes 1 only in `default`; `x_PosMatch`: an anchor
     // returns 0)
-    // ```c++
-    // 	size_t adv = 0;
-    // 	...
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				adv = 1;
-    // 	...
-    // 	return adv;	//nothing matched, successful
-    // ...
-    // 		case '<':	//start anchor
-    // 			if (0 == pos)	//matched
-    // 				return 0;
-    // 			break;
-    // 		case '>':	//end anchor
-    // 			if (pos == tlen)	//matched
-    // 				return 0;
-    // ```
     fn may_stay(&self) -> bool {
         if self.negative() {
             !self.reads()
@@ -779,12 +501,6 @@ impl PatternPos {
     /// Whether a step reads `text` (an alternative that is not an anchor or `X`).
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-579,
     // 614-617 (only the `default` alternatives of `x_NegMatch` and `x_PosMatch` read `text`)
-    // ```c++
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // ```
     fn reads(&self) -> bool {
         self.alt_chars
             .iter()
@@ -793,28 +509,9 @@ impl PatternPos {
 
     /// Whether a step can advance: a positive position with an alternative that is not an
     /// anchor, or a negation that reads.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-580,
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:575-612,
     // 610-620 (`x_NegMatch` returns `adv` = 1 only after a `default` alternative; `x_PosMatch`
     // returns 1 for `X` and the `default` letters)
-    // ```c++
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				adv = 1;
-    // ...
-    // 		case 'X':	//match any
-    // 			if (pos < tlen)	//last,
-    // 				return 1;
-    // 			break;
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				if ('a' <= c && 'z' >= c) c -= 0x20;
-    // 				if (*iterChar == c)	//matched
-    // 					return 1;
-    // ```
     fn may_advance(&self) -> bool {
         if self.negative() {
             self.reads()
@@ -856,85 +553,6 @@ fn atol(digits: &[u8]) -> u64 {
 
 impl ProSite {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:49-466
-    // ```c++
-    // CProSite::EParseError CProSite::Parse(const string &expr, size_t &errorPos)
-    // {
-    // 	if (expr.empty()) return eUnexpectedEnd;
-    // 	...
-    // 	while (iterCharEnd != iterChar)
-    // 	{
-    // 		char c = *iterChar;
-    // 		if ('a' <= c && 'z' >= c) c -= 0x20;	//turn to capital letters
-    // 		switch (c)
-    // 		{
-    // 		case '*':	//stop codon
-    // 			if (!bEscaped)	//not escaped, as equivalent to (0, inf)
-    // 			{
-    // 				switch (status)
-    // 				{
-    // 				case ePlainText:
-    // 					iterCurr->m_ulMinCount = 0;
-    // 					iterCurr->m_ulMaxCount = -1;	//the biggest possible
-    // 					if (iterCurr->m_strAltChars == "X") iterCurr->m_uiFlags |= TPatternPos::LAZY_MATCH;
-    // 					break;
-    // 				case eAlternates:	//always treat as a literal * (stop codon)
-    // 				case eNegations:
-    // 					iterCurr->m_strAltChars.push_back(c);
-    // 					break;
-    // 				case eRange:	//accepting max
-    // 				case eRepeats:
-    // 					if (lit.empty() && !bInfLit)
-    // 					{
-    // 						bInfLit = true;
-    // 						break;
-    // 					}
-    // 				case eAltRedund:
-    // 				case eNegRedund:
-    // 					break;
-    // 				default:
-    // 					eErrorType = eSyntaxError;
-    // 					goto labelErrorRet;
-    // 				}
-    // 				break;
-    // 			}
-    //
-    // 		case 'A': case 'C': ... case 'Y':	// the 20 amino acids and 'U'
-    // 			switch (status)
-    // 			{
-    // 			case eParserReady:	//No current
-    // 				status = ePlainText;
-    // 			case ePlainText:	//current is valid
-    // 				iterCurr = m_vecCompiledPattern.emplace(m_vecCompiledPattern.end(), __dummy);
-    // 			case eAlternates:	//single char alternative, assume: iterCurrAltPattern is undefined
-    // 			case eNegations:
-    // 				iterCurr->m_strAltChars.push_back(c);
-    // 				break;
-    // 			default:
-    // 				eErrorType = eSyntaxError;
-    // 				goto labelErrorRet;
-    // 			}
-    // 			bEscaped = false;
-    // 			break;
-    // 		case 'X': ...
-    // 		case '0': ... case '9': ...
-    // 		case '(': ... case ')': ... case ',': ... case '\\': ... case '[': ... case ']': ...
-    // 		case '{': ... case '}': ... case '<': ... case '>': ...
-    // 		case '-':	//ignore
-    // 		case ' ':
-    // 		case '\t':
-    // 			break;
-    // 		default:
-    // 			eErrorType = eInvalidChar;
-    // 			goto labelErrorRet;
-    // 		}
-    // 		++iterChar;
-    // 	}
-    //
-    // labelErrorRet:
-    // 	errorPos = (iterChar - expr.begin());
-    // 	return eErrorType;
-    // }
-    // ```
     // (The cases that the quote shortens are ported from prosite.cpp:159-461, one branch for
     // one branch. The end of the expression is not checked against the state: `[KR` and `x(2`
     // parse without an error.) `Err((error, position))` carries `errorPos`.
@@ -1215,38 +833,6 @@ impl ProSite {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:468-500
-    // ```c++
-    // size_t CProSite::Match(const string &text, size_t tlen, size_t start_pos) const
-    // {
-    // 	if (start_pos >= tlen) return string::npos;
-    // 	stack<x_TMatchRec> stkFlexStack;
-    //
-    // 	x_TMatchRec curr(m_vecCompiledPattern.begin());
-    //
-    // 	vector<TPatternPos> :: const_iterator iterPosEnd = m_vecCompiledPattern.end();
-    //
-    // 	while (iterPosEnd != curr.iterPos)
-    // 	{
-    // 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
-    // 		if (matched < 0)	//match failed
-    // 		{
-    // 			if (stkFlexStack.empty()) return string::npos;
-    // 			curr = stkFlexStack.top();
-    // 			stkFlexStack.pop();
-    // 		}
-    // 		else	//match success
-    // 		{
-    // 			if (matched > 0) stkFlexStack.push(curr);
-    // 			start_pos = curr.flex.back();
-    // 			++curr.iterPos;
-    // 			curr.flex.clear();
-    // 		}
-    // 	}
-    //
-    // 	// -- successfully matched all PatternPosition
-    // 	return start_pos;	//should always be valid.
-    // }
-    // ```
     // `Ok(None)` is `string::npos`. A pattern without a position (only `-`) matches at
     // `start_pos`. The second value says whether the match read `text` beyond its terminating 0
     // (answered by `past`). `text_heap` is the heap bytes of NCBI's string of the text; `Live`
@@ -1261,6 +847,10 @@ impl ProSite {
     ) -> (Result<Option<usize>, MatchError>, bool) {
         if start_pos >= tlen {
             return (Ok(None), false);
+        }
+        #[cfg(test)]
+        if past == Past::Fail {
+            growth::events::match_starts();
         }
         let matcher = Matcher {
             text,
@@ -1326,36 +916,9 @@ impl ProSite {
     /// `0..=capacity` are NCBI's own, a read beyond them may fault (refused even where both
     /// runs agree, DECISIONS 40), and its heap bytes count in NCBI's live memory.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:723-731
-    // ```c++
-    // 			minMap.clear();	//borrow this for other use
-    //
-    // 			for (size_t i = 0; i < mappedLen; ++i)
-    // 				if ((size_t)rMappedRes[i].curr < seqLen)
-    // 				{
-    // 					minMap.push_back(aaSeq[rMappedRes[i].curr]);
-    // 				}
-    //
-    // 			size_t endPos = ps.Match(minMap, seqLen, 0);
-    // ```
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:468-470,
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:468-489,
     // 480-489 (every position is tried with every count before the match fails: a failure
     // pops the stack and revisits the last position that has counts left)
-    // ```c++
-    // size_t CProSite::Match(const string &text, size_t tlen, size_t start_pos) const
-    // {
-    // 	if (start_pos >= tlen) return string::npos;
-    // 	...
-    // 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
-    // 		if (matched < 0)	//match failed
-    // 		{
-    // 			if (stkFlexStack.empty()) return string::npos;
-    // 			curr = stkFlexStack.top();
-    // 			stkFlexStack.pop();
-    // 		}
-    // 		else	//match success
-    // 		{
-    // 			if (matched > 0) stkFlexStack.push(curr);
-    // ```
     pub(crate) fn matches(
         &self,
         text: &[u8],
@@ -1377,7 +940,12 @@ impl ProSite {
         if let Ok(Some(_)) = result {
             return Ok(true);
         }
-        match self.run(text, tlen, start_pos, Past::Pass, text_heap).0 {
+        #[cfg(test)]
+        growth::events::pause(true);
+        let second = self.run(text, tlen, start_pos, Past::Pass, text_heap).0;
+        #[cfg(test)]
+        growth::events::pause(false);
+        match second {
             Ok(None) => Ok(false),
             _ => Err(MatchError::ReadPast),
         }
@@ -1386,35 +954,11 @@ impl ProSite {
     /// The highest position that a step that reads can be at, for any bytes of the text: each
     /// step advances by one at most, each position up to its maximal count, a step that reads
     /// advances, and reads stop before `tlen`.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-580,
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:575-612,
     // 610-620 (a step returns 0, 1 or `npos`; `text[pos]` is read only below `tlen`)
-    // ```c++
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // 				adv = 1;
-    // ...
-    // 		case 'X':	//match any
-    // 			if (pos < tlen)	//last,
-    // 				return 1;
-    // 			break;
-    // 		default:
-    // 			if (pos < tlen)
-    // 			{
-    // 				char c = text[pos];
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:678-683 (an
     // aggressive position steps up to `m_ulMaxCount` times; a lazy one adds a step per revisit
     // while `matched <= m_ulMaxCount`, :659)
-    // ```c++
-    // 			rMatchRec.push_back(start_pos);
-    // 			while ((matched = rMatchRec.size()) <= m_ulMaxCount)
-    // 			{
-    // 				size_t adv = (this->*m_pfnMatch)(text, tlen, start_pos);
-    // 				if (string::npos == adv)	//fail
-    // 					break;
-    // ```
     fn max_read(&self, tlen: usize, start_pos: usize) -> u64 {
         let advance = self
             .pattern
@@ -1435,29 +979,9 @@ impl ProSite {
     /// most one copy each, and only a position with counts left is copied: a maximal count above
     /// the minimal). A copy onto the stack adds to `curr.flex`'s capacity, the power of two that
     /// holds the largest `R`.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:656-669,
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:656-694,
     // 679, 693-695 (`retVal` is 1, a copy onto the stack, only with counts left)
-    // ```c++
-    // 			if (m_ulMaxCount > m_ulMinCount) retVal = 1;
-    // 			else retVal = 0;
-    // 		}
-    // 		else if (matched <= m_ulMaxCount)	//still flex	//revisit
-    // 		...
-    // 				if (m_ulMaxCount > matched) retVal = 1;
-    // 	...
-    // 			while ((matched = rMatchRec.size()) <= m_ulMaxCount)
-    // 	...
-    // 		if (matched < m_ulMinCount + 1) retVal = -1;	// minimal match not reached
-    // 		else if (matched > m_ulMinCount + 1) retVal = 1;	//with flex
-    // 		else retVal = 0;
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:489-492
-    // ```c++
-    // 			if (matched > 0) stkFlexStack.push(curr);
-    // 			start_pos = curr.flex.back();
-    // 			++curr.iterPos;
-    // 			curr.flex.clear();
-    // ```
     fn may_exhaust(&self, tlen: usize, text_heap: u64) -> bool {
         let (mut stacked, mut largest, mut peak) = (0u128, 0u128, 0u128);
         for pos in &self.pattern {
@@ -1485,35 +1009,6 @@ impl ProSite {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:700-742
-    // ```c++
-    // void CProSite::GetMinimalXMap(string &minMap) const
-    // {
-    // 	minMap.clear();
-    // 	size_t ttl = m_vecCompiledPattern.size();
-    // 	if (ttl > 0)
-    // 	{
-    // 		minMap.reserve(ttl + ttl);
-    // 		for (size_t i = 0; i < ttl; ++i)
-    // 		{
-    // 			if (m_vecCompiledPattern[i].m_ulMinCount > 0)
-    // 			{
-    // 				switch (m_vecCompiledPattern[i].m_strAltChars.size())
-    // 				{
-    // 				case 0:
-    // 					break;
-    // 				case 1:
-    // 					if ('X' == m_vecCompiledPattern[i].m_strAltChars[0]) minMap.append(m_vecCompiledPattern[i].m_ulMinCount, 'X');
-    // 					else if (m_vecCompiledPattern[i].m_uiFlags & TPatternPos::NEGATIVE_FILTER) minMap.append(m_vecCompiledPattern[i].m_ulMinCount, 'A');
-    // 					else minMap.append(m_vecCompiledPattern[i].m_ulMinCount, 'S');
-    // 					break;
-    // 				default:	//>1
-    // 					minMap.append(m_vecCompiledPattern[i].m_ulMinCount, 'A');
-    // 				}
-    // 			}
-    // 		}
-    // 	}
-    // }
-    // ```
     // The map's letters are not used (basedata.cpp:696 takes its length; the residues are
     // pushed into the same string after `clear()`, basedata.cpp:723-728): this follows the
     // string's length and capacity through `reserve` and the `append`s, which end NCBI's

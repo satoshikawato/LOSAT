@@ -165,8 +165,15 @@ fn fasta_ids_of_every_type() {
 
 /// The message of NCBI's report of an exception (the tail of its place, from the file's name,
 /// and the rest of its line) in LOSAT's words (`crate::wording::losat_text`).
-fn ncbi(report: &str) -> String {
-    crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"/src/{report}")).into_owned()
+fn ncbi(report: &str) -> Vec<u8> {
+    crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"/src/{report}"))
+        .into_owned()
+        .into_bytes()
+}
+
+/// Whether `message` holds `needle`.
+fn has(message: &[u8], needle: &[u8]) -> bool {
+    message.windows(needle.len()).any(|window| window == needle)
 }
 
 // Exceptions caught by fParse_PartialOK, as makeblastdb 2.17.0 posted them (probe runs of
@@ -176,14 +183,14 @@ fn partial_failures_post_the_exception_and_go_on() {
     let mut posted = Vec::new();
     let result = parse_ids(b"xyz|ABC|DEF", FIRST, &mut |w| posted.push(w));
     let error = result.unwrap_err();
-    assert_eq!(error.message, "Unsupported ID type DEF");
+    assert_eq!(error.message, b"Unsupported ID type DEF");
     let texts: Vec<_> = posted
         .iter()
         .map(|w| (w.subcode, w.message.clone()))
         .collect();
     assert_eq!(texts.len(), 2);
     assert_eq!(texts[0].1, ncbi("Seq_id.cpp\", line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported ID type xyz\n"));
-    assert!(texts[1].1.ends_with("Unsupported ID type ABC\n"));
+    assert!(texts[1].1.ends_with(b"Unsupported ID type ABC\n"));
     assert_eq!(texts[0].0, 7);
 
     posted.clear();
@@ -198,7 +205,7 @@ fn partial_failures_post_the_exception_and_go_on() {
         )))]
     );
     assert_eq!(posted.len(), 1);
-    assert!(posted[0].message.contains(&ncbi("seqloc/Textseq_id.cpp\", line 108: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Version embedded in accession NP_1.x is not a positive integer")));
+    assert!(has(&posted[0].message, &ncbi("seqloc/Textseq_id.cpp\", line 108: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Version embedded in accession NP_1.x is not a positive integer")));
 
     posted.clear();
     assert!(parse_ids(b"ref|NP_800001.x|", FIRST, &mut |w| posted.push(w)).is_err());
@@ -210,21 +217,21 @@ fn partial_failures_post_the_exception_and_go_on() {
         []
     );
     assert_eq!(posted.len(), 2);
-    assert!(posted[1].message.contains(&ncbi("Seq_id.cpp\", line 2941: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Negative, excessively large, or non-numeric gi ID gi")));
+    assert!(has(&posted[1].message, &ncbi("Seq_id.cpp\", line 2941: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Negative, excessively large, or non-numeric gi ID gi")));
 
     posted.clear();
     // The second x_Init reads "gi" as a PDB molecule again and throws with no piece left.
     assert!(parse_ids(b"pdb|12|gi|6|", FIRST, &mut |w| posted.push(w)).is_err());
     assert_eq!(posted.len(), 1);
-    assert!(posted[0].message.contains(&ncbi("Seq_id.cpp\", line 2813: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Malformatted PDB ID 12")));
+    assert!(has(&posted[0].message, &ncbi("Seq_id.cpp\", line 2813: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Malformatted PDB ID 12")));
 
     posted.clear();
     assert!(parse_ids(b"pat|US|12|x|gi|7|", FIRST, &mut |w| posted.push(w)).is_err());
-    assert!(posted[0].message.contains(&ncbi("Seq_id.cpp\", line 2799: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Bad sequence number x for US patent 12")));
+    assert!(has(&posted[0].message, &ncbi("Seq_id.cpp\", line 2799: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Bad sequence number x for US patent 12")));
 
     posted.clear();
     let result = parse_ids(b"gb||gi|10|", FIRST, &mut |w| posted.push(w)).unwrap();
-    assert!(posted[0].message.contains(&ncbi("Textseq_id.cpp\", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release )")));
+    assert!(has(&posted[0].message, &ncbi("Textseq_id.cpp\", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release )")));
     assert_eq!(
         result,
         [Some(ParsedSeqId::Genbank(textseq(
@@ -246,12 +253,12 @@ fn bare_ids_of_the_second_parse() {
     // Not a valid local id: Malformatted ID (fParse_ValidLocal without fParse_AnyLocal).
     let long = "a".repeat(51);
     let error = seq_id_from_text(long.as_bytes(), SECOND_BARE, &mut no_warning()).unwrap_err();
-    assert_eq!(error.message, format!("Malformatted ID {long}"));
+    assert_eq!(error.message, format!("Malformatted ID {long}").as_bytes());
     assert_eq!(
         seq_id_from_text(b"", SECOND_BARE, &mut no_warning())
             .unwrap_err()
             .message,
-        "Empty bare accession supplied"
+        b"Empty bare accession supplied"
     );
     assert_eq!(
         seq_id_from_text(b"1234567A", SECOND_BARE, &mut no_warning()).unwrap(),
@@ -281,9 +288,9 @@ fn control_and_non_ascii_bytes_make_a_local_id_invalid() {
     for bare in [&b"a\x02b"[..], b"ab\xc3\xa9", b"M\xc3\xbcller_b"] {
         let error = seq_id_from_text(bare, SECOND_BARE, &mut no_warning()).unwrap_err();
         assert!(
-            error.message.starts_with("Malformatted ID "),
+            error.message.starts_with(b"Malformatted ID "),
             "{}",
-            error.message
+            String::from_utf8_lossy(&error.message)
         );
     }
     assert_eq!(
@@ -312,12 +319,12 @@ fn every_extra_piece_is_warned_about() {
     assert_eq!(warnings.len(), 2, "{warnings:?}");
     assert!(warnings.iter().all(|w| w.subcode == 10
         && w.message
-            == "Ignoring extra parts (synonyms?) in FASTA-style ID ref|NP_000001.1|NAME|y||z|"));
+            == b"Ignoring extra parts (synonyms?) in FASTA-style ID ref|NP_000001.1|NAME|y||z|"));
     let error =
         seq_id_from_text(b"ref|NP_000001.1|NAME|y||z|", RAW_TEXT, &mut no_warning()).unwrap_err();
     assert_eq!(
         error.message,
-        "FASTA-style ID ref|NP_000001.1|NAME|y||z| has too many parts."
+        b"FASTA-style ID ref|NP_000001.1|NAME|y||z| has too many parts."
     );
 }
 

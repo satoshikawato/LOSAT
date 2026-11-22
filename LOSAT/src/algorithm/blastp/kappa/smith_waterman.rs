@@ -11,34 +11,7 @@
 //! `pssm[queryPos]`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
-//! ```c
-//!     Boolean smithWaterman =
-//!         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
-//! ```c
-//!                     if (smithWaterman) {
-//!                         *pStatusCode =
-//!                                 Blast_RedoOneMatchSmithWaterman(
-//!                                         alignments,
-//!                                         redo_align_params,
-//!                                         incoming_aligns,
-//!                                         numAligns[frame_index],
-//!                                         kbp->Lambda,
-//!                                         kbp->logK,
-//!                                         &matchingSeq,
-//!                                         query_info,
-//!                                         numQueries,
-//!                                         matrix,
-//!                                         BLASTAA_SIZE,
-//!                                         NRrecord,
-//!                                         forbidden,
-//!                                         redoneMatches,
-//!                                         &pvalueForThisPair,
-//!                                         compositionTestIndex,
-//!                                         &LambdaRatio
-//!                                 );
-//! ```
 //! The steps after it (`s_HSPListFromDistinctAlignments`, the reap, `s_HitlistEvaluateAndPurge`,
 //! the normalization and the identities) are the X-drop redo's (blast_kappa.c:3654-3707): the
 //! caller's (`postprocess_preliminary_hits_smith_waterman`).
@@ -89,15 +62,6 @@ pub(crate) type SwMatchScratch = SwRedoScratch<SquareWindow>;
 /// the batch's first query holds a redone match (`blast_engine::redo_run::sw_batch_failed`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
-/// ```c
-/// function_level_cleanup:
-///     if (status != 0) {
-///         for (query_index = 0;  query_index < numQueries;  query_index++) {
-///             BlastCompo_AlignmentsFree(&alignments[query_index],
-///                                       callbacks->free_align_traceback);
-///         }
-///     }
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwRedoFailed;
 
@@ -133,50 +97,6 @@ impl std::error::Error for SwRedoEndless {}
 /// `SwRedoEndless` are NCBI's failed and endless redos (see there).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1366-1430
-/// ```c
-///         window = windows[window_index];
-///         query_index = window->query_range.context;
-///         query_composition = &query_info[query_index].composition;
-///
-///         nearIdenticalStatus = s_preliminaryTestNearIdentical(query_info,
-///                                              window,
-///                                              window->align,
-///                                              params->near_identical_cutoff);
-///
-///         status =
-///             callbacks->get_range(matchingSeq, &window->subject_range,
-///                                  &subject,
-///                                  &query_info[query_index].seq,
-///                                  &window->query_range,
-///                                  &query,
-///                                  query_info[query_index].words,
-///                                  window->align, nearIdenticalStatus,
-///                                  compo_adjust_mode, TRUE,
-///                                  NULL);
-///         ...
-///         searchsp = query_info[query_index].eff_search_space;
-///
-///         /* For Smith-Waterman alignments, adjust the search using the
-///          * composition of the highest scoring alignment in window */
-///         if (compo_adjust_mode != eNoCompositionBasedStats) {
-///             Blast_AminoAcidComposition subject_composition;
-///             s_GetComposition(&subject_composition, alphsize,
-///                                     &subject, &window->subject_range,
-///                                     window->align, FALSE, subject_is_translated);
-///             adjust_search_failed =
-///                 Blast_AdjustScores(matrix,
-///                                    query_composition, query.length,
-///                                    &subject_composition, subject.length,
-///                                    scaledMatrixInfo, compo_adjust_mode,
-///                                    RE_pseudocounts, NRrecord,
-///                                    &matrix_adjust_rule, callbacks->calc_lambda,
-///                                    pvalueForThisPair,
-///                                    compositionTestIndex,
-///                                    LambdaRatio);
-///             ...
-///         }
-///         if ( !adjust_search_failed ) {
-/// ```
 /// The subject range's last argument is `NULL`: SEG runs unless the window's first alignment is
 /// near identical, as for the X-drop redo's first range (`subject_maybe_biased` starts true there
 /// and this redo does not read its answer).
@@ -207,12 +127,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         .first()
         .ok_or_else(|| anyhow::anyhow!("BLASTP redo requires query information"))?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1352-1357
-    // ```c
-    //     status =
-    //         s_WindowsFromAligns(incoming_aligns, query_info, hspcnt, numQueries,
-    //                             kWindowBorder, matchingSeq->length, &windows,
-    //                             &nWindows, query_is_translated, subject_is_translated, params->positionBased);
-    // ```
     let windows = windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?;
     let mut alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>> = Vec::new();
     let mut pvalue_for_this_pair = None;
@@ -248,14 +162,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         )?;
         let searchsp = query_info.eff_search_space;
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1439-1444
-        // ```c++
-        //     if (query_composition->numTrueAminoAcids == 0 ||
-        //         subject_composition->numTrueAminoAcids == 0) {
-        //         /* Either the query or subject contains only ambiguity
-        //            characters, most likely because the entire subject has been
-        //            SEGed.  Compositional adjustment is meaningless. */
-        //         return 1;
-        // ```
         let subject_composition = x_whole_subject_composition(&range);
         if query_info.composition.num_true_amino_acids == 0
             || subject_composition.num_true_amino_acids == 0
@@ -293,12 +199,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         );
         let rows = &*rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
-        // ```c
-        //         if(smithWaterman) {
-        // 	   forbidden_tld[i] = calloc(1,sizeof(Blast_ForbiddenRanges));
-        //            status_code =
-        //                Blast_ForbiddenRangesInitialize(forbidden_tld[i], queryInfo->max_length);
-        // ```
         // The round loop (`smith_waterman_redo_window`, redo_alignment.c:1438-1529) on the
         // subject's range from NCBI's `subject->data - 1`, which `ALIGN_EX` reads from
         // (`s_SWFindFinalEndsUsingXdrop`): the sentinel before the window's letters
@@ -354,20 +254,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             SwWindowRedo::Endless => return Err(SwRedoEndless.into()),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
-        // ```c
-        //     if (editScript != NULL) {
-        //         /* Shifted values of the endpoints */
-        //         Int4 aqueryStart =  queryStart + query_range->begin;
-        //         Int4 aqueryEnd   = *pqueryEnd  + query_range->begin;
-        //         Int4 amatchStart =  matchStart + subject_range->begin;
-        //         Int4 amatchEnd   = *pmatchEnd  + subject_range->begin;
-        //
-        //         obj = BlastCompo_AlignmentNew(newScore, matrix_adjust_rule,
-        //                                       aqueryStart, aqueryEnd,
-        //                                       query_range->context,
-        //                                       amatchStart, amatchEnd,
-        //                                       subject_range->context, editScript);
-        // ```
         // Each alignment prepended in the order made (`newAlign->next = alignments[query_index]`).
         for align in made {
             let mut new_align = blast_compo_alignment_new(

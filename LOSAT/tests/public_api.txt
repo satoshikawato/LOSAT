@@ -1,11 +1,12 @@
 pub mod losat
 pub mod losat::api
 #[non_exhaustive] pub enum losat::api::Error
-pub losat::api::Error::Argv(alloc::string::String)
-pub losat::api::Error::Input(alloc::string::String)
-pub losat::api::Error::Search(alloc::string::String)
+pub losat::api::Error::Argv(alloc::vec::Vec<u8>)
+pub losat::api::Error::Input(alloc::vec::Vec<u8>)
+pub losat::api::Error::Search(alloc::vec::Vec<u8>)
 impl losat::api::Error
-pub fn losat::api::Error::message(&self) -> &str
+pub fn losat::api::Error::message(&self) -> &[u8]
+pub fn losat::api::Error::to_string_lossy(&self) -> alloc::borrow::Cow<'_, str>
 impl core::clone::Clone for losat::api::Error
 pub fn losat::api::Error::clone(&self) -> losat::api::Error
 impl core::cmp::Eq for losat::api::Error
@@ -309,10 +310,13 @@ impl core::panic::unwind_safe::UnwindSafe for losat::api::Id
 pub struct losat::api::Inputs<'a>
 impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
+pub fn losat::api::Inputs<'a>::msa(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::msa_database(&'a std::path::Path, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm_database(&'a std::path::Path, &'a str) -> Self
+pub fn losat::api::Inputs<'a>::strategy(&'a losat::api::Strategy) -> Self
 impl<'a> core::clone::Clone for losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::clone(&self) -> losat::api::Inputs<'a>
 impl<'a> core::fmt::Debug for losat::api::Inputs<'a>
@@ -457,6 +461,7 @@ impl losat::api::Search
 pub fn losat::api::Search::argv(&self) -> &[alloc::string::String]
 pub fn losat::api::Search::dry_run(&self) -> bool
 pub fn losat::api::Search::program(&self) -> losat::api::Program
+pub fn losat::api::Search::read_strategy(&self, &[u8]) -> core::result::Result<losat::api::Strategy, losat::api::Error>
 impl core::clone::Clone for losat::api::Search
 pub fn losat::api::Search::clone(&self) -> losat::api::Search
 impl core::cmp::Eq for losat::api::Search
@@ -472,6 +477,16 @@ impl core::marker::Unpin for losat::api::Search
 impl core::marker::UnsafeUnpin for losat::api::Search
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Search
 impl core::panic::unwind_safe::UnwindSafe for losat::api::Search
+pub struct losat::api::Strategy
+impl core::fmt::Debug for losat::api::Strategy
+pub fn losat::api::Strategy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for losat::api::Strategy
+impl core::marker::Send for losat::api::Strategy
+impl core::marker::Sync for losat::api::Strategy
+impl core::marker::Unpin for losat::api::Strategy
+impl core::marker::UnsafeUnpin for losat::api::Strategy
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Strategy
+impl core::panic::unwind_safe::UnwindSafe for losat::api::Strategy
 #[non_exhaustive] pub struct losat::api::SubjectHits<'a>
 pub losat::api::SubjectHits::hsps: &'a [losat::api::HspRecord]
 pub losat::api::SubjectHits::q_idx: usize
@@ -506,6 +521,8 @@ pub fn losat::api::run_collect(&losat::api::Search, losat::api::Inputs<'_>, &[&s
 pub fn losat::api::run_convert2blastmask(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_dustmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_makembindex(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_segmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_to_file(&losat::api::Search, losat::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_windowmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::validate(losat::api::Program, &[&str]) -> core::result::Result<losat::api::Search, losat::api::Error>

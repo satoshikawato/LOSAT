@@ -24,11 +24,19 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name`, `-oid_masks` and
-//! the other options of `makeblastdb::UNSUPPORTED_OPTIONS`.
+//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
+//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
+//! files of the metadata file (`metadata::metadata_user_path`).
+//!
+//! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
+//! sequence in the form of the sequence file with its definition lines (and their PIG), the
+//! ranges of its masking algorithms and the blobs of its other columns, through the same
+//! `BuildDatabase` and `WriteDb` as a FASTA input; with `-randomize`, in the order of NCBI's
+//! shuffle (`crate::utils::std_shuffle`).
 
 pub mod bioseq;
 pub mod build_db;
+pub(crate) mod column;
 pub mod convert;
 pub mod data_size;
 pub mod deflines;
@@ -48,7 +56,9 @@ pub(crate) mod mask_info;
 pub(crate) mod mdb;
 pub(crate) mod metadata;
 pub(crate) mod ofstream;
+pub(crate) mod oid_list;
 pub mod platform;
+pub(crate) mod raw_source;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;
@@ -58,6 +68,7 @@ pub mod writer;
 #[cfg(test)]
 mod tests;
 
+use crate::wording::{DATABASE_CREATION_ERROR, DATABASE_ERROR, OPTIONS_ERROR};
 use std::path::PathBuf;
 
 use crate::ncbi_exception::NcbiException;
@@ -112,20 +123,6 @@ pub enum WriteDbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-//     catch (const std::bad_alloc&) {                                         \
-//         LOG_POST(Error << "BLAST ran out of memory");                       \
-//         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-//     }                                                                       \
-// ```
 // NCBI's writer does not test whether an output file opened, a write succeeded or a
 // rename took place, so makeblastdb has no message for these failures, and LOSAT's writer
 // does not test them either (`ofstream`, `dir_entry`). An input file that cannot be opened
@@ -133,29 +130,46 @@ pub enum WriteDbError {
 // "other" errors ("Error: " and exit status 255, `makeblastdb::MakedbError::exit_code`),
 // with the path and the system's message; they are not errors of the database's contents
 // ("BLAST Database creation error").
-impl std::fmt::Display for WriteDbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl WriteDbError {
+    /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
+    pub(crate) fn creation(message: Vec<u8>) -> Self {
+        match String::from_utf8(message) {
+            Ok(text) => WriteDbError::Creation(text),
+            Err(error) => WriteDbError::CreationBytes(error.into_bytes()),
+        }
+    }
+
+    /// The message makeblastdb prints for the error (without the line feed that ends it), as
+    /// bytes: a name or a word of the input that is not UTF-8 keeps its bytes, as in NCBI's
+    /// `std::string`.
+    pub fn message(&self) -> Vec<u8> {
+        let text = |prefix: &str, message: &[u8]| [prefix.as_bytes(), message].concat();
+        // LOSAT's prefixes (`crate::wording`) and a space, as NCBI's `BLAST ... error: `.
+        let losat = |prefix: &str, message: &[u8]| [prefix.as_bytes(), b" ", message].concat();
         match self {
-            WriteDbError::Creation(message) => {
-                write!(f, "BLAST Database creation error: {message}")
-            }
-            WriteDbError::CreationBytes(message) => write!(
-                f,
-                "BLAST Database creation error: {}",
-                String::from_utf8_lossy(message)
-            ),
-            WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
-            WriteDbError::Database(message) => write!(f, "BLAST Database error: {message}"),
+            WriteDbError::Creation(message) => losat(DATABASE_CREATION_ERROR, message.as_bytes()),
+            WriteDbError::CreationBytes(message) => losat(DATABASE_CREATION_ERROR, message),
+            WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
+            WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
-            WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
-            WriteDbError::Other(message) => write!(f, "Error: {message}"),
-            WriteDbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
-            WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
-            WriteDbError::Io { path, source } => {
-                write!(f, "Error: {}: {source}", path.display())
-            }
+            WriteDbError::Exception(e) => text("Error: ", &e.what()),
+            WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
+            WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
+            WriteDbError::OutOfMemory => b"BLAST ran out of memory".to_vec(),
+            WriteDbError::Io { path, source } => [
+                b"Error: ".as_slice(),
+                &crate::utils::os_bytes::path_bytes(path),
+                format!(": {source}").as_bytes(),
+            ]
+            .concat(),
         }
+    }
+}
+
+impl std::fmt::Display for WriteDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8_lossy(&self.message()))
     }
 }
 

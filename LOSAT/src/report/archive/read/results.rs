@@ -10,7 +10,6 @@ use std::ops::Range;
 
 use super::request::Queries;
 use super::{seq_align_id, seq_loc_id, Stop};
-use crate::ncbi_str::string_to_int8;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::Value;
@@ -77,46 +76,6 @@ impl Results {
     /// query takes the next run when its id is the run's, else no alignment. (`GetResultSet` then
     /// gives one empty set when there is no query: `alignments.resize(1)`.)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:405-468
-    // ```c++
-    //     	   ITERATE(CSeq_align_set::Tdata, it, al->Get()) {
-    //        	   // index 0 = query, index 1 = subject
-    //        	   const int query_index = 0;
-    //        	   CConstRef<CSeq_id> this_id( & (*it)->GetSeq_id(query_index) );
-    //
-    //       	    if (current_id.Empty() || (CSeq_id::e_YES != this_id->Compare(*current_id))) {
-    //               if (cur_set.NotEmpty()) {
-    //                   temp.push_back(cur_set);
-    //               }
-    //               cur_set.Reset(new CSeq_align_set);
-    //               current_id = this_id;
-    //             }
-    //       	    cur_set->Set().push_back(*it);
-    //           }
-    //     ...
-    //     ITERATE(CSearchResultSet::TQueryIdVector, it,  query_ids) {
-    //         const int query_index = 0;
-    //         if (sap_index < temp.size())
-    //         {
-    //              list< CRef< CSeq_align > > sal = temp[sap_index]->Get();
-    //              CConstRef<CSeq_id> this_id( & (sal.front()->GetSeq_id(query_index) ));
-    //              if (CSeq_id::e_YES == (*it)->Compare(sal.front()->GetSeq_id(query_index) ))
-    //              {
-    //                   rv.push_back(temp[sap_index]);
-    //                   sap_index++;
-    //              }
-    //              else
-    //              {
-    //                   cur_set.Reset(new CSeq_align_set);
-    //                   rv.push_back(cur_set);
-    //              }
-    //         }
-    //         else
-    //         {
-    //              cur_set.Reset(new CSeq_align_set);
-    //              rv.push_back(cur_set);
-    //         }
-    //     }
-    // ```
     // (A null query id, `(*it)->Compare`, is dereferenced only while a run is left.)
     pub(crate) fn alignment_sets(&self, queries: &Queries) -> Result<Vec<Range<usize>>, Stop> {
         let alignments = self.alignments();
@@ -156,77 +115,7 @@ impl Results {
     /// for a program that translates the query (`query_translated`, asked only when there are
     /// masks), else none.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:489-546
-    // ```c++
-    //     TSeqLocInfoVector retval;
-    //     retval.resize(GetQueries()->GetNumQueries());
-    //
-    //     TGSRR::TMasks network_masks = x_GetMasks();
-    //     if (network_masks.empty()) {
-    //         return retval;
-    //     }
-    //
-    //     EBlastProgramType program = NetworkProgram2BlastProgramType(m_Program,
-    //                                                                 m_Service);
-    //     CConstRef<CSeq_id> previous_seqid;
-    //     size_t query_index = 0;
-    //
-    //     ITERATE(TGSRR::TMasks, masks_for_frame, network_masks) {
-    //
-    //         _ASSERT(masks_for_frame->NotEmpty());
-    //
-    //         CConstRef<CSeq_id> current_seqid
-    //             ((*masks_for_frame)->GetLocations().front()->GetId());
-    //         if (previous_seqid.Empty()) {
-    //             previous_seqid = current_seqid;
-    //         }
-    //
-    //         // determine which query are we setting the masks for...
-    //         TMaskedQueryRegions* mqr = NULL;
-    //         if (CSeq_id::e_YES == current_seqid->Compare(*previous_seqid)) {
-    //             mqr = &retval[query_index];
-    //         } else {
-    //             mqr = &retval[++query_index];
-    //             previous_seqid = current_seqid;
-    //         }
-    //         ...
-    //         CRef<CSeq_loc> masks =
-    //             (*masks_for_frame)->GetLocations().front();
-    //         _ASSERT(masks->IsPacked_int());
-    //
-    //         const CPacked_seqint& packed_int = masks->GetPacked_int();
-    //         const EBlast4_frame_type frame = (*masks_for_frame)->GetFrame();
-    //         ITERATE(CPacked_seqint::Tdata, mask, packed_int.Get()) {
-    //             CRef<CSeq_interval> si
-    //                 (new CSeq_interval(const_cast<CSeq_id&>((*mask)->GetId()),
-    //                                    (*mask)->GetFrom(), (*mask)->GetTo()));
-    //             CRef<CSeqLocInfo> sli
-    //                 (new CSeqLocInfo(si, NetworkFrame2FrameNumber(frame, program)));
-    //             mqr->push_back(sli);
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1990-2017
-    // ```c++
-    // CSeqLocInfo::ETranslationFrame
-    // NetworkFrame2FrameNumber(objects::EBlast4_frame_type frame,
-    //                          EBlastProgramType program)
-    // {
-    //     if (Blast_QueryIsTranslated(program)) {
-    //         switch (frame) {
-    //         case eBlast4_frame_type_plus1:  return CSeqLocInfo::eFramePlus1;
-    //         case eBlast4_frame_type_plus2:  return CSeqLocInfo::eFramePlus2;
-    //         case eBlast4_frame_type_plus3:  return CSeqLocInfo::eFramePlus3;
-    //         case eBlast4_frame_type_minus1: return CSeqLocInfo::eFrameMinus1;
-    //         case eBlast4_frame_type_minus2: return CSeqLocInfo::eFrameMinus2;
-    //         case eBlast4_frame_type_minus3: return CSeqLocInfo::eFrameMinus3;
-    //         default: abort();
-    //         }
-    //         _TROUBLE;
-    //     }
-    //     ...
-    //     return CSeqLocInfo::eFrameNotSet;
-    // }
-    // ```
     // (`_ASSERT`s are not in NCBI's release build. A mask without locations (`front()` of an
     // empty list), or one more query than `GetNumQueries` (`retval[++query_index]`), reads
     // memory the input does not decide; a first location without one id is a null `CConstRef`.)
@@ -298,29 +187,6 @@ impl Results {
     /// The Karlin-Altschul blocks as `GetResultSet` takes them: in order, a gapped block sets
     /// the gapped parameters and another the ungapped ones, until both kinds are found.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2218-2238
-    // ```c++
-    //         bool found_gapped = false, found_ungapped = false;
-    //         pair<double, double> lambdas, Ks, Hs;
-    //         TKarlinAltschulBlocks ka_blocks = GetKABlocks();
-    //
-    //         ITERATE(TKarlinAltschulBlocks, itr, ka_blocks) {
-    //             if ((*itr)->GetGapped()) {
-    //                 lambdas.second = (*itr)->GetLambda();
-    //                 Ks.second = (*itr)->GetK();
-    //                 Hs.second = (*itr)->GetH();
-    //                 found_gapped = true;
-    //             } else {
-    //                 lambdas.first = (*itr)->GetLambda();
-    //                 Ks.first = (*itr)->GetK();
-    //                 Hs.first = (*itr)->GetH();
-    //                 found_ungapped = true;
-    //             }
-    //
-    //             if (found_gapped && found_ungapped) {
-    //                 break;
-    //             }
-    //         }
-    // ```
     #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn karlin_blocks(&self) -> KarlinBlocks {
         let mut out = KarlinBlocks::default();
@@ -354,37 +220,6 @@ impl Results {
     /// has one gives it); for `rpsblast` and `rpstblastn`, the first string (as left) with
     /// "Matrix: " gives the matrix, the rest after the text is removed.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2215
-    // ```c++
-    //         const string kTarget("Effective search space used: ");
-    //         const string kLength_Adj("Length adjustment: ");
-    //         list<string> search_stats = GetSearchStats();
-    //         Int8 effective_search_space = 0;
-    //         Int8 length_adjustment = 0;
-    //         NON_CONST_ITERATE(list<string>, itr, search_stats) {
-    //             if (NStr::Find(*itr, kTarget) != NPOS) {
-    //                 NStr::ReplaceInPlace(*itr, kTarget, kEmptyStr);
-    //                 effective_search_space =
-    //                     NStr::StringToInt8(*itr, NStr::fConvErr_NoThrow);
-    //             }
-    //             if (NStr::Find(*itr, kLength_Adj) != NPOS) {
-    //                             NStr::ReplaceInPlace(*itr, kLength_Adj, kEmptyStr);
-    //                             length_adjustment =
-    //                                 NStr::StringToInt8(*itr, NStr::fConvErr_NoThrow);
-    //             }
-    //         }
-    //
-    //         if((m_Service == "rpsblast") || (m_Service == "rpstblastn") )
-    //         {
-    //         	const string kTmp("Matrix: ");
-    //         	 NON_CONST_ITERATE(list<string>, itr, search_stats) {
-    //         		 if (NStr::Find(*itr, kTmp) != NPOS) {
-    //         			 NStr::ReplaceInPlace(*itr, kTmp, kEmptyStr);
-    //         			 m_CBOH->SetOptions().SetMatrixName((*itr).c_str());
-    //         			 break;
-    //         		 }
-    //         	 }
-    //         }
-    // ```
     #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
         let mut out = SearchStats::default();
@@ -392,7 +227,7 @@ impl Results {
             Some(list) => list.items().map(|text| text.str().to_vec()).collect(),
             None => return out,
         };
-        let number = |text: &[u8]| string_to_int8(text, 0).unwrap_or(0);
+        let number = |text: &[u8]| crate::ncbi_str::string_to_int8(text, 0).unwrap_or(0);
         for text in &mut stats {
             if replace_all(text, b"Effective search space used: ") {
                 out.effective_search_space = number(text);
@@ -417,30 +252,6 @@ impl Results {
 /// every `search` removed, each search going on from where the last was removed. Whether one
 /// was found.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
-// ```c++
-// string& NStr::ReplaceInPlace(string& src,
-//                              const string& search, const string& replace,
-//                              SIZE_TYPE start_pos, SIZE_TYPE max_replace,
-//                              SIZE_TYPE* num_replace)
-// {
-//     ...
-//     if ( start_pos + search.size() > src.size()  ||  search == replace )
-//         return src;
-//
-//     bool equal_len = (search.size() == replace.size());
-//     for (SIZE_TYPE count = 0; !(max_replace && count >= max_replace); count++){
-//         start_pos = src.find(search, start_pos);
-//         if (start_pos == NPOS)
-//             break;
-//         ...
-//             src.replace(start_pos, search.size(), replace);
-//         ...
-//         start_pos += replace.size();
-//         ...
-//     }
-//     return src;
-// }
-// ```
 // (`start_pos` 0 and `max_replace` 0 by default; the search was found, so the first test
 // does not return.)
 #[cfg(test)] // read by the formats of later pull requests (decision C3-3)

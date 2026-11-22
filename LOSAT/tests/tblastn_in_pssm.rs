@@ -46,13 +46,6 @@ fn tblastn_on(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
-// ```c++
-//     if (AsString() == "-") {
-// #if defined(NCBI_OS_MSWIN)
-//         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-// #endif
-//         m_Ios  = &cin;
-// ```
 // NCBI 2.17.0 (step-1 case `pf.stdin.6` of line PS PS7: the bytes of the run that names the file):
 // `-in_pssm -` reads the PSSM from the standard input, and the default `-query -` is not read.
 #[test]
@@ -77,17 +70,11 @@ fn in_pssm_dash_reads_the_standard_input() {
     assert_eq!(empty.status.code(), Some(1));
     assert_eq!(
         empty.stderr,
-        b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the LOSAT user manual.\n"
+        b"LOSAT query/options error: Unsupported format for PSSM\nPlease refer to the LOSAT user manual.\n"
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-162
-// ```c++
-// 	if ((mt_mode == CMTArgs::eSplitByQueries) && (num_threads > 1)){
-// 		m_UsageReport.AddParam(CBlastUsageReport::eMTMode, CMTArgs::eSplitByQueries);
-// 		return x_RunMTBySplitQuery();
-// 	}
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-164
 // NCBI 2.17.0 (step-1 cases `ts1.mt1.n2.6`, `ts1.mt1.n1.6`, `ts1.subj.mt1.n2.6` of line PS PS7): a PSSM
 // search split by queries aborts with `-db` (LOSAT's refusal, DECISIONS 35 Q4), and runs as one
 // thread with one thread or with `-subject` (whose thread warning LOSAT does not write,

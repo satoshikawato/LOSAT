@@ -8,16 +8,6 @@
 //! (`blastxml`, `offline`).
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1853-1871
-//! ```c++
-//! int main(int argc, char * argv[])
-//! {
-//! 	string launchAlias = CDirEntry::NormalizePath(argv[0]);
-//! 	string base, ext;
-//! 	CDirEntry::SplitPath(launchAlias, &CRpsbProcApp::m_st_launch_path, &base, &ext);
-//! 	...
-//! 	return CRpsbProcApp().AppMain(argc, argv);
-//! }
-//! ```
 //!
 //! NCBI's rpsbproc is not part of BLAST+ and its source is not in the pinned BLAST tree; the
 //! references `RpsbProc 0.5.1, 2025-05-13` name the files of its source package
@@ -62,41 +52,8 @@ use query::{
 use segset::SegSet;
 use sites::{MotifError, MotifState};
 
-/// rpsbproc's version (`VERDEF`).
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87
-// ```c++
-// #define VERDEF 0, 5, 1
-//
-// static constexpr const struct TVER
-// {
-// 	int major;
-// 	int minor;
-// 	int patch_level;
-// } VER = {VERDEF};
-//
-// std::ostream & operator << (std::ostream &os, const struct TVER &v)
-// {
-// 	os << 'v' << v.major << '.' << v.minor << '.' << v.patch_level;
-// 	return os;
-// }
-// ```
-pub const VERSION: &str = "0.5.1";
-
 /// `EErrorSubCode`: the exit codes.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:91-101
-// ```c++
-// enum EErrorSubCode
-// {
-// 	e_OK = 0,
-// 	e_Info,
-// 	e_DataLoadError,
-// 	e_InputFileOpenError,
-// 	e_OutputFileOpenError,
-// 	e_InputDataError,
-// 	//-----------------------
-// 	eErr_TotalErrorCodes
-// };
-// ```
 const E_OK: i32 = 0;
 const E_DATA_LOAD_ERROR: i32 = 2;
 const E_INPUT_FILE_OPEN_ERROR: i32 = 3;
@@ -105,9 +62,6 @@ const E_INPUT_DATA_ERROR: i32 = 5;
 
 /// `CRpsbProcApp::COORDSBASE`: the printed coordinates count from 1.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:335
-// ```c++
-// 	constexpr static const int COORDSBASE = 1;
-// ```
 const COORDSBASE: i64 = 1;
 
 /// `position + COORDSBASE`, the `int` sum of every coordinate that rpsbproc prints in `int`
@@ -124,9 +78,6 @@ fn printed_position(position: impl Into<i64>) -> i64 {
 
 /// `OVERLAPLEADING` as rpsbproc stores it (`unsigned int` of 10000000000).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:338
-// ```c++
-// 	constexpr static const unsigned int OVERLAPLEADING = 10000000000;
-// ```
 const OVERLAPLEADING: u32 = (10_000_000_000u64 % (1u64 << 32)) as u32;
 
 /// How `losat rpsbproc` ends: an exit status, or a refusal (its message, which may quote data
@@ -397,35 +348,13 @@ pub(crate) fn write_stdout(text: &str) {
 /// `NCBI_USE_ERRCODE_X` of ncbiapp.cpp (`Corelib_App`), the error code of the application's
 /// reports.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:65
-// ```c++
-// #define NCBI_USE_ERRCODE_X   Corelib_App
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/error_codes.hpp:49
-// ```c++
-// NCBI_DEFINE_ERRCODE_X(Corelib_App,        106, 24);
-// ```
 const CORELIB_APP: u32 = 106;
 
 /// The report of an exception that leaves rpsbproc's `Run` (`CNcbiApplication::x_TryMain`):
 /// the exception's own line, then the application's, exit 3. For the exceptions of `Init`
 /// (`initialization`) the application's line has subcode 15 and the exit is 2.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:669-674,711-728
-// ```c++
-//             catch (const CException& e) {
-//                 NCBI_REPORT_EXCEPTION_X(15,
-//                                         "Application's initialization failed", e);
-//                 *got_exception = true;
-//                 *exit_code = 2;
-//             }
-//             ...
-//             catch (const CException& e) {
-//                 ...
-//                 NCBI_REPORT_EXCEPTION_X(16,
-//                                         "Application's execution failed", e);
-//                 *got_exception = true;
-//                 *exit_code = 3;
-//             }
-// ```
 // (rpsbproc sets no diagnostic flags, so the report is `NcbiException::report_default_ex`'s; the
 // lines as NCBI's rpsbproc printed them: `Error: (CInvalidChoiceSelection::eFail) <message>` and
 // `Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) <message>`
@@ -442,11 +371,7 @@ fn report_exception(
     } else {
         (16, "Application's execution failed", 3)
     };
-    diag.post_bytes(
-        exception
-            .report_default_ex(CORELIB_APP, subcode, title)
-            .as_bytes(),
-    );
+    diag.post_bytes(&exception.report_default_ex(CORELIB_APP, subcode, title));
     status
 }
 
@@ -472,10 +397,6 @@ fn join(a: &OsStr, b: &str) -> OsString {
 /// dropped and `..` taken back where possible, without its trailing `/`
 /// (`ncbi_environment::normalize_path`, the Unix form, on every target).
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:501-502
-// ```c++
-//     static string NormalizePath(const string& path,
-//                                 EFollowLinks  follow_links = eIgnoreLinks);
-// ```
 fn normalize_path(path: &[u8]) -> Vec<u8> {
     crate::blastinput::ncbi_environment::normalize_path(path, None)
         .expect("a path normalized without links has no link limit")
@@ -484,22 +405,6 @@ fn normalize_path(path: &[u8]) -> Vec<u8> {
 /// The paths where rpsbproc looks for its data without `-d`: the launch directory of the
 /// program (`argv[0]` normalized) and its real directory (links followed, made absolute).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1855-1868
-// ```c++
-// 	string launchAlias = CDirEntry::NormalizePath(argv[0]);
-// 	string base, ext;
-// 	CDirEntry::SplitPath(launchAlias, &CRpsbProcApp::m_st_launch_path, &base, &ext);
-// 	if (!CRpsbProcApp::m_st_launch_path.empty())
-// 		CRpsbProcApp::m_st_launch_path.pop_back();	//get rid of the tailing '/'
-// 	// -- this is deliberately leave alone
-// 	CRpsbProcApp::m_st_exec_name = base + ext;
-//
-// 	CDir launchPathDir(launchAlias);
-// 	launchPathDir.DereferencePath();
-//
-// 	CDirEntry::SplitPath(CDirEntry::CreateAbsolutePath(launchPathDir.GetPath(), CDirEntry::eRelativeToCwd), &CRpsbProcApp::m_st_real_path);
-// 	if (!CRpsbProcApp::m_st_real_path.empty())
-// 		CRpsbProcApp::m_st_real_path.pop_back();
-// ```
 // The binary is `losat` (or a link `rpsbproc` to it, `--install-shims`). The launch path is
 // ported as NCBI makes it. For the real path NCBI follows the links of each component of the
 // path (`s_DereferencePath`, ncbifile.cpp) relative to the current directory, normalizes it
@@ -540,64 +445,6 @@ fn program_paths() -> (OsString, OsString) {
 
 /// The data directory (`#Annotation data at:`), searched as rpsbproc searches it.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:572-643
-// ```c++
-// 	m_init_msg << "#Annotation data at:";
-//
-// 	if (AV_Data.HasValue())	//take command line designated data path as first priority
-// 	{
-// 		const string &datapath = AV_Data.AsString();
-// 		if (!datapath.empty())
-// 		{
-// 			actual_path = datapath + "/" + _datadir;
-// 			if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())
-// 				goto labelDataPathFound;
-//
-// 			actual_path = datapath;
-// 			if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())
-// 				goto labelDataPathFound;
-//
-// 			LOG_POST_X(e_DataLoadError, "Specified data location (" << datapath << ") does not exist or does not contain data files");
-// 			m_app_status = e_DataLoadError;
-// 			m_init_msg << "(error)";
-// 			actual_path.clear();
-// 		}
-// 		...
-// 	}
-// 	else	//not specified in command line, so try home directory (where the binary located) first
-// 	{
-// 		// -- first look for current directory for a "data" subdirectory
-// 		actual_path = "./" + _datadir;
-//
-// 		if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//found
-// 			goto labelDataPathFound;
-//
-// 		actual_path = "./";
-// 		if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//found
-// 			goto labelDataPathFound;
-//
-// 		actual_path = CRpsbProcApp::m_st_launch_path + "/" + _datadir;
-// 		if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//found
-// 			goto labelDataPathFound;
-//
-// 		actual_path = CRpsbProcApp::m_st_launch_path;
-//
-// 		actual_path = CRpsbProcApp::m_st_launch_path + "/" + _datadir;
-// 		if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//found
-// 			goto labelDataPathFound;
-//
-// 		if (CRpsbProcApp::m_st_real_path != CRpsbProcApp::m_st_launch_path)
-// 		{
-// 			actual_path = CRpsbProcApp::m_st_real_path + "/" + _datadir;
-// 			if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//not there
-// 				goto labelDataPathFound;
-//
-// 			actual_path = CRpsbProcApp::m_st_real_path;
-// 			if (CDir(actual_path).Exists() && CFile(actual_path + "/" + _cdd).Exists())	//not there
-// 				goto labelDataPathFound;
-// 		}
-// 		actual_path.clear();
-// 	}
-// ```
 // (The registry's `[datafiles]` names, main:535-566, are rejected with every other registry
 // entry that changes the output: `ApplicationStart::settings`.)
 fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<OsString> {
@@ -645,24 +492,16 @@ fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<O
     }
 }
 
-/// The 9 lines that rpsbproc writes to standard error first (also with `-q`).
+/// The 9 lines that rpsbproc writes to standard error first (also with `-q`); the first names
+/// LOSAT's version (`Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`, `wording::RPSBPROC_TITLE`
+/// and `REPORT_VERSION`) where NCBI's names its own (`v0.5.1`, `VERDEF`; the Owner 2026-11-21
+/// 「Q1=B」).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87 (`VERDEF`)
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:397-406
-// ```c++
-// 	if (!m_silent)
-// 	{
-// 		cerr << PROGRAM_TITLE << ' ' << VER << endl;
-// 		cerr << "-------------------------------------------------------" << endl;
-// 		cerr << "Download:" << endl;
-// 		cerr << "\tftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/" << endl << endl;
-// 		cerr << "Blast applications download:" << endl;
-// 		cerr << "\tftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/" << endl << endl;
-// 		cerr << "For more information please refer to the README file" << endl;
-// 	}
-// ```
 // (`m_silent` is still false here: `-q` is read at main:677.)
 fn banner() {
     write_stderr(&format!(
-        "Post-RPSBLAST Processing Utility v{VERSION}\n\
+        "{} {}\n\
          -------------------------------------------------------\n\
          Download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/\n\
@@ -670,56 +509,15 @@ fn banner() {
          Blast applications download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/\n\
          \n\
-         For more information please refer to the README file\n"
+         For more information please refer to the README file\n",
+        crate::wording::RPSBPROC_TITLE,
+        crate::wording::REPORT_VERSION
     ));
 }
 
 /// The header of the report.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:679-716
-// ```c++
-// 	if (e_OK == m_app_status)
-// 	{
-//
-// 		m_init_msg << "#E-Value cutoff:\t" << m_evalue << endl;
-// 		m_init_msg << "#Redundancy:\t" << GetDisplay<TDataModes> (m_dmode) << endl;
-// 		m_init_msg << "#Data requested:\t" << GetDisplay<TTargetData>(m_tdata) << endl;
-// 		m_init_msg << "#Output format -- tab-delimited table" << endl;
-// 		m_init_msg << "#Show superfamilies: " << (m_show_clusters ? "YES" : "NO") << endl;
-// 		m_init_msg << '#' << DATASTART << endl;
-// 		m_init_msg << '#' << SESSIONSTART << DELIMIT << "<session-ordinal>" << DELIMIT << "<program>" << DELIMIT << "<database>" << DELIMIT << "<score-matrix>" << DELIMIT << "<evalue-threshold>" << endl;
-// 		m_init_msg << '#' << QUERYSTART << DELIMIT << "<query-id>" << DELIMIT << "<seq-type>" << DELIMIT << "<seq-length>" << DELIMIT << "<definition-line>" << endl;
-//
-//
-// 		if (TTargetData::e_feats != m_tdata)
-// 		{
-// 			m_init_msg << '#' << DOMSTART << endl;
-// 			m_init_msg << '#' << "<session-ordinal>" << DELIMIT << "<query-id[readingframe]>" << DELIMIT << "<hit-type>" << DELIMIT << "<PSSM-ID>" << DELIMIT << "<from>" << DELIMIT << "<to>" << DELIMIT << "<E-Value>" << DELIMIT << "<bitscore>" << DELIMIT << "<accession>" << DELIMIT << "<short-name>" << DELIMIT << "<incomplete>" << DELIMIT << "<superfamily PSSM-ID>" << endl;
-// 			m_init_msg << "#more such lines......" << endl;
-// 			m_init_msg << '#' << DOMEND << endl;
-// 		}
-// 		...
-// 		m_init_msg << '#' << QUERYEND << DELIMIT << "<query-id>" << endl;
-// 		m_init_msg << "#more query sections.." << endl;
-// 		m_init_msg << '#' << SESSIONEND << DELIMIT << "<session-ordinal>" << endl;
-// 		m_init_msg << "#more session sections.." << endl;
-// 		m_init_msg << '#' << DATAEND << endl;
-// 		m_init_msg << "#=====================================================================" << endl;
-// 	}
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:699-711
-// ```c++
-// 		if (TTargetData::e_doms != m_tdata)
-// 		{
-// 			m_init_msg << '#' << FEATSTART << endl;
-// 			m_init_msg << '#' << "<session-ordinal>" << DELIMIT << "<query-id[readingframe]>" << DELIMIT << "<annot-type>" << DELIMIT << "<title>" << DELIMIT << "<residue(coordinates)>" << DELIMIT << "<complete-size>" << DELIMIT << "<mapped-size>" << DELIMIT << "<source-domain>" << endl;
-// 			m_init_msg << "#more such lines......" << endl;
-// 			m_init_msg << '#' << FEATEND << endl;
-// 			m_init_msg << '#' << MOTIFSTART << endl;
-// 			m_init_msg << '#' << "<session-ordinal>" << DELIMIT << "<query-id[readingframe]>" << DELIMIT << "<title>" << DELIMIT << "<from>" << DELIMIT << "<to>" << DELIMIT << "<source-domain>" << endl;
-// 			m_init_msg << "#more such lines......" << endl;
-// 			m_init_msg << '#' << MOTIFEND << endl;
-// 		}
-// ```
 fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetData) -> String {
     let mode = match mode {
         DataMode::Rep => "Concise",
@@ -777,54 +575,7 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 /// The first variable of `variables` that changes how NCBI's object stream reads an archive or
 /// what its objects give, with a value that changes it; `None` when there is none.
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:57-68
-// ```c++
-// NCBI_PARAM_DECL(bool, OBJECTS, SEQ_DESCR_ALLOW_EMPTY);
-// NCBI_PARAM_DEF_EX(bool, OBJECTS, SEQ_DESCR_ALLOW_EMPTY, false,
-//                   eParam_NoThread, OBJECTS_SEQ_DESCR_ALLOW_EMPTY);
-// static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, SEQ_DESCR_ALLOW_EMPTY)> s_SeqDescrAllowEmpty;
-//
-// void CSeq_descr::PostRead(void) const
-// {
-//     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
-//         NCBI_THROW(CSerialException, eInvalidData,
-//                    "empty Seq-descr is not allowed");
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
-// ```c++
-// ESerialVerifyData CObjectIStream::x_GetVerifyDataDefault(void)
-// {
-//     ESerialVerifyData now = TSerialVerifyData::GetThreadDefault();
-//     if (now == eSerialVerifyData_Default) {
-//         now = TSerialVerifyData::GetDefault();
-//         if (now == eSerialVerifyData_Default) {
-// // this is to provide compatibility with old implementation
-//             const char* str = getenv(SERIAL_VERIFY_DATA_READ);
-//             if (str) {
-//                 if (NStr::CompareNocase(str,"YES") == 0) {
-//                     now = eSerialVerifyData_Yes;
-//                 } else if (NStr::CompareNocase(str,"NO") == 0) {
-//                     now = eSerialVerifyData_No;
-//                 } else if (NStr::CompareNocase(str,"NEVER") == 0) {
-//                     now = eSerialVerifyData_Never;
-//                 } else  if (NStr::CompareNocase(str,"ALWAYS") == 0) {
-//                     now = eSerialVerifyData_Always;
-//                 } else  if (NStr::CompareNocase(str,"DEFVALUE") == 0) {
-//                     now = eSerialVerifyData_DefValue;
-//                 } else  if (NStr::CompareNocase(str,"DEFVALUE_ALWAYS") == 0) {
-//                     now = eSerialVerifyData_DefValueAlways;
-//                 }
-//             }
-//         }
-//     }
-//     if (now != eSerialVerifyData_Default) {
-//         return now;
-//     }
-//     // change the default here, if you like
-//     return eSerialVerifyData_Yes;
-// }
-// ```
 // (`CSerialObject::x_GetVerifyData`, serialobject.cpp:180-221, reads `SERIAL_VERIFY_DATA_GET`
 // the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
 // member is no longer a read error, and the getter of an unset member gives its default instead
@@ -900,19 +651,8 @@ pub fn run(
 }
 
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:924-932
-// ```c++
-// int CRpsbProcApp::DryRun(void)
-// {
-// 	if (e_OK == m_app_status)
-// 		cerr << "Dryrun passed, all resources are present and loaded successfully." << endl;
-// 	else
-// 		cerr << "Dryrun failed, error subcode = " << m_app_status << endl;
-//
-// 	return m_app_status;
-// }
-// ```
 /// `losat rpsbproc -dryrun` with `args`: rpsbproc's own `DryRun`, which NCBI's application runs
-/// in place of `Run` after `Init` (ncbiapp.cpp:705-707, quoted at `cli::main_entry`). `Init`
+/// in place of `Run` after `Init` (ncbiapp.cpp:705-707, cited at `cli::main_entry`). `Init`
 /// runs as for a run (the program information, its messages, the `-i` file opened and read up
 /// to its first byte that is not white space, the `-o` file made empty, the data files loaded),
 /// then `DryRun`'s line on standard error, and its status is the exit status. An exception that
@@ -969,7 +709,7 @@ fn init(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (quoted at the BLAST
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (cited at the BLAST
     // programs in `cli::main_entry`): the application layer reads its environment and its
     // registry files (`rpsbproc.ini`, `.ncbirc`) before `Init`.
     let settings = match settings {
@@ -979,60 +719,6 @@ fn init(
     banner();
     let mut status = E_OK;
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:447-498
-    // ```c++
-    // 	m_init_msg << "#Input data file:";
-    // 	if (AV_InFile.HasValue())
-    // 	{
-    // 		const string &infname = AV_InFile.AsString();
-    // 		if (CFile(infname).Exists())
-    // 		{
-    // 			ifstream ifs(infname.c_str(), ios::binary | ios::in);
-    // 			if (ifs.good())
-    // 			{
-    // 				m_infiles.AppendFile(infname);
-    // 				m_init_msg << '\t' << infname;
-    // 			}
-    // 			else
-    // 			{
-    // 				LOG_POST_X(e_InputFileOpenError, "Unable to open input file: " << infname);
-    // 				m_app_status = e_InputFileOpenError;
-    // 			}
-    // 			ifs.close();
-    // 		}
-    // 		else
-    // 		{
-    // 			LOG_POST_X(e_InputFileOpenError, "Input file does not exist: " << infname);
-    // 			m_app_status = e_InputFileOpenError;
-    // 		}
-    // 	}
-    //
-    // 	if (m_infiles.NLeft() > 0)
-    // 		m_istream = m_infiles.OpenStream();
-    // 	else
-    // 		m_init_msg << "\tstdin";
-    //
-    // 	m_init_msg << endl;
-    //
-    // 	m_init_msg << "#Output data file:";
-    //
-    // 	if (AV_OutFile.HasValue())
-    // 	{
-    // 		const string & ofilename = AV_OutFile.AsString();
-    // 		m_outfile.open(ofilename.c_str(), ios::binary | ios::out);	//append! not write.
-    // 		if (m_outfile.good())
-    // 		{
-    // 			m_ostream = &m_outfile;
-    // 			m_init_msg << '\t' << ofilename;
-    // 		}
-    // 		else
-    // 		{
-    // 			LOG_POST_X(e_OutputFileOpenError, "Unable to open output file: " << ofilename);
-    // 			m_app_status = e_OutputFileOpenError;
-    // 		}
-    // 	}
-    // 	else
-    // 		m_init_msg << "\t(stdout)";
-    // ```
     let mut header: Vec<u8> = b"#Post-RPSBLAST Processing Utility\n\n#Input data file:".to_vec();
     let mut input: Option<Box<dyn Read>> = None;
     if let Some(infile) = &args.infile {
@@ -1082,30 +768,6 @@ fn init(
         header.extend_from_slice(b"\t(stdout)");
     }
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:501-522
-    // ```c++
-    // 	// -- check stream type
-    // 	// -- test if the stream contains xml or asn
-    // 	char c = 0;
-    // 	while (m_istream->good() && c <= ' ')
-    // 		m_istream->get(c);
-    //
-    // 	if (!m_istream->good())
-    // 	{
-    // 		m_app_status = e_InputDataError;
-    // 		return;
-    // 	}
-    //
-    // 	if ('<' == c)	//xml
-    // 	{
-    // 		LOG_POST_X(e_Info, "Warning: XML format support is deprecated!");
-    // 		m_sfmt = eSerial_Xml;
-    // 	}
-    //
-    // 	m_istream->putback(c);
-    //
-    //
-    // 	m_init_msg << endl;
-    // ```
     // (`c` is a signed `char`: the bytes from 0x80 are skipped as white space.)
     let mut input = BufReader::with_capacity(1 << 16, input);
     let first = loop {
@@ -1133,31 +795,6 @@ fn init(
     header.push(b'\n');
     header.extend_from_slice(b"#Annotation data at:");
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:645-669
-    // ```c++
-    // labelDataPathFound:
-    //
-    // 	if (!actual_path.empty())
-    // 	{
-    // 		m_init_msg << '\t' << actual_path;
-    // 		try
-    // 		{
-    // 			m_dom_cluster_src.LoadData_real(actual_path + "/" + _cdd, actual_path + "/" + _feats, actual_path + "/" + _genfeats, actual_path + "/" + _spthr, actual_path + "/" + _cdt, actual_path + "/" + _clst);
-    // 		}
-    // 		catch (CSimpleException e)
-    // 		{
-    // 			LOG_POST_X(e_DataLoadError, "Annotation data loading unsuccessful: " << e.what());
-    // 			m_app_status = e_DataLoadError;
-    // 			m_init_msg << "(error)";
-    // 		}
-    // 	}
-    // 	else
-    // 	{
-    // 		m_init_msg << "\tNot found!";
-    // 		LOG_POST_X(e_DataLoadError, "Cannot find data files");
-    // 		m_app_status = e_DataLoadError;
-    // 		m_init_msg << "(error)";
-    // 	}
-    // ```
     let mut data = CddData::default();
     match find_data_path(diag, args.data_path.as_deref()) {
         Some(path) => {
@@ -1191,13 +828,6 @@ fn init(
                     return Err(Outcome::Exit(report_exception(diag, &error, true)));
                 }
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:675-679
-                // ```c++
-                //             catch (const exception& e) {
-                //                 ERR_POST_X(6, "Application's initialization failed: " << e.what());
-                //                 *got_exception = true;
-                //                 *exit_code = 2;
-                //             }
-                // ```
                 // (A `std::exception` of the loader is no `CSimpleException`, so it leaves
                 // `Init`; NCBI's rpsbproc printed `Error: (106.6) ...` with the `what()` of
                 // libstdc++, PS16a review oracle A4-1 cases `annot10`, `gen10` and `ct3`.)
@@ -1308,126 +938,7 @@ fn value_variant(value: &ParamValue) -> &'static str {
 
 /// The sessions: one per archive (`Run`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:727-739
-// ```c++
-// int CRpsbProcApp::Run(void)
-// {
-// 	if (e_OK == m_app_status)
-// 	{
-// 		// -- output initial message
-// 		(*m_ostream) << m_init_msg.str();
-// 		(*m_ostream) << DATASTART << endl;
-// 		m_init_msg.clear();
-//
-// 		//CNcbiCdAlignProcessor proc(&m_dom_cluster_src);
-// 		COfflCdAlignProcessor proc(&m_dom_cluster_src);
-// 		//list<_TOfflDomQuery> qobjs;
-// 		size_t objCounter = 0, qCounter = 0;
-// ```
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:793-917
-// ```c++
-// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " start..." << endl;
-// 				...
-// 					switch (reqbody.Which())
-// 					{
-// 					case CBlast4_request_body::e_Queue_search:
-// 						{
-// 							const CBlast4_queue_search_request &qsreq = reqbody.GetQueue_search();
-//
-// 							// -- start session output
-// 							(*m_ostream) << SESSIONSTART << DELIMIT << ++objCounter << DELIMIT << qsreq.GetProgram();
-//
-// 							if (req.IsSetIdent() && req.CanGetIdent())
-// 								(*m_ostream) << DELIMIT << req.GetIdent();
-//
-// 							(*m_ostream) << DELIMIT << qsreq.GetSubject().GetDatabase();
-//
-// 							if (qsreq.IsSetAlgorithm_options() && qsreq.CanGetAlgorithm_options())
-// 							{
-// 								const CBlast4_parameters &algoParams = qsreq.GetAlgorithm_options();
-// 								CRef<CBlast4_parameter> refGCode = algoParams.GetParamByName("MatrixName");
-// 								if (!refGCode.IsNull())
-// 									(*m_ostream) << DELIMIT << refGCode->GetValue().GetString();
-//
-// 								refGCode = algoParams.GetParamByName("EvalueThreshold");
-// 								if (!refGCode.IsNull())
-// 									(*m_ostream) << DELIMIT << refGCode->GetValue().GetCutoff().GetE_value();
-// 							}
-//
-// 							(*m_ostream) << endl;
-//
-//
-// 							const CBlast4_queries &blast_queries = qsreq.GetQueries();
-//
-// 							switch (blast_queries.Which())
-// 							{
-// 							case CBlast4_queries::e_Bioseq_set:
-// 								pQuerySeqs = &(blast_queries.GetBioseq_set());
-// 								break;
-// 							default:
-// 								LOG_POST_X(e_InputDataError, "Wrong type of request data: CBlast4_queries::e_Bioseq_set expected");
-// 								m_app_status = e_InputDataError;
-// 								goto labelReturn;
-// 							}	//switch (blast_queries.Which())
-// 						}
-// 						break;
-// 					default:
-// 						LOG_POST_X(e_InputDataError, "Wrong type of request data: CBlast4_request_body::e_Queue_search expected");
-// 						m_app_status = e_InputDataError;
-// 						goto labelReturn;
-// 					}	//switch (reqbody.Which())
-//
-//
-// 					if (objBlastOutput.IsSetResults() && objBlastOutput.CanGetResults())
-// 					{
-// 						const CBlast4_archive::TResults & resobj = objBlastOutput.GetResults();	//
-//
-// 						if (resobj.IsSetMasks() && resobj.CanGetMasks())
-// 						{
-// 							const list< CRef< CBlast4_mask > > & blmasks = resobj.GetMasks();
-//
-// 							if (!blmasks.empty())
-// 								ConvertBlastMaskListToSeqLocInfoVector(blmasks, vecMasks);
-// 						}
-//
-// 						if (resobj.IsSetAlignments() && resobj.CanGetAlignments())
-// 						{
-// 							pAligns = &(resobj.GetAlignments());
-// 						}
-// 						else
-// 						{
-// 							LOG_POST_X(e_InputDataError, "Wrong type of results data: CBlast4_get_search_results_reply::e_alignments expected");
-//
-// 							goto labelNextObj;
-// 						}
-//
-// 					}
-// 					...
-// 				if (!m_silent) cerr << "Calculating...." << endl;
-// 				qobjs.clear();
-// 				proc.ProcessBlastResults(qobjs, pQuerySeqs->GetSeq_set(), vecMasks, pAligns->Get(), gcode);
-//
-// 				for (const auto & v: qobjs)
-// 				{
-// 					PrintDomQuery(v, objCounter);
-// 					++qCounter;
-// 				}
-//
-// 			labelNextObj:
-// 				(*m_ostream) << SESSIONEND << DELIMIT << objCounter << endl;
-// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " done..." << endl;
-// 			}
-// 		}
-//
-//
-// 		(*m_ostream) << DATAEND << endl;
-// 		if (!m_silent)
-// 			cerr << "All done, " << qCounter << " queries processed" << endl << endl;
-// 		// -- do real job, if anything goes wrong, set m_app_status and goto labelReturn;
-// 	}
-// labelReturn:
-// 	return m_app_status;
-// }
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:793-921
 // The `request` and `results` members are mandatory in the module, so an object that reads has
 // both (main:886-896 are not reached). The refusals that a session's request decides come
 // before anything of that session.
@@ -1610,49 +1121,9 @@ fn run_sessions<R: Read>(
 /// The sessions of an XML input: one per BlastOutput document (`Run`'s XML loop), until one does
 /// not read. A document is read whole before its session line (NCBI reads it into one object):
 /// what it prints is its version, database, matrix and E-value threshold, and its queries.
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:744-778
-// ```c++
-// 		if (eSerial_Xml == m_sfmt)
-// 		{
-// 			//list<_TOfflDomQuery> qobjs;
-// 			while (m_istream->good())
-// 			{
-// 				CBlastOutput objBlastOutput;
-// 				try
-// 				{
-// 					ObjStreamIn<CBlastOutput> ((*m_istream), objBlastOutput, eSerial_Xml);
-// 				}
-// 				catch (...)
-// 				{
-// 					break;
-// 				}
-//
-// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " start..." << endl;
-// 				const CBlastOutput::TParam &params = objBlastOutput.GetParam();
-// 				(*m_ostream) << SESSIONSTART << DELIMIT << ++objCounter << DELIMIT << objBlastOutput.GetVersion() << DELIMIT << objBlastOutput.GetDb() << DELIMIT << params.GetMatrix() << DELIMIT << params.GetExpect() << endl;
-// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " start..." << endl;
-// 				const CBlastOutput::TIterations &rIters = objBlastOutput.GetIterations();
-//
-// 				vector<PssmId_t> missed;
-// 				for (CBlastOutput::TIterations::const_iterator iter = rIters.begin(), iterEnd = rIters.end(); iterEnd != iter; ++iter)
-// 				{
-// 					if (!m_silent) cerr << "Calculating...." << endl;
-//
-// 					_TOfflDomQuery cdqVal;
-//
-// 					// -- this already included calculation
-// 					proc.ParseBlastOutput(cdqVal, **iter, missed, m_evalue);
-// 					PrintDomQuery(cdqVal, objCounter);
-// 					++qCounter;
-// 				}
-// 				(*m_ostream) << SESSIONEND << DELIMIT << objCounter << endl;
-// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " done..." << endl;
-//
-// 			}
-// 		}
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:741-778
 // (The `DATA` and `ENDDATA` lines and the last line on standard error are those of every input,
-// quoted at `run_sessions`. C++17 evaluates the left operand of `<<` first: the session line is
+// cited at `run_sessions`. C++17 evaluates the left operand of `<<` first: the session line is
 // written up to the tab before the matrix when `GetMatrix` throws for a document without
 // `Parameters_matrix` (`CUnassignedMember`). `GetParam`, `GetVersion`, `GetDb`, `GetExpect` and
 // `GetIterations` get mandatory members, which every document read has. The motif positions of
@@ -1791,95 +1262,7 @@ fn std_exception(report: &mut Report, what: &[u8]) -> Outcome {
 
 /// `PrintDomQuery` of a protein query with `-t doms`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:947-1031
-// ```c++
-// void CRpsbProcApp::PrintDomQuery(const TDomQuery &q, size_t idxBlObj) const
-// {
-// 	static constexpr const SeqLen_t codonEnd = READINGFRAME::RF_SIZE - 1;
-//
-// 	(*m_ostream) << QUERYSTART << DELIMIT << q.m_strAccession << DELIMIT;
-// 	...
-// 	if (!q.m_bIsNa)
-// 	{
-// 		(*m_ostream) << QUERY_TYPE_PEPTIDE << DELIMIT << q.m_uiSeqLen << DELIMIT << q.m_strTitle << endl;
-// 		vector<TDomSeqAlignIndex::__TCdAlignRecord> vecDomAligns, vecFeatAligns;	//vecDomFams for output of superfamilies of domain hits
-// 		q.m_dimSplitAligns[0].CreateRecordSets(q.m_vecAlignments, m_dom_cluster_src, vecDomAligns, vecFeatAligns, m_dmode);
-//
-// 		// - so that we don't output redundent domain families
-// 		map<unsigned int, TDomSeqAlignIndex::__TCdAlignRecord > mapDomFams;
-//
-// 		if (TTargetData::e_feats != m_tdata)
-// 		{
-// 			if (!vecDomAligns.empty())
-// 			{
-// 				(*m_ostream) << DOMSTART << endl;
-// 				if (TDataModes::e_rep == m_dmode)
-// 				{
-// 					for (vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterRec = vecDomAligns.begin(), iterRecEnd = vecDomAligns.end(); iterRecEnd != iterRec; ++iterRec)
-// 					{
-// 						if (NULL == iterRec->pCdInfo) continue;
-// 						(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT;
-// 						if (1 == iterRec->pAlign->m_iRepClass)	//multi, should be no more
-// 							PrintDomLine(HITTYPE_MULTIDOM, *iterRec);
-// 						else if (iterRec->pAlign->m_bSpecQualified)
-// 						{
-// 							PrintDomLine(HITTYPE_SPECIFIC, *iterRec);
-// 							if (NULL != iterRec->pClst)
-// 							{
-// 								unsigned int key = iterRec->pAlign->m_iRegionIdx * OVERLAPLEADING + iterRec->pCdInfo->m_uiClusterPssmId;
-// 								//if (mapDomFams.end() == mapDomFams.find(key))
-// 								mapDomFams.emplace(key, *iterRec);
-// 							}
-// 						}
-// 						else if (NULL != iterRec->pClst)
-// 							PrintClstLine(*iterRec);
-// 						else	//not qualified for specific, but no cluster -- non-specific
-// 							PrintDomLine(HITTYPE_NONSPECIFIC, *iterRec);
-// 						(*m_ostream) << endl;
-// 					}	//dom loops end
-// 				}	//rep mode
-// 				else	//nonrep mode
-// 				{
-// 					for (vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterRec = vecDomAligns.begin(), iterRecEnd = vecDomAligns.end(); iterRecEnd != iterRec; ++iterRec)
-// 					{
-// 						if (NULL == iterRec->pCdInfo) continue;
-// 						(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT;
-// 						if (1 == iterRec->pAlign->m_iRepClass)	//multi
-// 							PrintDomLine(HITTYPE_MULTIDOM, *iterRec);
-// 						else if (iterRec->pAlign->m_bRep && iterRec->pAlign->m_bSpecQualified)
-// 							PrintDomLine(HITTYPE_SPECIFIC, *iterRec);
-// 						else
-// 							PrintDomLine(HITTYPE_NONSPECIFIC, *iterRec);
-// 						if (NULL != iterRec->pClst)
-// 						{
-// 							unsigned int key = iterRec->pAlign->m_iRegionIdx * OVERLAPLEADING + iterRec->pCdInfo->m_uiClusterPssmId;
-// 							//if (mapDomFams.end() == mapDomFams.find(key))
-// 							mapDomFams.emplace(key, *iterRec);
-// 						}
-// 						(*m_ostream) << endl;
-// 					}
-// 				}
-//
-// 				(*m_ostream) << DOMEND << endl;
-//
-// 				if (m_show_clusters)	//user want to see all superfams
-// 				{
-// 					(*m_ostream) << FAMSTART << endl;
-// 					for (const auto & v : mapDomFams)
-// 					{
-// 						(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT;
-// 						PrintClstLine(v.second);
-// 						(*m_ostream) << endl;
-// 					}
-// 					(*m_ostream) << FAMEND << endl;
-// 				}
-// 			}
-// 		}
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1801-1802
-// ```c++
-// 	(*m_ostream) << QUERYEND << endl;
-// 	if (!m_silent) cerr << "End processing Query " << q.m_strTitle << endl;
-// ```
 // `m_uiClusterPssmId` is never set by the offline data (`TDomain` keeps its 0): the key of a
 // superfamily is its region times `OVERLAPLEADING`, an `unsigned int` product that wraps, and
 // `emplace` keeps the first record of a key. `Multidom` (`m_iRepClass` 1) is never made
@@ -2125,159 +1508,6 @@ fn mostly_mapped(featsegs: &SegSet, site: &data::Site) -> bool {
 
 /// The SITES and MOTIFS parts of a protein query (`PrintDomQuery`, `-t feats` and `both`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1033-1266
-// ```c++
-// 		if (TTargetData::e_doms != m_tdata)
-// 		{
-// 			vector<TDomSeqAlignIndex::__MotifType_base> vecMotifRecs;
-//
-// 			vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterFeatAlign = vecFeatAligns.begin(), iterFeatAlignEnd = vecFeatAligns.end();
-//
-// 			if (iterFeatAlignEnd != iterFeatAlign)	//not empty())
-// 			{
-// 				if (!iterFeatAlign->pCdInfo->m_bIsStructDom)	//has regular domains
-// 				{
-// 					(*m_ostream) << FEATSTART << endl;
-// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
-// 					{
-// 						if (iterFeatAlign->pCdInfo->m_bIsStructDom) break;
-//
-// 						bool bIsSpecific = iterFeatAlign->pAlign->m_bRep && iterFeatAlign->pAlign->m_bSpecQualified;
-// 						const char * pType = ANNOTTYPE_SPECIFIC;
-// 						const list <TDomSite> * pFeats = &(iterFeatAlign->pCdInfo->m_lstSpecificFeatures);
-// 						unsigned int uiSrcPssmId = iterFeatAlign->pAlign->m_uiPssmId;
-//
-// 						if (!bIsSpecific && NULL != iterFeatAlign->pRootCdInfo)
-// 						{
-// 							pType = ANNOTTYPE_GENERIC;
-// 							pFeats = &(iterFeatAlign->pCdInfo->m_lstGenericFeatures);
-// 							uiSrcPssmId = iterFeatAlign->pCdInfo->m_uiHierarchyRoot;
-// 						}
-//
-// 						for (list<TDomSite> :: const_iterator iterFeat = pFeats->begin(); iterFeat != pFeats->end(); ++iterFeat)
-// 						{
-// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
-// 							{
-// 								vecMotifRecs.emplace_back(iterFeat, iterFeatAlign, bIsSpecific, uiSrcPssmId);
-// 								continue;
-// 							}
-//
-// 							CSegSet featsegs(*iterFeat);
-// 							iterFeatAlign->pAlign->MapSegSet(featsegs, false);
-// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterFeat->GetCompleteSize() > 0.8))
-// 							{
-// 								vector<TSeg_base::TResiduePos> vecMappedPos;
-// 								iterFeatAlign->pAlign->GetTranslatedPosMap(featsegs, q.m_uiSeqLen, vecMappedPos);
-//
-// 								if (iterFeat->MotifCheck(vecMappedPos, q.m_strSeqData) > 0) continue;	//failed motif check
-//
-// 								(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT << pType << DELIMIT << iterFeat->m_strTitle << DELIMIT;
-//
-// 								const CSegSet::TSegs& segs = featsegs.GetSegs();
-//
-// 								size_t mapped = 0;
-//
-// 								char dimDelimit[2] = {0, 0};
-// 								for (CSegSet::TSegs::const_iterator iterSeg = segs.begin(); iterSeg != segs.end(); ++iterSeg)
-// 								{
-// 									for (int res = iterSeg->from; res <= iterSeg->to; ++res)
-// 									{
-// 										(*m_ostream) << dimDelimit << (char)toupper(q.m_strSeqData[res]) << (res + COORDSBASE);
-// 										dimDelimit[0] = COORDELIMIT;
-// 										++mapped;
-// 									}
-// 								}
-// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT;
-// 								if (uiSrcPssmId < INVALIDPSSMID)
-// 									(*m_ostream) << uiSrcPssmId;
-// 								else
-// 								{
-// 									const TDomain * pSrcCd = m_dom_cluster_src.FindCdInfo(uiSrcPssmId);
-// 									if (nullptr != pSrcCd)
-// 										(*m_ostream) << pSrcCd->m_strAccession;
-// 									else
-// 										(*m_ostream) << uiSrcPssmId;
-// 								}
-// 								(*m_ostream) << endl;
-// 							}
-// 						}
-// 					}
-//
-// 					// -- non-motif features from SD
-//
-// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
-// 					{
-// 						for (list<TDomSite> :: const_iterator iterFeat = iterFeatAlign->pCdInfo->m_lstSpecificFeatures.begin(); iterFeat != iterFeatAlign->pCdInfo->m_lstSpecificFeatures.end(); ++iterFeat)
-// 						{
-// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
-// 							{
-// 								vecMotifRecs.emplace_back(iterFeat, iterFeatAlign, true, 0);
-// 								continue;
-// 							}
-//
-// 							CSegSet featsegs(*iterFeat);
-// 							iterFeatAlign->pAlign->MapSegSet(featsegs, false);
-//
-// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterFeat->GetCompleteSize() > 0.8))
-// 							{
-// 								... (the MotifCheck and the line as above, with ANNOTTYPE_SPECIFIC)
-// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT << 0/*iterFeatAlign->pAlign->m_uiPssmId*/ << endl;
-// 							}
-// 						}
-// 					}
-//
-// 					(*m_ostream) << FEATEND << endl;
-// 				}
-//
-// 				// -- Motif part
-// 				if (!vecMotifRecs.empty())
-// 				{
-// 					// -- start SD
-// 					// -- features
-// 					(*m_ostream) << MOTIFSTART << endl;
-// 					vector<TDomSeqAlignIndex::__MotifType_base> :: const_iterator iterM = vecMotifRecs.begin(), iterMEnd = vecMotifRecs.end();
-// 					for ( ; iterMEnd != iterM; ++iterM)
-// 					{
-// 						if (iterM->iterAlignRec->pCdInfo->m_bIsStructDom) break;
-//
-// 						CSegSet featsegs(*iterM->iterMotifFeat);
-// 						iterM->iterAlignRec->pAlign->MapSegSet(featsegs);
-//
-// 						if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterM->iterMotifFeat->GetCompleteSize() > 0.8))
-// 						{
-// 							(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT << iterM->iterMotifFeat->m_strTitle << DELIMIT;
-// 							int res0 = featsegs.GetLeft(), res1 = featsegs.GetRight();
-// 							(*m_ostream) << (char)toupper(q.m_strSeqData[res0]) << res0 + COORDSBASE << DELIMIT << res1 + COORDSBASE << (char)toupper(q.m_strSeqData[res1]) << DELIMIT;
-//
-// 							if (iterM->uiSrcPssmId < INVALIDPSSMID)
-// 								(*m_ostream) << iterM->uiSrcPssmId;
-// 							else
-// 							{
-// 								const TDomain *pSrcDom = m_dom_cluster_src.FindCdInfo(iterM->uiSrcPssmId);
-// 								if (nullptr != pSrcDom)
-// 									(*m_ostream) << pSrcDom->m_strAccession;
-// 								else
-// 									(*m_ostream) << iterM->uiSrcPssmId;
-// 							}
-//
-// 							(*m_ostream) << endl;
-// 						}
-// 					}
-//
-// 					// Motif from SD
-// 					for ( ; iterMEnd != iterM; ++iterM)
-// 					{
-// 						CSegSet featsegs(*iterM->iterMotifFeat);
-// 						if (!iterM->iterAlignRec->pAlign->m_ClipSet.IsEmpty())
-// 							featsegs.Cross(iterM->iterAlignRec->pAlign->m_ClipSet);
-//
-// 						iterM->iterAlignRec->pAlign->MapSegSet(featsegs);
-// 						... (the same line)
-// 					}
-// 					(*m_ostream) << MOTIFEND << endl;
-// 				}
-// 			}
-// 		}
-// ```
 // (An `sd` record first in the list prints no SITES part and no motif is collected then.)
 fn print_features(
     report: &mut Report,
@@ -2485,34 +1715,6 @@ fn print_incomplete(report: &mut Report, n_missing: f64, c_missing: f64) {
 
 /// `PrintDomLine`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1807-1832
-// ```c++
-// void CRpsbProcApp::PrintDomLine(const char *pType, const TDomSeqAlignIndex::__TCdAlignRecord &rec) const
-// {
-// 	(*m_ostream) << pType << DELIMIT << (rec.pAlign->m_uiPssmId >= INVALIDPSSMID ? 0 : rec.pAlign->m_uiPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << rec.pAlign->m_dEValue << DELIMIT << rec.pAlign->m_dBitScore << DELIMIT << rec.pCdInfo->m_strAccession << DELIMIT << rec.pCdInfo->m_strShortName << DELIMIT;
-// 	bool bTmMiss = false;
-// 	if (rec.pAlign->m_dNMissing > 0.2)
-// 	{
-// 		(*m_ostream) << 'N';
-// 		bTmMiss = true;
-// 	}
-// 	if (rec.pAlign->m_dCMissing > 0.2)
-// 	{
-// 		(*m_ostream) << 'C';
-// 		bTmMiss = true;
-// 	}
-// 	if (!bTmMiss)
-// 		(*m_ostream) << '-';
-// 	(*m_ostream) << DELIMIT;
-// 	if (NULL == rec.pClst)
-// 		(*m_ostream) << '-';
-// 	else if (rec.pClst->m_uiPssmId >= INVALIDPSSMID)
-// 		(*m_ostream) << rec.pClst->m_strAccession;
-// 	else
-// 		(*m_ostream) << rec.pClst->m_uiPssmId;
-// 	//<< (NULL == rec.pClst ? '-' : rec.pClst->m_uiPssmId);
-//
-// }
-// ```
 // (`m_iFrom + COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++):
 // `printed_position`, for protein and nucleotide queries alike.)
 fn print_dom_line(
@@ -2559,15 +1761,6 @@ fn print_dom_line(
 
 /// `PrintClstLine`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1834-1851
-// ```c++
-// void CRpsbProcApp::PrintClstLine(const TDomSeqAlignIndex::__TCdAlignRecord &rec) const
-// {
-// 	(*m_ostream) << HITTYPE_CLUSTER << DELIMIT << (rec.pCdInfo->m_uiClusterPssmId >= INVALIDPSSMID ? 0 : rec.pCdInfo->m_uiClusterPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << rec.pAlign->m_dEValue << DELIMIT << rec.pAlign->m_dBitScore << DELIMIT << rec.pClst->m_strAccession << DELIMIT << rec.pClst->m_strShortName << DELIMIT;
-// 	bool bTmMiss = false;
-// 	...
-// 	(*m_ostream) << DELIMIT << '-';
-// }
-// ```
 // (`m_uiClusterPssmId` is 0: the offline loader never sets it.)
 fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, data: &CddData) {
     let align = &query.aligns[record.align];
@@ -2589,55 +1782,5 @@ fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, da
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ncbifile.cpp:820-971 (quoted at `ncbi_environment::normalize_path`).
-    #[test]
-    fn normalize_path_as_ncbi() {
-        for (path, normalized) in [
-            ("", ""),
-            ("/", "/"),
-            ("///", "/"),
-            ("losat", "losat"),
-            ("./losat", "losat"),
-            ("bin/./losat", "bin/losat"),
-            ("bin//losat", "bin/losat"),
-            ("bin/../losat", "losat"),
-            ("../bin/losat", "../bin/losat"),
-            ("/../bin/losat", "/bin/losat"),
-            ("bin/losat/", "bin/losat"),
-            (".", "."),
-            ("./", "."),
-        ] {
-            assert_eq!(
-                normalize_path(path.as_bytes()),
-                normalized.as_bytes(),
-                "{path}"
-            );
-        }
-    }
-
-    // rpsbproc_main.cpp:1809,1836 (quoted at `print_dom_line`, `print_cluster_line`): `m_iFrom +
-    // COORDSBASE` of a hit that ends at 2^31 - 1 overflows `int` (both 0.5.1 builds print
-    // -2147483648: PS16c review oracle `plusmax`); its value, 2^31, is what NCBI prints for the hit
-    // moved 3 bases down plus 3 (PS16-Q1 oracle `ntplusmax` and its nearby input `ntplusmax3`;
-    // PD-LOSAT-NCBI-DEFECTS exception 12). The XML input's `INT_MIN - 1` prints `INT_MIN`.
-    #[test]
-    fn printed_positions_past_int() {
-        assert_eq!(printed_position(i32::MAX), 2_147_483_648);
-        assert_eq!(printed_position(i32::MAX - 3), 2_147_483_645);
-        assert_eq!(printed_position(i64::from(i32::MIN) - 1), -2_147_483_648);
-        assert_eq!(printed_position(0), 1);
-    }
-
-    // `ostream << double` of -0.0 is glibc's `%g`, "-0".
-    #[test]
-    fn format_g_keeps_the_sign_of_zero() {
-        assert_eq!(format_g(-0.0), "-0");
-        assert_eq!(format_g(0.0), "0");
-        assert_eq!(format_g(3.06789e-55), "3.06789e-55");
-        assert_eq!(format_g(179.393), "179.393");
-        assert_eq!(OVERLAPLEADING, 1_410_065_408);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

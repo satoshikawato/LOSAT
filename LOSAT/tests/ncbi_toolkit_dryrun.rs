@@ -10,8 +10,8 @@
 //! command line writes to its standard error (the example ends every failure with exit status
 //! 1). rpsblast and rpstblastn are not in the library (`api::Program`).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (quoted at
-//! `cli::main_entry`) and 926-1001 (quoted at `ncbi_environment::preparse`).
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (cited at
+//! `cli::main_entry`) and 926-1001 (cited at `ncbi_environment::preparse`).
 
 #![cfg(unix)]
 
@@ -549,11 +549,9 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
         } else if in_library(program) {
             assert_eq!(library.status.code(), Some(1), "{program}");
             assert!(
-                text(&library.stderr)
-                    .contains("the option -version runs on the command line of LOSAT's")
-                    && text(&library.stderr).contains(
-                        "the library API and the Web engine do not write NCBI's version text"
-                    ),
+                text(&library.stderr).contains("the option -version runs on the command line")
+                    && text(&library.stderr).contains("only: the library API")
+                    && text(&library.stderr).contains("not write NCBI's version text"),
                 "{program}: {library:?}"
             );
         }

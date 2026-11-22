@@ -112,6 +112,7 @@ def test_results_survive_pickle(case):
 
 
 def test_an_id_that_is_not_utf8_is_text_with_replacement_characters():
+    # Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     letters = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ"
     # Latin-1's `é` (0xE9), a truncated `€` (E2 82) and a lone 0xFF; `é` in UTF-8.
     query = b">q\xe9\xe2\x82 a title\n" + letters + b"\n"

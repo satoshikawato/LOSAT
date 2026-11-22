@@ -20,7 +20,7 @@ export const DATA_GATEWAY_METHODS = [
   'openRun',
   'commitRun',
   'discardRun',
-  'discardFailedRun',
+  'keepFailedRun',
   'readOutput',
   'readOutputRange',
   'readHits',

@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1754905306566/work/c++/src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 2: "é": unexpected member, should be one of: "algo-id" "algo-program" "algo-options" "masks"  ( at Blast-db-mask-info)
+

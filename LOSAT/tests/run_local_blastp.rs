@@ -95,22 +95,8 @@ impl Drop for Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226
-// ```c
-// CBlastFormat formatter(opt, *db_adapter,
-//                        fmt_args->GetFormattedOutputChoice(),
-// ```
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-226
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 #[test]
 fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let inputs = Inputs::new(8);
@@ -139,12 +125,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-// ```c++
-//     if (m_FormatType == CFormattingArgs::eTabular ||
-//         m_FormatType == CFormattingArgs::eTabularWithComments ||
-//         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-//         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-// ```
 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20 (line CLI C2,
 // `algorithm::blastp::tabular`), of one search: each equals its run alone and the CLI run of
 // that format, beside the default 6.
@@ -228,24 +208,8 @@ fn cli_run(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
-// ```c
-//         } catch (const CException& e) {
-//             ...
-//             CRef<CSearchMessage> m
-//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-//             messages[index].push_back(m);
-//             s_InvalidateQueryContexts(qinfo, index);
-//         }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-// ```c
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-//         		ERR_POST(Warning << warning);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
 // A query without residues stays in its batch with NCBI's warning and a report without
 // hits; a subject without residues gets its warning before the prolog and stays in the
 // database statistics (oracle rows `blastp.rec_empty_mid.*`, `blastp.both_empty_records.*`).
@@ -291,13 +255,7 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:729-732
-// ```c
-//    if (db_length == 0 &&
-//        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-//       return 0;
-//    }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
 // Every subject without residues: the warnings, no hit, and a search space of 0; blastp
 // is gapped, so the average subject length is not checked (oracle `blastp.rec_empty_all.s.*`).
 // The library's search of the same files writes the CLI's report and warnings.
@@ -332,18 +290,6 @@ fn subjects_without_residues_only_give_reports_without_hits() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-// ```c
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        ...
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
 // Without the Gumbel block (`-searchsp`, `OLD_FSC`) a subject set of fewer letters than sequences
 // stops blastp and psiblast in the first batch's setup, after the subjects' warnings and the
 // outfmt 0 prolog (NCBI 2.17.0 blastp and psiblast, `-subject` of `M`, ``, ``: exit 3, probes
@@ -363,12 +309,12 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
     for (program, title, prolog_end) in [
         (
             "blastp",
-            "BLASTP 2.17.0+",
+            concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")"),
             " 3 sequences; 1 total letters\n\n",
         ),
         (
             "psiblast",
-            "PSIBLAST 2.17.0+",
+            concat!("PSIBLAST (LOSAT ", env!("CARGO_PKG_VERSION"), ")"),
             "Database: User specified sequence set.\n           3 sequences; 1 total letters\n\n",
         ),
     ] {
@@ -403,7 +349,7 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
                 format!(
                     "Warning: [{program}] Subject_2 s2 empty: Subject sequence contains no data\n\
                      Warning: [{program}] Subject_3 s3 empty: Subject sequence contains no data\n\
-                     BLAST engine error: The average subject length is too short\n"
+                     LOSAT engine error: The average subject length is too short\n"
                 ),
                 "{program} {args:?}"
             );
@@ -420,12 +366,6 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 // A first query batch of invalid queries only is not searched: NCBI reports it, then the next
 // batch's setup fails (NCBI 2.17.0 `BATCH_SIZE=1 blastp` of an all-X query and tk with `-subject`
 // of `MK`, ``, `` and `-searchsp 1000`: probes `q.bp.qx_tk.bs1.sp.{0,7}` of the PS5c review, exit
@@ -459,12 +399,12 @@ fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
              Warning: [blastp] Query_1 qx all X: Could not calculate ungapped Karlin-Altschul \
              parameters due to an invalid query sequence or its translation. Please verify the \
              query sequence(s) and/or filtering options \n\
-             BLAST engine error: The average subject length is too short\n",
+             LOSAT engine error: The average subject length is too short\n",
             "outfmt {outfmt}"
         );
         if outfmt == "0" {
             assert!(
-                stdout.starts_with("BLASTP 2.17.0+")
+                stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")"))
                     && stdout.ends_with(
                         " 3 sequences; 2 total letters\n\n\n\nQuery= qx all X\n\nLength=30\n\n\n\
                          ***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    \
@@ -475,21 +415,18 @@ fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
             );
         } else {
             assert!(
-                stdout.starts_with("# BLASTP 2.17.0+\n# Query: qx all X\n# Database: ")
-                    && stdout.lines().count() == 3,
+                stdout.starts_with(concat!(
+                    "# BLASTP (LOSAT ",
+                    env!("CARGO_PKG_VERSION"),
+                    ")\n# Query: qx all X\n# Database: "
+                )) && stdout.lines().count() == 3,
                 "{stdout}"
             );
         }
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // A batch of queries without residues only stops NCBI after the prolog, with one message
 // per query (oracle `blastp.rec_empty_all.q.*`); with BATCH_SIZE, after the reports of the
 // batches before, without the epilog (`blastp.batch_late_allempty.*`). This half compares with
@@ -516,19 +453,20 @@ fn a_batch_of_queries_without_residues_stops() {
     assert!(matches!(error, Error::Search(_)), "{error:?}");
     assert_eq!(
         error.message(),
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTP 2.17.0+\n") && prolog.ends_with(" total letters\n\n"),
+        prolog.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+            && prolog.ends_with(" total letters\n\n"),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());
     let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "0"], &[]);
     assert_eq!(code, Some(3), "{stderr}");
     assert_eq!(stdout, outputs[0]);
-    assert_eq!(stderr, error.message());
+    assert_eq!(stderr.as_bytes(), error.message());
 
     let mut text = format!(
         ">q1\n{}\n>q2\n{}\n",
@@ -555,20 +493,11 @@ fn a_batch_of_queries_without_residues_stops() {
     );
     assert_eq!(
         stderr,
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-// ```c
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
 // A reader error in a later batch comes after the reports of the batches before (without
 // the epilog); in the first batch, before any report. Blank and comment lines after the
 // last record end the reading (oracle `blastp.batch_late_bad.*`). The batches are the CLI's
@@ -605,7 +534,7 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
         "{report}"
     );
     assert!(
-        stderr.starts_with("BLAST query error: CFastaReader: "),
+        stderr.starts_with("LOSAT query error: CFastaReader: "),
         "{stderr}"
     );
     let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "7"], &[]);
@@ -619,8 +548,8 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
     assert!(
         error
             .message()
-            .starts_with("BLAST query error: CFastaReader: ")
-            && stderr.starts_with(error.message()),
+            .starts_with(b"LOSAT query error: CFastaReader: ")
+            && stderr.as_bytes().starts_with(error.message()),
         "{error}"
     );
     let mut blank = text.into_bytes();

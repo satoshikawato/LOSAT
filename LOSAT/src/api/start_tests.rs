@@ -17,6 +17,7 @@ use crate::api::{
     run, run_batches, run_collect, run_to_file, validate, FastaRecord, Inputs, Program,
 };
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
 const NUCLEOTIDES: &[u8] =
@@ -69,7 +70,7 @@ fn path_text(path: &Path) -> &str {
     path.to_str().unwrap()
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (cited at
 // `ncbi_environment::preparse`): `-dryrun` anywhere before `--`, also as an option's value, but
 // not as the value of `-logfile` or `-conffile`, which the start takes with them.
 #[test]
@@ -155,7 +156,7 @@ fn a_records_search_without_the_words_starts_nothing() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at `cli::main_entry`):
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (cited at `cli::main_entry`):
 // a dry run ends after the arguments. The command line's writes nothing and makes no `-out`
 // file, whatever its inputs (NCBI BLAST+ 2.17.0, probes `dry`, `dry_noquery`, `dry_old_out`,
 // `dry_dbmissing`); `-outfmt` is read by NCBI's `Run`, so a dry run does not look at it.
@@ -242,7 +243,7 @@ fn a_dry_run_makes_the_logfile() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
 // `ncbi_environment::run_messages_follow_log`). NCBI BLAST+ 2.17.0 (probes `log_warn`,
 // `log_empty`, `log_nodir`, `log_old`): tblastx's run messages go to the `-logfile` file (appended
 // to), the other programs' to the standard error; `-logfile ""` sends them nowhere, a file in a
@@ -377,7 +378,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     }
     // A malformed file.
     std::fs::write(&conffile, "[x\n").unwrap();
-    let report = Error::Search(section_report().repeat(2).trim_end().to_string());
+    let report = Error::Search(section_report().repeat(2).trim_end().into());
     assert_eq!(run_collect(&with(&[]), inputs, &["6"]), Err(report.clone()));
     assert_eq!(
         run_collect(&with(&["-dryrun"]), inputs, &["6"]),
@@ -410,7 +411,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     let search = validate(Program::Blastp, &["-conffile", path_text(&missing)]).unwrap();
     assert_eq!(
         run_collect(&search, inputs, &["6"]),
-        Err(Error::Search(critical.clone()))
+        Err(Error::Search(critical.clone().into()))
     );
     // With `-logfile`: the file gets the post, the error is the same text.
     let log = dir.join("log.txt");
@@ -426,7 +427,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     .unwrap();
     assert_eq!(
         run_collect(&search, inputs, &["6"]),
-        Err(Error::Search(critical.clone()))
+        Err(Error::Search(critical.clone().into()))
     );
     assert_eq!(
         std::fs::read_to_string(&log).unwrap(),
@@ -454,7 +455,7 @@ fn a_started_call_refuses_the_settings_that_the_command_line_refuses() {
     };
     let refused = run_collect(&with(&["-dryrun"]), inputs, &["6"]).unwrap_err();
     assert!(
-        matches!(&refused, Error::Search(reason) if reason.contains("[BLAST] LONG_SEQID")),
+        matches!(&refused, Error::Search(_)) && refused.to_string().contains("[BLAST] LONG_SEQID"),
         "{refused:?}"
     );
     let search = with(&[]);
@@ -481,7 +482,7 @@ fn a_started_call_refuses_the_settings_that_the_command_line_refuses() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381 (`-subject_loc`
-// excludes `-db`, quoted at `blastp::args`). README: a dry run reports an error in its arguments as
+// excludes `-db`, cited at `blastp::args`). README: a dry run reports an error in its arguments as
 // without `-dryrun`; `validate` parses with one kind of subject, each call with its own
 // (`Search::command`).
 #[test]
@@ -514,13 +515,16 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
     // `run_to_file`'s file is the parser's `-out`: its usage line names it, as the command line's
     // does when `-out` is given.
     let out = dir.join("out.txt");
-    let Error::Argv(message) = &refused else {
-        unreachable!()
-    };
-    let refused_out = Error::Argv(message.replace(
-        "Usage: losat blastp -query <PATH> -db <NAME>\n",
-        "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
-    ));
+    assert!(matches!(refused, Error::Argv(_)), "{refused:?}");
+    let refused_out = Error::Argv(
+        refused
+            .to_string()
+            .replace(
+                "Usage: losat blastp -query <PATH> -db <NAME>\n",
+                "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
+            )
+            .into(),
+    );
     assert_ne!(refused_out, refused);
     assert_eq!(
         run_to_file(&search, database, "6", &out, &mut diagnostics),
@@ -549,7 +553,7 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
 // `ncbi_environment::run_messages_follow_log`): tblastx's errors go where its diagnostics go, an
 // `-out` that cannot be made too (`losat tblastx ... -out nodir/o.txt -logfile log.txt` writes
 // its argument error to `log.txt`); blastn's go to its standard error, the error here.
@@ -566,6 +570,7 @@ fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
         .unwrap()
         .message
         .clone();
+    let message = String::from_utf8(message).unwrap();
     for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
         std::fs::write(&log, "").unwrap();
         let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
@@ -581,7 +586,7 @@ fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
 // `ncbi_environment::run_messages_follow_log`): the command line's one run writes its own
 // messages (here `-max_target_seqs 1`'s warning) once, to tblastx's `-logfile` file; the library's
 // batches, each a run of its own, write them once too, in the file or with the first batch.
@@ -638,7 +643,7 @@ fn the_batches_write_the_run_s_messages_once() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
 // `ncbi_environment::run_messages_follow_log`): tblastx reads `-outfmt` in its run, after the
 // standard error went to the `-logfile` target, so the command line's error of a value goes to
 // the file (`losat tblastx ... -outfmt 99 -logfile log.txt`: `Error: Formatting choice is out of
@@ -657,7 +662,8 @@ fn an_outfmt_error_goes_where_the_run_s_errors_go() {
             .unwrap()
             .message
             .clone();
-        let refused = Error::Argv(format!("{native:#}"));
+        let message = String::from_utf8(message).unwrap();
+        let refused = Error::Argv(format!("{native:#}").into());
         for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
             let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
             std::fs::write(&log, "").unwrap();
@@ -973,6 +979,98 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
                 };
                 assert_eq!(place, expected, "{label}");
             }
+        }
+    }
+}
+
+// Line WQA's sweep, D11 (2026-11-20) and its round 2: a caller's `-logfile` name is read as the
+// command line on Linux reads it where the name's directories exist (`RunFiles::log_target`). NCBI
+// BLAST+ 2.17.0 and LOSAT's command line, with a `.ncbirc` of the one byte 0xEF, which NCBI cannot
+// read (the usage report's `Error: (110.4) Error reading the registry after line 1: `, written to
+// the standard error at once), and the run's warning (`-max_target_seqs 1`; TBLASTX writes it where
+// the diagnostics go): `-logfile -` writes the error once to the standard error; `/dev/stderr` is a
+// file there, which gets the error too, so the standard error has it twice; `logs/run.log`,
+// `/dev/stdout`, `logs/` (the file `logs`) and ` run.log` (`run.log`) are files, which get it (the
+// command line writes `/dev/stdout`'s into its standard output); `/dev/fd/2`, `/proc/self/fd/2` and
+// `/dev/fd/1` are files on procfs, which reports no free space, so they get nothing; `logs/.` names
+// a directory and `/dev/fd/3` a file descriptor that the run has not opened, which NCBI cannot
+// open: as `-`. The run's warning goes to the file in TBLASTX, else
+// to the standard error.
+#[test]
+fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
+    use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
+    use crate::report::run_files::RunFiles;
+    use std::io::Write as _;
+    let files = Files(vec![("./.ncbirc", b"\xef")]);
+    let error = "Error: (110.4) Error reading the registry after line 1: \n";
+    let warning = "Warning: w\n";
+    // Where the name sends the start's messages: `cerr`, a file that is the standard error, a file
+    // of the run, or nowhere (a file system without free space).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Stderr,
+        StderrFile,
+        File,
+        Nowhere,
+    }
+    for program in ["blastn", "tblastx"] {
+        let follows = program == "tblastx";
+        for (logfile, kind) in [
+            ("-", Kind::Stderr),
+            ("/dev/stderr", Kind::StderrFile),
+            ("/proc/self/fd/2", Kind::Nowhere),
+            ("/dev/fd/2", Kind::Nowhere),
+            ("/dev/fd/1", Kind::Nowhere),
+            ("logs/run.log", Kind::File),
+            ("/tmp/run.log", Kind::File),
+            ("/dev/stdout", Kind::File),
+            ("logs/", Kind::File),
+            (" run.log", Kind::File),
+            ("logs/.", Kind::Stderr),
+            ("/dev/fd/3", Kind::Stderr),
+        ] {
+            let words = ["-logfile", logfile];
+            let kept = std::sync::Arc::new(Kept::default());
+            let mut stderr = Vec::new();
+            let mut started = begin_with(
+                ApplicationStart::with_files(program, &words, &[], &files),
+                &words,
+                &RunFiles::Receiver(kept.clone()),
+                &mut stderr,
+            )
+            .unwrap();
+            let place = started.messages_place();
+            started
+                .sink(&mut stderr)
+                .write_all(warning.as_bytes())
+                .unwrap();
+            started.finish().unwrap();
+            let label = format!("{program} -logfile {logfile}");
+            let warned = !follows || matches!(kind, Kind::Stderr | Kind::StderrFile);
+            let expected_stderr = format!(
+                "{}{}",
+                error.repeat(if kind == Kind::StderrFile { 2 } else { 1 }),
+                if warned { warning } else { "" }
+            );
+            assert_eq!(
+                String::from_utf8(stderr).unwrap(),
+                expected_stderr,
+                "{label}"
+            );
+            let expected_files = match kind {
+                Kind::File => vec![(
+                    logfile.as_bytes().to_vec(),
+                    format!("{error}{}", if follows { warning } else { "" }).into_bytes(),
+                )],
+                _ => Vec::new(),
+            };
+            assert_eq!(*kept.0.lock().unwrap(), expected_files, "{label}");
+            let expected_place = match (follows, kind) {
+                (false, _) | (true, Kind::Stderr | Kind::StderrFile) => TextPlace::StandardError,
+                (true, Kind::File) => TextPlace::LogFile,
+                (true, Kind::Nowhere) => TextPlace::Nowhere,
+            };
+            assert_eq!(place, expected_place, "{label}");
         }
     }
 }

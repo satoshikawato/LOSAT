@@ -1,0 +1,247 @@
+# name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 windowmasker 1.0.0 (env_blast on ws), frozen by make_fixtures.py; inputs from make_inputs.py, db/ by NCBI makeblastdb 2.17.0 (make_fixtures.py).
+# The help, the arguments and their checks.
+help_h	-h
+help_help	-help
+help_xml	-xmlhelp
+noargs	
+extra_positional	-ustat ../winmask/counts/dm2L_u9.binary extra
+badopt	-ustat ../winmask/counts/dm2L_u9.binary -nosuchopt
+dupopt	-ustat ../winmask/counts/dm2L_u9.binary -window 20 -window 30
+dryrun	-dryrun
+dryrun_missing	-ustat nonexistent.counts -in in/nonexistent.fa -dryrun
+conf_missing	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -conffile missing.ini
+x_mk_ustat	-mk_counts -ustat ../winmask/counts/dm2L_u9.binary
+x_mk_convert	-mk_counts -convert
+x_mk_textend	-mk_counts -t_extend 5
+x_mk_dust	-mk_counts -dust T
+x_cv_tlow	-convert -t_low 5
+x_cv_ids	-convert -ids in/ids_a.txt
+x_ustat_checkdup	-ustat ../winmask/counts/dm2L_u9.binary -checkdup T
+x_ustat_sformat	-ustat ../winmask/counts/dm2L_u9.binary -sformat ascii
+x_ustat_mem	-ustat ../winmask/counts/dm2L_u9.binary -mem 10
+x_ustat_unit	-ustat ../winmask/counts/dm2L_u9.binary -unit 5
+x_ustat_gs	-ustat ../winmask/counts/dm2L_u9.binary -genome_size 100
+x_ustat_smem	-ustat ../winmask/counts/dm2L_u9.binary -smem 10
+x_ustat_falist	-ustat ../winmask/counts/dm2L_u9.binary -fa_list T
+x_ustat_convert	-ustat ../winmask/counts/dm2L_u9.binary -convert
+c_unit0	-mk_counts -unit 0
+c_unit17	-mk_counts -unit 17
+c_mem0	-mk_counts -mem 0
+c_gs_3e9	-mk_counts -genome_size 3000000000
+c_window0	-ustat ../winmask/counts/dm2L_u9.binary -window 0
+c_textend_neg	-ustat ../winmask/counts/dm2L_u9.binary -t_extend -1
+c_tthres0	-ustat ../winmask/counts/dm2L_u9.binary -t_thres 0
+c_thigh0	-ustat ../winmask/counts/dm2L_u9.binary -t_high 0
+c_tlow0	-ustat ../winmask/counts/dm2L_u9.binary -t_low 0
+c_settlow0	-ustat ../winmask/counts/dm2L_u9.binary -set_t_low 0
+c_setthigh0	-ustat ../winmask/counts/dm2L_u9.binary -set_t_high 0
+c_pct101	-ustat ../winmask/counts/dm2L_u9.binary -t_low_pct 101
+c_pct_neg	-ustat ../winmask/counts/dm2L_u9.binary -t_high_pct -0.5
+c_pct_abc	-ustat ../winmask/counts/dm2L_u9.binary -t_extend_pct abc
+c_pct_100	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -t_thres_pct 100
+c_outfmt_bad	-ustat ../winmask/counts/dm2L_u9.binary -outfmt nosuch
+c_infmt_bad	-ustat ../winmask/counts/dm2L_u9.binary -infmt nosuch
+c_dust_bad	-ustat ../winmask/counts/dm2L_u9.binary -dust maybe
+c_textmatch_bad	-ustat ../winmask/counts/dm2L_u9.binary -text_match 2
+c_window_abc	-ustat ../winmask/counts/dm2L_u9.binary -window abc
+c_window_hex	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -window 0x14
+c_window_big	-ustat ../winmask/counts/dm2L_u9.binary -window 99999999999
+# The mode and the configuration's checks (CWinMaskConfig), in NCBI's order.
+mode_none	-in ../winmask/fasta/dm2L_3k.fa
+m_in_missing	-ustat ../winmask/counts/dm2L_u9.binary -in in/nonexistent.fa
+m_in_missing_badustat	-ustat nonexistent.counts -in in/nonexistent.fa
+m_in_dir	-ustat ../winmask/counts/dm2L_u9.binary -in in
+m_in_comma	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa,../winmask/fasta/dm2L_3k.fa
+m_out_unwritable	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -out /nonexistent_dir/x.txt
+m_ids_both	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -ids in/ids_a.txt -exclude_ids in/ids_b.txt
+m_ids_both_mi	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -ids in/ids_a.txt -exclude_ids in/ids_b.txt -outfmt maskinfo_asn1_text
+m_textmatch_f	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_a.txt -text_match F
+m_textmatch_f_noids	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -text_match F
+m_seqids	-ustat ../winmask/counts/dm2L_u9.binary -infmt seqids -in in/ids_a.txt
+m_seqids_missing	-ustat ../winmask/counts/dm2L_u9.binary -infmt seqids -in in/nonexistent.txt
+m_seqids_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt seqids -in in/ids_a.txt -outfmt maskinfo_asn1_text
+m_meta	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -meta something
+# The counts file (CSeqMaskerIstatFactory::create) after the reader and the writer: a maskinfo writer still writes its object.
+u_missing	-ustat nonexistent.counts -in ../winmask/fasta/dm2L_3k.fa
+u_missing_mi	-ustat nonexistent.counts -in ../winmask/fasta/dm2L_3k.fa -outfmt maskinfo_asn1_text
+u_garbage	-ustat in/garbage.counts -in ../winmask/fasta/dm2L_3k.fa
+u_empty	-ustat in/empty.counts -in ../winmask/fasta/dm2L_3k.fa
+u_window5	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -window 5
+u_window5_mi	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_3k.fa -window 5 -outfmt maskinfo_xml
+# Masks of each counts format.
+f_binary_60k	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa
+f_binary_edge	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa
+f_obinary_nz	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta
+f_ascii_nz	-ustat ../winmask/counts/mg1655_u9.ascii -in ../fasta/NZ_CP006932.fasta
+f_oascii_nz	-ustat ../winmask/counts/mg1655_u9.oascii -in ../fasta/NZ_CP006932.fasta
+f_obinary_edge	-ustat ../winmask/counts/mg1655_u9.obinary -in ../winmask/fasta/dm_edge.fa
+f_ascii_edge	-ustat ../winmask/counts/mg1655_u9.ascii -in ../winmask/fasta/dm_edge.fa
+f_obinary_u2	-ustat ../winmask/counts/dm_u2.obinary -in ../winmask/fasta/dm2L_3k.fa
+f_obinary_u2_60k	-ustat ../winmask/counts/dm_u2.obinary -in ../winmask/fasta/dm2L_60k.fa
+# The output formats, with and without -parse_seqids.
+o_interval	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt interval
+o_interval_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt interval -parse_seqids
+o_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt fasta
+o_fasta_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt fasta -parse_seqids
+o_seqloc_asn1_bin	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_asn1_bin
+o_seqloc_asn1_bin_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_asn1_bin -parse_seqids
+o_seqloc_asn1_text	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_asn1_text
+o_seqloc_asn1_text_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_asn1_text -parse_seqids
+o_seqloc_xml	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_xml
+o_seqloc_xml_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt seqloc_xml -parse_seqids
+o_maskinfo_asn1_bin	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_asn1_bin
+o_maskinfo_asn1_bin_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_asn1_bin -parse_seqids
+o_maskinfo_asn1_text	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_asn1_text
+o_maskinfo_asn1_text_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_asn1_text -parse_seqids
+o_maskinfo_xml	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_xml
+o_maskinfo_xml_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -outfmt maskinfo_xml -parse_seqids
+o_empty_interval	-ustat ../winmask/counts/dm2L_u9.binary -in in/empty.fa
+o_empty_maskinfo	-ustat ../winmask/counts/dm2L_u9.binary -in in/empty.fa -outfmt maskinfo_asn1_text
+o_empty_seqloc	-ustat ../winmask/counts/dm2L_u9.binary -in in/empty.fa -outfmt seqloc_asn1_text
+o_stdin	-ustat ../winmask/counts/dm2L_u9.binary < in/multi.fa
+o_stdin_dash	-ustat ../winmask/counts/dm2L_u9.binary -in - < in/multi.fa
+# Records: letters, lengths, records without letters, CRLF, gaps. ncbi/<name>.merged is NCBI's 2>&1 stream of a run of its own for the rows of make_fixtures.py's MERGED (the reader's warnings among the output's bytes; r_letters_slb, r_gap_mi and the .merged files added 2026-11-21 by ad-M5-1).
+r_letters	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa
+r_letters_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -outfmt fasta
+r_letters_slb	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -outfmt seqloc_asn1_bin
+r_short	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa
+r_short_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa -outfmt fasta
+r_hdronly	-ustat ../winmask/counts/dm2L_u9.binary -in in/hdronly.fa
+r_midempty	-ustat ../winmask/counts/dm2L_u9.binary -in in/midempty.fa
+r_midempty_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/midempty.fa -outfmt maskinfo_asn1_text
+r_lastempty	-ustat ../winmask/counts/dm2L_u9.binary -in in/lastempty.fa
+r_lastempty_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/lastempty.fa -outfmt maskinfo_xml
+r_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/crlf.fa
+r_gap	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa
+r_gap_fasta_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa -outfmt fasta -parse_seqids
+r_gap_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa -dust T -outfmt maskinfo_asn1_text
+# The masker's settings.
+w_9	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 9
+w_10	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 10
+w_13	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 13
+w_20	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 20
+w_255	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 255
+w_256	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 256
+w_300	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 300
+t_extend50	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_extend 50
+t_thres120	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_thres 120
+t_high150	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_high 150
+t_low20	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low 20
+t_low100	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low 100
+t_set_high400	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -set_t_high 400
+t_set_low200_ob	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta -set_t_low 200
+t_set_low200_asc	-ustat ../winmask/counts/mg1655_u9.ascii -in ../fasta/NZ_CP006932.fasta -set_t_low 200
+t_all	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_extend 60 -t_thres 90 -t_high 300 -t_low 50 -set_t_high 250 -set_t_low 10
+t_textend_low_ob	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta -t_extend 30
+t_textend_low_asc	-ustat ../winmask/counts/mg1655_u9.ascii -in ../fasta/NZ_CP006932.fasta -t_extend 30
+# -t_*_pct: the percentages of the counts file's ##pct lines.
+p_low50	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low_pct 50
+p_low95	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low_pct 95
+p_extend99	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_extend_pct 99
+p_thres995	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_thres_pct 99.5
+p_high998	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_high_pct 99.8
+p_all	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low_pct 90 -t_extend_pct 99 -t_thres_pct 99.5 -t_high_pct 99.8
+p_zero	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_low_pct 0 -t_extend_pct 0
+p_100	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_thres_pct 100 -t_high_pct 100
+p_and_int	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -t_thres_pct 99.9 -t_thres 50
+p_ascii	-ustat ../winmask/counts/mg1655_u9.ascii -in ../fasta/NZ_CP006932.fasta -t_extend_pct 99.2 -t_thres_pct 99.7
+p_oascii	-ustat ../winmask/counts/mg1655_u9.oascii -in ../fasta/NZ_CP006932.fasta -t_extend_pct 99.2 -t_thres_pct 99.7
+p_obinary	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta -t_extend_pct 99.2 -t_thres_pct 99.7
+p_nopct_low	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_low_pct 50
+p_nopct_ext_thr	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_extend_pct 99 -t_thres_pct 99.5
+p_nopct_high	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_high_pct 99
+p_nopct_all	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_high_pct 99 -t_thres_pct 98 -t_extend_pct 97 -t_low_pct 96
+p_u2	-ustat ../winmask/counts/dm_u2.obinary -in ../winmask/fasta/dm2L_3k.fa -t_thres_pct 50
+# -dust T: CSDustMasker (window 64, linker 1, one random generator for the run) and MergeMaskInfo.
+d_60k	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T
+d_edge	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa -dust T
+d_letters	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -dust T
+d_letters_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -dust T -outfmt fasta
+d_multi_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -dust T -outfmt maskinfo_asn1_text
+d_level10	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T -dust_level 10
+d_level0	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa -dust T -dust_level 0
+d_level_neg	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa -dust T -dust_level -1
+d_level64	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T -dust_level 64
+d_level65	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa -dust T -dust_level 65
+d_false	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust F -dust_level 10
+d_true_word	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust true
+d_nz_ob	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta -dust yes
+d_thres_low	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T -t_thres 40
+d_short	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa -dust T
+# -ids and -exclude_ids (text match on the title's first word). The lists' lines are split as NCBI's Linux build splits them: a \r stays in the id (i_ids_crlf, i_ids_cr, i_excl_crlf; added 2026-11-21 by ad-M5-1).
+i_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_a.txt
+i_ids_b	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_b.txt
+i_ids_tab	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_tab.txt
+i_ids_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_crlf.txt
+i_ids_cr	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_cr.txt
+i_excl_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_crlf.txt
+i_ids_none	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_none.txt
+i_ids_missing	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/nonexistent.txt
+i_excl_a	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_a.txt
+i_excl_b_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_b.txt -outfmt fasta
+i_ids_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_a.txt -parse_seqids
+i_excl_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_a.txt -parse_seqids
+i_ids_dust	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_b.txt -dust T
+# -infmt blastdb: db/wm (makeblastdb of in/multi.fa) and db/wm_ps (with -parse_seqids); @CWD@ in the expected text is this directory.
+b_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm
+b_db_ps	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps
+b_db_fasta	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -outfmt fasta
+b_db_ps_maskinfo	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -outfmt maskinfo_asn1_text -parse_seqids
+b_db_ps_seqloc	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -outfmt seqloc_asn1_text
+b_db_ids	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_db.txt
+b_db_ps_ids	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt
+b_db_excl	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -exclude_ids in/ids_db.txt
+b_db_dust	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -dust T
+b_db_missing	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/none
+b_db_missing_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/none -outfmt maskinfo_asn1_text
+# -text_match F with -infmt blastdb: each id of the list read as a Seq-id (CIdSet_SeqId) and matched against the database sequence's Seq-ids; an id that CSeq_id cannot read is posted and skipped (probe s1 of line NP M5; rows added 2026-11-21 by M5c).
+s_wm_ids_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_db.txt -text_match F
+s_wm_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_a.txt -text_match F
+s_wm_ids_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_ord.txt -text_match F
+s_wm_ids_case	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_case.txt -text_match F
+s_wm_ids_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_forms.txt -text_match F
+s_wm_ids_bad	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_bad.txt -text_match F
+s_wm_ex_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -exclude_ids in/ids_db.txt -text_match F
+s_wm_ex_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -exclude_ids in/ids_ord.txt -text_match F
+s_ps_ids_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F
+s_ps_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_a.txt -text_match F
+s_ps_ids_unver	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_unver.txt -text_match F
+s_ps_ids_ord	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_ord.txt -text_match F
+s_ps_ids_case	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_case.txt -text_match F
+s_ps_ids_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_forms.txt -text_match F
+s_ps_ids_bad	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_bad.txt -text_match F
+s_ps_ids_lcl	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_lcl.txt -text_match F
+s_ps_ids_sp	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_sp.txt -text_match F
+s_ps_ids_tpa	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_tpa.txt -text_match F
+s_ps_ids_err	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_seqid_err.txt -text_match F
+s_ps_ex_err	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_seqid_err.txt -text_match F
+s_ps_ids_crlf	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_seqid_crlf.txt -text_match F
+s_ps_ids_missing	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/nonexistent.txt -text_match F
+s_ps_ex_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_db.txt -text_match F
+s_ps_ex_forms	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_forms.txt -text_match F
+s_ps_ids_forms_fasta	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_forms.txt -outfmt fasta -text_match F
+s_ps_ex_forms_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_forms.txt -outfmt maskinfo_asn1_text -parse_seqids -text_match F
+# -text_match F after the M5c review (2026-11-21): the Seq-id that seqloc_* and maskinfo_* print once a list id made the info of the handle (another alternative, another number, another case), ordinal ids of a list of two databases, a database with a gi, two definition lines and a local id first; and FASTA records whose Seq-id of the handle is not the first.
+s_ps_ids_db_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F -outfmt maskinfo_asn1_text
+s_ps_ids_db_sl	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -text_match F -outfmt seqloc_asn1_text
+s_ps_ex_emb_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -exclude_ids in/ids_emb2.txt -text_match F -outfmt maskinfo_asn1_text
+s_ps_ids_case_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_case_mi.txt -text_match F -outfmt maskinfo_asn1_text
+s_wm2_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm" -ids in/ids_ord8.txt -text_match F
+s_wm2_ids_ord3	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm" -ids in/ids_ord3.txt -text_match F
+s_mid_ids_gi5	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_gi5.txt -text_match F -outfmt maskinfo_asn1_text
+s_mid_ids_gibar	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_gi5_bar.txt -text_match F
+s_mid_ids_ab5	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_ab5.txt -text_match F
+s_mid_ids_ab6	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_ab6.txt -text_match F
+s_mid_ids_aj7	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -ids in/ids_aj7.txt -text_match F
+s_mid_mi	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -outfmt maskinfo_asn1_text
+s_mid_ps	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/multi_ids -parse_seqids
+s_fa_access_sl	-ustat ../winmask/counts/dm2L_u9.binary -in in/access.fa -parse_seqids -outfmt seqloc_asn1_text
+s_fa_access_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/access.fa -parse_seqids -outfmt maskinfo_asn1_text
+s_wmb_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm_b" -ids in/ids_ord8.txt -text_match F
+s_bwm_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm_b db/wm" -ids in/ids_ord8.txt -text_match F
+s_ps_ids_warn	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_warn.txt -text_match F
+# -ids and -exclude_ids matched as text against sequence::GetTitle of database sequences with a tax id (db/wm_tx): an empty title is made from the scientific name of the first source in the taxonomy database (BLASTDB=: ../seqdb/taxdb/t5), else it is "No definition line found"; no HTML decoding (line RG item D5a-t, 2026-11-21; frozen with the local official NCBI BLAST+ 2.17.0 release by make_fixtures.py --only).
+t_wm_tx_ids	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt
+t_wm_tx_ids_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt
+t_wm_tx_excl_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -exclude_ids in/ids_tx.txt
+t_wm_tx_ids_taxdb_sl	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt -outfmt seqloc_asn1_text

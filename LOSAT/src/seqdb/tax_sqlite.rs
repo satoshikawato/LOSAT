@@ -51,13 +51,96 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use super::lmdb_read::ReadAt;
+use super::lmdb_read::{ReadAt, ReadError};
 
 /// NCBI's default file name (`CTaxonomy4BlastSQLite::kDefaultName`), used in the
 /// texts of the sanity-check errors by [`TaxonomySqlite::open`].
 pub const DEFAULT_NAME: &str = "taxonomy4blast.sqlite3";
 
 const TABLE_NAME: &str = "TaxidInfo";
+
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:189-193
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:649-655
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:680-686
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:756-764
+// NCBI reads the file through SQLite, not a mapping: a read of a page that the system fails (any
+// error of `pread`) is SQLite's `SQLITE_IOERR_READ`, extended code 266, "disk I/O error" (NCBI
+// BLAST+ 2.17.0 with the reads of the file failing with EIO from its second page or its third:
+// line WQA D18b round 2, probe L3). The step's error leaves `GetLeafNodeTaxids`, whose statement's
+// destructor finalizes it, which gives the error again; the destructor posts that one
+// (`STD_CATCH_ALL_X(3, ...)` of the module `Db_Sqlite`, error code 1010) before the caller sees
+// the step's.
+/// What NCBI writes where a read of the file fails while `GetLeafNodeTaxids` steps its query
+/// ([`TaxonomySqlite::descendants`]'s [`ReadError::Unreadable`]): the step's exception
+/// ([`QueryReadFailure::step`]), which the caller catches or ends the run with, and the post of
+/// the statement's destructor ([`QueryReadFailure::finalize_post`]), which comes first. A read
+/// that fails before, at the sanity check of the constructor, is one of the constructor's
+/// exceptions, which the callers take as a file that is not there (`ReadError::Unreadable` of
+/// [`TaxonomySqlite::open`]).
+pub struct QueryReadFailure;
+
+impl QueryReadFailure {
+    /// `SQLITE_SAFE_CALL` of a call that failed on SQLite's read error: `s_ProcessErrorCode`'s
+    /// exception, rethrown as the wrapper's `kind` with `message` at `line` of `function`.
+    fn exception(
+        kind: &'static str,
+        line: u32,
+        function: &'static str,
+        message: &str,
+    ) -> crate::ncbi_exception::NcbiException {
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        const FILE: &str = "src/db/sqlite/sqlitewrapp.cpp";
+        NcbiException::new(
+            ThrowSite {
+                file: FILE,
+                line: 193,
+                kind,
+                function: Some("ncbi::s_ProcessErrorCode"),
+            },
+            "Error from sqlite3: [266] disk I/O error",
+        )
+        .rethrow(
+            ThrowSite {
+                file: FILE,
+                line,
+                kind,
+                function: Some(function),
+            },
+            message,
+        )
+    }
+
+    /// The exception of the step that failed (`CSQLITE_Statement::Step`).
+    pub fn step() -> crate::ncbi_exception::NcbiException {
+        Self::exception(
+            "CSQLITE_Exception::eStmtStep",
+            762,
+            "ncbi::CSQLITE_Statement::Step",
+            "Error stepping through statement results",
+        )
+    }
+
+    /// The post of the statement's destructor in the application whose diagnostic prefix is
+    /// `prefix` (`[Error in x_Finalize()] Exception: ` and the finalize's exception report, a line
+    /// of severity `Error` with the error code `1010.3`), in LOSAT's words.
+    pub fn finalize_post(prefix: &str) -> Vec<u8> {
+        let exception = Self::exception(
+            "CSQLITE_Exception::eStmtFinalize",
+            684,
+            "ncbi::CSQLITE_Statement::x_Finalize",
+            "Cannot finalize statement",
+        );
+        crate::ncbi_exception::error_post_line(
+            Some("1010.3"),
+            Some(prefix),
+            &[
+                b"[Error in x_Finalize()] Exception: ".as_slice(),
+                &exception.ncbi_what(),
+            ]
+            .concat(),
+        )
+    }
+}
 const INDEX_NAME: &str = "TaxidInfoCompositeIdx_parent";
 /// Longest chain of b-tree levels followed; SQLite's own limit is 20.
 const MAX_DEPTH: u32 = 24;
@@ -170,7 +253,7 @@ fn be_int(b: &[u8]) -> i64 {
 }
 
 /// Body length of a serial type (section 2.1), `Err` for the reserved types 10 and 11.
-fn serial_len(t: u64) -> Result<u64, String> {
+fn serial_len(t: u64) -> Result<u64, ReadError> {
     Ok(match t {
         0 | 8 | 9 => 0,
         1 => 1,
@@ -179,7 +262,7 @@ fn serial_len(t: u64) -> Result<u64, String> {
         4 => 4,
         5 => 6,
         6 | 7 => 8,
-        10 | 11 => return Err(corrupt("reserved serial type")),
+        10 | 11 => return Err(corrupt("reserved serial type").into()),
         n if n % 2 == 0 => (n - 12) / 2,
         n => (n - 13) / 2,
     })
@@ -189,13 +272,13 @@ fn serial_len(t: u64) -> Result<u64, String> {
 /// At most `max_cols` columns are decoded. A text or blob body that is not in `buf`
 /// becomes `Val::Cut` when `cut_ok` (and ends the decoding); any other missing
 /// byte gives `Rec::Short`.
-fn parse_record(buf: &[u8], total: u64, max_cols: usize, cut_ok: bool) -> Result<Rec, String> {
+fn parse_record(buf: &[u8], total: u64, max_cols: usize, cut_ok: bool) -> Result<Rec, ReadError> {
     let (hsize, mut hp) = match varint(buf) {
         Some(x) => x,
         None => return Ok(Rec::Short),
     };
     if hsize < hp as u64 || hsize > total {
-        return Err(corrupt("record header size"));
+        return Err(corrupt("record header size").into());
     }
     let mut types: Vec<u64> = Vec::new();
     while (hp as u64) < hsize && types.len() < max_cols {
@@ -204,7 +287,7 @@ fn parse_record(buf: &[u8], total: u64, max_cols: usize, cut_ok: bool) -> Result
                 types.push(t);
                 hp += n;
             }
-            Some(_) => return Err(corrupt("record header column")),
+            Some(_) => return Err(corrupt("record header column").into()),
             None => return Ok(Rec::Short),
         }
     }
@@ -216,7 +299,7 @@ fn parse_record(buf: &[u8], total: u64, max_cols: usize, cut_ok: bool) -> Result
             .checked_add(len)
             .ok_or_else(|| corrupt("record body size"))?;
         if end > total {
-            return Err(corrupt("record body past the payload"));
+            return Err(corrupt("record body past the payload").into());
         }
         if end > buf.len() as u64 {
             if cut_ok && t >= 12 {
@@ -301,43 +384,11 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     // -----------------------------------------------------------------------
 
     /// Open with the default file name in error texts, see [`Self::open_named`].
-    pub fn open(src: &'r R) -> Result<Self, String> {
+    pub fn open(src: &'r R) -> Result<Self, ReadError> {
         Self::open_named(src, DEFAULT_NAME)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:77-106
-    // ```c++
-    // void CTaxonomy4BlastSQLite::x_SanityCheck()
-    // {
-    //     const map<string, string> kRequiredElements {
-    //         { "table", "TaxidInfo" },
-    //         { "index", "TaxidInfoCompositeIdx_parent" }
-    //     };
-    //     const string kSqlStmt =
-    //         "SELECT COUNT(*) FROM sqlite_master WHERE type=? and name=?;";
-    //     for (auto& [type, name] : kRequiredElements) {
-    //         unique_ptr<CSQLITE_Statement> s(new CSQLITE_Statement(&*m_DbConn, kSqlStmt));
-    //         s->Bind(1, type);
-    //         s->Bind(2, name);
-    //         s->Execute();
-    //         if (s->Step()) {
-    //             if (s->GetInt(0) != 1) {
-    //                 CNcbiOstrstream oss;
-    //                 oss << "Database '" << m_DbName << "' does not have " << type;
-    //                 oss << " " << name << ". Please run the following command or ";
-    //                 oss << "contact your system administrator to install it:" << endl;
-    //                 oss << "update_blastdb.pl --decompress taxdb";
-    //                 NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
-    //             }
-    //         } else {
-    //             CNcbiOstrstream oss;
-    //             oss << "Failed to check for " << type << " " << name << " in '";
-    //             oss << m_DbName << "'";
-    //             NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
-    //         }
-    //     }
-    // }
-    // ```
     // The `map` iterates in key order, so the index is checked before the table.
     // `SELECT COUNT(*)` always returns a row, so the "Failed to check" branch cannot
     // happen. `db_name` is the resolved path NCBI puts in the message. The header
@@ -347,7 +398,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     /// Open the database bytes `src`: read the header and make NCBI's sanity check
     /// (exactly one `sqlite_master` row for the table `TaxidInfo` and one for the
     /// index `TaxidInfoCompositeIdx_parent`). `db_name` only appears in error texts.
-    pub fn open_named(src: &'r R, db_name: &str) -> Result<Self, String> {
+    pub fn open_named(src: &'r R, db_name: &str) -> Result<Self, ReadError> {
         const SQL: &str = "SELECT COUNT(*) FROM sqlite_master WHERE type=? and name=?;";
         let notdb = || {
             format!(
@@ -369,27 +420,27 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         // A file of size 0 is an empty database for SQLite: no sqlite_master rows.
         if len > 0 {
             if len < 100 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             let mut h = [0u8; 100];
             src.read_exact_at(&mut h, 0)?;
             if &h[0..16] != b"SQLite format 3\0" {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             let ps = u16::from_be_bytes([h[16], h[17]]) as usize;
             let ps = if ps == 1 { 65536 } else { ps };
             if !(512..=65536).contains(&ps) || !ps.is_power_of_two() {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             // bytes 18/19: file format write/read version, 1 = rollback journal, 2 = WAL
             if h[18] == 2 || h[19] == 2 {
-                return Err("database is in WAL mode: the write-ahead log (taxonomy4blast.sqlite3-wal) is not available to this reader, copy the file after a checkpoint with journal_mode=DELETE".to_string());
+                return Err("database is in WAL mode: the write-ahead log (taxonomy4blast.sqlite3-wal) is not available to this reader, copy the file after a checkpoint with journal_mode=DELETE".to_string().into());
             }
             if h[19] > 2 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             if h[21] != 64 || h[22] != 32 || h[23] != 32 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             let usable = ps - h[20] as usize;
             // header size in pages is valid only when the change counter matches
@@ -408,25 +459,25 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
             // of the tree walks, which then no longer ends a tree whose pages are shared many
             // times over.
             if page_count > len.div_ceil(ps as u64) {
-                return Err(corrupt("the header gives more pages than the file holds"));
+                return Err(corrupt("the header gives more pages than the file holds").into());
             }
             if usable < 480 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             me.enc = match be_uint(&h[56..60]) {
                 1 => Enc::Utf8,
                 2 => Enc::Utf16Le,
                 3 => Enc::Utf16Be,
-                _ => return Err(notdb()),
+                _ => return Err(notdb().into()),
             };
             if be_uint(&h[44..48]) > 4 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
             me.page_size = ps;
             me.usable = usable;
             me.page_count = page_count;
             if me.page_count == 0 {
-                return Err(notdb());
+                return Err(notdb().into());
             }
         }
         let slots = (1_048_576 / me.page_size).clamp(8, 256);
@@ -465,7 +516,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 return Err(format!(
                     "Database '{}' does not have {} {}. Please run the following command or contact your system administrator to install it:\nupdate_blastdb.pl --decompress taxdb",
                     db_name, ty, name
-                ));
+                ).into());
             }
         }
         me.index_root = index_root;
@@ -496,9 +547,9 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     // -----------------------------------------------------------------------
 
     /// Page `pgno` (1-based), from the cache or by one positioned read.
-    fn read_page(&self, pgno: u32) -> Result<Arc<Vec<u8>>, String> {
+    fn read_page(&self, pgno: u32) -> Result<Arc<Vec<u8>>, ReadError> {
         if pgno == 0 || u64::from(pgno) > self.page_count {
-            return Err(corrupt("page number out of range"));
+            return Err(corrupt("page number out of range").into());
         }
         let slot = pgno as usize;
         {
@@ -522,20 +573,20 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     /// SQLite file format, section 1.6 "B-tree Pages" (header of 8 bytes for a leaf,
     /// 12 for an interior page; page 1 starts its b-tree header after the 100-byte
     /// database header, but its cell offsets are still counted from the page start).
-    fn page_hdr(&self, pgno: u32, want: &[u8]) -> Result<Page, String> {
+    fn page_hdr(&self, pgno: u32, want: &[u8]) -> Result<Page, ReadError> {
         let data = self.read_page(pgno)?;
         let off = if pgno == 1 { 100usize } else { 0 };
         let b = &data[off..off + 12];
         let kind = b[0];
         if !want.contains(&kind) {
-            return Err(corrupt("unexpected b-tree page type"));
+            return Err(corrupt("unexpected b-tree page type").into());
         }
         let interior = kind == 0x02 || kind == 0x05;
         let hs = if interior { 12 } else { 8 };
         let ncells = u16::from_be_bytes([b[3], b[4]]) as usize;
         let min_cell = off + hs + 2 * ncells;
         if min_cell > self.usable {
-            return Err(corrupt("cell pointer array past the page"));
+            return Err(corrupt("cell pointer array past the page").into());
         }
         let right = if interior {
             be_uint(&b[8..12]) as u32
@@ -553,11 +604,11 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     /// Offset in the page of cell `i`.
-    fn cell_off(&self, p: &Page, i: usize) -> Result<usize, String> {
+    fn cell_off(&self, p: &Page, i: usize) -> Result<usize, ReadError> {
         let at = p.ptrs + 2 * i;
         let c = u16::from_be_bytes([p.data[at], p.data[at + 1]]) as usize;
         if c < p.min_cell || c >= self.usable {
-            return Err(corrupt("cell offset outside the cell content area"));
+            return Err(corrupt("cell offset outside the cell content area").into());
         }
         Ok(c)
     }
@@ -596,18 +647,18 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         p: u64,
         local: u64,
         want: u64,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Vec<u8>, ReadError> {
         let want = want.min(p);
         let local_end = (start as u64).saturating_add(local);
         if local_end > self.usable as u64 {
-            return Err(corrupt("cell payload past the page"));
+            return Err(corrupt("cell payload past the page").into());
         }
         let local_end = local_end as usize;
         if want <= local {
             return Ok(pg.data[start..start + want as usize].to_vec());
         }
         if p > self.src.len() || local_end + 4 > self.usable {
-            return Err(corrupt("payload larger than the file"));
+            return Err(corrupt("payload larger than the file").into());
         }
         let mut out = Vec::with_capacity(want as usize);
         out.extend_from_slice(&pg.data[start..local_end]);
@@ -617,7 +668,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         let mut b4 = [0u8; 4];
         while (out.len() as u64) < want {
             if next == 0 || next > self.page_count {
-                return Err(corrupt("overflow chain ends early"));
+                return Err(corrupt("overflow chain ends early").into());
             }
             let at = (next - 1) * self.page_size as u64;
             self.src.read_exact_at(&mut b4, at)?;
@@ -643,10 +694,10 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         pgno: u32,
         depth: u32,
         budget: &mut u64,
-        f: &mut dyn FnMut(Vec<Val>) -> Result<(), String>,
-    ) -> Result<(), String> {
+        f: &mut dyn FnMut(Vec<Val>) -> Result<(), ReadError>,
+    ) -> Result<(), ReadError> {
         if depth > MAX_DEPTH || *budget == 0 {
-            return Err(corrupt("b-tree too deep or cyclic"));
+            return Err(corrupt("b-tree too deep or cyclic").into());
         }
         *budget -= 1;
         let p = self.page_hdr(pgno, &[0x05, 0x0d])?;
@@ -666,7 +717,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 let data = self.payload_prefix(&p, c + n1 + n2, psize, local, psize)?;
                 match parse_record(&data, psize, 5, false)? {
                     Rec::Cols(cols) => f(cols)?,
-                    Rec::Short => return Err(corrupt("short record")),
+                    Rec::Short => return Err(corrupt("short record").into()),
                 }
             }
         }
@@ -684,7 +735,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     /// `(left child, payload size, payload)`, leaf pages 0x0a hold `(payload size,
     /// payload)`; the payload is the record `(parent, taxid, rowid)`). The second
     /// column is decoded when `want1`.
-    fn index_cell(&self, p: &Page, i: usize, want1: bool) -> Result<IdxCell, String> {
+    fn index_cell(&self, p: &Page, i: usize, want1: bool) -> Result<IdxCell, ReadError> {
         let c = self.cell_off(p, i)?;
         let b = &p.data[c..self.usable];
         let mut pos = 0usize;
@@ -718,7 +769,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 }
                 Rec::Short => {
                     if want >= psize {
-                        return Err(corrupt("short index record"));
+                        return Err(corrupt("short index record").into());
                     }
                     want = (want * 4 + 64).min(psize);
                     owned = Some(self.payload_prefix(p, c + pos, psize, local, want)?);
@@ -728,17 +779,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:40-48
-    // ```c++
-    // const char* kSQLQuery = R"(
-    // WITH RECURSIVE descendants_from(taxid, parent) AS
-    //     (SELECT ?1, NULL
-    //      UNION ALL
-    //      SELECT T.taxid, T.parent
-    //        FROM descendants_from D, TaxidInfo T
-    //        WHERE D.taxid = T.parent)
-    // SELECT taxid from descendants_from;
-    // )";
-    // ```
     // The recursive step `T.parent = D.taxid` is answered by the index
     // `TaxidInfoCompositeIdx_parent (parent, taxid)`: all entries whose first
     // column equals `x` are adjacent, ordered by taxid. The scan seeks the first
@@ -753,9 +793,9 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         depth: u32,
         budget: &mut u64,
         out: &mut Vec<i64>,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ReadError> {
         if depth > MAX_DEPTH || *budget == 0 {
-            return Err(corrupt("b-tree too deep or cyclic"));
+            return Err(corrupt("b-tree too deep or cyclic").into());
         }
         *budget -= 1;
         let p = self.page_hdr(pgno, &[0x02, 0x0a])?;
@@ -779,7 +819,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 Ordering::Greater => return Ok(true),
                 Ordering::Equal => match cell.key1 {
                     Some(Val::Int(t)) => out.push(t),
-                    _ => return Err(corrupt("taxid column of the index is not an integer")),
+                    _ => return Err(corrupt("taxid column of the index is not an integer").into()),
                 },
             }
         }
@@ -790,27 +830,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:108-126
-    // ```c++
-    // void CTaxonomy4BlastSQLite::GetLeafNodeTaxids(const int taxid, vector<int>& descendants)
-    // {
-    //     descendants.clear();
-    //     if (taxid <= 0) return;
-    //
-    //     if (!m_Statement) {
-    //         m_Statement.reset(new CSQLITE_Statement(&*m_DbConn, kSQLQuery));
-    //     }
-    //     m_Statement->Reset();
-    //     m_Statement->ClearBindings();
-    //     m_Statement->Bind(1, taxid);
-    //     m_Statement->Execute();
-    //
-    //     while (m_Statement->Step()) {
-    //         auto desc_taxid = m_Statement->GetInt(0);
-    //         if (desc_taxid != taxid)
-    //             descendants.push_back(desc_taxid);
-    //     }
-    // }
-    // ```
     /// All proper descendants of `taxid` (children, their children, ...) in the order
     /// SQLite's recursive CTE emits them, which is breadth first: SQLite keeps the
     /// rows of the recursive table in a queue, outputs the row at the head and
@@ -833,15 +852,15 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     /// itself, as for any other taxid. `descendants(1)` is the whole tree of the
     /// real file. `Err` stays for a damaged file (corrupt pages, depth limit, page
     /// budget, more rows than the file can contain).
-    pub fn descendants(&self, taxid: i32) -> Result<Vec<i32>, String> {
+    pub fn descendants(&self, taxid: i32) -> Result<Vec<i32>, ReadError> {
         if taxid <= 0 {
             return Ok(Vec::new());
         }
-        self.index_def.clone()?;
+        self.index_def.clone().map_err(ReadError::Format)?;
         let x = i64::from(taxid);
         // The queue and the output are the same list: `nodes[head..]` still to expand.
         let mut nodes: Vec<i64> = vec![x];
-        // NCBI's `WITH RECURSIVE ... UNION ALL` (tax4blastsqlite.cpp) does not end for a start
+        // NCBI's `WITH RECURSIVE ... UNION ALL` (c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp) does not end for a start
         // taxid that lies in a parent cycle. LOSAT skips taxids it has already visited
         // (DI-8 DECISIONS 10, an approved difference of the PD-LOSAT-NCBI-DEFECTS kind).
         let mut seen: HashSet<i64> = HashSet::new();
@@ -862,7 +881,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 }
             }
             if nodes.len() as u64 > max_rows {
-                return Err(format!("the recursive query for taxid {} returns more rows than the file holds (damaged taxonomy table)", taxid));
+                return Err(format!("the recursive query for taxid {} returns more rows than the file holds (damaged taxonomy table)", taxid).into());
             }
         }
         Ok(nodes
@@ -874,379 +893,5 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-
-    /// Directory of the fixtures (small databases made with Python's `sqlite3` from the
-    /// schema text of NCBI's real file) and of their `.ref` files (NCBI's query run by SQLite).
-    fn fx_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxsqlite")
-    }
-
-    fn fnv(ids: &[i32]) -> u64 {
-        let mut h: u64 = 0xcbf29ce484222325;
-        for i in ids {
-            for b in format!("{},", i).bytes() {
-                h = (h ^ u64::from(b)).wrapping_mul(0x100000001b3);
-            }
-        }
-        h
-    }
-
-    fn load(name: &str) -> Vec<u8> {
-        std::fs::read(fx_dir().join(name)).unwrap_or_else(|e| panic!("fixture {}: {}", name, e))
-    }
-
-    /// Compare every node of a fixture with the reference written by gen_fx.py.
-    fn check_fixture(name: &str) {
-        let data = load(&format!("{}.sqlite3", name));
-        let db = TaxonomySqlite::open(&data).unwrap_or_else(|e| panic!("{}: open: {}", name, e));
-        let refs = std::fs::read_to_string(fx_dir().join(format!("{}.ref", name))).unwrap();
-        let mut n = 0;
-        let mut full: HashMap<i64, Vec<i32>> = HashMap::new();
-        for line in refs.lines() {
-            let f: Vec<&str> = line.split(' ').collect();
-            if f[0] == "wide" {
-                continue;
-            }
-            if f[0] == "full" {
-                full.insert(
-                    f[1].parse().unwrap(),
-                    f[2..]
-                        .iter()
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.parse().unwrap())
-                        .collect(),
-                );
-                continue;
-            }
-            let t: i64 = f[0].parse().unwrap();
-            // taxids beyond i32 cannot be asked through the i32 API
-            if t > i64::from(i32::MAX) {
-                continue;
-            }
-            if f[1] == "LOOP" {
-                // taxid 1 is its own parent: SQLite's query never ends; see `root_in_a_parent_cycle`
-                continue;
-            }
-            let mut got = db
-                .descendants(t as i32)
-                .unwrap_or_else(|e| panic!("{} taxid {}: {}", name, t, e));
-            got.sort_unstable();
-            let (cnt, h): (usize, u64) = (f[1].parse().unwrap(), f[2].parse().unwrap());
-            assert_eq!((got.len(), fnv(&got)), (cnt, h), "{} taxid {}", name, t);
-            if let Some(want) = full.get(&t) {
-                assert_eq!(&got, want, "{} taxid {}", name, t);
-            }
-            n += 1;
-        }
-        assert!(n > 50, "{}: only {} nodes compared", name, n);
-        // taxid <= 0 and absent taxids
-        assert_eq!(db.descendants(0).unwrap(), Vec::<i32>::new());
-        assert_eq!(db.descendants(-5).unwrap(), Vec::<i32>::new());
-        assert_eq!(db.descendants(i32::MAX).unwrap(), Vec::<i32>::new());
-        println!("{}: {} nodes equal to sqlite3", name, n);
-    }
-
-    #[test]
-    fn fixture_page_512() {
-        check_fixture("p512");
-    }
-
-    #[test]
-    fn fixture_utf16() {
-        check_fixture("utf16");
-    }
-
-    /// Taxid 1 is its own parent (as in NCBI's file). NCBI's query for it never ends; LOSAT
-    /// skips visited taxids (DI-8 DECISIONS 10), so the result is every other node reachable from 1.
-    #[test]
-    fn root_in_a_parent_cycle() {
-        for name in ["p512", "utf16"] {
-            let data = load(&format!("{name}.sqlite3"));
-            let db = TaxonomySqlite::open(&data).unwrap();
-            let refs = std::fs::read_to_string(fx_dir().join(format!("{name}.ref"))).unwrap();
-            // The reference lists every node of the fixture (the "1 LOOP" line is the root); the
-            // nodes that 1 does not reach are 2 (parent NULL), 3 (parent 0) and the two absent ids.
-            let mut want: Vec<i32> = Vec::new();
-            let mut listed = 0;
-            for l in refs.lines() {
-                let f: Vec<&str> = l.split(' ').collect();
-                if f[0] == "wide" || f[0] == "full" {
-                    continue;
-                }
-                listed += 1;
-                let t: i64 = f[0].parse().unwrap();
-                if [1, 2, 3, 12345, 999_999_999].contains(&t) {
-                    continue;
-                }
-                // sqlite3_column_int keeps the low 32 bits
-                want.push(t as i32);
-            }
-            want.sort_unstable();
-            let mut got = db.descendants(1).unwrap();
-            got.sort_unstable();
-            assert_eq!(got.len(), want.len(), "{name}");
-            assert_eq!(got, want, "{name}");
-            assert_eq!(listed, want.len() + 5, "{name}");
-            assert!(!got.contains(&1));
-        }
-    }
-
-    /// Two nodes that are each other's parent (20 and 21), and the root: the walk ends and
-    /// returns what NCBI's query would return before it started to repeat itself.
-    #[test]
-    fn parent_cycles_end() {
-        let data = load("cycle.sqlite3");
-        let db = TaxonomySqlite::open(&data).unwrap();
-        let d = |t: i32| {
-            let mut v = db.descendants(t).unwrap();
-            v.sort_unstable();
-            v
-        };
-        assert_eq!(d(1), vec![10, 11]);
-        assert_eq!(d(10), vec![11]);
-        assert_eq!(d(20), vec![21, 22]);
-        assert_eq!(d(21), vec![20, 22]);
-        assert_eq!(d(22), Vec::<i32>::new());
-        assert_eq!(d(30), Vec::<i32>::new());
-        assert_eq!(d(31), Vec::<i32>::new());
-    }
-
-    #[test]
-    fn wide_taxid_truncates_like_getint() {
-        // gen_fx.py stores taxid 5_000_000_000 as a child of the node named in the
-        // `wide` line of the reference, and 5_000_000_001 as its child. GetInt keeps
-        // the low 32 bits: 5_000_000_000 - 2^32 = 705_032_704. (The reference equality
-        // of check_fixture already covers it; this names the values.)
-        let data = load("p512.sqlite3");
-        let db = TaxonomySqlite::open(&data).unwrap();
-        let refs = std::fs::read_to_string(fx_dir().join("p512.ref")).unwrap();
-        let wide: i32 = refs
-            .lines()
-            .find_map(|l| l.strip_prefix("wide "))
-            .unwrap()
-            .parse()
-            .unwrap();
-        let got = db.descendants(wide).unwrap();
-        assert!(
-            got.contains(&705_032_704) && got.contains(&705_032_705),
-            "{:?}",
-            got
-        );
-    }
-
-    #[test]
-    fn sanity_check_failures() {
-        let data = load("noindex.sqlite3");
-        let e = TaxonomySqlite::open_named(&data, "/db/taxonomy4blast.sqlite3")
-            .err()
-            .unwrap();
-        assert_eq!(
-            e,
-            "Database '/db/taxonomy4blast.sqlite3' does not have index TaxidInfoCompositeIdx_parent. Please run the following command or contact your system administrator to install it:\nupdate_blastdb.pl --decompress taxdb"
-        );
-        let e = TaxonomySqlite::open(&data).err().unwrap();
-        assert!(
-            e.starts_with("Database 'taxonomy4blast.sqlite3' does not have index "),
-            "{}",
-            e
-        );
-        // an empty file is an empty database: both missing, the index is reported first
-        let empty = load("empty.bin");
-        let e = TaxonomySqlite::open(&empty).err().unwrap();
-        assert!(
-            e.contains("does not have index TaxidInfoCompositeIdx_parent"),
-            "{}",
-            e
-        );
-        // the table row removed from sqlite_master, the index there
-        let d = load("notable.sqlite3");
-        let e = TaxonomySqlite::open(&d).err().unwrap();
-        assert!(
-            e.contains("does not have table TaxidInfo. Please run"),
-            "{}",
-            e
-        );
-    }
-
-    #[test]
-    fn not_a_database() {
-        let d = load("notdb.bin");
-        let e = TaxonomySqlite::open(&d).err().unwrap();
-        assert!(e.ends_with("[26] file is not a database"), "{}", e);
-        let e = TaxonomySqlite::open(&b"SQLite format 3\0"[..])
-            .err()
-            .unwrap();
-        assert!(e.contains("not a database"), "{}", e);
-    }
-
-    #[test]
-    fn wal_refused() {
-        let mut d = load("p512.sqlite3");
-        d[18] = 2;
-        d[19] = 2;
-        let e = TaxonomySqlite::open(&d).err().unwrap();
-        assert!(e.contains("WAL"), "{}", e);
-    }
-
-    #[test]
-    fn page_in_memory_and_vec_sources() {
-        // the two impls of ReadAt answer the same
-        let v = load("p512.sqlite3");
-        let a = TaxonomySqlite::open(&v).unwrap();
-        let b = TaxonomySqlite::open(v.as_slice()).unwrap();
-        let first: i32 = {
-            let refs = std::fs::read_to_string(fx_dir().join("p512.ref")).unwrap();
-            refs.lines()
-                .filter(|l| {
-                    !l.starts_with("full")
-                        && !l.starts_with("wide")
-                        && !l.contains("LOOP")
-                        && !l.contains(" 0 ")
-                })
-                .map(|l| l.split(' ').next().unwrap().parse::<i64>().unwrap())
-                .find(|&t| t < i64::from(i32::MAX))
-                .unwrap() as i32
-        };
-        assert_eq!(a.descendants(first).unwrap(), b.descendants(first).unwrap());
-        assert!(!a.descendants(first).unwrap().is_empty());
-    }
-
-    /// Random byte-damaged copies per fixture (the source test used 1500; kept short for a debug build).
-    const DAMAGE_ROUNDS: usize = 200;
-
-    /// Damaged files must give `Err` (or a result), never a panic or a hang.
-    #[test]
-    fn damaged_files_never_panic() {
-        let mut seed: u64 = 0x1234_5678_9abc_def0;
-        let mut rnd = move || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            seed
-        };
-        for name in ["p512.sqlite3", "utf16.sqlite3"] {
-            let orig = load(name);
-            // the root, a node without children and the largest subtrees of the fixture
-            let refs =
-                std::fs::read_to_string(fx_dir().join(name.replace(".sqlite3", ".ref"))).unwrap();
-            let mut big: Vec<(usize, i32)> = refs
-                .lines()
-                .filter(|l| !l.starts_with("wide") && !l.starts_with("full"))
-                .filter_map(|l| {
-                    let f: Vec<&str> = l.split(' ').collect();
-                    Some((
-                        f.get(1)?.parse().ok()?,
-                        i32::try_from(f[0].parse::<i64>().ok()?).ok()?,
-                    ))
-                })
-                .collect();
-            big.sort_unstable_by(|a, b| b.cmp(a));
-            let mut ids: Vec<i32> = vec![1, 2, 705_032_704];
-            ids.extend(big.iter().take(3).map(|b| b.1));
-            // truncations
-            for cut in [
-                0usize,
-                50,
-                99,
-                100,
-                101,
-                511,
-                1000,
-                orig.len() / 3,
-                orig.len() / 2,
-                orig.len() - 1,
-            ] {
-                let d = &orig[..cut.min(orig.len())];
-                if let Ok(db) = TaxonomySqlite::open(d) {
-                    for &t in &ids {
-                        let _ = db.descendants(t);
-                    }
-                }
-            }
-            // random byte damage, mostly in the first pages and the cell pointers
-            let mut opens = 0;
-            for round in 0..DAMAGE_ROUNDS {
-                let mut d = orig.clone();
-                for _ in 0..(1 + round % 6) {
-                    let at = if rnd() % 3 == 0 {
-                        (rnd() % 160) as usize
-                    } else {
-                        (rnd() % d.len() as u64) as usize
-                    };
-                    d[at] = rnd() as u8;
-                }
-                if let Ok(db) = TaxonomySqlite::open(&d) {
-                    opens += 1;
-                    for &t in &ids {
-                        let _ = db.descendants(t);
-                    }
-                }
-            }
-            assert!(opens > 100, "{}: only {} damaged files opened", name, opens);
-        }
-    }
-
-    // --- the real file ------------------------------------------------------------
-
-    /// Positioned reads of a real file (pread), the way the integration will use it.
-    struct FileSrc(std::fs::File, u64);
-
-    impl ReadAt for FileSrc {
-        fn len(&self) -> u64 {
-            self.1
-        }
-        fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
-            ReadAt::read_exact_at(&self.0, buf, offset)
-        }
-    }
-
-    /// Needs the real NCBI file: `LOSAT_TEST_TAX_SQLITE=/path/to/taxonomy4blast.sqlite3` (3.4 million
-    /// rows) and `LOSAT_TEST_TAX_SQLITE_EXPECTED`, the file that `tests/seqdb/tax_sqlite_ref.py`
-    /// writes from it with Python's `sqlite3`: a line `T: sorted descendants` for 212 taxids (NCBI's
-    /// query run by SQLite) and for taxid 1, whose NCBI query never ends (a walk of the whole tree).
-    #[test]
-    #[ignore = "needs LOSAT_TEST_TAX_SQLITE (the real taxonomy4blast.sqlite3) and LOSAT_TEST_TAX_SQLITE_EXPECTED"]
-    fn real_file_equals_sqlite3() {
-        let path = std::env::var("LOSAT_TEST_TAX_SQLITE").expect("LOSAT_TEST_TAX_SQLITE");
-        let expected = std::env::var("LOSAT_TEST_TAX_SQLITE_EXPECTED")
-            .expect("LOSAT_TEST_TAX_SQLITE_EXPECTED");
-        let t0 = std::time::Instant::now();
-        let f = std::fs::File::open(&path).unwrap();
-        let file = FileSrc(f.try_clone().unwrap(), f.metadata().unwrap().len());
-        let db = TaxonomySqlite::open_named(&file, &path).unwrap();
-        println!("real file: {} bytes, open {:?}", file.1, t0.elapsed());
-        let refs = std::fs::read_to_string(&expected).unwrap();
-        let mut total = 0usize;
-        let mut count = 0usize;
-        for line in refs.lines() {
-            let (t, rest) = line.split_once(':').unwrap();
-            let t: i32 = t.parse().unwrap();
-            let want: Vec<i32> = rest
-                .split_whitespace()
-                .map(|s| s.parse().unwrap())
-                .collect();
-            let t1 = std::time::Instant::now();
-            // root: SQLite never finishes; LOSAT returns the whole tree
-            let mut got = db
-                .descendants(t)
-                .unwrap_or_else(|e| panic!("taxid {}: {}", t, e));
-            let el = t1.elapsed();
-            got.sort_unstable();
-            assert_eq!(got, want, "taxid {}", t);
-            total += got.len();
-            count += 1;
-            if got.len() > 20000 || [1, 9606, 561, 10090].contains(&t) {
-                println!("taxid {:>8}: {:>8} descendants in {:?}", t, got.len(), el);
-            }
-        }
-        assert_eq!(count, 213, "{expected}: lines");
-        println!(
-            "{} taxids equal to sqlite3 ({} descendants in all)",
-            count, total
-        );
-    }
-}
+#[path = "tax_sqlite_tests.rs"]
+mod tests;

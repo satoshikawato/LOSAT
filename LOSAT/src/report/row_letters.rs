@@ -4,19 +4,7 @@
 //! columns whose `-` is a residue (`stored_gap_columns`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:116-121
-//! ```c++
-//!         CBioseq_Handle h = GetBioseqHandle(row);
-//!         CSeqVector vec = h.GetSeqVector
-//!             (CBioseq_Handle::eCoding_Iupac,
-//!              IsPositiveStrand(row) ?
-//!              CBioseq_Handle::eStrand_Plus :
-//!              CBioseq_Handle::eStrand_Minus);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-//! ```c++
-//!                     } else if (m_SeqLocChar==eLowerCase){
-//!                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-//! ```
 //! NCBI's reports read the letters of every row from its Bioseq and compare them as they are; a
 //! mask lowers a letter only where outfmt 0 prints the row. A FASTA record's Bioseq holds its
 //! letters in upper case (NCBI's reader keeps the lower case as a mask, fasta.cpp:945-949), and
@@ -183,51 +171,7 @@ pub(crate) fn stored_gap_columns(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
-// ```c++
-// void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
-//                                           const string& sequence ,
-//                                           int& match, int& positive,
-//                                           string& middle_line)
-// {
-//     match = 0;
-//     positive = 0;
-//     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
-//     if(m_AlignOption & eShowMiddleLine){
-//         middle_line = sequence;
-//     }
-//     for(int i=0; i<min_length; i++){
-//         if(sequence_standard[i]==sequence[i]){
-//             if(m_AlignOption & eShowMiddleLine){
-//                 if(m_MidLineStyle == eBar ) {
-//                     middle_line[i] = '|';
-//                 } else if (m_MidLineStyle == eChar){
-//                     middle_line[i] = sequence[i];
-//                 }
-//             }
-//             match ++;
-//         } else {
-//             if ((m_AlignType&eProt)
-//                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
-//                 positive ++;
-//                 if(m_AlignOption & eShowMiddleLine){
-//                     if (m_MidLineStyle == eChar){
-//                         middle_line[i] = '+';
-//                     }
-//                 }
-//             } else {
-//                 if (m_AlignOption & eShowMiddleLine){
-//                     middle_line[i] = ' ';
-//                 }
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1798
-// ```c++
-//     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
-//                        aln_vec_info->alnRowInfo->sequence[1],
-//                        aln_vec_info->match,
-//                        aln_vec_info->positive,
-//                        aln_vec_info->alnRowInfo->middleLine);
-// ```
 /// The positives of the rows `query` and `subject` (identities included), as NCBI counts them
 /// on the Bioseqs' letters before a mask lowers any (`QueryCase`: the query's letters as `case`
 /// reads them, the subject's capitals).
@@ -250,74 +194,5 @@ pub(crate) fn display_positives(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI showalign.cpp:2131-2155 and align_format_util.cpp:3563-3581 (quoted above and at
-    // `protein_display_score`): a masked capital compares as its capital; a PSSM query's
-    // lower-case letter is identical to no subject letter and scores -1000.
-    #[test]
-    fn a_masked_letter_compares_as_its_capital_and_a_bioseq_letter_as_it_is() {
-        let matrix = ScoringMatrix::Blosum62;
-        assert_eq!(
-            display_positives(b"aKv", b"AKI", matrix, QueryCase::Masked),
-            3
-        );
-        assert_eq!(
-            display_positives(b"aKv", b"AKI", matrix, QueryCase::Bioseq),
-            1
-        );
-        assert_eq!(
-            display_positives(b"-A", b"-a", matrix, QueryCase::Bioseq),
-            2
-        );
-        let pssm = QueryLetters::new(b"AKV", Some(b"aKv"));
-        assert_eq!(
-            (pssm.get(0), pssm.get(1), pssm.get(3)),
-            (Some(b'a'), Some(b'K'), None)
-        );
-        assert_eq!(pssm.case(), QueryCase::Bioseq);
-        let record = QueryLetters::new(b"aKv", None);
-        assert_eq!((record.get(0), record.get(2)), (Some(b'A'), Some(b'V')));
-        assert_eq!(record.case(), QueryCase::Masked);
-        assert_eq!(
-            QueryCase::Masked.compared_letters()[usize::from(b'k')],
-            b'K'
-        );
-        assert_eq!(
-            QueryCase::Bioseq.compared_letters()[usize::from(b'k')],
-            b'k'
-        );
-        assert_eq!(
-            QueryCase::Masked.compared_letters()[usize::from(b'-')],
-            b'-'
-        );
-        assert!(pssm.shows_other_letters());
-        assert!(QueryLetters::new(b"A-K", None).shows_other_letters());
-        assert!(!record.shows_other_letters());
-    }
-
-    // A gap character is a residue of its own side's sequence: the query reads one at a
-    // substitution and an insertion, the subject at a substitution and a deletion.
-    #[test]
-    fn the_gap_residues_lie_at_their_sides_columns() {
-        let ops = [
-            GapEditOp::Sub(2),
-            GapEditOp::Ins(1),
-            GapEditOp::Del(1),
-            GapEditOp::Sub(1),
-        ];
-        // Query `XA--K` read from 1: its `-` at positions 2 and 3 lie at columns 1 and 2 (the
-        // insertion).
-        assert_eq!(
-            stored_gap_columns(b"XA--K", b'-', 1, &ops, RowSide::Query),
-            [1, 2]
-        );
-        // Subject residues 0, 9, 0, 5 at columns 0, 1, 3, 4: code 0 at 0 and 3.
-        assert_eq!(
-            stored_gap_columns(&[0, 9, 0, 5], 0, 0, &ops, RowSide::Subject),
-            [0, 3]
-        );
-        assert!(stored_gap_columns(b"MKVLA", b'-', 0, &ops, RowSide::Query).is_empty());
-    }
-}
+#[path = "row_letters_tests.rs"]
+mod tests;

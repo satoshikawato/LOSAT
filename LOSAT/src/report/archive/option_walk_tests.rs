@@ -57,7 +57,7 @@ fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| format!("{}={:?}", param.name(), param.value))
         .collect();
     if let Some(step) = request.step_number {
         listed.push(format!("Web_StepNumber=Integer({step})"));
@@ -124,7 +124,8 @@ fn walk(app: &App) {
         for pair in app.base.chunks(2) {
             let flag = pair[0];
             let replaced = (flag == "-db" && words.contains(&"-subject"))
-                || (flag == "-query" && words.contains(&"-in_pssm"))
+                || (flag == "-query"
+                    && (words.contains(&"-in_pssm") || words.contains(&"-in_msa")))
                 || words.contains(&flag);
             if !replaced {
                 line.extend_from_slice(pair);
@@ -280,6 +281,26 @@ const PSIBLAST: &[Case] = &[
         &["-culling_limit", "2"],
         &[After("WordThreshold", "Culling", "Integer(2)")],
     ),
+    // Recorded where `-culling_limit` is, the overhang before the score edge, with a query and
+    // with `-in_pssm` (NCBI BLAST+ 2.17.0, line NP O6a-2's strategy probe `ps_q_both.ss`,
+    // `ps_pssm_both.ss`).
+    (
+        "best_hit_overhang",
+        &["-best_hit_overhang", "0.2"],
+        &[After("WordThreshold", "BestHitOverhang", "Real(0.2)")],
+    ),
+    (
+        "best_hit_score_edge",
+        &["-best_hit_score_edge", "0.3"],
+        &[After("WordThreshold", "BestHitScoreEdge", "Real(0.3)")],
+    ),
+    // Recorded where `-culling_limit` is, with a query and with `-in_pssm` (NCBI BLAST+ 2.17.0,
+    // line NP O6b's strategy probe `ps_q_on.ss`, `ps_pssm_on.ss`).
+    (
+        "subject_besthit",
+        &["-subject_besthit"],
+        &[After("WordThreshold", "UseSubjectBestHit", "Boolean(true)")],
+    ),
     // `SetXDropoff` has no remote option (blast_options_cxx.cpp:588-590).
     ("xdrop_ungap", &["-xdrop_ungap", "8"], &[]),
     (
@@ -399,6 +420,19 @@ const PSIBLAST: &[Case] = &[
     ("save_each_pssm", &["-save_each_pssm"], &[]),
     // A PSSM query's request records the same options (`p9.pp.db.itdef.f6`; the PSSM walk).
     ("in_pssm", &["-in_pssm", "p.asn"], &[]),
+    // An alignment query (`-in_msa`, line PS item PS6): the PSSM it makes is searched as a PSSM
+    // query's, and only `-ignore_msa_master` is a request option of its own.
+    ("in_msa", &["-in_msa", "m.aln"], &[]),
+    (
+        "msa_master_idx",
+        &["-in_msa", "m.aln", "-msa_master_idx", "2"],
+        &[],
+    ),
+    (
+        "ignore_msa_master",
+        &["-in_msa", "m.aln", "-ignore_msa_master"],
+        &[At("IgnoreMsaMaster", "Boolean(true)")],
+    ),
 ];
 
 /// psiblast's request of the base command line (`p9.ps.q.db.itdef.f6`, `p9.pp.db.itdef.f6`).
@@ -466,10 +500,6 @@ fn every_psiblast_argument_is_recorded_as_ncbi_records_it() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1247 (`-in_pssm`
 // excludes `-query` and `-query_loc`)
-// ```c++
-//     arg_desc.SetDependency(kArgPSIInputChkPntFile, CArgDescriptions::eExcludes,
-//                            kArgQuery);
-// ```
 // A PSSM query's request records psiblast's options as a FASTA query's does (the handle and the
 // classes are the same; NCBI BLAST+ 2.17.0 `p9.pp.db.itdef.f6` = `p9.ps.q.db.itdef.f6`, `pp.db.cbs*`,
 // `pp.db.it*`, `pp.db.ssp.f6`): every psiblast argument again, with `-in_pssm` in the base.
@@ -484,6 +514,9 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[
                 ("query", &["-query", "q.faa"]),
                 ("query_loc", &["-query_loc", "1-10"]),
+                ("in_msa", &["-in_msa", "m.aln"]),
+                ("msa_master_idx", &["-msa_master_idx", "2"]),
+                ("ignore_msa_master", &["-ignore_msa_master"]),
             ],
         ),
         inputs: psiblast_inputs,
@@ -717,6 +750,11 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[],
         ),
         ("db", &[], &[]),
+        // The database masks (series NP, M4b PR 2) are program options of the database, written
+        // where the formatter resolves them (`common::database::note_archive_database_masking`),
+        // not from the command line's options.
+        ("db_soft_mask", &["-db_soft_mask", "11"], &[]),
+        ("db_hard_mask", &["-db_hard_mask", "11"], &[]),
         (
             "dbsize",
             &["-dbsize", "1000000"],
@@ -739,6 +777,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
         (
             "export_search_strategy",
             &["-export_search_strategy", "s.asn"],
+            &[],
+        ),
+        // An imported strategy is read by the run (`archive::apply_strategy`), not recorded.
+        (
+            "import_search_strategy",
+            &["-import_search_strategy", "s.asn"],
             &[],
         ),
         (
@@ -855,6 +899,17 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             "culling_limit",
             &["-culling_limit", "2"],
             &[After("SegFilteringHicut", "Culling", "Integer(2)")],
+        ),
+        // Recorded where `-culling_limit` is (NCBI BLAST+ 2.17.0, line NP O6b's strategy probe
+        // `tn_pssm_on.ss`).
+        (
+            "subject_besthit",
+            &["-subject_besthit"],
+            &[After(
+                "SegFilteringHicut",
+                "UseSubjectBestHit",
+                "Boolean(true)",
+            )],
         ),
         ("num_threads", &["-num_threads", "2"], &[]),
         ("mt_mode", &["-mt_mode", "1", "-num_threads", "2"], &[]),

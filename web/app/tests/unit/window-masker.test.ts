@@ -265,11 +265,11 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
     },
     validate: () => {
       calls.push('validate');
-      return undefined;
+      return { ok: true, dataLoaders: true };
     },
-    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } }),
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: role === ROLE_QUERY ? [{ id: 'q', length: bytes.length }] : [{ id: 's', length: bytes.length }] };
     },
@@ -560,8 +560,8 @@ describe.skipIf(reactors === undefined)('the counts file in the built serial rea
   const subject = readFileSync(resolve(LOSAT, 'tests/fixtures/blastn_regression/inputs/s60k.fa'));
 
   function search(abi: ReactorAbi, argv: readonly string[]): string {
-    const q = abi.register('blastn', ROLE_QUERY, query);
-    const s = abi.register('blastn', ROLE_SUBJECT, subject);
+    const q = abi.register('blastn', ROLE_QUERY, true, query);
+    const s = abi.register('blastn', ROLE_SUBJECT, true, subject);
     const chunks: Uint8Array[] = [];
     try {
       abi.run([...argv, '-num_threads', '1'], q.handle, s.handle, (stream, bytes) => {

@@ -4,6 +4,7 @@
 //! `-comp_based_stats` strings that NCBI reads in its option handlers, after the input and
 //! output files are opened.
 
+use crate::wording::{ENGINE_ERROR, QUERY_ERROR, QUERY_OPTIONS_ERROR};
 use std::path::Path;
 
 use crate::blastinput::value_parsers::SegSpec;
@@ -13,20 +14,25 @@ use crate::wording::USER_MANUAL_FOOTER;
 
 /// An error that NCBI raises as `CInputException` (an option handler or `Validate`).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
-/// ```c
-///     catch (const blast::CInputException& e) {                               \
-///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-///         exit_code = BLAST_INPUT_ERROR;                                      \
-///     }                                                                       \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
 /// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): directs users to
 /// `USER_MANUAL_FOOTER` ("Please refer to the LOSAT user manual.").
 pub fn options_error(message: &str) -> anyhow::Error {
+    options_error_bytes(message.as_bytes())
+}
+
+/// [`options_error`] of a message's bytes (a matrix name that NCBI's buffer cuts inside a
+/// character: `stats::protein_options::print_matrix_message`).
+pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{USER_MANUAL_FOOTER}\n"),
+        message: [
+            QUERY_OPTIONS_ERROR.as_bytes(),
+            b" ",
+            message,
+            format!("\n{USER_MANUAL_FOOTER}\n").as_bytes(),
+        ]
+        .concat(),
     }
     .into()
 }
@@ -34,33 +40,30 @@ pub fn options_error(message: &str) -> anyhow::Error {
 /// An error that NCBI raises as a `CBlastException` that is neither an option nor a
 /// memory error (exit 3).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:225-227
-/// ```c
-///         } else {                                                            \
-///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-///             exit_code = BLAST_ENGINE_ERROR;                                 \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub fn engine_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n"),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
+    }
+    .into()
+}
+
+/// An error of a reader of NCBI's objtools (`CObjReaderParseException`: the FASTA reader's, the
+/// alignment reader's of psiblast's `-in_msa`), which the applications report with the reader's
+/// message and exit 1. The one producer of that line.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
+pub fn query_error(message: &str) -> anyhow::Error {
+    NativeError {
+        exit: 1,
+        message: format!("{QUERY_ERROR} {message}\n").into(),
     }
     .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
 // loop is the same, tblastx_app.cpp:176-207)
-// ```c++
-//             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-//                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                     results = lcl_blast.Run();
-// ...
-//                     ITERATE(CSearchResultSet, result, *results) {
-//                         formatter.PrintOneResultSet(**result, query);
-//                     }
-// ```
 /// An error of a query batch's search that comes after the reports of the batches before, for
 /// every program: NCBI searches a batch and prints its reports before it reads the next one, so
 /// when the search of a batch stops NCBI has printed the reports of the batches before, without
@@ -86,90 +89,21 @@ impl std::error::Error for ErrorAfterBatchReports {}
 /// NCBI's error for a search without `-subject` (and without `-db`), which the handler of
 /// the database arguments raises before the query and the output are opened.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
-/// ```c
-///     } else if (!m_IsIgBlast){
-///         // IgBlast permits use of germline database
-///         NCBI_THROW(CInputException, eInvalidInput,
-///            "Either a BLAST database or subject sequence(s) must be specified");
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
 pub fn missing_subject_error() -> anyhow::Error {
     options_error("Either a BLAST database or subject sequence(s) must be specified")
 }
 
 /// NCBI's error for a subject file without records, raised when the subjects are read.
 ///
-/// NCBI reference: c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-/// ```c
-/// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-///     : m_QueryVector(& queries)
-/// {
-///     if (queries.Empty()) {
-///         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
 pub fn empty_subjects_error() -> anyhow::Error {
     engine_error("Empty CBlastQueryVector")
 }
 
 /// NCBI's output format numbers (`CFormattingArgs::EOutputFormat`).
 ///
-/// NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1023-1074
-/// ```c
-///     /// Defines the output formats supported by our command line formatter
-///     enum EOutputFormat {
-///         /// Standard pairwise alignments
-///         ePairwise = 0,
-///         ///< Query anchored showing identities
-///         eQueryAnchoredIdentities,
-///         ///< Query anchored no identities
-///         eQueryAnchoredNoIdentities,
-///         ///< Flat query anchored showing identities
-///         eFlatQueryAnchoredIdentities,
-///         ///< Flat query anchored no identities
-///         eFlatQueryAnchoredNoIdentities,
-///         /// XML output
-///         eXml,
-///         /// Tabular output
-///         eTabular,
-///         /// Tabular output with comments
-///         eTabularWithComments,
-///         /// ASN.1 text output
-///         eAsnText,
-///         /// ASN.1 binary output
-///         eAsnBinary,
-///         /// Comma-separated values
-///         eCommaSeparatedValues,
-///         /// BLAST archive format
-///         eArchiveFormat,
-///         /// JSON seq-align
-///         eJsonSeqalign,
-///         /// JSON XInclude
-///         eJson,
-///         /// XML2 XInclude
-///         eXml2,
-///         /// JSON2 single file
-///         eJson_S,
-///         /// XML2 single file
-///         eXml2_S,
-///         /// SAM format
-///         eSAM,
-///
-///         eTaxFormat,
-///
-///         ///igblast AIRR rearrangement, 19
-///         eAirrRearrangement,
-///         /// Comma-separated values with a header
-///         eCommaSeparatedValuesWithHeader,
-///
-///         /// unaligned reads in magicblast
-///         eFasta,
-///         /// Sentinel value for error checking
-///         eEndValue
-///
-///     };
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1023-1074
 pub mod output_format {
     pub const PAIRWISE: i32 = 0;
     pub const QUERY_ANCHORED_IDENTITIES: i32 = 1;
@@ -222,6 +156,59 @@ impl FormatChoice {
             self.number.to_string()
         } else {
             format!("{} {}", self.number, self.spec)
+        }
+    }
+}
+
+/// A `-outfmt` value after the early reading that every program's `run` makes before its option
+/// handlers (`early_format_choice`): the choice it read, or the value left to the formatting
+/// handler. A deferred value has no format number and no custom specification, so the type has
+/// nothing to read for it: a place that needs the choice takes it from `parsed`, `number` or
+/// `at_formatting_handler`, and says what it does for a value not read yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EarlyFormat {
+    /// A value that NCBI's `ParseFormattingString` read.
+    Parsed(FormatChoice),
+    /// A value that does not parse, of a run that writes a search strategy file: NCBI reads no
+    /// `-outfmt` before its option handlers, and the program's formatting handler reads the
+    /// value again and stops with its error (`at_formatting_handler`).
+    Deferred,
+}
+
+impl EarlyFormat {
+    /// The choice that was read, none for a deferred value.
+    pub fn parsed(&self) -> Option<&FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Some(choice),
+            EarlyFormat::Deferred => None,
+        }
+    }
+
+    /// The format number that was read, none for a deferred value.
+    pub fn number(&self) -> Option<i32> {
+        self.parsed().map(|choice| choice.number)
+    }
+
+    /// The choice at the program's formatting handler, the last of its option handlers: a
+    /// deferred value reads the value `outfmt` again, with NCBI's error (the one owner of where
+    /// the value's error comes), any other is as read.
+    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Ok(choice.clone()),
+            EarlyFormat::Deferred => parse_formatting_string(outfmt),
+        }
+    }
+
+    /// `report_format` of the choice; a deferred value has no report (its error comes at the
+    /// formatting handler).
+    pub fn report_format(
+        &self,
+        program: Program,
+        out: Option<&Path>,
+    ) -> anyhow::Result<Option<ReportFormat>> {
+        match self {
+            EarlyFormat::Parsed(choice) => report_format(choice, program, out),
+            EarlyFormat::Deferred => Ok(None),
         }
     }
 }
@@ -296,29 +283,6 @@ impl ReportFormat {
     /// whatever the format.)
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
-    /// ```c++
-    ///     if (m_FormatType == CFormattingArgs::eAsnText
-    ///       || m_FormatType == CFormattingArgs::eAsnBinary
-    ///       || m_FormatType == CFormattingArgs::eXml
-    ///       || m_FormatType == CFormattingArgs::eXml2
-    ///       || m_FormatType == CFormattingArgs::eJson
-    ///       || m_FormatType == CFormattingArgs::eXml2_S
-    ///       || m_FormatType == CFormattingArgs::eJson_S
-    ///       || m_FormatType == CFormattingArgs::eJsonSeqalign
-    ///       || m_FormatType == CFormattingArgs::eSAM)
-    ///     {
-    ///         x_PrintStructuredReport(results, queries);
-    ///         return;
-    ///     }
-    ///
-    ///     if (results.HasErrors()) {
-    ///         ERR_POST(Error << results.GetErrorStrings());
-    ///         return; // errors are deemed fatal
-    ///     }
-    ///     if (results.HasWarnings()) {
-    ///         ERR_POST(Warning << results.GetWarningStrings());
-    ///     }
-    /// ```
     pub fn writes_query_warnings(self) -> bool {
         use ReportFormat::*;
         !matches!(
@@ -345,14 +309,7 @@ impl ReportFormat {
     /// others write them before the query's report.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-    /// ```c++
-    ///        		const CBioseq_Handle& subject_bh =
-    ///                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
-    /// ```c++
-    ///             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
-    /// ```
     pub fn places_subject_reads(self) -> bool {
         use ReportFormat::*;
         matches!(
@@ -374,15 +331,9 @@ impl ReportFormat {
 
 /// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:104
-/// ```c
-///     m_FormattingArgs.Reset(new CFormattingArgs(false, CFormattingArgs::eIsSAM));
-/// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blastp_args.cpp:95 (blastx_args.cpp:113,
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:104
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:95 (c++/src/algo/blast/blastinput/blastx_args.cpp:113,
 /// tblastn_args.cpp:110 and tblastx_args.cpp:104 are the same)
-/// ```c
-///     m_FormattingArgs.Reset(new CFormattingArgs);
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Blastn,
@@ -479,64 +430,8 @@ impl Program {
 /// NCBI's reading of a `-outfmt` value, which `SetOptions` does before every other handler
 /// (`ArchiveFormatRequested`), with NCBI's errors.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851
-/// ```c
-///     if (args[kArgOutputFormat]) {
-///         string fmt_choice =
-///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-///         string::size_type pos;
-///         if ( (pos = fmt_choice.find_first_of(' ')) != string::npos) {
-///             custom_fmt_spec.assign(fmt_choice, pos+1,
-///                                    fmt_choice.size()-(pos+1));
-///             fmt_choice.erase(pos);
-///         }
-///         if(!custom_fmt_spec.empty()) {
-///             if(NStr::StartsWith(custom_fmt_spec, "delim")) {
-///                 vector <string> tokens;
-///                 NStr::Split(custom_fmt_spec," ",tokens);
-///                 if(tokens.size() > 0) {
-///                     string tag;
-///                     bool isValid = NStr::SplitInTwo(tokens[0],"=",tag,custom_delim);
-///                     if(!isValid) {
-///                         string msg("Delimiter format is invalid. Valid format is delim=<delimiter value>");
-///                         NCBI_THROW(CInputException, eInvalidInput, msg);
-///                     }
-///                     else {
-///                         custom_fmt_spec = NStr::Replace(custom_fmt_spec,tokens[0],"");
-///                         custom_fmt_spec = NStr::TruncateSpaces(custom_fmt_spec);
-///                     }
-///                 }
-///             }
-///         }
-///         int val = 0;
-///         try { val = NStr::StringToInt(fmt_choice); }
-///         catch (const CStringException&) {   // probably a conversion error
-///             CNcbiOstrstream os;
-///             os << "'" << fmt_choice << "' is not a valid output format";
-///             string msg = CNcbiOstrstreamToString(os);
-///             NCBI_THROW(CInputException, eInvalidInput, msg);
-///         }
-///         if (val < 0 || val >= static_cast<int>(eEndValue)) {
-///             string msg("Formatting choice is out of range");
-///             throw std::out_of_range(msg);
-///         }
-///         fmt_type = static_cast<EOutputFormat>(val);
-///         if ( !(fmt_type == eTabular ||
-///                fmt_type == eTabularWithComments ||
-///                fmt_type == eCommaSeparatedValues ||
-///                fmt_type == eCommaSeparatedValuesWithHeader ||
-///                fmt_type == eSAM) ) {
-///                custom_fmt_spec.clear();
-///         }
-///     }
-/// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-263
-/// ```c
-///     catch (const std::exception& e) {                                       \
-///         LOG_POST(Error << "Error: " << e.what());                           \
-///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-///     }                                                                       \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
 /// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`; `NStr::StringToInt`
 /// is `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
 pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
@@ -563,7 +458,7 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
     if !(0..END_VALUE).contains(&number) {
         return Err(NativeError {
             exit: 255,
-            message: "Error: Formatting choice is out of range\n".to_string(),
+            message: "Error: Formatting choice is out of range\n".into(),
         }
         .into());
     }
@@ -595,20 +490,8 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
 /// (`Program::custom_fields`), and a custom delimiter unless it writes them with the shared
 /// tabular writer (`Program::shared_tabular`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
-/// ```c
-///     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
-///     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
-///     		NCBI_THROW(CInputException, eInvalidInput,
-///     		                        "SAM format is only applicable to blastn" );
-///     }
-/// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:891-893
-/// ```c
-/// 	if((fmt ==  CFormattingArgs::eXml2) || (fmt ==  CFormattingArgs::eJson)) {
-/// 	   if (s == "-"){
-/// 		   string f_str = (fmt == CFormattingArgs::eXml2) ? "14.": "13.";
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:891-893
 pub fn report_format(
     choice: &FormatChoice,
     program: Program,
@@ -644,29 +527,11 @@ pub fn report_format(
 /// NCBI's errors for the formats of other programs, which the formatting handler raises
 /// after the input and output files are opened.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
-/// ```c
-///     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
-///     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
-///     		NCBI_THROW(CInputException, eInvalidInput,
-///     		                        "SAM format is only applicable to blastn" );
-///     }
-///     if((m_OutputFormat == eAirrRearrangement) && !(m_FormatFlags & eIsAirrRearrangement) ){
-///         NCBI_THROW(CInputException, eInvalidInput,
-///                    "AIRR rearrangement format is only applicable to igblastn" );
-///     }
-///     if (m_OutputFormat == eFasta) {
-///         NCBI_THROW(CInputException, eInvalidInput,
-///                    "FASTA output format is only applicable to magicblast");
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
 ///
 /// Then NCBI's check of a custom delimiter (`report::tabular::custom_delimiter_conflict`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
-/// ```c++
-///     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
-/// ```
 pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyhow::Result<()> {
     formatting_handler_check_with(choice, program.is_sam())
 }
@@ -696,22 +561,7 @@ pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> any
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after
 /// `Query is Empty!`.
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:888-899
-/// ```c
-/// UseXInclude(const CFormattingArgs & f, const string & s)
-/// {
-/// 	CFormattingArgs::EOutputFormat fmt = f.GetFormattedOutputChoice();
-/// 	if((fmt ==  CFormattingArgs::eXml2) || (fmt ==  CFormattingArgs::eJson)) {
-/// 	   if (s == "-"){
-/// 		   string f_str = (fmt == CFormattingArgs::eXml2) ? "14.": "13.";
-/// 		   NCBI_THROW(CInputException, eEmptyUserInput,
-/// 		              "Please provide a file name for outfmt " + f_str);
-/// 	   }
-/// 	   return true;
-/// 	}
-/// 	return false;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:888-899
 pub fn xinclude_check(choice: &FormatChoice) -> anyhow::Result<()> {
     xinclude_check_for(choice, None)
 }
@@ -730,50 +580,45 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
     }
 }
 
+/// Whether NCBI refuses the format choice `choice` of a `program` run with `-out` `out` itself,
+/// later than its parse: SAM, AIRR and FASTA outside their programs and a custom delimiter that
+/// the field list uses (`formatting_handler_check`), and an XInclude format (13, 14) without a
+/// file name (`xinclude_check_for`). LOSAT's refusals of the formats that psiblast, rpsblast and
+/// rpstblastn do not write yet, which come at the parse, leave these to NCBI's own error at its
+/// place (line RG F/d36 probes rps.conf20, rps.o14, ps.o13, ps.o14).
+pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<&Path>) -> bool {
+    formatting_handler_check(choice, program).is_err() || xinclude_check_for(choice, out).is_err()
+}
+
+/// The early reading of the `-outfmt` value `outfmt` that every program's `run` makes before its
+/// option handlers (NCBI's `ArchiveFormatRequested`), with NCBI's errors: the choice, or
+/// `EarlyFormat::Deferred` where the value does not parse and the run writes a search strategy
+/// file (`strategy`). NCBI then reads no `-outfmt` before its option handlers: the strategy file
+/// is created first and the early read is skipped (the `||` of that reference), so the value's error comes
+/// from the formatting handler, the last of the handlers, after the arguments' own errors in
+/// their order (`-subject` opened and `-subject_loc` read, `-query` opened, `-out` created,
+/// `-query_loc` read; line RG F/d36 review 2c B1). The program's own formatting handler reads the
+/// value again and raises it there; nothing before it can use a deferred choice (`EarlyFormat`
+/// has no number for it).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<EarlyFormat> {
+    match parse_formatting_string(outfmt) {
+        Ok(choice) => Ok(EarlyFormat::Parsed(choice)),
+        Err(_) if strategy => Ok(EarlyFormat::Deferred),
+        Err(error) => Err(error),
+    }
+}
+
 /// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. Every locut and
 /// hicut that `NStr::StringToDouble` reads is taken, an infinity or NaN too: the query filter
 /// keeps the default for one that is not above 0 (NaN included, `SegSpec::params`), SEG
 /// compares an infinite one as NCBI does (`+inf` masks every window), and the filter string of
 /// the reports prints it as glibc does (`report::blast_xml::filter`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406
-/// ```c
-///         if (m_QueryIsProtein && args[kArgSegFiltering]) {
-///             const string& seg_opts = args[kArgSegFiltering].AsString();
-///             if (seg_opts == kDfltArgNoFiltering) {
-///                 opt.SetSegFiltering(false);
-///             } else if (seg_opts == kDfltArgApplyFiltering) {
-///                 opt.SetSegFiltering(true);
-///             } else {
-///                 x_TokenizeFilteringArgs(seg_opts, tokens);
-///                 opt.SetSegFilteringWindow(NStr::StringToInt(tokens[0]));
-///                 opt.SetSegFilteringLocut(NStr::StringToDouble(tokens[1]));
-///                 opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
-///             }
-///         }
-/// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:375-384
-/// ```c
-/// CFilteringArgs::x_TokenizeFilteringArgs(const string& filtering_args,
-///                                         vector<string>& output) const
-/// {
-///     output.clear();
-///     NStr::Split(filtering_args, " ", output);
-///     if (output.size() != 3) {
-///         NCBI_THROW(CInputException, eInvalidInput,
-///                    "Invalid number of arguments to filtering option");
-///     }
-/// }
-/// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:423-428
-/// ```c
-///     } catch (const CStringException& e) {
-///         if (e.GetErrCode() == CStringException::eConvert) {
-///             NCBI_THROW(CInputException, eInvalidInput,
-///                        "Invalid input for filtering parameters");
-///         }
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:423-428
 pub fn parse_seg_option(value: &str) -> anyhow::Result<SegSpec> {
     read_seg_option(value).map_err(options_error)
 }
@@ -822,49 +667,7 @@ pub enum CompositionMode {
 /// `u` or `U` second character asks for unified P-values with an adjusting mode.
 /// Returns the mode and whether unified P-values are asked for.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:834-892
-/// ```c
-///         ECompoAdjustModes compo_mode = eNoCompositionBasedStats;
-///
-///         switch (comp_stat_string[0]) {
-///             case '0': case 'F': case 'f':
-///                 compo_mode = eNoCompositionBasedStats;
-///                 break;
-///             case '1':
-///                 compo_mode = eCompositionBasedStats;
-///                 break;
-///             case 'D': case 'd':
-/// ...
-///                 else {
-///                     compo_mode = eCompositionMatrixAdjust;
-///                 }
-///                 break;
-///             case '2':
-///                 compo_mode = eCompositionMatrixAdjust;
-///                 break;
-///             case '3':
-///                 compo_mode = eCompoForceFullMatrixAdjust;
-///                 break;
-///             case 'T': case 't':
-///                 compo_mode = (program == eRPSBlast || program == eRPSTblastn || program == eDeltaBlast) ?
-///                     eCompositionBasedStats : eCompositionMatrixAdjust;
-///                 break;
-///         }
-/// ...
-///         if (ungapped && *ungapped && compo_mode != eNoCompositionBasedStats) {
-///             NCBI_THROW(CInputException, eInvalidInput,
-///                        "Composition-adjusted searched are not supported with "
-///                        "an ungapped search, please add -comp_based_stats F or "
-///                        "do a gapped search");
-///         }
-///
-///         opt.SetCompositionBasedStats(compo_mode);
-///         if (program == eBlastp &&
-///             compo_mode != eNoCompositionBasedStats &&
-///             tolower(comp_stat_string[1]) == 'u') {
-///             opt.SetUnifiedP(1);
-///         }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:834-892
 pub fn parse_comp_based_stats(
     value: &str,
     blastp: bool,
@@ -897,41 +700,10 @@ pub fn parse_comp_based_stats(
 /// ([`environment_int`]), and a chunk size that is not divisible by 3 is NCBI's engine error. Each
 /// program returns it through the error frame of its first batch, after the outfmt 0 prolog.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
-/// ```c
-///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
-///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
-///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
-///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
-///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
-///     /* No split for ungapped mode JIRA SB-1082 */
-///     if (!options->GetGappedMode()) m_NumChunks = 1;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:55-61
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
-/// ```c
-///     SBlastSetupData(CRef<IQueryFactory> qf, CRef<CBlastOptions> opts)
-///         : m_InternalData(new SInternalData),
-///       m_QuerySplitter(new CQuerySplitter(qf, opts))
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:98-103
-/// ```c
-///     const EBlastProgramType prog_type(EProgramToEBlastProgramType(program));
-///     if (Blast_QueryIsTranslated(prog_type) && !Blast_SubjectIsPssm(prog_type) &&
-///         (retval % CODON_LENGTH) != 0) {
-///         NCBI_THROW(CBlastException, eInvalidArgument,
-///                    "Split query chunk size must be divisible by 3");
-///     }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:78-110
-/// ```c
-///     // do not split RPS-BLAST
-///     if (Blast_SubjectIsPssm(program) || ... ) { retval = false; }
-/// ...
-///     if ( !SplitQuery_ShouldSplit(program, *chunk_size, concatenated_query_length, num_queries)) {
-///         return 1;
-///     }
-///     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:98-103
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:78-111
 /// `SplitQuery_CalculateNumChunks` reads the overlap (`getenv("OVERLAP_CHUNK_SIZE")` in
 /// `SplitQuery_GetOverlapChunkSize`) only after `SplitQuery_ShouldSplit` is true, and that is
 /// false for RPS-BLAST (`Blast_SubjectIsPssm`, "do not split RPS-BLAST"), so `rpsblast` reads
@@ -961,18 +733,8 @@ pub fn check_query_split_environment(
 /// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` as NCBI reads it (`None` when unset or blank); `Err` is
 /// the `CStringException` of a value that it cannot convert ([`environment_int`]).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:58-61
-/// ```c
-///     char* chunk_sz_str = getenv("CHUNK_SIZE");
-///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-///         retval = NStr::StringToInt(chunk_sz_str);
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:54-57
-/// ```c
-///     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
-///     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
-///         retval = NStr::StringToInt(overlap_sz_str);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:58-61
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:54-57
 pub(crate) fn read_query_split_variable(variable: &str) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
         Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
@@ -989,14 +751,8 @@ pub(crate) fn read_query_split_variable(variable: &str) -> anyhow::Result<Option
 /// ` and the exception's report, exit status 255). The bytes are those of the value as the
 /// process got it.
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643 (quoted at
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643 (cited at
 /// `ncbi_str::string_to_int`)
-/// ```c++
-/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-/// {
-///     S2N_CONVERT_GUARD_EX(flags);
-///     Int8 value = StringToInt8(str, flags, base);
-/// ```
 pub(crate) fn environment_int(value: &std::ffi::OsStr) -> anyhow::Result<i32> {
     crate::ncbi_str::string_to_int(value.as_encoded_bytes(), 0)
         .map_err(|e| NativeError::exception(&e).into())
@@ -1006,14 +762,7 @@ pub(crate) fn environment_int(value: &std::ffi::OsStr) -> anyhow::Result<i32> {
 /// reproduce: `BL2SEQ_LEGACY` in a search of `-subject` sequences (`fasta_subjects`; NCBI
 /// searches each subject on its own and writes another report, a `-db` search ignores it).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
-/// ```c
-/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
-/// 	if (bl2seq_legacy)
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
-/// 	else
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210
 /// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
 /// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
 /// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
@@ -1039,36 +788,9 @@ pub fn check_search_environment(program: &str, fasta_subjects: bool) -> anyhow::
 /// reader's messages of the batch's records. An integer only decides whether the sequences are
 /// fetched ahead (`common::database::prefetch_off`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
-/// ```c
-/// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-/// 		if (pre_fetch_limit_str) {
-/// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-/// 			if(pre_fetch_limit == 0) {
-/// 				return false;
-/// 			}
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:756-765
-/// ```c
-/// void BlastFormatter_PreFetchSequenceData(const blast::CSearchResultSet& results,
-/// 		                                 CRef<CScope> scope,
-/// 		                                 blast::CFormattingArgs::EOutputFormat format_type)
-/// {
-///     _ASSERT(scope.NotEmpty());
-///     if (results.size() == 0) {
-///         return;
-///     }
-///     if(!s_PreFetchSeqs(results, format_type)){
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blastx_app.cpp:283-288
-/// ```c
-///             if (fmt_args->ArchiveFormatRequested(args)) {
-///                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-///                 m_Bah.ResetMessages();
-///             } else {
-///                 BlastFormatter_PreFetchSequenceData(*results, scope,
-///                 		                            fmt_args->GetFormattedOutputChoice());
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:732-737
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-765
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288
 /// The archive (`archive`: every requested format is outfmt 11, `ReportOutputs::only_archive`) is
 /// written without the prefetch, so NCBI never converts the value there; blastp, tblastn,
 /// tblastx, rpsblast and blastn write it so too (blastp_app.cpp:280-285, tblastn_app.cpp:294-299
@@ -1077,14 +799,7 @@ pub fn check_search_environment(program: &str, fasta_subjects: bool) -> anyhow::
 /// tblastn_node.cpp:206-210 and 243-247, blastn_node.cpp:204-208). psiblast's iterations fetch
 /// ahead before they choose the archive, so PSIBLAST passes `archive` false.
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/psiblast_app.cpp:262-266
-/// ```c
-///                    results = psiblast->Run();
-///                    BlastFormatter_PreFetchSequenceData(*results, scope,
-///                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
-///                    if(CFormattingArgs::eArchiveFormat ==
-///                 	  m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice())
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-266
 /// When NCBI splits a `-db` search by queries (blastp, blastx, tblastn, blastn: `-mt_mode 1`, or
 /// the automatic choice at `-num_threads` 2 or more for a query file over the program's size and a
 /// database under its length, `s_GetMT1Cutoffs`), its nodes catch the exception: NCBI writes
@@ -1097,7 +812,7 @@ pub fn check_prefetch_environment(archive: bool) -> anyhow::Result<()> {
     prefetch_seqs_limit().map(drop)
 }
 
-/// `PRE_FETCH_SEQS_LIMIT` as NCBI's prefetch converts it (`s_PreFetchSeqs`, quoted at
+/// `PRE_FETCH_SEQS_LIMIT` as NCBI's prefetch converts it (`s_PreFetchSeqs`, cited at
 /// `check_prefetch_environment`): `None` when it is not set; `Err` is the `CStringException` of a
 /// value that `NStr::StringToInt` cannot convert ([`environment_int`]). The one reader of the
 /// variable: the check of the first batch's prefetch, and the limit that decides whether a batch's
@@ -1112,12 +827,7 @@ pub(crate) fn prefetch_seqs_limit() -> anyhow::Result<Option<i32>> {
 /// program's `default`: tblastx 10002 nucleotides, tblastn 20000 and blastp 10000
 /// residues), as the `TSeqPos` that `CBlastInput` compares with.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input_aux.cpp:117-119
-/// ```c
-///     case eTblastn:
-///         retval = 20000;
-///         break;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:117-119
 /// A value that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI there, before the
 /// formatter and anything else is written, with its `CStringException` (`NativeError::exception`,
 /// exit status 255; with outfmt 11 NCBI's error archive follows).
@@ -1133,14 +843,10 @@ pub fn query_batch_size(default: u32) -> anyhow::Result<u32> {
 
 /// Whether the environment variable `OLD_FSC` is set (to any value, the empty one too), with
 /// which NCBI's protein programs compute without the Gumbel block (finite-size correction).
-/// NCBI sets it itself for `-searchsp` (blast_args.cpp:303-307), so BLASTP, PSIBLAST, RPSBLAST, BLASTX
+/// NCBI sets it itself for `-searchsp` (c++/src/algo/blast/blastinput/blast_args.cpp:303-307), so BLASTP, PSIBLAST, RPSBLAST, BLASTX
 /// and TBLASTN read it as they read `-searchsp`: their `old_fsc`.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:922-923
-/// ```c
-///     use_old_fsc = getenv("OLD_FSC");
-///     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
 pub fn old_fsc_environment() -> bool {
     std::env::var_os("OLD_FSC").is_some()
 }
@@ -1155,15 +861,7 @@ pub fn old_fsc_environment() -> bool {
 /// docs/evidence/losat_web_e2e/AUTHORITY.md). `query_length` is the length of the
 /// concatenated query of the batch (`BLAST_SequenceBlk->length`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_extend.c:52-57
-/// ```c
-///                 diag_array_length = 1;
-///                 /* What power of 2 is just longer than the query? */
-///                 while (diag_array_length < (qlen+window_size))
-///                 {
-///                         diag_array_length = diag_array_length << 1;
-///                 }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
 pub fn check_diag_table_window(
     query_length: i32,
     window: i32,
@@ -1178,445 +876,5 @@ pub fn check_diag_table_window(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn diag_table_windows_over_2_to_the_30_are_rejected() {
-        // NCBI blast_extend.c:52-57: the doubling loop ends only when qlen + window <= 2^30.
-        assert!(check_diag_table_window(1000, (1 << 30) - 1000, "BLASTP").is_ok());
-        for window in [(1 << 30) - 999, i32::MAX] {
-            let error = format!(
-                "{:#}",
-                check_diag_table_window(1000, window, "TBLASTX").unwrap_err()
-            );
-            assert!(
-                error.contains("not supported by LOSAT's TBLASTX"),
-                "{window}: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn seg_values_that_strtod_does_not_read_are_ncbi_errors() {
-        // NCBI blast_args.cpp:405-406,423-428 (StringToDouble with default flags).
-        for value in [
-            "12 2.5x 2.5",
-            "12 2,2 2.5",
-            "12 1e 2.5",
-            "12 0x 2.5",
-            "12 . 2.5",
-            "12 nan(1) 2.5",
-        ] {
-            let error = format!("{:#}", parse_seg_option(value).unwrap_err());
-            assert!(
-                error.contains("Invalid input for filtering parameters"),
-                "{value}: {error}"
-            );
-        }
-        // NCBI 2.17.0 searches with an infinite or NaN locut or hicut (sw8/nfix/probe/seg2), as
-        // LOSAT does: the values as read (the filter string prints them), defaults for those not
-        // above 0 in the query filter (`SegSpec::params`).
-        for (value, locut, hicut) in [
-            ("12 +inf 2.5", f64::INFINITY, 2.5),
-            ("12 1e400 2.5", f64::INFINITY, 2.5),
-            ("12 2.2 -nan", 2.2, -f64::NAN),
-            ("12 +nan(1) 2.5", f64::from_bits(0x7ff8_0000_0000_0001), 2.5),
-            ("12 -inf -inf", f64::NEG_INFINITY, f64::NEG_INFINITY),
-        ] {
-            match parse_seg_option(value).unwrap() {
-                SegSpec::WindowLocutHicut {
-                    window: 12,
-                    locut: read_locut,
-                    hicut: read_hicut,
-                } => assert_eq!(
-                    (read_locut.to_bits(), read_hicut.to_bits()),
-                    (locut.to_bits(), hicut.to_bits()),
-                    "{value}"
-                ),
-                other => panic!("{value}: {other:?}"),
-            }
-        }
-        let params = |value: &str| parse_seg_option(value).unwrap().params().unwrap();
-        let (inf_low, nan_high) = (params("12 +inf 2.5"), params("12 2.2 -nan"));
-        assert_eq!(
-            (inf_low.locut, inf_low.hicut),
-            (f64::INFINITY, f64::INFINITY)
-        );
-        assert_eq!((nan_high.locut, nan_high.hicut), (2.2, 2.5));
-        // NCBI's error of the hicut, with an infinite locut.
-        let error = format!("{:#}", parse_seg_option("12 +inf 2.5x").unwrap_err());
-        assert!(
-            error.contains("Invalid input for filtering parameters"),
-            "{error}"
-        );
-        assert!(parse_seg_option("12 2.2 2.5").is_ok());
-        // `strtod` reads hexadecimal numbers: NCBI 2.17.0's `blastp -seg "12 0x1.2p1 0x1.4p1"`
-        // searches as `-seg "12 2.25 2.5"`, `-seg "12 0x10 2.5"` with the locut 16.
-        for (value, locut, hicut) in [
-            ("12 0x1.2p1 0x1.4p1", 2.25, 2.5),
-            ("12 0x10 2.5", 16.0, 2.5),
-        ] {
-            match parse_seg_option(value).unwrap() {
-                SegSpec::WindowLocutHicut {
-                    window: 12,
-                    locut: read_locut,
-                    hicut: read_hicut,
-                } => assert_eq!((read_locut, read_hicut), (locut, hicut), "{value}"),
-                other => panic!("{value}: {other:?}"),
-            }
-        }
-    }
-
-    fn message(error: anyhow::Error) -> String {
-        match error.downcast::<NativeError>() {
-            Ok(native) => format!("{} {}", native.exit, native.message),
-            Err(other) => format!("losat {other}"),
-        }
-    }
-
-    // NCBI BLAST+ 2.17.0 -outfmt spellings (blast_args.cpp:2801-2851).
-    #[test]
-    fn formatting_strings_are_read_as_ncbi_reads_them() {
-        assert_eq!(
-            parse_formatting_string(" 6 ").unwrap(),
-            FormatChoice {
-                number: 6,
-                spec: String::new(),
-                delimiter: String::new(),
-            }
-        );
-        assert_eq!(parse_formatting_string("+6").unwrap().number, 6);
-        assert_eq!(parse_formatting_string("06").unwrap().normalized(), "6");
-        assert!(parse_formatting_string("6 std").unwrap().custom());
-        assert!(!parse_formatting_string("0 std").unwrap().custom());
-        assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), "0");
-        let delimited = parse_formatting_string("7 delim=, qseqid  sseqid ").unwrap();
-        assert_eq!(
-            (delimited.spec.as_str(), delimited.delimiter.as_str()),
-            ("qseqid  sseqid", ",")
-        );
-        assert_eq!(delimited.normalized(), "7 qseqid  sseqid");
-        assert!(!parse_formatting_string("6 delim=").unwrap().custom());
-        assert!(message(parse_formatting_string("6 delim").unwrap_err())
-            .contains("Delimiter format is invalid"));
-        assert_eq!(
-            message(parse_formatting_string("abc").unwrap_err()),
-            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
-        );
-        assert_eq!(
-            message(parse_formatting_string("22").unwrap_err()),
-            "255 Error: Formatting choice is out of range\n"
-        );
-        assert_eq!(
-            message(parse_formatting_string("-1").unwrap_err()),
-            "255 Error: Formatting choice is out of range\n"
-        );
-    }
-
-    const PROGRAMS: [Program; 5] = [
-        Program::Blastn,
-        Program::Blastp,
-        Program::Blastx,
-        Program::Tblastn,
-        Program::Tblastx,
-    ];
-
-    // NCBI blast_args.hpp:1023-1074: the numbers of `EOutputFormat`; 19 (AIRR) and 21 (FASTA)
-    // are igblastn's and magicblast's, 22 is `eEndValue`.
-    #[test]
-    fn report_formats_are_ncbis_format_numbers() {
-        for number in (0..=18).chain([20]) {
-            let format = ReportFormat::from_number(number).unwrap();
-            assert_eq!(format.number(), number);
-        }
-        for number in [-1, AIRR_REARRANGEMENT, FASTA, END_VALUE, 99] {
-            assert_eq!(ReportFormat::from_number(number), None, "{number}");
-        }
-        assert_eq!(ReportFormat::from_number(17), Some(ReportFormat::Sam));
-        assert_eq!(
-            ReportFormat::from_number(20),
-            Some(ReportFormat::CommaSeparatedValuesWithHeader)
-        );
-    }
-
-    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8, 9 and 12 in
-    // every program (8 and 12: line OF track S, OF3b; 9: OF3c), and 5 in every program
-    // (BLASTN, BLASTP: OF4a; BLASTX, TBLASTN, TBLASTX: OF4b); 15 and 16 in BLASTP and BLASTN
-    // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program;
-    // 13 and 14 in BLASTP and BLASTN (OF5c part 1), BLASTX, TBLASTN and TBLASTX (part 2): every
-    // program writes 0, 5 to 9 and 12 to 16.
-    // 17 (SAM) in BLASTN alone (OF6); 10 and 20 in every program with the shared tabular
-    // writer (line CLI C2, PRs 1 to 3).
-    #[test]
-    fn every_program_writes_its_formats_only() {
-        for program in PROGRAMS {
-            let written: Vec<i32> = (0..END_VALUE)
-                .filter_map(ReportFormat::from_number)
-                .filter(|&format| program.writes(format))
-                .map(ReportFormat::number)
-                .collect();
-            // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
-            // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
-            // 10 and 20 with the shared tabular writer (line CLI C2: every program); 18, the
-            // organism report (line RG T2: every program); 1 to 4, the query-anchored views (line RG
-            // T3a: BLASTP; T3b: BLASTN, TBLASTN; T3c: BLASTX, TBLASTX: every program).
-            let expected: &[i32] = match program {
-                Program::Blastn => &[
-                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20,
-                ],
-                _ => &[
-                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20,
-                ],
-            };
-            assert_eq!(written, expected, "{program:?}");
-        }
-        assert_eq!(
-            PROGRAMS.map(Program::name),
-            ["BLASTN", "BLASTP", "BLASTX", "TBLASTN", "TBLASTX"]
-        );
-        assert_eq!(
-            PROGRAMS.map(Program::is_sam),
-            [true, false, false, false, false]
-        );
-        assert_eq!(
-            PROGRAMS.map(Program::custom_fields),
-            [true, true, true, true, true]
-        );
-        assert_eq!(
-            PROGRAMS.map(Program::shared_tabular),
-            [true, true, true, true, true]
-        );
-    }
-
-    // NCBI blast_format.cpp:1431-1452: the structured reports return before the result
-    // warnings.
-    #[test]
-    fn structured_formats_write_no_query_warnings() {
-        let silent: Vec<i32> = (0..END_VALUE)
-            .filter_map(ReportFormat::from_number)
-            .filter(|format| !format.writes_query_warnings())
-            .map(ReportFormat::number)
-            .collect();
-        assert_eq!(silent, [5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
-    }
-
-    #[test]
-    fn report_formats_defer_ncbis_own_errors() {
-        let choice = |number| FormatChoice {
-            number,
-            spec: String::new(),
-            delimiter: String::new(),
-        };
-        let file = Some(Path::new("o.json"));
-        for program in PROGRAMS {
-            let name = program.name();
-            assert_eq!(
-                report_format(&choice(0), program, None).unwrap(),
-                Some(ReportFormat::Pairwise)
-            );
-            // NCBI rejects these later (`formatting_handler_check`, `xinclude_check`).
-            for number in [AIRR_REARRANGEMENT, FASTA, JSON, XML2] {
-                assert_eq!(
-                    report_format(&choice(number), program, None).unwrap(),
-                    None,
-                    "{name} {number}"
-                );
-            }
-            assert_eq!(
-                report_format(&choice(JSON), program, Some(Path::new("-"))).unwrap(),
-                None
-            );
-            // Formats that NCBI writes and LOSAT does not, before the inputs are read.
-            for number in (1..=16)
-                .filter(|&number| !matches!(number, PAIRWISE | TABULAR | TABULAR_WITH_COMMENTS))
-                .filter(|&number| {
-                    let format = ReportFormat::from_number(number).unwrap();
-                    !program.writes(format)
-                })
-                .chain([18, 20])
-                .filter(|&number| {
-                    !ReportFormat::from_number(number).is_some_and(|format| program.writes(format))
-                })
-            {
-                assert_eq!(
-                    report_format(&choice(number), program, file)
-                        .unwrap_err()
-                        .to_string(),
-                    format!("output format {number} is not supported by LOSAT's {name}")
-                );
-            }
-            let sam = report_format(&choice(SAM), program, None);
-            if program.is_sam() {
-                assert_eq!(sam.unwrap(), Some(ReportFormat::Sam));
-            } else {
-                assert_eq!(sam.unwrap(), None);
-            }
-            // A delimiter: the shared tabular writer's (BLASTN, TBLASTN, TBLASTX), else LOSAT's
-            // rejection.
-            let delimited = parse_formatting_string("6 delim=, std").unwrap();
-            if program.shared_tabular() {
-                assert_eq!(
-                    report_format(&delimited, program, None).unwrap(),
-                    Some(ReportFormat::Tabular)
-                );
-            } else {
-                assert!(report_format(&delimited, program, None)
-                    .unwrap_err()
-                    .to_string()
-                    .ends_with(&format!("is not supported by LOSAT's {name}")));
-            }
-        }
-        // A number outside NCBI's enum (no `-outfmt` reads so) is LOSAT's rejection.
-        assert!(report_format(&choice(END_VALUE), Program::Blastp, None).is_err());
-    }
-
-    // NCBI blast_args.cpp:2874-2886 and blast_app_util.cpp:888-899.
-    #[test]
-    fn ncbis_later_format_errors_are_its_messages() {
-        let choice = |number| FormatChoice {
-            number,
-            spec: String::new(),
-            delimiter: String::new(),
-        };
-        let options =
-            |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
-        for program in PROGRAMS {
-            let sam = formatting_handler_check(&choice(SAM), program);
-            if program.is_sam() {
-                assert!(sam.is_ok());
-            } else {
-                assert_eq!(
-                    message(sam.unwrap_err()),
-                    options("SAM format is only applicable to blastn")
-                );
-            }
-            assert_eq!(
-                message(
-                    formatting_handler_check(&choice(AIRR_REARRANGEMENT), program).unwrap_err()
-                ),
-                options("AIRR rearrangement format is only applicable to igblastn")
-            );
-            assert_eq!(
-                message(formatting_handler_check(&choice(FASTA), program).unwrap_err()),
-                options("FASTA output format is only applicable to magicblast")
-            );
-            for number in (0..=16).chain([18, 20]) {
-                assert!(formatting_handler_check(&choice(number), program).is_ok());
-            }
-        }
-        assert_eq!(
-            message(xinclude_check(&choice(JSON)).unwrap_err()),
-            options("Please provide a file name for outfmt 13.")
-        );
-        assert_eq!(
-            message(xinclude_check(&choice(XML2)).unwrap_err()),
-            options("Please provide a file name for outfmt 14.")
-        );
-        for number in (0..=12).chain(15..=21) {
-            assert!(xinclude_check(&choice(number)).is_ok());
-        }
-    }
-
-    #[test]
-    fn seg_values_follow_ncbis_filtering_handler() {
-        assert_eq!(parse_seg_option("no").unwrap(), SegSpec::No);
-        assert!(message(parse_seg_option("12 2.2").unwrap_err())
-            .contains("Invalid number of arguments to filtering option"));
-        assert!(message(parse_seg_option("12  2.2 2.5").unwrap_err())
-            .contains("Invalid number of arguments to filtering option"));
-        assert!(message(parse_seg_option("x 2.2 2.5").unwrap_err())
-            .contains("Invalid input for filtering parameters"));
-        assert!(message(parse_seg_option("12 inf 2.5").unwrap_err())
-            .contains("Invalid input for filtering parameters"));
-        assert_eq!(
-            parse_seg_option("+12 2.2 .5").unwrap(),
-            SegSpec::WindowLocutHicut {
-                window: 12,
-                locut: 2.2,
-                hicut: 0.5
-            }
-        );
-    }
-
-    #[test]
-    fn composition_modes_read_the_first_character() {
-        for (value, mode) in [
-            ("0", CompositionMode::NoCompositionBasedStats),
-            ("F", CompositionMode::NoCompositionBasedStats),
-            ("", CompositionMode::NoCompositionBasedStats),
-            ("x", CompositionMode::NoCompositionBasedStats),
-            ("4", CompositionMode::NoCompositionBasedStats),
-            ("1", CompositionMode::CompositionBasedStats),
-            ("D", CompositionMode::CompositionMatrixAdjust),
-            ("t", CompositionMode::CompositionMatrixAdjust),
-            ("2xyz", CompositionMode::CompositionMatrixAdjust),
-            ("3", CompositionMode::CompoForceFullMatrixAdjust),
-        ] {
-            assert_eq!(
-                parse_comp_based_stats(value, true, false).unwrap().0,
-                mode,
-                "{value}"
-            );
-        }
-        assert!(parse_comp_based_stats("2U", true, false).unwrap().1);
-        assert!(!parse_comp_based_stats("2U", false, false).unwrap().1);
-        assert!(!parse_comp_based_stats("0u", true, false).unwrap().1);
-        assert!(parse_comp_based_stats("2", true, true).is_err());
-        assert!(parse_comp_based_stats("x", true, true).is_ok());
-    }
-
-    // NCBI BLAST+ 2.17.0 (the official Linux x64 release) with `CHUNK_SIZE`,
-    // `OVERLAP_CHUNK_SIZE`, `BATCH_SIZE` and `PRE_FETCH_SEQS_LIMIT` set to each value (env
-    // parity probe h_probe of 2026-11-12, REPORT.md "Values"): `NStr::StringToInt` with flags 0
-    // takes a sign and no spaces; a value that it cannot convert ends the program with
-    // `CATCH_ALL`'s report of its `CStringException`, exit status 255.
-    #[test]
-    fn environment_values_are_converted_as_ncbis_string_to_int() {
-        use std::ffi::OsStr;
-        for (text, value) in [("5", 5), ("+5", 5), ("-1", -1), ("0", 0)] {
-            assert_eq!(
-                environment_int(OsStr::new(text)).unwrap(),
-                value,
-                "{text:?}"
-            );
-        }
-        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
-        for (text, line, function, kind, pos) in [
-            ("abc", 861, "StringToInt8", "Int8", 0),
-            (" 5", 861, "StringToInt8", "Int8", 0),
-            ("", 861, "StringToInt8", "Int8", 0),
-            ("1.5", 870, "StringToInt8", "Int8", 1),
-            ("5x", 870, "StringToInt8", "Int8", 1),
-            ("5 ", 870, "StringToInt8", "Int8", 1),
-            (
-                "99999999999999999999",
-                852,
-                "StringToInt8",
-                "Int8, overflow",
-                18,
-            ),
-            (
-                "-99999999999999999999",
-                852,
-                "StringToInt8",
-                "Int8, overflow",
-                19,
-            ),
-            ("2147483648", 640, "StringToInt", "int, overflow", 0),
-            ("-2147483649", 640, "StringToInt", "int, overflow", 0),
-        ] {
-            let error = environment_int(OsStr::new(text)).unwrap_err();
-            let native = error.downcast_ref::<NativeError>().expect("NCBI's report");
-            assert_eq!(native.exit, 255, "{text:?}");
-            assert_eq!(
-                native.message,
-                // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
-                crate::wording::losat_text(&format!(
-                    "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{text}' to {kind} (m_Pos = {pos})\n\n"
-                )),
-                "{text:?}"
-            );
-        }
-    }
-}
+#[path = "app_tests.rs"]
+mod tests;

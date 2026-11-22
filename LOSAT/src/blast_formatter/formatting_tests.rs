@@ -24,7 +24,10 @@ fn caught(error: anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .expect("NCBI's error");
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 fn error_of(outfmt: &str) -> (i32, String) {
@@ -227,6 +230,7 @@ fn the_formatting_options_are_kept_where_ncbi_reads_them() {
             line_length: Some(30),
             sort_hits: Some(2),
             sort_hsps: Some(1),
+            hitlist_start: None,
         }
     );
     assert!(formatting.warnings.is_empty());

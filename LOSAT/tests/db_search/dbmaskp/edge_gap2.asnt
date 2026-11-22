@@ -1,0 +1,22 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program seg,
+  algo-options "edge gap2",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 100,
+          to 149,
+          id local id 5
+        },
+        {
+          from 152,
+          to 199,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

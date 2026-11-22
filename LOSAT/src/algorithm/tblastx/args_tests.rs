@@ -7,7 +7,7 @@ fn parse_args(args: &[&str]) -> TblastxArgs {
     let mut all_args = vec!["losat".to_string(), "tblastx".to_string()];
     all_args.extend(args.iter().map(|s| s.to_string()));
 
-    // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
     let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
     let crate::cli::Commands::Tblastx(args) = cli.command else {
@@ -66,7 +66,7 @@ fn test_custom_threshold() {
     assert_eq!(args.word_threshold(), 20.0);
 }
 
-// NCBI c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
 // BLAST_GetSuggestedWindowSize) and c++/src/algo/blast/blastinput/blast_args.cpp:586-623
 // (TBLASTX takes the suggestion, plus 2, unless -threshold is given): PAM30 reads 18 and 15;
 // the name is kept as typed.
@@ -174,13 +174,6 @@ fn test_seg_options() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-// ```c++
-// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
-// {
-//     if (args[kArgLookupTableMaskingOnly]) {
-//         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-//     }
-// ```
 // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is false
 // (`kDfltArgLookupTableMaskingOnlyProt`).
 #[test]
@@ -201,7 +194,7 @@ fn test_soft_masking_sets_mask_at_hash() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244 and 321-323
-// (quoted at `TblastxArgs::sum_stats`); c++/src/algo/blast/api/tblastx_options.cpp:76-81 (the
+// (cited at `TblastxArgs::sum_stats`); c++/src/algo/blast/api/tblastx_options.cpp:76-81 (the
 // default, true)
 // `-sum_stats` takes NCBI's boolean spellings (`NStr::StringToBool`); omitted, the search links
 // with sum statistics and the archive records nothing (`None`).
@@ -257,15 +250,7 @@ fn test_query_and_subject_paths() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-944
-// ```c++
-//     arg_desc.AddDefaultKey(kArgMaxIntronLength, "length",
-// ...
-//                     CArgDescriptions::eInteger,
-//                     NStr::IntToString(kDfltArgMaxIntronLength));
-//     arg_desc.SetConstraint(kArgMaxIntronLength,
-//                            new CArgAllowValuesGreaterThanOrEqual(0));
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (cited at
 // `check_ncbi_options`)
 // `-max_intron_length` is an integer of 0 or more (NCBI's argument errors for the others are the
 // parser's); 0 runs as without it, any other value is NCBI's options error for TBLASTX.

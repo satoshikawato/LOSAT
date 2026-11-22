@@ -5,10 +5,14 @@ name: Python wheels
 # and later, built as the native release binaries are (release-readiness-v020.yml, job
 # native-artifacts): on the same runner images, for their host targets, with Rust 1.92.0 and, by
 # python/Cargo.toml and python/.cargo/config.toml, LOSAT's release profile (panic = "unwind" aside)
-# and x86-64 rustflags. `maturin build` runs on the runner itself; `--compatibility pypi` fails a
-# wheel whose tags PyPI would refuse and `--auditwheel check` one that needs a library outside the
-# manylinux set, instead of copying it into the wheel. On Linux the manylinux tag is the oldest glibc
-# that the wheel's symbols allow, as for the release binary built on the same image.
+# and x86-64 rustflags. `maturin build` runs on the runner itself; `--auditwheel check` fails a wheel
+# that needs a library outside the manylinux set, instead of copying it into the wheel. On Linux, zig
+# links the wheel against the symbols of glibc 2.17 (`--zig --compatibility manylinux2014`), so that
+# it installs on glibc 2.17 and later although the image's glibc is 2.39; maturin fails a wheel that
+# needs a newer symbol. zig links with its own LLD and C runtime objects and puts LLVM's libunwind
+# into the wheel instead of loading libgcc_s; the reports are the same, and time and memory are
+# within the runs' spread (A/B of 2026-11-20, x86-64 and aarch64). Elsewhere
+# `--compatibility pypi` fails a wheel whose tags PyPI would refuse.
 #
 # Each wheel is installed into a fresh virtual environment of the oldest and of the newest CPython
 # it serves, and a blastp search through it must write the report and the diagnostics whose hashes
@@ -121,11 +125,21 @@ jobs:
           # ubuntu-24.04-arm ("detected conflict: 'bin/cargo-clippy'", 2026-11-13); the release
           # build needs none of them.
           RUSTUP_TOOLCHAIN: 1.92.0
+          # The Python whose ziglang package maturin runs as zig (else `python3` on PATH).
+          CARGO_ZIGBUILD_PYTHON_PATH: ${{ steps.newest.outputs.python-path }}
         run: |
           set -euo pipefail
           # The maturin of python.yml's tests, pinned in one place.
-          "$PYTHON" -m pip install --disable-pip-version-check --quiet "$(grep '^maturin==' tests/requirements.txt)"
-          "$PYTHON" -m maturin build --release --locked --compatibility pypi --auditwheel check \
+          maturin=$(grep '^maturin==' tests/requirements.txt)
+          if [ "$RUNNER_OS" = Linux ]; then
+            # zig for the link, only here (the version of the trial run 44672341945).
+            "$PYTHON" -m pip install --disable-pip-version-check --quiet "$maturin" ziglang==0.17.1
+            compatibility=(--zig --compatibility manylinux2014)
+          else
+            "$PYTHON" -m pip install --disable-pip-version-check --quiet "$maturin"
+            compatibility=(--compatibility pypi)
+          fi
+          "$PYTHON" -m maturin build --release --locked "${compatibility[@]}" --auditwheel check \
             --interpreter "$PYTHON" --out dist
 
       - name: Install it in fresh environments and search
@@ -159,6 +173,32 @@ jobs:
             (cd "$RUNNER_TEMP" && "$py" -I "$GITHUB_WORKSPACE/python/tools/wheel_smoke.py" \
               --repo "$GITHUB_WORKSPACE" --wheel "$wheel") | tee -a "$GITHUB_STEP_SUMMARY"
           done
+
+      # The oldest glibc the Linux wheel serves: the same install and search with CPython 3.10 of
+      # the manylinux2014 image (CentOS 7, glibc 2.17), pinned by digest (tag 2026.11.14-1).
+      - name: Install it on glibc 2.17 and search
+        if: runner.os == 'Linux'
+        env:
+          RUNNER_LABEL: ${{ matrix.runner }}
+          IMAGE: >-
+            ${{ runner.arch == 'ARM64'
+            && 'quay.io/pypa/manylinux2014_aarch64@sha256:c2995cae5e2d433fbe757d1466486727b3edd68ba644cd60df253365f35fda9e'
+            || 'quay.io/pypa/manylinux2014_x86_64@sha256:e6a785657009c612fe2a85fa933051d03a50ba62b1c5e47d62abcab546a2e423' }}
+        run: |
+          set -euo pipefail
+          wheel=$(cd python && ls dist/*.whl)
+          {
+            echo "### pylosat wheel on glibc 2.17, $RUNNER_LABEL"
+            echo
+            echo "| Python | wheel | tags | size | blastp report (SicyWSV x PajaWSV, outfmt 6) |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker run --rm -v "$GITHUB_WORKSPACE:/w:ro" -w /tmp "$IMAGE" bash -euo pipefail -c '
+            getconf GNU_LIBC_VERSION >&2
+            /opt/python/cp310-cp310/bin/python -m venv /tmp/venv
+            /tmp/venv/bin/python -m pip install --disable-pip-version-check --quiet --no-index --no-deps "/w/python/$0"
+            /tmp/venv/bin/python -I /w/python/tools/wheel_smoke.py --repo /w --wheel "/w/python/$0"
+          ' "$wheel" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -2,16 +2,7 @@
 //! operations behind them).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2447-2654
-//! ```c++
-//! SIZE_TYPE NStr::DoubleToString_Ecvt(double val, unsigned int precision,
-//!                                     char* buffer, SIZE_TYPE bufsize,
-//!                                     int* dec, int* sign)
-//! ```
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2658-2744
-//! ```c++
-//! SIZE_TYPE NStr::DoubleToStringPosix(double val, unsigned int precision,
-//!                                     char* buffer, SIZE_TYPE bufsize)
-//! ```
 //!
 //! The expected values are NCBI's own outputs. `SAMPLE_ROWS` holds every distinct real that
 //! NCBI BLAST+ 2.17.0 printed in the outfmt 5, 8, 12, 13, 14, 15 and 16 samples of
@@ -415,20 +406,6 @@ fn ncbi_precision_sweep() {
 }
 
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:185-196
-/// ```c++
-///     if (isnan(data)) {
-///         m_Output.PutString("NOT-A-NUMBER");
-///         return;
-///     }
-///     if (!finite(data)) {
-///         if (data > 0) {
-///             m_Output.PutString("PLUS-INFINITY");
-///         } else {
-///             m_Output.PutString("MINUS-INFINITY");
-///         }
-///         return;
-///     }
-/// ```
 #[test]
 fn non_finite_reals() {
     let cases: [(f64, &str, &str, Option<JsonDoubleError>); 4] = [

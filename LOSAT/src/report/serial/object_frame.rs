@@ -18,40 +18,7 @@ pub(crate) enum FrameKind {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:366-381
-// ```c++
-// const char* CObjectStackFrame::GetFrameTypeName(void) const
-// {
-//     const char* s;
-//     switch (GetFrameType())
-//     {
-//     default:                  s = "UNKNOWN";             break;
-//     case eFrameOther:         s = "eFrameOther";         break;
-//     case eFrameNamed:         s = "eFrameNamed";         break;
-//     case eFrameArray:         s = "eFrameArray";         break;
-//     case eFrameArrayElement:  s = "eFrameArrayElement";  break;
-//     case eFrameClass:         s = "eFrameClass";         break;
-//     case eFrameClassMember:   s = "eFrameClassMember";   break;
-//     case eFrameChoice:        s = "eFrameChoice";        break;
-//     case eFrameChoiceVariant: s = "eFrameChoiceVariant"; break;
-//     }
-//     return s;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-410
-// ```c++
-// string CObjectStackFrame::GetFrameInfo(void) const
-// {
-//     string info(" Frame type= ");
-//     info += GetFrameTypeName();
-//     if (m_TypeInfo) {
-//         info += ", Object type= " + m_TypeInfo->GetName();
-//     }
-//     if (m_MemberId) {
-//         info += ", Member name= " + m_MemberId->GetName();
-//     }
-//     return info;
-// }
-// ```
 /// `GetFrameInfo()` of a frame of `kind` whose type (the named, class, choice and array frames)
 /// is `type_name` (empty for an anonymous type) and whose member or variant (a member or variant
 /// frame, once `SetTopMemberId` named it) is `member`.
@@ -78,47 +45,6 @@ pub(crate) fn frame_info(kind: FrameKind, type_name: Option<&str>, member: Optio
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:412-452
-// ```c++
-// string CObjectStackFrame::GetFrameName(void) const
-// {
-//     string info;
-//     switch ( GetFrameType() ) {
-//     case eFrameClassMember:
-//     case eFrameChoiceVariant:
-//         {
-//             if ( m_MemberId ) {
-//                 const CMemberId& id = *m_MemberId;
-// //                info = '.';
-//                 if ( !id.GetName().empty() ) {
-//                     info += id.GetName();
-//                 }
-//                 else {
-//                     info += '[';
-//                     info += NStr::IntToString(id.GetTag());
-//                     info += ']';
-//                 }
-//             }
-//         }
-//         break;
-//     case eFrameArrayElement:
-//         info = "[]";
-//         break;
-//     case eFrameArray:
-//         info = "[]";
-//         break;
-//     case eFrameNamed:
-//         if (!GetNotag()) {
-//             info = GetTypeInfo()->GetName();
-//         }
-//         break;
-//     default:
-//         {
-//             break;
-//         }
-//     }
-//     return info;
-// }
-// ```
 /// `GetFrameName()`: what `CSerialException::AddFrameInfo` adds for the frame (the member's name,
 /// `[]` for a container and its element, the type of a named frame, nothing for a class or a
 /// choice). Every member of LOSAT's types has a name.
@@ -140,22 +66,6 @@ pub(crate) fn frame_name<'a>(
 /// the line that `NCBI_RETHROW_SAME` adds to a `CException` other than a `CSerialException`
 /// passing through it.
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
-// ```c++
-// #define END_OBJECT_FRAME_OF(Stream) \
-//     } catch (CSerialException& s_expt) { \
-//         std::string msg((Stream).TopFrame().GetFrameName()); \
-//         (Stream).PopFrame(); \
-//         s_expt.AddFrameInfo(msg); \
-//         throw; \
-//     } catch ( CEofException& e_expt ) { \
-//         (Stream).HandleEOF(e_expt); \
-//     } catch (CException& expt) { \
-//         std::string msg((Stream).TopFrame().GetFrameInfo()); \
-//         (Stream).PopFrame(); \
-//         NCBI_RETHROW_SAME(expt,msg); \
-//     } \
-//     (Stream).PopFrame()
-// ```
 // The lines are those of `END_OBJECT_FRAME()` in the functions that push the frames:
 // `CObjectIStream::Read` (objistr.cpp:959-969), `CObjectIStreamAsn::ReadClassSequential`
 // (objistrasn.cpp:1380-1397, the member frame ends in `ReadClassSequentialContentsEnd` at
@@ -192,27 +102,7 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
 /// `GetFrameName` calls by that type): the place of the line that `NCBI_RETHROW_SAME` adds to a
 /// `CException` other than a `CSerialException` passing through it. The mask reader's
 /// (`writedb::mask_info`) frame of `:Type`.
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1174-1197
-// ```c++
-//     case eOtherPointer:
-//         {
-//             _TRACE("CObjectIStream::ReadPointer: new...");
-//             string className = ReadOtherPointer();
-//             _TRACE("CObjectIStream::ReadPointer: new " << className);
-//             objectType = MapType(className);
-//
-//             BEGIN_OBJECT_FRAME2(eFrameNamed, objectType);
-//             ...
-//             ReadObject(objectPtr, objectType);
-//             if ( objectType->IsCObject() )
-//                 ref.Release();
-//
-//             END_OBJECT_FRAME();
-//
-//             ReadOtherPointerEnd();
-//             break;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1198
 pub(crate) const READ_POINTER_FRAME_END: (&str, u32, &str) = (
     "src/serial/objistr.cpp",
     1195,

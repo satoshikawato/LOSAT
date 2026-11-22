@@ -9,6 +9,7 @@ only with their listed output, and the run fails on any other mismatch, on an
 execution or thread-evidence failure, and on a stale allow-list entry.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,19 +19,18 @@ from concurrent.futures import ThreadPoolExecutor
 import certify_platform_native_v010 as authority
 from frozen_allowlist import Allowlist
 from wasm_performance import execute, digest, validate_thread_evidence
+import losat_wording  # noqa: E402  (LOSAT's words read back to NCBI's, AGENTS.md rule 8)
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
 
-# NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
-# x_PrintField(*iter); m_Ostream << "\n";
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
 # Preserve frozen fixture bytes/paths, formatting and order; no normalization.
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['native', 'threaded', 'oracle-dir', 'output-dir']:
         p.add_argument('--' + name, type=Path, required=True)
-    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+    # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     p.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     p.add_argument('--node', default='node')
     p.add_argument('--jobs',type=int,default=1,choices=[1,2,3])
@@ -47,8 +47,7 @@ def main():
     environment = {k: v for k, v in os.environ.items() if not k.startswith(('LOSAT_', 'RAYON_')) and k != 'BL2SEQ_LEGACY'}
     environment.update(LC_ALL='C', NODE_NO_WARNINGS='1')
     records = []; record_lock=threading.Lock(); pending=[]
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
     metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)] if value}, authority_sha256=native_authority.file_sha256)
     prefixes = [('native', [str(args.native.resolve())]),
                 ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]
@@ -60,8 +59,18 @@ def main():
         result = execute(command, ROOT, out / label, env, args.timeout_seconds)
         result.update(label=label, program=program, case_id=case_id, expected_sha256=expected)
         executed = result['status'] == 'PASS'
-        result['raw_equal'] = executed and result['raw_output_sha256'] == expected
-        result['allowlist'] = allowlist.classify(program, case_id, expected, result.get('raw_output_sha256'), executed)
+        observed = result.get('raw_output_sha256')
+        output = out / label / 'output.txt'
+        if executed and not label.startswith('retained-linux-oracle/') and output.is_file():
+            # The frozen LOSAT hashes (v0.1.1) are of outputs in NCBI's words: LOSAT's version line
+            # (AGENTS.md rule 8) is read back to NCBI's for the comparison, and an output that still
+            # writes NCBI's words matches nothing.
+            data = output.read_bytes()
+            found = losat_wording.names_ncbi(data)
+            observed = f'ncbi-words:{found.decode()}' if found else hashlib.sha256(losat_wording.ncbi_hash_form(data)).hexdigest()
+            result['ncbi_words_sha256'] = observed
+        result['raw_equal'] = executed and observed == expected
+        result['allowlist'] = allowlist.classify(program, case_id, expected, observed, executed)
         result['thread_evidence'] = None
         if threads is not None and executed:
             try:
@@ -78,8 +87,7 @@ def main():
             command = list(step.command)
             count_index = command.index('-num_threads') + 1
             original_n = int(command[count_index])
-            # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
-            # x_PrintField(*iter); m_Ostream << "\n";
+            # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
             for kind, prefix in prefixes:
                 if kind == 'serial' and original_n != 1: continue  # explicitly non-applicable frozen native-thread4 rows
                 current = [*prefix, *command[1:]]
@@ -92,8 +100,7 @@ def main():
             pending.append((step.program, step.case_id, f'retained-linux-oracle/{step.program}/{step.case_id}', list(step.command), references[0], environment))
         else:
             pending.append((step.program, step.case_id, f'repeatability/{step.program}/{step.case_id}/{step.run_index}', list(step.command), step.expected_losat_sha256, {**environment, **dict(step.environment)}))
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
-    # x_PrintField(*iter); m_Ostream << "\n";
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     # Independent oracle processes may overlap; each output is compared without reordering.
     # This is correctness execution, never a performance sample.
     metadata['concurrent_test_processes']=args.jobs

@@ -7,11 +7,6 @@
 //! and a `-db` subject with ambiguous bases, whose letters the re-evaluation reads again.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2659-2662,2700
-//! ```c
-//!       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-//! ...
-//!          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-//! ```
 //! The inputs (NCBI's outcomes from the probes of line RG item X-short-tbx on ws, 2026-11-17):
 //! `nq` (`ATGCATTATTGGTGGTGGTTT`, frame +1 M H Y W W W F) hits `w11` (`TGGTGGTGGTT`) with
 //! `-window_size 0`, and NCBI dies; so it does on `amb11` (`TGGTGGTGGNN`) with `-db`. `qa` (30 A)
@@ -338,7 +333,12 @@ fn a_header_the_fetch_cannot_read_fails_the_batch_after_the_batches_before() {
             let case = format!("threads {threads}: q8 then nq, outfmt {outfmt}");
             let batches = search(&q8nq, Some("1"), outfmt);
             assert_fetch_refused(&batches, &case);
-            assert_eq!(String::from_utf8_lossy(&batches.stdout), before, "{case}");
+            // `before` is NCBI's frozen output: LOSAT's is NCBI's in LOSAT's words.
+            assert_eq!(
+                String::from_utf8_lossy(&batches.stdout),
+                String::from_utf8_lossy(&losat::wording::losat_output_bytes(before.as_bytes())),
+                "{case}"
+            );
         }
     }
 }

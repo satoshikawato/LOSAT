@@ -14,13 +14,6 @@
 //! stored O). There is no rule (class `always`): every `-db` run takes this path.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
-//! ```c
-//!         if( program_number == eBlastTypeTblastn ) {
-//!             seq_info->seq_arg.encoding = eBlastEncodingNcbi4na;
-//!         } else {
-//!             seq_info->seq_arg.encoding = eBlastEncodingProtein;
-//!         }
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -191,6 +184,7 @@ fn reports_with_reads_per_match_are_the_one_thread_reports() {
     }
 }
 
+// Test protein: made from the first residues of E. coli AsnA (RefSeq NP_418200.1) and other letters.
 /// The letters before position 27 of the proteins of
 /// `pyrrolysine_recounts_do_not_depend_on_the_threads`.
 const PREFIX: &str = "MKTAYIAKQRQISFVKSHFSRQLEDN";

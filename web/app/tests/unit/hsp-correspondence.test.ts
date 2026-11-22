@@ -2,10 +2,12 @@
 // TD-3): for every outfmt 0 fixture of the programs that LOSAT Web runs
 // (LOSAT/tests/outfmt0_manifest.tsv; BLASTX joins in SX), the serial reactor runs the
 // search in Node, and
-// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture (a fixture of an
-//   outfmt 6 or 7 field list only adds its search; for the approved
-//   -db_gencode exception, NCBI's database search outside the lines that name the database,
-//   as docs/evidence/losat_web_e2a/check_losat.py compares them),
+// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture in LOSAT's words (LOSAT
+//   states its own version, LOSAT/src/wording.rs; the frozen hash judges LOSAT's output read back
+//   in NCBI's words, `losat_wording.py hash-form`) (a fixture of an outfmt 6 or 7 field list only
+//   adds its search; for the approved -db_gencode exception, NCBI's database search in LOSAT's
+//   words outside the lines that name the database, as docs/evidence/losat_web_e2a/check_losat.py
+//   compares them),
 // - the HSP records' `out6` ranges tile the outfmt 6 text in the order of the records, and
 //   each row's coordinates are the record's,
 // - outfmt 0 has as many sections and subject headings as the records point to, except in a run
@@ -21,6 +23,7 @@
 //   linked only where the outfmt 0 search has exactly its HSPs, so there is no such order),
 // - the results screen's index (domain/result-index.ts) groups the same HSPs.
 // It needs LOSAT_WEB_REACTORS; the gate runs it (docs/evidence/losat_web_w4/run_gate.sh).
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -127,8 +130,8 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const started = abi.start(argv);
   // A run with -parse_deflines reads its inputs together for its argv (line WQA's sweep, D7, 2026-11-19), as the app's runs do.
   const together = started.ok && started.start.registerInputs ? abi.registerInputs(argv, queryBytes, subjectBytes) : undefined;
-  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, queryBytes);
-  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, subjectBytes);
+  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, queryBytes);
+  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, subjectBytes);
   try {
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => parts.set(stream, [...(parts.get(stream) ?? []), bytes.slice()]));
   } finally {
@@ -149,6 +152,18 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
 }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+/** The one mapping between NCBI's words and LOSAT's (LOSAT/tests/losat_wording.py, the port of
+ * LOSAT/src/wording.rs): `map-output` gives LOSAT's bytes of NCBI's output, `hash-form` LOSAT's
+ * output read back in NCBI's words (`ncbi-words: ...` when it still writes NCBI's words). */
+function wording(command: 'map-output' | 'hash-form', bytes: Uint8Array): Uint8Array | string {
+  const run = spawnSync('python3', ['-I', join(ENGINE, 'tests/losat_wording.py'), command, '-'], {
+    input: bytes,
+    maxBuffer: 1 << 30,
+  });
+  if (run.error) throw run.error;
+  return run.status === 0 ? new Uint8Array(run.stdout) : `ncbi-words: ${run.stderr.toString()}`;
+}
 
 /**
  * check_losat.py's normalize_database_lines: a report without the lines that name the
@@ -185,7 +200,8 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const bytes = outputs.streams.get(stream) ?? new Uint8Array();
   const label = `${fixture.id}: NCBI's frozen outfmt ${stream}`;
   if (database === undefined) {
-    expect(sha256(bytes), label).toBe(frozen);
+    const read = wording('hash-form', bytes);
+    expect(typeof read === 'string' ? read : sha256(read), label).toBe(frozen);
     return 'bytes';
   }
   const oracle = readFileSync(join(ENGINE, database));
@@ -193,8 +209,10 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const posted = Buffer.from(oracle.toString('latin1').replace(/^( {4}Posted date: {2}).*$/gm, '$1(the time makeblastdb ran)'), 'latin1');
   expect(sha256(posted), `${fixture.id}: ${database}`).toBe(frozen);
   const decoder = new TextDecoder();
+  const inLosatWords = wording('map-output', oracle);
+  if (typeof inLosatWords === 'string') throw new Error(inLosatWords);
   expect(withoutDatabaseLines(decoder.decode(bytes)), `${label} (database search, -db_gencode exception)`).toBe(
-    withoutDatabaseLines(decoder.decode(oracle)),
+    withoutDatabaseLines(decoder.decode(inLosatWords)),
   );
   return 'database';
 }
@@ -203,10 +221,13 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
 /**
  * The first and last coordinates of the label's lines of one section. With -line_length 1 NCBI writes
  * the first Query line without its start (`Query       T`, the frozen bytes of the t1.*.ll1 rows); the
- * start is then undefined and only the end can be compared.
+ * start is then undefined and only the end can be compared. The section of an HSP of length 0
+ * (BLASTP `-ungapped -window_size 0`, the ungapped.blastp.len0.* rows) has its score lines and no
+ * alignment lines: undefined.
  */
-function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] {
+function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] | undefined {
   const lines = section.split('\n').filter((line) => line.startsWith(`${label} `));
+  if (lines.length === 0) return undefined;
   const parse = (line: string) => line.trim().split(/\s+/);
   const first = parse(lines[0]!);
   const last = parse(lines.at(-1)!);
@@ -222,7 +243,7 @@ function shownEnds(ends: [number | undefined, number], start: number, end: numbe
 /** The raw score, the first and last coordinates of one HSP section of outfmt 0, as a comparable text. */
 function sectionKey(section: string): string {
   const raw = /^ Score = +[\d.]+ bits \((\d+)\)/.exec(section)?.[1];
-  return JSON.stringify([Number(raw), ...alignmentEnds(section, 'Query'), ...alignmentEnds(section, 'Sbjct')]);
+  return JSON.stringify([Number(raw), ...(alignmentEnds(section, 'Query') ?? []), ...(alignmentEnds(section, 'Sbjct') ?? [])]);
 }
 
 /**
@@ -295,12 +316,16 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // -sorthits and -sorthsps sort the pairwise output only (NCBI: "Not applicable for outfmt > 4";
   // blast_format.cpp:1523-1530), so with them the sections follow that order, not the records'.
   const sortsPairwise = fixture.words.includes('-sorthits') || fixture.words.includes('-sorthsps');
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = decoder.decode(out0.subarray(0, 9)) === 'RMBLASTN ';
   let previousEnd = 0;
   const headings = new Map<string, readonly [number, number] | null>();
   let sections = 0;
   let unshown = 0;
   // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty heading, and
-  // NCBI's line stands in place of each of its alignments (showalign.cpp:1976-1981; LOSAT's
+  // NCBI's line stands in place of each of its alignments (c++/src/objtools/align_format/showalign.cpp:1976-1981; LOSAT's
   // report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
   const skippedLine = /^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/;
   const skippedHeadings = new Set<number>();
@@ -344,11 +369,19 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       headingNames.set(record.s_idx, named);
     }
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
-    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
+    if (rawScoreOnly) expect(section, `${where(record)} section raw score`).toMatch(new RegExp(`^ Score = ${record.raw_score}\n`));
+    else expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     const queryEnds = alignmentEnds(section, 'Query');
     const subjectEnds = alignmentEnds(section, 'Sbjct');
-    expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
-    expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    if (queryEnds === undefined || subjectEnds === undefined) {
+      // An HSP of length 0: no alignment lines, and the record's ranges end one before they start.
+      expect([queryEnds, subjectEnds], `${where(record)} a section without alignment lines`).toEqual([undefined, undefined]);
+      expect(section, `${where(record)} the section of an HSP of length 0`).toMatch(/^ Identities = 0\/0 \(100%\),/m);
+      expect([record.q_end - record.q_start, record.s_end - record.s_start], `${where(record)} length 0`).toEqual([-1, -1]);
+    } else {
+      expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
+      expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
+    }
     previousEnd = end;
   }
   const subjectsNamed = new Map<string, Set<string>>();

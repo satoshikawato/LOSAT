@@ -102,23 +102,7 @@ const fn opt(name: &'static str, ty: &'static Ty) -> Member {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval_.cpp:110-123
-// ```c++
-// BEGIN_NAMED_BASE_CLASS_INFO("Seq-interval", CSeq_interval)
-// {
-//     SET_CLASS_MODULE("NCBI-Seqloc");
-//     ADD_NAMED_STD_MEMBER("from", m_From)->SetSetFlag(MEMBER_PTR(m_set_State[0]));
-//     ADD_NAMED_STD_MEMBER("to", m_To)->SetSetFlag(MEMBER_PTR(m_set_State[0]));
-//     ADD_NAMED_ENUM_MEMBER("strand", m_Strand, ENa_strand)->SetSetFlag(MEMBER_PTR(m_set_State[0]))->SetOptional();
-//     ADD_NAMED_REF_MEMBER("id", m_Id, CSeq_id);
-//     ADD_NAMED_REF_MEMBER("fuzz-from", m_Fuzz_from, CInt_fuzz)->SetOptional();
-//     ADD_NAMED_REF_MEMBER("fuzz-to", m_Fuzz_to, CInt_fuzz)->SetOptional();
-//     info->RandomOrder();
-//     info->CodeVersion(22400);
-//     info->DataSpec(ncbi::EDataSpec::eASN);
-// }
-// END_CLASS_INFO
-// ```
+// NCBI reference (598d8ae6): datatool's src/objects/seqloc/Seq_interval_.cpp:110-123 (from seqloc.asn)
 // (The other generated classes of these types are alike: `ADD_NAMED_REF_MEMBER` has no set flag;
 // `Blast-db-mask-info.masks`, `Seq-point.id`/`fuzz`, `Packed-seqpnt.id`/`fuzz`, `Seq-bond.a`/`b`,
 // `Dbtag.tag`, `Patent-seq-id.cit`, `Id-pat.id` and `PDB-seq-id.rel` are such members; checked
@@ -151,35 +135,6 @@ const fn var(name: &'static str, ty: &'static Ty) -> Variant {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-79
-// ```c++
-// Blast-filter-program ::= INTEGER {
-//     not-set             (0),
-//     dust                (10),
-//     seg                 (20),
-//     windowmasker        (30),
-//     repeat              (40),
-//     other               (100),
-//     max                 (255)
-// }
-//
-// Blast-mask-list ::= SEQUENCE {
-//     -- masks for a single sequence should be grouped in a Packed-seqint
-//     masks SEQUENCE OF Seq-loc,
-//     -- as of 01/21/2010, this field is set to false always, indicating that the
-//     -- entire object (set of Seq-loc) is contained in this object
-//     more BOOLEAN
-// }
-//
-// -- Defines the masking information for a set of sequences
-// Blast-db-mask-info ::= SEQUENCE {
-//     algo-id      INTEGER,
-//     algo-program Blast-filter-program,
-//     algo-options VisibleString,
-//     -- This object was originally created to allow pagination of the sequence
-//     -- masks, but this feature was discontinued in 01/21/2010
-//     masks        Blast-mask-list
-// }
-// ```
 pub(super) static BLAST_FILTER_PROGRAM: EnumDef = EnumDef {
     values: &crate::seqdb::mask::FILTER_PROGRAMS,
     integer: true,
@@ -211,20 +166,6 @@ pub(super) static T_STR: Ty = Ty::Str;
 static T_NULL: Ty = Ty::Null;
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:79-91
-// ```c++
-// Seq-loc ::= CHOICE {
-//     null NULL ,           -- not placed
-//     empty Seq-id ,        -- to NULL one Seq-id in a collection
-//     whole Seq-id ,        -- whole sequence
-//     int Seq-interval ,    -- from to
-//     packed-int Packed-seqint ,
-//     pnt Seq-point ,
-//     packed-pnt Packed-seqpnt ,
-//     mix Seq-loc-mix ,
-//     equiv Seq-loc-equiv ,  -- equivalent sets of locations
-//     bond Seq-bond ,
-//     feat Feat-id }         -- indirect, through a Seq-feat
-// ```
 pub(super) static T_SEQ_LOC: Ty = Ty::Choice(&SEQ_LOC);
 pub(super) static SEQ_LOC: ChoiceDef = ChoiceDef {
     name: "Seq-loc",
@@ -255,58 +196,7 @@ pub(super) const SEQ_LOC_EQUIV: usize = 8;
 pub(super) const SEQ_LOC_BOND: usize = 9;
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-129
-// ```c++
-// Seq-interval ::= SEQUENCE {
-//     from INTEGER ,
-//     to INTEGER ,
-//     strand Na-strand OPTIONAL ,
-//     id Seq-id ,    -- WARNING: this used to be optional
-//     fuzz-from Int-fuzz OPTIONAL ,
-//     fuzz-to Int-fuzz OPTIONAL }
-//
-// Packed-seqint ::= SEQUENCE OF Seq-interval
-//
-// Seq-point ::= SEQUENCE {
-//     point INTEGER ,
-//     strand Na-strand OPTIONAL ,
-//     id Seq-id ,     -- WARNING: this used to be optional
-//     fuzz Int-fuzz OPTIONAL }
-//
-// Packed-seqpnt ::= SEQUENCE {
-//     strand Na-strand OPTIONAL ,
-//     id Seq-id ,
-//     fuzz Int-fuzz OPTIONAL ,
-//     points SEQUENCE OF INTEGER }
-//
-// Na-strand ::= ENUMERATED {          -- strand of nucleic acid
-//     unknown (0) ,
-//     plus (1) ,
-//     minus (2) ,
-//     both (3) ,                -- in forward orientation
-//     both-rev (4) ,            -- in reverse orientation
-//     other (255) }
-//
-// Seq-bond ::= SEQUENCE {         -- bond between residues
-//     a Seq-point ,           -- connection to a least one residue
-//     b Seq-point OPTIONAL }  -- other end may not be available
-//
-// Seq-loc-mix ::= SEQUENCE OF Seq-loc   -- this will hold anything
-//
-// Seq-loc-equiv ::= SET OF Seq-loc      -- for a set of equivalent locations
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.def:1-17
-// ```c++
-// [Seq-interval]
-// from._type = TSeqPos
-// to._type   = TSeqPos
-//
-// [Seq-point]
-// point._type = TSeqPos
-//
-// [Packed-seqpnt]
-// points._type   = vector
-// points.E._type = TSeqPos
-// ```
 pub(super) static SEQ_INTERVAL: ClassDef = ClassDef {
     name: "Seq-interval",
     members: &[
@@ -371,13 +261,6 @@ static T_SEQ_LOC_MIX: Ty = Ty::SeqOf(&T_SEQ_LOC);
 static T_SEQ_LOC_EQUIV: Ty = Ty::SetOf(&T_SEQ_LOC);
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/seqfeat.asn:32-36
-// ```c++
-// Feat-id ::= CHOICE {
-//     gibb INTEGER ,            -- geninfo backbone
-//     giim Giimport-id ,        -- geninfo import
-//     local Object-id ,         -- for local software use
-//     general Dbtag }           -- for use by various databases
-// ```
 static FEAT_ID: ChoiceDef = ChoiceDef {
     name: "Feat-id",
     variants: &[
@@ -389,32 +272,8 @@ static FEAT_ID: ChoiceDef = ChoiceDef {
 };
 static T_FEAT_ID: Ty = Ty::Choice(&FEAT_ID);
 
-// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:106-117
-// ```c++
-// Int-fuzz ::= CHOICE {
-//     p-m INTEGER ,                    -- plus or minus fixed amount
-//     range SEQUENCE {                 -- max to min
-//         max INTEGER ,
-//         min INTEGER } ,
-//     pct INTEGER ,                    -- % plus or minus (x10) 0-1000
-//     lim ENUMERATED {                 -- some limit value
-//         unk (0) ,                    -- unknown
-//         gt (1) ,                     -- greater than
-//         lt (2) ,                     -- less than
-//         tr (3) ,                     -- space to right of position
-//         tl (4) ,                     -- space to left of position
-//         circle (5) ,                 -- artificial break at origin of circle
-//         other (255) } ,              -- something else
-//     alt SET OF INTEGER }             -- set of alternatives for the integer
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:106-120
 // NCBI reference (598d8ae6): c++/src/objects/general/general.def:1-9
-// ```c++
-// [Int-fuzz]
-// p-m._type       = TSeqPos
-// range.max._type = TSeqPos
-// range.min._type = TSeqPos
-// alt.E._type     = TSeqPos
-// ```
 static INT_FUZZ_RANGE: ClassDef = ClassDef {
     name: "",
     members: &[req("max", &T_UINT32), req("min", &T_UINT32)],
@@ -447,28 +306,6 @@ static INT_FUZZ: ChoiceDef = ChoiceDef {
 static T_INT_FUZZ: Ty = Ty::Choice(&INT_FUZZ);
 
 // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-80
-// ```c++
-// Date ::= CHOICE {
-//     str VisibleString ,        -- for those unparsed dates
-//     std Date-std }             -- use this if you can
-//
-// Date-std ::= SEQUENCE {        -- NOTE: this is NOT a unix tm struct
-//     year INTEGER ,             -- full year (including 1900)
-//     month INTEGER OPTIONAL ,   -- month (1-12)
-//     day INTEGER OPTIONAL ,     -- day of month (1-31)
-//     season VisibleString OPTIONAL ,  -- for "spring", "may-june", etc
-//     hour INTEGER OPTIONAL ,    -- hour of day (0-23)
-//     minute INTEGER OPTIONAL ,  -- minute of hour (0-59)
-//     second INTEGER OPTIONAL }  -- second of minute (0-59)
-//
-// Dbtag ::= SEQUENCE {
-//     db VisibleString ,          -- name of database or system
-//     tag Object-id }         -- appropriate tag
-//
-// Object-id ::= CHOICE {
-//     id INTEGER ,
-//     str VisibleString }
-// ```
 static OBJECT_ID: ChoiceDef = ChoiceDef {
     name: "Object-id",
     variants: &[var("id", &T_INT32), var("str", &T_STR)],
@@ -502,68 +339,8 @@ pub(super) static DATE: ChoiceDef = ChoiceDef {
 static T_DATE: Ty = Ty::Choice(&DATE);
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-77
-// ```c++
-// Seq-id ::= CHOICE {
-//     local Object-id ,            -- local use
-//     gibbsq INTEGER ,             -- Geninfo backbone seqid
-//     gibbmt INTEGER ,             -- Geninfo backbone moltype
-//     giim Giimport-id ,           -- Geninfo import id
-//     genbank Textseq-id ,
-//     embl Textseq-id ,
-//     pir Textseq-id ,
-//     swissprot Textseq-id ,
-//     patent Patent-seq-id ,
-//     other Textseq-id ,           -- for historical reasons, 'other' = 'refseq'
-//     general Dbtag ,              -- for other databases
-//     gi INTEGER ,                 -- GenInfo Integrated Database
-//     ddbj Textseq-id ,            -- DDBJ
-//     prf Textseq-id ,             -- PRF SEQDB
-//     pdb PDB-seq-id ,             -- PDB sequence
-//     tpg Textseq-id ,             -- Third Party Annot/Seq Genbank
-//     tpe Textseq-id ,             -- Third Party Annot/Seq EMBL
-//     tpd Textseq-id ,             -- Third Party Annot/Seq DDBJ
-//     gpipe Textseq-id ,           -- Internal NCBI genome pipeline processing ID
-//     named-annot-track Textseq-id -- Internal named annotation tracking ID
-// }
-//
-// Patent-seq-id ::= SEQUENCE {
-//     seqid INTEGER ,         -- number of sequence in patent
-//     cit Id-pat }           -- patent citation
-//
-// Textseq-id ::= SEQUENCE {
-//     name VisibleString OPTIONAL ,
-//     accession VisibleString OPTIONAL ,
-//     release VisibleString OPTIONAL ,
-//     version INTEGER OPTIONAL }
-//
-// Giimport-id ::= SEQUENCE {
-//     id INTEGER ,                     -- the id to use here
-//     db VisibleString OPTIONAL ,      -- dbase used in
-//     release VisibleString OPTIONAL } -- the release
-//
-// PDB-seq-id ::= SEQUENCE {            --
-//       mol PDB-mol-id ,                    -- the molecule name
-//       chain INTEGER DEFAULT 32 ,          -- Deprecated:  'chain' can't support multiple character
-//       rel Date OPTIONAL ,                 -- release date, month and year
-//       chain-id VisibleString OPTIONAL }   -- chain identifier; length-independent generalization of 'chain'
-//
-// PDB-mol-id ::= VisibleString  -- name of mol, 4 chars
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.def:1-6
-// ```c++
-// [Seq-id]
-// gi._type = ncbi::TGi
-// gi._storage_type = ncbi::TIntId
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
-// ```c++
-// Id-pat ::= SEQUENCE {                   -- just to identify a patent
-//     country VisibleString ,             -- Patent Document Country
-//     id CHOICE {
-//         number VisibleString ,          -- Patent Document Number
-//         app-number VisibleString } ,    -- Patent Doc Appl Number
-//     doc-type VisibleString OPTIONAL }   -- Patent Doc Type
-// ```
 pub(super) static ID_PAT_ID: ChoiceDef = ChoiceDef {
     name: "",
     variants: &[var("number", &T_STR), var("app-number", &T_STR)],

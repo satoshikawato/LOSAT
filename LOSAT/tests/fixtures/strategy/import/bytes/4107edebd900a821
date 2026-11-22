@@ -1,0 +1,153 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 279 total letters
+
+
+
+Query= lcl|Query_1 qn1 plus strand gene
+
+Length=366
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             20.0    6e-04
+sp2 subject protein beta, distant                                     18.5    0.002
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 20.0 bits (40),  Expect = 6e-04, Method: Compositional matrix adjust.
+ Identities = 8/8 (100%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  37  MWMEHSVL  60
+           MWMEHSVL
+Sbjct  1   MWMEHSVL  8
+
+
+ Score = 11.9 bits (19),  Expect = 0.86, Method: Compositional matrix adjust.
+ Identities = 3/7 (43%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  19  VWLPHSM  39
+           +W+ HS+
+Sbjct  1   MWMEHSV  7
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 18.5 bits (36),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 7/7 (100%), Positives = 7/7 (100%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  40  WMEHSVL  60
+           WMEHSVL
+Sbjct  2   WMEHSVL  8
+
+
+ Score = 11.9 bits (19),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +1
+
+Query  22  WLPHSM  39
+           W+ HS+
+Sbjct  2   WMEHSV  7
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4743
+
+
+Query= lcl|Query_2 qn2 minus strand gene
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     27.3    1e-06
+sp1 subject protein alpha                                             18.1    0.002
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 27.3 bits (59),  Expect = 1e-06, Method: Composition-based stats.
+ Identities = 11/11 (100%), Positives = 11/11 (100%), Gaps = 0/11 (0%)
+ Frame = -3
+
+Query  58   HALRHWKINEI  26
+            HALRHWKINEI
+Sbjct  110  HALRHWKINEI  120
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 18.1 bits (35),  Expect = 0.002, Method: Composition-based stats.
+ Identities = 6/9 (67%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  58   HALRHWKIN  32
+             +LRHW+IN
+Sbjct  105  QSLRHWEIN  113
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4743
+
+
+Query= lcl|Query_3 qn3 no hits
+
+Length=150
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4743
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

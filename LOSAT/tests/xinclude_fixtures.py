@@ -83,10 +83,23 @@ EXTENSIONS = {"13": "json", "14": "xml"}
 _PSSM_INPUTS: list[Path] = []
 
 
+# The options of psiblast's command line that give the query as an alignment: the library API takes
+# the alignment as the inputs (`Inputs::msa`) and the two master options in its argv, but only with
+# the alignment (`db_search_fixtures.py check_row`: a row that gives them without `-in_msa`, the
+# rules of the options themselves, is `library-skip`).
+ALIGNMENT_OPTIONS = ("-in_msa", "-msa_master_idx", "-ignore_msa_master")
+
+
 def query_argv(cell: str, root: Path) -> list[str]:
     """The arguments of a query cell (`root`: the directory the runs start in, LOSAT/): `-query
     <cell>`, or for a PSSM query (psiblast, tblastn) `-in_pssm <file>` (`pssm-gz:<path>` inflated into a
-    temporary directory, `pssm:<path>` as it is)."""
+    temporary directory, `pssm:<path>` as it is), or for an alignment query (psiblast) `-in_msa <file>`
+    (`msa:<path>`), or none at all for the cell `none:` (a row that tests the options of an input the
+    command line does not give)."""
+    if cell == "none:":
+        return []
+    if cell.startswith("msa:"):
+        return ["-in_msa", cell.removeprefix("msa:")]
     if cell.startswith("pssm:"):
         return ["-in_pssm", cell.removeprefix("pssm:")]
     if cell.startswith("pssm-gz:"):

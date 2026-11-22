@@ -10,7 +10,6 @@ use crate::ncbi_app::no_dependencies;
 static TOOL: Tool = Tool {
     program: "t",
     refusal_name: "T",
-    version: "0",
     help: "",
     descs: &[
         key("n", Kind::Integer, Some("7"), None),
@@ -22,6 +21,7 @@ static TOOL: Tool = Tool {
     ],
     dependencies: no_dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 fn parse_words(line: &[&str]) -> Result<Args, ArgsError> {
@@ -45,7 +45,7 @@ fn strings(texts: &[&str]) -> Vec<String> {
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (cited at
 // `integer_value`).
 #[test]
 fn integer_keys_convert_as_ncbi_s_reader() {

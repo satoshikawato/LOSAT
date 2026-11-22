@@ -24,8 +24,10 @@
 - [makeblastdb](programs/makeblastdb.md)
 - [blastdbcmd](programs/blastdbcmd.md)
 - [dustmasker](programs/dustmasker.md)
+- [windowmasker](programs/windowmasker.md)
 - [segmasker](programs/segmasker.md)
 - [convert2blastmask](programs/convert2blastmask.md)
+- [makembindex](programs/makembindex.md)
 - [blast_formatter](programs/blast_formatter.md)
 
 # Libraries and WebAssembly
@@ -45,3 +47,4 @@
 - [Differences from NCBI BLAST+](differences.md)
 - [What LOSAT refuses](refusals.md)
 - [Troubleshooting](troubleshooting.md)
+- [Third-party notices](third-party-notices.md)

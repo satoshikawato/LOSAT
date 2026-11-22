@@ -24,7 +24,8 @@ cd tests
 
 Requirements: Bash 4+, a current Node.js release with WASI support (the current
 frozen snapshot used Node 26.8.2), NCBI BLAST+ (`blastn`, `blastp`,
-`tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
+`tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`
+(`requirements-wasm-threading.txt` holds the versions CI installs, with their hashes).
 `--bin losat` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
 
@@ -489,8 +490,8 @@ v0.1.0 certification and release contracts retain their historical target scope.
 The files `tests/*.rs` are built into eight test binaries: the suites `blastn`, `blastp`, `blastx`,
 `tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the two files that
 change the process environment or process-wide state, `blastn_report_stream_api` and
-`thread_memory` (a counting global allocator). Unit tests are in the crate (`#[cfg(test)]` modules
-next to the code, `cargo test --lib`). A test
+`thread_memory` (a counting global allocator). Unit tests are in the crate (`#[cfg(test)] #[path = "<stem>_tests.rs"] mod tests;`,
+the module's file next to the code, `cargo test --lib`). A test
 is named `<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`
 (keep `--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs
 `tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `losat::blastn`). A
@@ -507,8 +508,9 @@ lcov files (`coverage_summary.py`, tested by `test_coverage_summary.py`) into th
 coverage of LOSAT's sources. The job summary has the totals and a table by module; the artifact
 `coverage` has the merged lcov file and a table per file. The jobs run in the nightly run of dev and in
 dispatched runs of other branches, not on `main`; they have no threshold and do not change the run's
-result. cargo-llvm-cov leaves out the test files (`tests/`, `examples/`, `tests.rs`, `*_tests.rs`), but
-inline `#[cfg(test)]` modules of `src` files are counted (about a third of the functions, 2026-11-07).
+result. cargo-llvm-cov leaves out the test files (`tests/`, `examples/`, `tests.rs`, `*_tests.rs`), so the
+unit tests of the `src` files, which live in sibling `*_tests.rs` files, are not counted (before 2026-11-21 their inline
+`#[cfg(test)]` modules were: about a third of the functions, 2026-11-07).
 Locally, `cargo llvm-cov nextest --all-features` (cargo-llvm-cov 0.9.1 and the `llvm-tools-preview`
 component) ran the tests 6.3 times as long as `cargo nextest run` (2026-11-07, 8 test threads on a loaded
 32-core machine); set `LLVM_PROFILE_FILE_NAME=LOSAT-%8m.profraw` as the jobs do, or its default writes

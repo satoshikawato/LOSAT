@@ -27,9 +27,6 @@ pub(crate) struct Tool {
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
-    /// The version that `-version` and the full versions print (`CVersionInfo::Print` of
-    /// `GetFullVersion`: `2.17.0+`, `1.0.0`; `ncbi_version::print`).
-    pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
     /// frozen. Its part before the details (`REQUIRED ARGUMENTS` or `OPTIONAL ARGUMENTS`) is
     /// the usage that `-h` and the argument errors print (`short_usage`).
@@ -42,6 +39,8 @@ pub(crate) struct Tool {
     pub(crate) dependencies: fn() -> Vec<(&'static str, Dep, &'static str)>,
     /// The prefix of the program's diagnostics (`SetDiagPostPrefix`), if it sets one.
     pub(crate) post_prefix: Option<&'static str>,
+    /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
+    pub(crate) components: &'static [crate::ncbi_version::Component],
 }
 
 /// `Tool::dependencies` of a program that sets none.
@@ -50,17 +49,10 @@ pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
-// ```c++
-//     if (detailed) {
-//         x.AddDetails(arr);
-//     } else {
-//         arr.push_back(kEmptyStr);
-//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
-//     }
-// ```
 /// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
 /// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
-/// convert2blastmask's) or the optional ones.
+/// convert2blastmask's) or the optional ones. The description states LOSAT's version
+/// (`help_text`).
 pub(crate) fn short_usage(help: &str) -> String {
     let end = ["REQUIRED ARGUMENTS", "OPTIONAL ARGUMENTS"]
         .iter()
@@ -69,8 +61,14 @@ pub(crate) fn short_usage(help: &str) -> String {
         .unwrap_or(help.len());
     format!(
         "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        &help[..end]
+        help_text(&help[..end])
     )
+}
+
+/// LOSAT's text of NCBI's frozen `-help` text `help`: its description states LOSAT's version
+/// (`BLAST database client, version LOSAT 0.2.0`; `wording::losat_text`).
+pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
+    crate::wording::losat_text(help)
 }
 
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
@@ -116,14 +114,20 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-    // ```c++
-    //     SetDiagPostLevel(eDiag_Warning);
-    //     SetDiagPostPrefix("blastdbcmd");
-    // ```
     /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the application
     /// (`Tool::post_prefix`), the message.
     pub(crate) fn err_post(&mut self, message: &str) {
         self.err_post_bytes(message.as_bytes());
+    }
+
+    /// `ERR_POST(Warning << message)` inside `Run`: as `err_post`, of severity `Warning`.
+    pub(crate) fn warning_post(&mut self, message: &str) {
+        self.write_text(&crate::ncbi_exception::post_line(
+            crate::ncbi_exception::Severity::Warning,
+            None,
+            self.tool.post_prefix,
+            message.as_bytes(),
+        ));
     }
 
     /// `err_post` of a message that is not UTF-8.
@@ -146,28 +150,7 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-710
-    // ```c++
-    //         if ( s_HandleExceptions() ) {
-    //             try {
-    //                 *exit_code = m_DryRun ? DryRun() : Run();
-    //             }
-    //             catch (CArgException& e) {
-    //                 NCBI_RETHROW_SAME(e, "Application's execution failed");
-    //             }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
-    // ```c++
-    // void CException::AddBacklog(const CDiagCompileInfo& info,
-    //                             const string& message,
-    //                             EDiagSev severity)
-    // {
-    //     const CException* prev = m_Predecessor;
-    //     m_Predecessor = x_Clone();
-    //     ...
-    //     x_Init(info, message, 0, severity);
-    //     m_MainText = false;
-    // }
-    // ```
     /// A `CArgException` that the program's `Run` throws (`files::open_input_file`,
     /// `Args::output_file`): the application adds `Application's execution failed` to it and
     /// reports it as an argument error, after the usage; exit status 1.
@@ -176,48 +159,7 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
-    // ```c++
-    //     catch (const CArgException& e) {
-    //         // Print USAGE and the exception error message
-    //         if ( e.GetErrCode() != CArgException::eNoValue &&  m_ArgDesc.get() ) {
-    //             x_AddDefaultArgs();
-    //             string str;
-    //             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fNoUsage) ) {
-    //                 m_ArgDesc->PrintUsage(str);
-    //                 cerr << str;
-    //             }
-    //             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fDupErrToCerr) ) {
-    //                 CStreamDiagHandler* errh =
-    //                     dynamic_cast<CStreamDiagHandler*>(GetDiagHandler());
-    //                 if (!errh  ||  errh->GetStream() != &cerr) {
-    //                     cerr << "Error in command-line arguments. "
-    //                         "See error logs for more details." << endl;
-    //                 }
-    //             }
-    //             ...
-    //             cerr << string(72, '=') << endl << endl;
-    //         }
-    //         SetDiagPostAllFlags(eDPF_Severity);
-    //         NCBI_REPORT_EXCEPTION_X(18, "", e);
-    //         got_exception = true;
-    //         exit_code = 1;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7877-7888
-    // ```c++
-    //     for (pex = &ex; pex; pex = pex->GetPredecessor()) {
-    //         pile.push(pex);
-    //         if (!main_pex  &&  pex->HasMainText())
-    //             main_pex = pex;
-    //     }
-    //     if (!main_pex)
-    //         main_pex = pile.top();
-    //     if ( !IsOssEmpty(*m_Buffer.m_Stream) ) {
-    //         *this << "(" << main_pex->GetType() << "::"
-    //                      << main_pex->GetErrCodeString() << ") "
-    //               << s_GetExceptionText(main_pex);
-    //     }
-    // ```
     // With `eDPF_Severity` alone each exception of the chain is posted as `Error: <text>`, oldest
     // first, then the title's line, `Error: ` and the empty title, ` (CArgException::<code>) `
     // and the text of the newest exception that has its main text: the one the reader threw (a
@@ -292,15 +234,7 @@ pub(crate) type Body = fn(
 ) -> i32;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the
-// configuration before the arguments are read; quoted at `ApplicationStart`)
-// ```c++
-// void CNcbiApplicationAPI::x_TryInit(EAppDiagStream diag, const char* conf)
-// {
-//     // Load registry from the config file
-//     if ( conf ) {
-//         string x_conf(conf);
-//         LoadConfig(*m_Config, &x_conf);
-// ```
+// configuration before the arguments are read; cited at `ApplicationStart`)
 /// The run of `tool` with `words`, its standard input `input`, its output on `out` and its
 /// errors on `err`; the exit status. The library API's run, which runs NCBI's application start
 /// of this process as the command line's entry does (`ApplicationStart::of_process`): the usage
@@ -357,13 +291,14 @@ fn run_app(
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
     let mut target = diag_target(log_file(words));
-    start.write_log_setup(&mut target);
+    start.write_log_setup(&mut target, err);
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
             let _ = out.write_all(
-                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
+                crate::ncbi_version::print_with_components(request, tool.program, tool.components)
+                    .as_bytes(),
             );
             return 0;
         }
@@ -401,7 +336,7 @@ fn run_app(
             return 0;
         }
         Err(ArgsError::Help) => {
-            let _ = out.write_all(tool.help.as_bytes());
+            let _ = out.write_all(help_text(tool.help).as_bytes());
             return 0;
         }
         // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
@@ -421,7 +356,7 @@ fn run_app(
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
     };
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (cited at
     // `cli::main_entry`: blastdbcmd and dustmasker keep the default `DryRun`, which returns 0
     // after the arguments have passed their definitions; LOSAT refuses the settings it refuses
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
@@ -439,122 +374,5 @@ fn run_app(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI prints the versions before it reads the arguments, whatever their bytes (review 1 F4 of
-    // line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0); a word
-    // that is not UTF-8 is refused otherwise.
-    #[cfg(unix)]
-    #[test]
-    fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
-        use std::os::unix::ffi::OsStringExt;
-        static TOOL: Tool = Tool {
-            program: "p",
-            refusal_name: "P",
-            version: "1.0.0",
-            help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
-            descs: &[],
-            dependencies: no_dependencies,
-            post_prefix: None,
-        };
-        fn body(
-            _: &Args,
-            _: &ApplicationSettings,
-            _: &mut files::Cin<'_>,
-            _: &mut dyn Write,
-            _: &mut Diag,
-        ) -> i32 {
-            unreachable!("the run")
-        }
-        let run = |words: Vec<OsString>| {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let status = run_with(
-                &TOOL,
-                &words,
-                &mut std::io::empty(),
-                &mut out,
-                &mut err,
-                body,
-            );
-            (
-                status,
-                String::from_utf8(out).unwrap(),
-                String::from_utf8(err).unwrap(),
-            )
-        };
-        let bytes = OsString::from_vec(vec![0xff]);
-        for (word, request) in [
-            ("-version", crate::ncbi_version::VersionRequest::Version),
-            (
-                "-version-full-json",
-                crate::ncbi_version::VersionRequest::FullJson,
-            ),
-        ] {
-            assert_eq!(
-                run(vec!["-out".into(), bytes.clone(), word.into()]),
-                (
-                    0,
-                    crate::ncbi_version::print(request, "p", "1.0.0"),
-                    String::new()
-                )
-            );
-        }
-        assert_eq!(
-            run(vec!["-out".into(), bytes]),
-            (
-                1,
-                String::new(),
-                "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, \
-                 which is not supported by LOSAT's P\n"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
-        static TOOL: Tool = Tool {
-            program: "p",
-            refusal_name: "P",
-            version: "1.0.0",
-            help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
-            descs: &[],
-            dependencies: no_dependencies,
-            post_prefix: None,
-        };
-        let mut stderr = Vec::new();
-        let mut diag = Diag {
-            target: DiagTarget::Stderr,
-            stderr: &mut stderr,
-            tool: &TOOL,
-        };
-        let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
-        assert_eq!(diag.run_arg_exception(error), 1);
-        assert_eq!(
-            String::from_utf8(stderr).unwrap(),
-            // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
-            crate::wording::losat_text(&format!(
-                "USAGE\n  p [-h]\n\nUse '-help' to print detailed descriptions of command line \
-                 arguments\n{}\n\nError: Argument \"in\". X\nError: Application's execution \
-                 failed\nError:  (CArgException::eNoFile) Argument \"in\". X\n",
-                "=".repeat(72)
-            ))
-        );
-        // `eNoValue` prints no usage.
-        let mut stderr = Vec::new();
-        let mut diag = Diag {
-            target: DiagTarget::Stderr,
-            stderr: &mut stderr,
-            tool: &TOOL,
-        };
-        diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
-        assert_eq!(
-            String::from_utf8(stderr).unwrap(),
-            crate::wording::losat_text(
-                "Error: m\nError: Application's execution failed\nError:  (CArgException::eNoValue) \
-                 m\n"
-            )
-        );
-    }
-}
+#[path = "tests.rs"]
+mod tests;

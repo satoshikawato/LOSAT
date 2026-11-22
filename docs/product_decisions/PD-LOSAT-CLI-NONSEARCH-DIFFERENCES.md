@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.23 (pending: the Owner's review of exceptions 12 and 13, line NW's pull request)
+- Version: 1.25 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -46,7 +46,11 @@
   messages in LOSAT's words; the Owner's instruction of 2026-11-20, line NW, NW DECISIONS 1, 5, 6;
   exception 13: the SAM `@PG CL:` tag, recording `docs/decisions/OWNER_DECISIONS.md` entry 7 of
   2026-10-19, Owner-delegated, which said the difference goes into a product decision; found by
-  line MAN's review)
+  line MAN's review); 1.24 2026-11-21 (`losat windowmasker` in the scope and in exception 10; line
+  NP, item M5a; Owner-delegated, the same standing instruction); 1.25 2026-11-21 (exception 14:
+  LOSAT's name and version where LOSAT states the running program's version, in the search outputs
+  too, and LOSAT's error prefixes; the Owner's 「Q1=B Q2=B」 of 2026-11-21, line NW2, NW2
+  DECISIONS 1; the forms, NW2 DECISIONS 2-4, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -58,12 +62,14 @@
 The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLASTX,
 BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
-since version 1.16 `losat segmasker` and since version 1.18 `losat convert2blastmask`, whose
-outputs do) that is not part of a search result: argument parsing, help text, thread
+since version 1.16 `losat segmasker`, since version 1.18 `losat convert2blastmask` and since
+version 1.24 `losat windowmasker`, whose outputs do) that is not part of a search result: argument parsing, help text, thread
 warnings, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
-bar on a terminal. Search results, their outfmt
+bar on a terminal, and since version 1.25 the statement of the running program's version in every
+output, search results included (exception 14). Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
-those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule.
+those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule, apart from that
+version statement and the words of exceptions 12 and 14.
 
 ## Approved exceptions
 
@@ -197,12 +203,13 @@ BLAST+.
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
-10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's and convert2blastmask's output,
+10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's, windowmasker's and convert2blastmask's output,
    and in every program's version and help**
    (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
-   version 1.18 the same day, convert2blastmask, item K3). A write of NCBI's blastdbcmd 2.17.0,
-   dustmasker 1.0.0, segmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
+   version 1.18 the same day, convert2blastmask, item K3; version 1.24, 2026-11-21, windowmasker,
+   line NP item M5a). A write of NCBI's blastdbcmd 2.17.0,
+   dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
    sees the failed write and ends the program at once, with exit status 0 and no message, in
@@ -218,22 +225,24 @@ BLAST+.
    On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
    a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
    NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
-   segmasker's `interval` and `fasta`, convert2blastmask's `interval`,
+   segmasker's `interval` and `fasta`, windowmasker's `interval` and `fasta`, convert2blastmask's `interval`,
    blastdbcmd's retrieval, `-info`, `-list`, `-tax_info`) the later writes are dropped and the
    run goes on to its end with its exit status (0, or the error of a later input or entry, such
    as blastdbcmd's `Skipped` of an id that is not found, exit status 1); where NCBI writes
    through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
    `maskinfo_*`: exit status 3, 0 or 134 by the case; segmasker's: 1 or 134, the local official
-   release with `-out /dev/full`; convert2blastmask's `maskinfo_*`; blastdbcmd's `-metadata`:
+   release with `-out /dev/full`; windowmasker's: 3 for `seqloc_*`, 134 for `maskinfo_*`, NCBI
+   2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`; blastdbcmd's `-metadata`:
    exit status 6), LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
-   (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
+   (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
+   (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
    `blastdbcmd/metadata.rs`,
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
-   blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
+   blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 11. **BLASTN's progress bar on a terminal** (version 1.22, 2026-11-20, recorded for the v0.2.0
    release on the Owner's choice of 2026-11-20; the Owner approved this text the same day, with no
@@ -272,8 +281,8 @@ BLAST+.
 
 12. **Messages in LOSAT's words** (version 1.23, 2026-11-20). The Owner, 2026-11-20 (verbatim):
    「てかメッセージとかで「BLAST+のマニュアルを参照してください」とかNCBIの文言がそのまま出てきてるやつ、全部LOSATに直しといて」;
-   the prefixes stay (the Owner's 「すべて推奨通り」 to keeping `BLAST query/options error:` and its
-   siblings, the same day). Where NCBI's messages name NCBI's product or show the internals of
+   the prefixes stayed (the Owner's 「すべて推奨通り」 to keeping `BLAST query/options error:` and its
+   siblings, the same day) until the Owner's 「Q1=B Q2=B」 of 2026-11-21 (exception 14). Where NCBI's messages name NCBI's product or show the internals of
    NCBI's C++ Toolkit, LOSAT's say it in LOSAT's words, in standard error, in the library's and the
    Web engine's errors and in an archive's messages (`Blast4-error.message`):
    - the footer of the query, input, filtering, scoring, formatting, strategy, archive and
@@ -290,11 +299,10 @@ BLAST+.
      `(m_Pos = <n>)` reads `(position <n>)`;
    - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
      -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.
-   The error category prefixes (`BLAST query/options error:`, `BLAST engine error:`,
-   `BLAST Database error:`, `BLAST options error:`), NCBI's diagnostic codes such as `(106.15)`,
-   the message bodies (also where they name an NCBI function, such as
-   `CSeq_align::GetSeqRange(): Row is empty`), every error condition, exit status and search
-   result, `-version`, `-help` and `-xmlhelp` stay NCBI's. LOSAT's refusals that name
+   NCBI's diagnostic codes such as `(106.15)`, the message bodies (also where they name an NCBI
+   function, such as `CSeq_align::GetSeqRange(): Row is empty`), every error condition, exit status
+   and search result stay NCBI's; since version 1.25 the error category prefixes, the version
+   statement of the search results, `-version`, `-help` and `-xmlhelp` follow exception 14. LOSAT's refusals that name
    `NCBI BLAST+` speak of NCBI's program and stay. One producer: `LOSAT/src/wording.rs`
    (`USER_MANUAL_FOOTER`; `losat_text`, which `ncbi_exception::NcbiException` applies to the
    report it builds as NCBI's, as do its posts, `post_line_in`). The comparisons with NCBI's
@@ -302,6 +310,52 @@ BLAST+.
    Release-notes sentence: Error messages refer to the LOSAT user manual and no longer show NCBI's
    C++ exception reports (source paths, class names); the `BLAST ... error:` prefixes and exit
    statuses are unchanged.
+
+14. **LOSAT's name and version, and LOSAT's error prefixes** (version 1.25, 2026-11-21). The Owner,
+   2026-11-21, on a LOSAT Web screenshot whose failed run kept an outfmt 0 output that starts
+   `BLASTP 2.17.0+` under `Run 1 failed: BLAST engine error: ...` (verbatim, as session
+   losat-baselines-58 recorded it): 「エラーメッセージにBLASTP 2.17.0+ とか書いてあるけどなんで？LOSATでしょ？…LOSAT全体から駆逐すべきでは？」,
+   then 「Q1=B Q2=B」: Q1 B, the first line of the outputs names LOSAT (no longer the same bytes as
+   NCBI's), and Q2 B, the `BLAST ... error:` prefixes in LOSAT's words. The forms
+   (Owner-delegated, NW2 DECISIONS 2-4):
+   - Wherever LOSAT states the running program's version it states LOSAT and LOSAT's version
+     (the crate's, `0.2.0` in v0.2.0). After a program's name: `BLASTP (LOSAT 0.2.0)` where NCBI
+     writes `BLASTP 2.17.0+`: outfmt 0's first line, outfmt 7's `# BLASTP (LOSAT 0.2.0)`, outfmt 5's
+     `BlastOutput_version`, outfmt 13 and 15's JSON `version`, outfmt 14 and 16's `<version>`, the
+     XML that rpsbproc reads and its `SESSION` line, and the descriptions of NCBI's frozen `-help`
+     and `-xmlhelp` texts (`Protein-Protein BLAST (LOSAT 0.2.0)`); the program's name stays first,
+     so a reader that takes the first word as the program (Biopython's outfmt 7 reader) still reads
+     it. Alone: `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone: an archive's (outfmt 11) and a
+     search strategy's `ident`, SAM's `@PG VN:`, the first line of `-version`
+     (`blastn: LOSAT 0.2.0`; dustmasker, segmasker and rpsbproc too, where NCBI's state their own
+     `1.0.0` and `0.5.1`) and the program's version in `-version-full-xml` and `-version-full-json`,
+     blastdbcmd's `version LOSAT 0.2.0`. rpsbproc's banner reads
+     `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` (NCBI's `v0.5.1`). The program's `<version>`
+     in `-xmlhelp` holds LOSAT's version number, `0.2.0`, as `-version-full-xml`'s numbers do
+     (NCBI's `2.17.0`; dustmasker's and segmasker's `1.0.0`, rpsbproc's `0.5.1`).
+   - The structure of the XML and JSON outputs stays NCBI's: element and member names, their order
+     and nesting, the DOCTYPE (`-//NCBI//NCBI BlastOutput/EN`, `NCBI_BlastOutput.dtd`),
+     `xmlns="http://www.ncbi.nlm.nih.gov"` and `xs:schemaLocation` (`NCBI_BlastOutput2.xsd`), which
+     name the format's definition, not the program that ran (Biopython's `Bio.Blast` parser checks
+     them).
+   - The prefixes: `LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`,
+     `LOSAT database creation error:` (makeblastdb), `LOSAT options error:` and
+     `LOSAT query error:`, where NCBI writes `BLAST query/options error:`, `BLAST engine error:`,
+     `BLAST Database error:`, `BLAST Database creation error:`, `BLAST options error:` and
+     `BLAST query error:`; the same length, so an archive's wrapped message keeps NCBI's wraps.
+   - Kept: the `Reference:` citations, `BLAST` as the name of the method or the format
+     (`# BLAST processed 2 queries`, `BLAST database`), sentences about NCBI's program
+     (`output compatible with blast 2.17.0`, `NCBI BLAST+ 2.17.0 aborts`), NCBI's diagnostic codes,
+     message bodies (also `BLAST failed to write output`, `BLAST ran out of memory`) and exit
+     statuses, and every other byte of the outputs.
+   One producer: `LOSAT/src/wording.rs` (`LOSAT_VERSION`, `REPORT_VERSION`, `ERROR_PREFIXES`); NCBI's
+   frozen `-help` and `-xmlhelp` texts are printed through its mapping. The comparisons with
+   NCBI's freezes apply the same mapping to the freeze (`losat_output_bytes`; AGENTS.md rule 8;
+   `python3 -I LOSAT/tests/losat_wording.py map-output <file>` for an ad-hoc comparison).
+   Release-notes sentence: Outputs name LOSAT and its version where NCBI BLAST+ names its own
+   (`BLASTP (LOSAT 0.2.0)` in place of `BLASTP 2.17.0+`, `-version` prints `blastn: LOSAT 0.2.0`),
+   and error messages start with `LOSAT engine error:` and the other `LOSAT ... error:` prefixes in
+   place of NCBI's `BLAST ... error:`; every other byte of the search results is unchanged.
 
 13. **SAM `@PG CL:`** (version 1.23, 2026-11-20, Owner-delegated, recording the decision of
    2026-10-19, `docs/decisions/OWNER_DECISIONS.md` entry 7). BLASTN `-outfmt 17` writes in the
@@ -350,7 +404,7 @@ BLAST+.
   `-conffile` and `-dryrun` as the command line does: every `validate` and `run` makes NCBI's
   application start, the file of `-conffile` is a file that the page gives the engine, the `-logfile`
   file comes back as a file of the run, and a `-dryrun` run reads no record and writes no output (a
-  `-logfile` name with a directory is refused, the browser has no directories). Since version 1.21 the library API (and
+  `-logfile` name with a directory, refused until line WQA's sweep D11 of 2026-11-20, is read as the command line on Linux reads it where the name's directories exist). Since version 1.21 the library API (and
   pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
   E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
   application start; the `-logfile` file gets what the command line writes there, the registry
@@ -366,8 +420,8 @@ BLAST+.
   only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
   archive (line RG DECISIONS E1c-2). Since version 1.17 `-help-full` is no longer refused: every
   program writes its `-help` text (exception 1), as NCBI's programs write the bytes of `-help`
-  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
-  LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
+  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT's text, its
+  own, does not list). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
   place) and the full versions stay refused, in makeblastdb too (line RG item E2); since version
   1.20 `-xmlhelp` is not refused on the command line (exception 1): it stops the reader as `-help`

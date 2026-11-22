@@ -54,19 +54,83 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:60-67
+/// Why a reader over [`ReadAt`] (this LMDB reader, `tax_files`'s lookup files, `tax_sqlite`) gives
+/// up: the file's bytes are not what it reads (`Format`, LOSAT's text of a damaged or foreign
+/// file, which the callers turn into their own error or NCBI's text), or the system does not give
+/// them (`Unreadable`). The second is a typed boundary so that a read that fails after the file
+/// was opened is not a format refusal (line WQA D18c, 2026-11-21): NCBI maps the LMDB and lookup
+/// files, where such a failure is a SIGBUS, so it stays [`super::SeqDbError::Read`], LOSAT's own
+/// "cannot be read"; it reads `taxonomy4blast.sqlite3` through SQLite, where it is SQLite's read
+/// error, which `tax_sqlite`'s callers write as NCBI does (`tax_sqlite::QueryReadFailure`; review
+/// 1 of line WQA D18b, L3).
+#[derive(Debug)]
+pub enum ReadError {
+    /// The bytes are not those of the expected format, or a range passes the end of the source.
+    Format(String),
+    /// The system failed to give bytes of a file after its first byte ([`super::SeqDbError::Read`]:
+    /// where NCBI reads its mapping, a SIGBUS, which `report::db_subject::LookupFailure::of_error`
+    /// takes as NCBI's crash, line WQA D18 round 3; of `taxonomy4blast.sqlite3`, SQLite's read
+    /// error, `tax_sqlite::QueryReadFailure`).
+    Unreadable(super::SeqDbError),
+}
+
+impl ReadError {
+    /// The database error of this failure: the `Unreadable` error as it is, the format message
+    /// through `format` (each caller's own error or NCBI's text for it).
+    pub fn into_seqdb(self, format: impl FnOnce(String) -> super::SeqDbError) -> super::SeqDbError {
+        match self {
+            ReadError::Format(message) => format(message),
+            ReadError::Unreadable(error) => error,
+        }
+    }
+
+    /// This failure with `prefix` before a format message (an `Unreadable` error keeps its text).
+    pub fn prefixed(self, prefix: &str) -> Self {
+        match self {
+            ReadError::Format(message) => ReadError::Format(format!("{prefix}{message}")),
+            unreadable => unreadable,
+        }
+    }
+}
+
+impl From<String> for ReadError {
+    fn from(message: String) -> Self {
+        ReadError::Format(message)
+    }
+}
+
+impl From<&str> for ReadError {
+    fn from(message: &str) -> Self {
+        ReadError::Format(message.to_string())
+    }
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Format(message) => f.write_str(message),
+            ReadError::Unreadable(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
+
 /// Positioned reads over a database file ([`super::file::DbFile`]) or a buffer.
 pub trait ReadAt {
     /// Total length in bytes.
     fn len(&self) -> u64;
-    /// Fill `buf` from `offset`; `Err` when the range is not inside the source.
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String>;
+    /// Fill `buf` from `offset`; `Err`: [`ReadError::Format`] when the range is not inside the
+    /// source, [`ReadError::Unreadable`] when the system does not give the bytes.
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError>;
 }
 
 impl ReadAt for [u8] {
     fn len(&self) -> u64 {
         <[u8]>::len(self) as u64
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         let end = offset
             .checked_add(buf.len() as u64)
             .filter(|&e| e <= <[u8]>::len(self) as u64)
@@ -87,7 +151,7 @@ impl ReadAt for Vec<u8> {
     fn len(&self) -> u64 {
         Vec::len(self) as u64
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         self.as_slice().read_exact_at(buf, offset)
     }
 }
@@ -96,8 +160,11 @@ impl ReadAt for super::file::DbFile {
     fn len(&self) -> u64 {
         super::file::DbFile::len(self)
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
-        super::file::DbFile::read_exact_at(self, buf, offset).map_err(|e| e.to_string())
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
+        super::file::DbFile::read_exact_at(self, buf, offset).map_err(|error| match error {
+            super::SeqDbError::Read { .. } => ReadError::Unreadable(error),
+            other => ReadError::Format(other.to_string()),
+        })
     }
 }
 
@@ -108,20 +175,20 @@ impl ReadAt for std::fs::File {
         self.metadata().map(|m| m.len()).unwrap_or(0)
     }
     #[cfg(unix)]
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
-            .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset))
+            .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset).into())
     }
     #[cfg(not(any(unix, windows)))]
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         use std::io::{Read, Seek, SeekFrom};
         let mut f = self;
         f.seek(SeekFrom::Start(offset))
             .and_then(|_| f.read_exact(buf))
-            .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset))
+            .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset).into())
     }
     #[cfg(windows)]
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         let mut done = 0usize;
         while done < buf.len() {
             let n = std::os::windows::fs::FileExt::seek_read(
@@ -135,7 +202,8 @@ impl ReadAt for std::fs::File {
                     "read of {} bytes at offset {}: unexpected end of file",
                     buf.len(),
                     offset
-                ));
+                )
+                .into());
             }
             done += n;
         }
@@ -171,18 +239,18 @@ fn bad_valsize() -> String {
     "MDB_BAD_VALSIZE: Unsupported size of key/DB name/data, or wrong DUPFIXED size".to_string()
 }
 
-fn slice(b: &[u8], off: usize, n: usize) -> Result<&[u8], String> {
+fn slice(b: &[u8], off: usize, n: usize) -> Result<&[u8], ReadError> {
     off.checked_add(n)
         .and_then(|end| b.get(off..end))
         .ok_or_else(|| {
-            format!(
+            ReadError::Format(format!(
                 "LMDB: {n} bytes at offset {off} are outside a block of {} bytes",
                 b.len()
-            )
+            ))
         })
 }
 
-fn rd_u16(b: &[u8], off: usize) -> Result<u16, String> {
+fn rd_u16(b: &[u8], off: usize) -> Result<u16, ReadError> {
     Ok(u16::from_le_bytes(
         slice(b, off, 2)?
             .try_into()
@@ -190,7 +258,7 @@ fn rd_u16(b: &[u8], off: usize) -> Result<u16, String> {
     ))
 }
 
-fn rd_u32(b: &[u8], off: usize) -> Result<u32, String> {
+fn rd_u32(b: &[u8], off: usize) -> Result<u32, ReadError> {
     Ok(u32::from_le_bytes(
         slice(b, off, 4)?
             .try_into()
@@ -198,7 +266,7 @@ fn rd_u32(b: &[u8], off: usize) -> Result<u32, String> {
     ))
 }
 
-fn rd_u64(b: &[u8], off: usize) -> Result<u64, String> {
+fn rd_u64(b: &[u8], off: usize) -> Result<u64, ReadError> {
     Ok(u64::from_le_bytes(
         slice(b, off, 8)?
             .try_into()
@@ -230,12 +298,13 @@ pub struct Db {
 
 impl Db {
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1005-1014
-    fn parse(raw: &[u8]) -> Result<Db, String> {
+    fn parse(raw: &[u8]) -> Result<Db, ReadError> {
         if raw.len() < DB_RECORD_SZ {
             return Err(format!(
                 "LMDB: database record of {} bytes, expected {DB_RECORD_SZ}",
                 raw.len()
-            ));
+            )
+            .into());
         }
         Ok(Db {
             pad: rd_u32(raw, 0)?,
@@ -265,7 +334,7 @@ struct Meta {
 
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1036-1054
 /// Read and validate the meta page that starts at `off` (header 16 bytes, then the meta).
-fn read_meta<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<Meta, String> {
+fn read_meta<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<Meta, ReadError> {
     let end = off
         .checked_add(META_BYTES as u64)
         .filter(|&e| e <= src.len());
@@ -273,24 +342,25 @@ fn read_meta<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<Meta, String> {
         return Err(format!(
             "LMDB: file of {} bytes is too small for a meta page at offset {off}",
             src.len()
-        ));
+        )
+        .into());
     }
     let mut b = [0u8; META_BYTES];
     src.read_exact_at(&mut b, off)?;
     // The checks of mdb_env_read_header: P_META flag, magic, version.
     if rd_u16(&b, 10)? & P_META == 0 {
-        return Err(format!(
-            "LMDB: page at offset {off} is not a meta page (MDB_INVALID)"
-        ));
+        return Err(format!("LMDB: page at offset {off} is not a meta page (MDB_INVALID)").into());
     }
     if rd_u32(&b, 16)? != MDB_MAGIC {
-        return Err("LMDB: meta page has invalid magic (MDB_INVALID)".to_string());
+        return Err("LMDB: meta page has invalid magic (MDB_INVALID)"
+            .to_string()
+            .into());
     }
     let version = rd_u32(&b, 20)?;
     if version != MDB_DATA_VERSION {
         return Err(format!(
             "LMDB: database is version {version}, expected version {MDB_DATA_VERSION} (MDB_VERSION_MISMATCH)"
-        ));
+        ).into());
     }
     Ok(Meta {
         free: Db::parse(slice(&b, 40, DB_RECORD_SZ)?)?,
@@ -320,7 +390,7 @@ struct Node {
 
 impl Page {
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:846-852
-    fn new(buf: Rc<Vec<u8>>) -> Result<Page, String> {
+    fn new(buf: Rc<Vec<u8>>) -> Result<Page, ReadError> {
         let pad = rd_u16(&buf, 8)?;
         let flags = rd_u16(&buf, 10)?;
         let lower = rd_u16(&buf, 12)? as usize;
@@ -328,7 +398,8 @@ impl Page {
             return Err(format!(
                 "LMDB: page header lower={lower} is outside a page of {} bytes",
                 buf.len()
-            ));
+            )
+            .into());
         }
         Ok(Page {
             buf,
@@ -339,18 +410,12 @@ impl Page {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:898-960
-    fn node(&self, i: usize) -> Result<Node, String> {
+    fn node(&self, i: usize) -> Result<Node, ReadError> {
         if self.flags & P_LEAF2 != 0 || self.flags & (P_BRANCH | P_LEAF) == 0 {
-            return Err(format!(
-                "LMDB: page with flags {:#x} has no nodes",
-                self.flags
-            ));
+            return Err(format!("LMDB: page with flags {:#x} has no nodes", self.flags).into());
         }
         if i >= self.n {
-            return Err(format!(
-                "LMDB: node {i} is outside a page of {} nodes",
-                self.n
-            ));
+            return Err(format!("LMDB: node {i} is outside a page of {} nodes", self.n).into());
         }
         let o = rd_u16(&self.buf, PAGEHDRSZ + 2 * i)? as usize;
         let lo = rd_u16(&self.buf, o)? as u64;
@@ -399,23 +464,20 @@ impl Page {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:995-995
-    fn leaf2_key(&self, i: usize) -> Result<&[u8], String> {
+    fn leaf2_key(&self, i: usize) -> Result<&[u8], ReadError> {
         let ks = self.pad as usize;
         if ks == 0 {
-            return Err("LMDB: LEAF2 page with key size 0".to_string());
+            return Err("LMDB: LEAF2 page with key size 0".to_string().into());
         }
         if i >= self.n {
-            return Err(format!(
-                "LMDB: LEAF2 key {i} is outside a page of {} keys",
-                self.n
-            ));
+            return Err(format!("LMDB: LEAF2 key {i} is outside a page of {} keys", self.n).into());
         }
         slice(&self.buf, PAGEHDRSZ + i * ks, ks)
     }
 
     /// Key of entry `i` of a leaf page of a sub-database or sub-page: LEAF2 keys are the
     /// fixed-size values, in other leaves the value of a duplicate is the node key.
-    fn dup_item(&self, i: usize) -> Result<&[u8], String> {
+    fn dup_item(&self, i: usize) -> Result<&[u8], ReadError> {
         if self.flags & P_LEAF2 != 0 {
             self.leaf2_key(i)
         } else {
@@ -426,7 +488,7 @@ impl Page {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5276-5365
     /// `mdb_node_search`: index of the first entry >= `key` and whether it is equal.
-    fn node_search(&self, key: &[u8], db_flags: u16) -> Result<(usize, bool), String> {
+    fn node_search(&self, key: &[u8], db_flags: u16) -> Result<(usize, bool), ReadError> {
         let leaf2 = self.flags & P_LEAF2 != 0;
         let mut low: isize = if self.flags & P_LEAF != 0 { 0 } else { 1 };
         let mut high: isize = self.n as isize - 1;
@@ -515,11 +577,11 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3943-3949
     /// Open an environment: validate both meta pages (magic, version), take the page size from
     /// `FREE_DBI.md_pad`, use the meta page with the larger transaction id (tie: meta 0).
-    pub fn open(src: &'r R) -> Result<Self, String> {
+    pub fn open(src: &'r R) -> Result<Self, ReadError> {
         let m0 = read_meta(src, 0)?;
         let psize = m0.free.pad as usize;
         if !(512..=32768).contains(&psize) || !psize.is_power_of_two() {
-            return Err(format!("LMDB: invalid page size {psize} in the meta page"));
+            return Err(format!("LMDB: invalid page size {psize} in the meta page").into());
         }
         let m1 = read_meta(src, psize as u64)?;
         let meta = if m0.txnid < m1.txnid { m1 } else { m0 };
@@ -554,12 +616,13 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5465-5479
-    fn page(&self, pgno: u64) -> Result<Page, String> {
+    fn page(&self, pgno: u64) -> Result<Page, ReadError> {
         if pgno >= self.npages {
             return Err(format!(
                 "LMDB: page {pgno} not found (the database has {} pages) (MDB_PAGE_NOTFOUND)",
                 self.npages
-            ));
+            )
+            .into());
         }
         if let Some(buf) = self.cache.borrow().get(&pgno) {
             return Page::new(Rc::clone(buf));
@@ -577,7 +640,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5484-5562
     /// Leaf page whose key range covers `key` (`None` for an empty tree).
-    fn leaf_for(&self, db: &Db, key: &[u8]) -> Result<Option<Page>, String> {
+    fn leaf_for(&self, db: &Db, key: &[u8]) -> Result<Option<Page>, ReadError> {
         self.descend(db, key, |_, _| {})
     }
 
@@ -588,7 +651,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         db: &Db,
         key: &[u8],
         mut on_branch: impl FnMut(Page, usize),
-    ) -> Result<Option<Page>, String> {
+    ) -> Result<Option<Page>, ReadError> {
         if db.root == P_INVALID {
             return Ok(None);
         }
@@ -596,7 +659,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         for _ in 0..=MAX_DEPTH {
             if page.flags & P_BRANCH != 0 {
                 if page.n == 0 {
-                    return Err("LMDB: empty branch page (MDB_CORRUPTED)".to_string());
+                    return Err("LMDB: empty branch page (MDB_CORRUPTED)".to_string().into());
                 }
                 let (mut i, exact) = page.node_search(key, db.flags)?;
                 if i >= page.n {
@@ -605,7 +668,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
                     if i == 0 {
                         return Err(
                             "LMDB: branch search ended before the first node (MDB_CORRUPTED)"
-                                .to_string(),
+                                .to_string()
+                                .into(),
                         );
                     }
                     i -= 1;
@@ -619,18 +683,20 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
                 return Err(format!(
                     "LMDB: index points to a page with flags {:#x}, expected branch or leaf (MDB_CORRUPTED)",
                     page.flags
-                ));
+                ).into());
             }
         }
-        Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string())
+        Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)"
+            .to_string()
+            .into())
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6032-6047
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6148-6153
     /// `mdb_cursor_set(MDB_SET)`: leaf page and node of an exact key match.
-    fn find(&self, db: &Db, key: &[u8]) -> Result<Option<(Page, Node)>, String> {
+    fn find(&self, db: &Db, key: &[u8]) -> Result<Option<(Page, Node)>, ReadError> {
         if key.is_empty() {
-            return Err(bad_valsize());
+            return Err(bad_valsize().into());
         }
         let Some(leaf) = self.leaf_for(db, key)? else {
             return Ok(None);
@@ -649,9 +715,9 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     /// order (`None`: every key is before it). Past the last node of the leaf that covers `key`,
     /// the first key of the next leaf (`mdb_cursor_sibling`: the deepest branch with a node to the
     /// right of the one taken, then the first node of each page down).
-    pub fn first_key_at_least(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    pub fn first_key_at_least(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, ReadError> {
         if key.is_empty() {
-            return Err(bad_valsize());
+            return Err(bad_valsize().into());
         }
         let mut path = Vec::new();
         let Some(leaf) = self.descend(db, key, |page, i| path.push((page, i)))? else {
@@ -669,30 +735,32 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
             for _ in path.len()..=MAX_DEPTH {
                 if page.flags & P_BRANCH != 0 {
                     if page.n == 0 {
-                        return Err("LMDB: empty branch page (MDB_CORRUPTED)".to_string());
+                        return Err("LMDB: empty branch page (MDB_CORRUPTED)".to_string().into());
                     }
                     page = self.page(page.node(0)?.child)?;
                 } else if page.flags & P_LEAF != 0 && page.flags & P_LEAF2 == 0 {
                     if page.n == 0 {
-                        return Err(
-                            "LMDB: empty leaf page past the root (MDB_CORRUPTED)".to_string()
-                        );
+                        return Err("LMDB: empty leaf page past the root (MDB_CORRUPTED)"
+                            .to_string()
+                            .into());
                     }
                     return Ok(Some(page.key(&page.node(0)?).to_vec()));
                 } else {
                     return Err(format!(
                         "LMDB: index points to a page with flags {:#x}, expected branch or leaf (MDB_CORRUPTED)",
                         page.flags
-                    ));
+                    ).into());
                 }
             }
-            return Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string());
+            return Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)"
+                .to_string()
+                .into());
         }
         Ok(None)
     }
 
     /// Whether `db` has a key that starts with `prefix` (`MDB_SET_RANGE` at `prefix`).
-    pub fn has_key_starting_with(&self, db: &Db, prefix: &[u8]) -> Result<bool, String> {
+    pub fn has_key_starting_with(&self, db: &Db, prefix: &[u8]) -> Result<bool, ReadError> {
         Ok(self
             .first_key_at_least(db, prefix)?
             .is_some_and(|key| key.starts_with(prefix)))
@@ -701,7 +769,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:9784-9799
     /// Look a named database up in the main database (`mdb_dbi_open` of an existing database).
     /// `Ok(None)` when there is no such name (NCBI: `MDB_NOTFOUND`).
-    pub fn open_db(&self, name: &[u8]) -> Result<Option<Db>, String> {
+    pub fn open_db(&self, name: &[u8]) -> Result<Option<Db>, ReadError> {
         // Cannot mix named databases with some main database flags.
         if self.main.flags & (MDB_DUPSORT | MDB_INTEGERKEY) != 0 {
             return Ok(None);
@@ -712,7 +780,9 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         // Make sure this is actually a database.
         if node.flags & (F_DUPDATA | F_SUBDATA) != F_SUBDATA {
             return Err(
-                "MDB_INCOMPATIBLE: Operation and DB incompatible, or DB type changed".to_string(),
+                "MDB_INCOMPATIBLE: Operation and DB incompatible, or DB type changed"
+                    .to_string()
+                    .into(),
             );
         }
         Ok(Some(Db::parse(page.data(&node))?))
@@ -720,23 +790,21 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5755-5779
     /// Data of a node: inline, or read from the overflow pages for `F_BIGDATA`.
-    fn node_value(&self, page: &Page, node: &Node) -> Result<Vec<u8>, String> {
+    fn node_value(&self, page: &Page, node: &Node) -> Result<Vec<u8>, ReadError> {
         if node.flags & F_BIGDATA == 0 {
             return Ok(page.data(node).to_vec());
         }
         let pgno = rd_u64(page.data(node), 0)?;
         if pgno >= self.npages {
-            return Err(format!(
-                "LMDB: overflow page {pgno} not found (MDB_PAGE_NOTFOUND)"
-            ));
+            return Err(format!("LMDB: overflow page {pgno} not found (MDB_PAGE_NOTFOUND)").into());
         }
         let mut hdr = [0u8; PAGEHDRSZ];
         let base = pgno * self.psize as u64;
         self.src.read_exact_at(&mut hdr, base)?;
         if rd_u16(&hdr, 10)? & P_OVERFLOW == 0 {
-            return Err(format!(
-                "LMDB: page {pgno} is not an overflow page (MDB_CORRUPTED)"
-            ));
+            return Err(
+                format!("LMDB: page {pgno} is not an overflow page (MDB_CORRUPTED)").into(),
+            );
         }
         // mp_pages shares the place of mp_lower/mp_upper in the page header.
         let pages = rd_u32(&hdr, 12)? as u64;
@@ -747,7 +815,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
             return Err(format!(
                 "LMDB: overflow value of {} bytes does not fit its {pages} pages (MDB_CORRUPTED)",
                 node.dsize
-            ));
+            )
+            .into());
         }
         let mut v = vec![0u8; node.dsize];
         self.src.read_exact_at(&mut v, base + PAGEHDRSZ as u64)?;
@@ -756,37 +825,41 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:7531-7571
     /// Shape of the values of one leaf node of `db`.
-    fn node_dups(&self, db: &Db, page: &Page, node: &Node) -> Result<Dups, String> {
+    fn node_dups(&self, db: &Db, page: &Page, node: &Node) -> Result<Dups, ReadError> {
         if node.flags & F_DUPDATA == 0 {
             return Ok(Dups::One(self.node_value(page, node)?));
         }
         if db.flags & MDB_DUPSORT == 0 || node.flags & F_BIGDATA != 0 {
-            return Err("LMDB: duplicate node in a database without MDB_DUPSORT, or with overflow data (MDB_CORRUPTED)".to_string());
+            return Err("LMDB: duplicate node in a database without MDB_DUPSORT, or with overflow data (MDB_CORRUPTED)".to_string().into());
         }
         if node.flags & F_SUBDATA != 0 {
             return Ok(Dups::SubDb(Db::parse(page.data(node))?));
         }
         let sub = Page::new(Rc::new(page.data(node).to_vec()))?;
         if sub.flags & P_SUBP == 0 || sub.flags & P_LEAF == 0 {
-            return Err(format!("LMDB: duplicate sub-page has flags {:#x}, expected a leaf sub-page (MDB_CORRUPTED)", sub.flags));
+            return Err(format!("LMDB: duplicate sub-page has flags {:#x}, expected a leaf sub-page (MDB_CORRUPTED)", sub.flags).into());
         }
         Ok(Dups::SubPage(sub))
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6260-6269
     /// First value in the order of the duplicates (`mdb_cursor_first` of the sub-cursor).
-    fn first_dup(&self, dups: &Dups) -> Result<Vec<u8>, String> {
+    fn first_dup(&self, dups: &Dups) -> Result<Vec<u8>, ReadError> {
         match dups {
             Dups::One(v) => Ok(v.clone()),
             Dups::SubPage(p) => {
                 if p.n == 0 {
-                    return Err("LMDB: empty duplicate sub-page (MDB_CORRUPTED)".to_string());
+                    return Err("LMDB: empty duplicate sub-page (MDB_CORRUPTED)"
+                        .to_string()
+                        .into());
                 }
                 Ok(p.dup_item(0)?.to_vec())
             }
             Dups::SubDb(sub) => {
                 if sub.root == P_INVALID {
-                    return Err("LMDB: empty duplicate sub-database (MDB_CORRUPTED)".to_string());
+                    return Err("LMDB: empty duplicate sub-database (MDB_CORRUPTED)"
+                        .to_string()
+                        .into());
                 }
                 let mut page = self.page(sub.root)?;
                 for _ in 0..=MAX_DEPTH {
@@ -797,7 +870,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
                         if page.n == 0 {
                             return Err(
                                 "LMDB: empty leaf in a duplicate sub-database (MDB_CORRUPTED)"
-                                    .to_string(),
+                                    .to_string()
+                                    .into(),
                             );
                         }
                         return Ok(page.dup_item(0)?.to_vec());
@@ -805,10 +879,13 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
                         return Err(format!(
                             "LMDB: sub-database page with flags {:#x} (MDB_CORRUPTED)",
                             page.flags
-                        ));
+                        )
+                        .into());
                     }
                 }
-                Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string())
+                Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)"
+                    .to_string()
+                    .into())
             }
         }
     }
@@ -818,8 +895,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     fn each_dup(
         &self,
         dups: &Dups,
-        f: &mut dyn FnMut(&[u8]) -> Result<(), String>,
-    ) -> Result<(), String> {
+        f: &mut dyn FnMut(&[u8]) -> Result<(), ReadError>,
+    ) -> Result<(), ReadError> {
         match dups {
             Dups::One(v) => f(v),
             Dups::SubPage(p) => {
@@ -849,8 +926,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     fn walk_leaves(
         &self,
         root: u64,
-        f: &mut dyn FnMut(&Page) -> Result<(), String>,
-    ) -> Result<(), String> {
+        f: &mut dyn FnMut(&Page) -> Result<(), ReadError>,
+    ) -> Result<(), ReadError> {
         let mut budget = self.npages;
         self.walk_rec(root, 0, &mut budget, f)
     }
@@ -860,14 +937,18 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         pgno: u64,
         depth: usize,
         budget: &mut u64,
-        f: &mut dyn FnMut(&Page) -> Result<(), String>,
-    ) -> Result<(), String> {
+        f: &mut dyn FnMut(&Page) -> Result<(), ReadError>,
+    ) -> Result<(), ReadError> {
         if depth > MAX_DEPTH {
-            return Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string());
+            return Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)"
+                .to_string()
+                .into());
         }
         if *budget == 0 {
             return Err(
-                "LMDB: tree visits more pages than the database has (MDB_CORRUPTED)".to_string(),
+                "LMDB: tree visits more pages than the database has (MDB_CORRUPTED)"
+                    .to_string()
+                    .into(),
             );
         }
         *budget -= 1;
@@ -884,14 +965,15 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
             Err(format!(
                 "LMDB: page {pgno} has flags {:#x}, expected branch or leaf (MDB_CORRUPTED)",
                 page.flags
-            ))
+            )
+            .into())
         }
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6333-6359
     /// `MDB_SET` + `MDB_GET_CURRENT`: the first duplicate of `key` (the only value of a plain
     /// key). Works for sub-page and sub-database keys. `Ok(None)`: no such key.
-    pub fn first_value(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    pub fn first_value(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, ReadError> {
         let Some((page, node)) = self.find(db, key)? else {
             return Ok(None);
         };
@@ -903,7 +985,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     /// `MDB_SET` + `MDB_GET_CURRENT` + `MDB_NEXT_DUP` until the end: every value of `key` in
     /// LMDB order (for `MDB_DUPFIXED` without `MDB_INTEGERDUP`: `memcmp` of the value bytes).
     /// Empty when the key is absent.
-    pub fn values(&self, db: &Db, key: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    pub fn values(&self, db: &Db, key: &[u8]) -> Result<Vec<Vec<u8>>, ReadError> {
         let Some((page, node)) = self.find(db, key)? else {
             return Ok(Vec::new());
         };
@@ -922,14 +1004,16 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     pub fn for_each(
         &self,
         db: &Db,
-        mut f: impl FnMut(&[u8], &[u8]) -> Result<(), String>,
-    ) -> Result<(), String> {
+        mut f: impl FnMut(&[u8], &[u8]) -> Result<(), ReadError>,
+    ) -> Result<(), ReadError> {
         if db.root == P_INVALID {
             return Ok(());
         }
         self.walk_leaves(db.root, &mut |leaf: &Page| {
             if leaf.flags & P_LEAF2 != 0 {
-                return Err("LMDB: LEAF2 page in a main tree (MDB_CORRUPTED)".to_string());
+                return Err("LMDB: LEAF2 page in a main tree (MDB_CORRUPTED)"
+                    .to_string()
+                    .into());
             }
             for i in 0..leaf.n {
                 let node = leaf.node(i)?;
@@ -943,579 +1027,5 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-
-    /// Fixture databases (made by NCBI makeblastdb 2.17.0, see `tests/seqdb/README.md`).
-    const FX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/seqdb/lmdb");
-    /// Values written by `dump.py` (a Python reference reader) for the fixtures.
-    const EXP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/seqdb/lmdb/expected");
-
-    /// Path of an `expected/*.txt` file: the repository fixtures, else the directory named by
-    /// `LOSAT_TEST_18S_EXPECTED` (the dumps of the NCBI-distributed 18S database are too big to commit).
-    fn exp_path(name: &str) -> String {
-        let repo = format!("{EXP}/{name}.txt");
-        if std::path::Path::new(&repo).exists() {
-            return repo;
-        }
-        let dir = std::env::var("LOSAT_TEST_18S_EXPECTED").unwrap_or_default();
-        format!("{dir}/{name}.txt")
-    }
-
-    fn hex(b: &[u8]) -> String {
-        b.iter().map(|x| format!("{x:02x}")).collect()
-    }
-
-    fn unhex(s: &str) -> Vec<u8> {
-        (0..s.len() / 2)
-            .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
-            .collect()
-    }
-
-    /// One database of an `expected/*.txt` file written by `gen/expect.py` from `dump.py`.
-    struct ExpDb {
-        name: String,
-        flags: u16,
-        depth: u16,
-        entries: u64,
-        keys: Vec<(Vec<u8>, Vec<Vec<u8>>)>,
-    }
-
-    fn load_expected(name: &str) -> Vec<ExpDb> {
-        let text = std::fs::read_to_string(exp_path(name)).unwrap();
-        let mut dbs: Vec<ExpDb> = Vec::new();
-        for line in text.lines() {
-            let f: Vec<&str> = line.split(' ').collect();
-            match f[0] {
-                "META" => {}
-                "DB" => dbs.push(ExpDb {
-                    name: f[1].to_string(),
-                    flags: f[2].parse().unwrap(),
-                    depth: f[3].parse().unwrap(),
-                    entries: f[4].parse().unwrap(),
-                    keys: Vec::new(),
-                }),
-                "K" => {
-                    let vals = f[2].split(',').map(unhex).collect();
-                    dbs.last_mut().unwrap().keys.push((unhex(f[1]), vals));
-                }
-                _ => panic!("bad expected line {line}"),
-            }
-        }
-        dbs
-    }
-
-    /// Every named database: record fields, the in-order walk, `first_value`, `values`.
-    fn check_against_dump<R: ReadAt + ?Sized>(env: &Env<R>, exp_name: &str) {
-        for ex in load_expected(exp_name) {
-            let db = env
-                .open_db(ex.name.as_bytes())
-                .unwrap()
-                .unwrap_or_else(|| panic!("{exp_name}: {} missing", ex.name));
-            assert_eq!(
-                (db.flags, db.depth, db.entries),
-                (ex.flags, ex.depth, ex.entries),
-                "{exp_name} {}",
-                ex.name
-            );
-            let mut walked: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-            env.for_each(&db, |k, v| {
-                walked.push((k.to_vec(), v.to_vec()));
-                Ok(())
-            })
-            .unwrap();
-            let want: Vec<(Vec<u8>, Vec<u8>)> = ex
-                .keys
-                .iter()
-                .flat_map(|(k, vs)| vs.iter().map(move |v| (k.clone(), v.clone())))
-                .collect();
-            assert_eq!(
-                walked.len(),
-                want.len(),
-                "{exp_name} {} walk length",
-                ex.name
-            );
-            assert!(walked == want, "{exp_name} {} walk differs", ex.name);
-            assert_eq!(walked.len() as u64, db.entries);
-            for (k, vs) in &ex.keys {
-                assert_eq!(
-                    env.first_value(&db, k).unwrap().as_ref(),
-                    Some(&vs[0]),
-                    "{exp_name} first of {}",
-                    hex(k)
-                );
-                assert_eq!(
-                    &env.values(&db, k).unwrap(),
-                    vs,
-                    "{exp_name} values of {}",
-                    hex(k)
-                );
-            }
-        }
-    }
-
-    fn check_file(name: &str) {
-        let f = File::open(format!("{FX}/{name}")).unwrap();
-        let env = Env::open(&f).unwrap();
-        check_against_dump(&env, name);
-    }
-
-    #[test]
-    fn fixtures_match_dump_py() {
-        for n in [
-            "p5.pdb",
-            "p5.ptf",
-            "n5.ndb",
-            "n5.ntf",
-            "mv.pdb",
-            "mv.ptf",
-            "dup.pdb",
-            "dup.ptf",
-            "thr500.pdb",
-            "thr501.pdb",
-            "mvbig.pdb",
-        ] {
-            check_file(n);
-        }
-    }
-
-    #[test]
-    fn in_memory_sources_agree_with_files() {
-        let bytes = std::fs::read(format!("{FX}/p5.pdb")).unwrap();
-        let env = Env::open(&bytes).unwrap();
-        check_against_dump(&env, "p5.pdb");
-        let env2 = Env::open(&bytes[..]).unwrap();
-        check_against_dump(&env2, "p5.pdb");
-        assert_eq!((env.page_size(), env.txnid()), (4096, 2));
-    }
-
-    #[test]
-    fn p5_literals() {
-        let bytes = std::fs::read(format!("{FX}/p5.pdb")).unwrap();
-        let env = Env::open(&bytes).unwrap();
-        let acc = env.open_db(b"acc2oid").unwrap().unwrap();
-        assert_eq!(
-            (acc.flags, acc.depth, acc.entries, acc.root),
-            (0x14, 1, 16, 6)
-        );
-        // a key with two OIDs lives in an inline sub-page; both values come back
-        assert_eq!(
-            env.values(&acc, b"AAA00001").unwrap(),
-            vec![2u32.to_le_bytes().to_vec(), 3u32.to_le_bytes().to_vec()]
-        );
-        assert_eq!(
-            env.first_value(&acc, b"AAA00001").unwrap(),
-            Some(2u32.to_le_bytes().to_vec())
-        );
-        assert_eq!(
-            env.first_value(&acc, b"AAA00001.2").unwrap(),
-            Some(3u32.to_le_bytes().to_vec())
-        );
-        // keys are case sensitive; absent keys are None / empty
-        assert_eq!(env.first_value(&acc, b"aaa00001").unwrap(), None);
-        assert_eq!(
-            env.first_value(&acc, b"MYPROT9").unwrap(),
-            Some(4u32.to_le_bytes().to_vec())
-        );
-        assert_eq!(
-            env.first_value(&acc, b"myprot9").unwrap(),
-            Some(4u32.to_le_bytes().to_vec())
-        );
-        assert!(env.values(&acc, b"nokey").unwrap().is_empty());
-        assert_eq!(env.first_value(&acc, b"AAA0000").unwrap(), None);
-        assert_eq!(env.first_value(&acc, b"zzzz").unwrap(), None);
-        // an empty key is MDB_BAD_VALSIZE in NCBI (mdb_cursor_set)
-        assert!(env
-            .first_value(&acc, b"")
-            .unwrap_err()
-            .contains("MDB_BAD_VALSIZE"));
-        // unknown database name
-        assert_eq!(env.open_db(b"taxid2offset").unwrap(), None);
-        // integer keys: volume 0
-        let vn = env.open_db(b"volname").unwrap().unwrap();
-        assert_eq!(vn.flags, 0x08);
-        assert_eq!(
-            env.first_value(&vn, &0u32.to_le_bytes()).unwrap(),
-            Some(b"p5".to_vec())
-        );
-        let vi = env.open_db(b"volinfo").unwrap().unwrap();
-        assert_eq!(
-            env.first_value(&vi, &0u32.to_le_bytes()).unwrap(),
-            Some(7i32.to_le_bytes().to_vec())
-        );
-        assert_eq!(env.first_value(&vi, &1u32.to_le_bytes()).unwrap(), None);
-    }
-
-    #[test]
-    fn p5_taxid2offset_order_is_memcmp_of_le_bytes() {
-        // p5.ptf: txnid 0 (page 0, empty) and 1 (page 1); page 1 is picked.
-        let f = File::open(format!("{FX}/p5.ptf")).unwrap();
-        let env = Env::open(&f).unwrap();
-        assert_eq!(env.txnid(), 1);
-        let db = env.open_db(b"taxid2offset").unwrap().unwrap();
-        let mut keys = Vec::new();
-        env.for_each(&db, |k, v| {
-            keys.push((
-                i32::from_le_bytes(k.try_into().unwrap()),
-                u64::from_le_bytes(v.try_into().unwrap()),
-            ));
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(
-            keys.iter().map(|k| k.0).collect::<Vec<_>>(),
-            vec![0, 7227, 10090, 9606]
-        );
-    }
-
-    #[test]
-    fn dup_subdatabase_keys_work_unlike_ncbi() {
-        let f = File::open(format!("{FX}/dup.pdb")).unwrap();
-        let env = Env::open(&f).unwrap();
-        let acc = env.open_db(b"acc2oid").unwrap().unwrap();
-        // 700 OIDs under one key (sub-database), in memcmp order of the LE bytes: 0, 256, 512, 1, ...
-        let vals = env.values(&acc, b"DUP00001").unwrap();
-        assert_eq!(vals.len(), 700);
-        let oids: Vec<u32> = vals
-            .iter()
-            .map(|v| u32::from_le_bytes(v[..].try_into().unwrap()))
-            .collect();
-        assert_eq!(&oids[..7], &[0, 256, 512, 1, 257, 513, 2]);
-        assert_eq!(
-            env.first_value(&acc, b"DUP00001").unwrap(),
-            Some(0u32.to_le_bytes().to_vec())
-        );
-        let mut sorted = oids.clone();
-        sorted.sort();
-        assert_eq!(sorted, (0..700).collect::<Vec<u32>>());
-        assert_eq!(
-            env.first_value(&acc, b"DUP00001.5").unwrap(),
-            Some(4u32.to_le_bytes().to_vec())
-        );
-    }
-
-    #[test]
-    fn threshold_500_subpage_501_subdb() {
-        for (name, n) in [("thr500.pdb", 500usize), ("thr501.pdb", 501)] {
-            let f = File::open(format!("{FX}/{name}")).unwrap();
-            let env = Env::open(&f).unwrap();
-            let acc = env.open_db(b"acc2oid").unwrap().unwrap();
-            let vals = env.values(&acc, b"DUP00001").unwrap();
-            assert_eq!(vals.len(), n, "{name}");
-            let mut seen = std::collections::BTreeSet::new();
-            for v in &vals {
-                seen.insert(u32::from_le_bytes(v[..].try_into().unwrap()));
-            }
-            assert_eq!(seen.len(), n);
-        }
-    }
-
-    /// `first_key_at_least` (`MDB_SET_RANGE`) against the dump of a depth-two `acc2oid` (2,400
-    /// keys over several leaves): each key finds itself, a key just after it finds the next key
-    /// (the first of the next leaf after a leaf's last), and past the last key nothing.
-    #[test]
-    fn first_key_at_least_follows_the_key_order_across_leaves() {
-        let f = File::open(format!("{FX}/mvbig.pdb")).unwrap();
-        let env = Env::open(&f).unwrap();
-        let acc = env.open_db(b"acc2oid").unwrap().unwrap();
-        assert_eq!(acc.depth, 2);
-        let exp = load_expected("mvbig.pdb");
-        let keys: Vec<&Vec<u8>> = exp
-            .iter()
-            .find(|db| db.name == "acc2oid")
-            .unwrap()
-            .keys
-            .iter()
-            .map(|(key, _)| key)
-            .collect();
-        assert_eq!(keys.len(), 2400);
-        assert_eq!(
-            env.first_key_at_least(&acc, b"\x01").unwrap().as_ref(),
-            Some(keys[0])
-        );
-        for (at, key) in keys.iter().enumerate() {
-            assert_eq!(
-                env.first_key_at_least(&acc, key).unwrap().as_ref(),
-                Some(*key)
-            );
-            let after = [key.as_slice(), b"\0"].concat();
-            assert_eq!(
-                env.first_key_at_least(&acc, &after).unwrap().as_ref(),
-                keys.get(at + 1).copied(),
-                "after {}",
-                String::from_utf8_lossy(key)
-            );
-            assert!(env.has_key_starting_with(&acc, &key[..3]).unwrap());
-        }
-        assert!(!env.has_key_starting_with(&acc, b"BIG00000.10").unwrap());
-        assert!(!env.has_key_starting_with(&acc, b"big").unwrap());
-        assert_eq!(env.first_key_at_least(&acc, b"\xff").unwrap(), None);
-        assert!(env.first_key_at_least(&acc, b"").is_err());
-    }
-
-    #[test]
-    fn mvbig_integer_keys_depth_two() {
-        let f = File::open(format!("{FX}/mvbig.pdb")).unwrap();
-        let env = Env::open(&f).unwrap();
-        let vn = env.open_db(b"volname").unwrap().unwrap();
-        assert_eq!((vn.depth, vn.entries), (2, 400));
-        // numeric order (memcmp order would put 256 before 1)
-        let mut keys = Vec::new();
-        env.for_each(&vn, |k, _| {
-            keys.push(u32::from_le_bytes(k.try_into().unwrap()));
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(keys, (0..400).collect::<Vec<u32>>());
-        for i in [0u32, 1, 255, 256, 257, 399] {
-            let name = env.first_value(&vn, &i.to_le_bytes()).unwrap().unwrap();
-            assert_eq!(name, format!("mvbig.{i:03}").into_bytes(), "volume {i}");
-        }
-        assert_eq!(env.first_value(&vn, &400u32.to_le_bytes()).unwrap(), None);
-    }
-
-    /// Needs the NCBI-distributed `18S_fungal_sequences` database: `LOSAT_TEST_18S_DB` is its path
-    /// without the extension, `LOSAT_TEST_18S_EXPECTED` the directory of its `dump.py` outputs
-    /// (`18S_fungal_sequences.ndb.txt`, `.ntf.txt`).
-    #[test]
-    #[ignore = "needs LOSAT_TEST_18S_DB and LOSAT_TEST_18S_EXPECTED"]
-    fn ncbi_distributed_18s_matches_dump_py() {
-        let prefix = std::env::var("LOSAT_TEST_18S_DB").expect("LOSAT_TEST_18S_DB");
-        let ndb = format!("{prefix}.ndb");
-        let ntf = format!("{prefix}.ntf");
-        let f = File::open(&ndb).unwrap();
-        let env = Env::open(&f).unwrap();
-        check_against_dump(&env, "18S_fungal_sequences.ndb");
-        let f = File::open(&ntf).unwrap();
-        let env = Env::open(&f).unwrap();
-        check_against_dump(&env, "18S_fungal_sequences.ntf");
-    }
-
-    // ---- synthetic files: overflow values, meta choice, errors ----
-
-    fn put16(b: &mut [u8], o: usize, v: u16) {
-        b[o..o + 2].copy_from_slice(&v.to_le_bytes());
-    }
-
-    fn meta_page(psize: usize, pgno: u64, txnid: u64, main_root: u64, last_pg: u64) -> Vec<u8> {
-        let mut p = vec![0u8; psize];
-        p[0..8].copy_from_slice(&pgno.to_le_bytes());
-        put16(&mut p, 10, P_META);
-        p[16..20].copy_from_slice(&MDB_MAGIC.to_le_bytes());
-        p[20..24].copy_from_slice(&1u32.to_le_bytes());
-        // FREE_DBI: md_pad = page size, flags 0x4008, empty
-        p[40..44].copy_from_slice(&(psize as u32).to_le_bytes());
-        put16(&mut p, 44, 0x4008);
-        p[80..88].copy_from_slice(&u64::MAX.to_le_bytes());
-        // MAIN_DBI
-        put16(&mut p, 88 + 6, 1);
-        p[88 + 40..88 + 48].copy_from_slice(&main_root.to_le_bytes());
-        p[136..144].copy_from_slice(&last_pg.to_le_bytes());
-        p[144..152].copy_from_slice(&txnid.to_le_bytes());
-        p
-    }
-
-    /// Leaf page with `(flags, key, data, dsize)` nodes (keys given in order).
-    fn leaf_page(psize: usize, pgno: u64, nodes: &[(u16, &[u8], Vec<u8>, usize)]) -> Vec<u8> {
-        let mut p = vec![0u8; psize];
-        p[0..8].copy_from_slice(&pgno.to_le_bytes());
-        put16(&mut p, 10, P_LEAF);
-        let mut upper = psize;
-        for (i, (fl, k, d, dsize)) in nodes.iter().enumerate() {
-            let sz = (8 + k.len() + d.len() + 1) & !1;
-            upper -= sz;
-            put16(&mut p, 16 + 2 * i, upper as u16);
-            put16(&mut p, upper, (*dsize & 0xffff) as u16);
-            put16(&mut p, upper + 2, (*dsize >> 16) as u16);
-            put16(&mut p, upper + 4, *fl);
-            put16(&mut p, upper + 6, k.len() as u16);
-            p[upper + 8..upper + 8 + k.len()].copy_from_slice(k);
-            p[upper + 8 + k.len()..upper + 8 + k.len() + d.len()].copy_from_slice(d);
-        }
-        put16(&mut p, 12, (16 + 2 * nodes.len()) as u16);
-        put16(&mut p, 14, upper as u16);
-        p
-    }
-
-    /// Main database with a plain value, an overflow value (2 pages) and a named-DB record.
-    fn synthetic(txn0: u64, txn1: u64) -> (Vec<u8>, Vec<u8>) {
-        let psize = 4096usize;
-        let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
-        let mut dbrec = vec![0u8; 48];
-        dbrec[4..6].copy_from_slice(&0x14u16.to_le_bytes());
-        dbrec[40..48].copy_from_slice(&u64::MAX.to_le_bytes());
-        let nodes: Vec<(u16, &[u8], Vec<u8>, usize)> = vec![
-            (F_BIGDATA, b"big", 3u64.to_le_bytes().to_vec(), big.len()),
-            (F_SUBDATA, b"emptydb", dbrec, 48),
-            (0, b"small", b"xyz".to_vec(), 3),
-        ];
-        let mut file = Vec::new();
-        file.extend(meta_page(psize, 0, txn0, 2, 4));
-        file.extend(meta_page(psize, 1, txn1, 2, 4));
-        file.extend(leaf_page(psize, 2, &nodes));
-        let mut ov = vec![0u8; 2 * psize];
-        ov[0..8].copy_from_slice(&3u64.to_le_bytes());
-        put16(&mut ov, 10, P_OVERFLOW);
-        ov[12..16].copy_from_slice(&2u32.to_le_bytes());
-        ov[16..16 + big.len()].copy_from_slice(&big);
-        file.extend(ov);
-        (file, big)
-    }
-
-    #[test]
-    fn overflow_values_and_named_records() {
-        let (file, big) = synthetic(1, 2);
-        let env = Env::open(&file).unwrap();
-        let main = Db {
-            pad: 0,
-            flags: 0,
-            depth: 1,
-            branch_pages: 0,
-            leaf_pages: 1,
-            overflow_pages: 0,
-            entries: 3,
-            root: 2,
-        };
-        assert_eq!(env.first_value(&main, b"big").unwrap(), Some(big.clone()));
-        assert_eq!(env.values(&main, b"big").unwrap(), vec![big]);
-        assert_eq!(
-            env.first_value(&main, b"small").unwrap(),
-            Some(b"xyz".to_vec())
-        );
-        let db = env.open_db(b"emptydb").unwrap().unwrap();
-        assert_eq!(db.flags, 0x14);
-        assert!(db.is_empty_tree());
-        assert_eq!(env.first_value(&db, b"k").unwrap(), None);
-        env.for_each(&db, |_, _| Err("must not be called".into()))
-            .unwrap();
-        // not a database record
-        assert!(env
-            .open_db(b"small")
-            .unwrap_err()
-            .contains("MDB_INCOMPATIBLE"));
-        // corrupt overflow: claims more bytes than its pages hold
-        let mut bad = file.clone();
-        bad[3 * 4096 + 12..3 * 4096 + 16].copy_from_slice(&1u32.to_le_bytes());
-        let env = Env::open(&bad).unwrap();
-        assert!(env.first_value(&main, b"big").is_err());
-    }
-
-    #[test]
-    fn meta_pick_larger_txnid_tie_meta0() {
-        // meta 0 has the larger txnid: still root 2 either way; tell the metas apart by txnid()
-        let (f, _) = synthetic(5, 3);
-        assert_eq!(Env::open(&f).unwrap().txnid(), 5);
-        let (f, _) = synthetic(3, 5);
-        assert_eq!(Env::open(&f).unwrap().txnid(), 5);
-        let (f, _) = synthetic(4, 4);
-        assert_eq!(Env::open(&f).unwrap().txnid(), 4);
-    }
-
-    #[test]
-    fn open_errors() {
-        let (good, _) = synthetic(1, 2);
-        assert!(Env::open(&Vec::<u8>::new())
-            .unwrap_err()
-            .contains("too small"));
-        assert!(Env::open(&good[..100]).unwrap_err().contains("too small"));
-        let mut bad = good.clone();
-        bad[16] ^= 1;
-        assert!(Env::open(&bad).unwrap_err().contains("magic"));
-        let mut bad = good.clone();
-        bad[20] = 2;
-        assert!(Env::open(&bad)
-            .unwrap_err()
-            .contains("MDB_VERSION_MISMATCH"));
-        let mut bad = good.clone();
-        bad[10] = 0;
-        assert!(Env::open(&bad).unwrap_err().contains("not a meta page"));
-        let mut bad = good.clone();
-        bad[40..44].copy_from_slice(&3000u32.to_le_bytes());
-        assert!(Env::open(&bad).unwrap_err().contains("page size"));
-        // second meta page cut off
-        assert!(Env::open(&good[..4096 + 100]).is_err());
-        // a text file
-        assert!(Env::open(&b"hello world, this is not an LMDB file at all ".repeat(10)).is_err());
-    }
-
-    /// Cheap deterministic generator for the corruption tests.
-    struct Lcg(u64);
-    impl Lcg {
-        fn next(&mut self) -> u64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            self.0 >> 33
-        }
-    }
-
-    /// Open, list and look up in a possibly corrupt file; any outcome but a panic or a hang is fine.
-    fn exercise(bytes: &[u8]) {
-        let Ok(env) = Env::open(bytes) else { return };
-        for name in [&b"acc2oid"[..], b"volname", b"volinfo", b"taxid2offset"] {
-            let Ok(Some(db)) = env.open_db(name) else {
-                continue;
-            };
-            let _ = env.for_each(&db, |_, _| Ok(()));
-            let _ = env.first_value(&db, b"DUP00001");
-            let _ = env.values(&db, b"AAA00001");
-            let _ = env.values(&db, &7u32.to_le_bytes());
-            let _ = env.first_value(&db, &9606i32.to_le_bytes());
-        }
-    }
-
-    #[test]
-    fn corrupt_files_give_errors_not_panics() {
-        for name in [
-            "p5.pdb",
-            "n5.ndb",
-            "mv.pdb",
-            "dup.pdb",
-            "p5.ptf",
-            "mvbig.pdb",
-        ] {
-            let orig = std::fs::read(format!("{FX}/{name}")).unwrap();
-            let mut rng = Lcg(0x1234_5678 ^ orig.len() as u64);
-            for round in 0..400 {
-                let mut b = orig.clone();
-                for _ in 0..1 + round % 4 {
-                    let at = (rng.next() as usize) % b.len();
-                    // aim half of the flips at the first bytes of pages (headers)
-                    let at = if rng.next().is_multiple_of(2) {
-                        at & !4095 | (rng.next() as usize % 160)
-                    } else {
-                        at
-                    };
-                    let at = at.min(b.len() - 1);
-                    b[at] = rng.next() as u8;
-                }
-                exercise(&b);
-            }
-            // truncation at many lengths
-            for cut in (0..orig.len()).step_by(517) {
-                exercise(&orig[..cut]);
-            }
-        }
-    }
-
-    #[test]
-    fn cyclic_tree_is_an_error_not_a_hang() {
-        // mvbig volname tree has a branch root: point every child of a branch page at itself
-        let mut b = std::fs::read(format!("{FX}/mvbig.pdb")).unwrap();
-        let env = Env::open(&b).unwrap();
-        let vn = env.open_db(b"volname").unwrap().unwrap();
-        let root = vn.root as usize;
-        let page = &mut b[root * 4096..(root + 1) * 4096];
-        let n = (u16::from_le_bytes([page[12], page[13]]) as usize - 16) / 2;
-        for i in 0..n {
-            let o = u16::from_le_bytes([page[16 + 2 * i], page[17 + 2 * i]]) as usize;
-            page[o..o + 2].copy_from_slice(&(root as u16).to_le_bytes());
-            page[o + 2..o + 6].copy_from_slice(&[0, 0, 0, 0]);
-        }
-        let env = Env::open(&b).unwrap();
-        assert!(env.for_each(&vn, |_, _| Ok(())).is_err());
-        assert!(env.first_value(&vn, &300u32.to_le_bytes()).is_err());
-    }
-}
+#[path = "lmdb_read_tests.rs"]
+mod tests;

@@ -18,21 +18,6 @@
 //! sort it by score (`Blast_HSPListSortByScore`) as `BLAST_LinkHsps` does.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1760-1814
-//! ```c
-//!    /* Remove any information on number of linked HSPs from previous
-//!       linking. */
-//!    for (index = 0; index < hsp_list->hspcnt; ++index)
-//!        hsp_list->hsp_array[index]->num = 1;
-//!
-//!    /* Link up the HSP's for this hsp_list. */
-//!    if (link_hsp_params->longest_intron <= 0) {
-//!        s_BlastEvenGapLinkHSPs(program_number, hsp_list, query_info,
-//!                              subject_length, sbp, link_hsp_params,
-//!                              gapped_calculation);
-//! ...
-//!    /* Sort the HSP array by score */
-//!    Blast_HSPListSortByScore(hsp_list);
-//! ```
 
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cmp::Ordering;
@@ -42,14 +27,6 @@ use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, smal
 use crate::stats::KarlinParams;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:66-71
-// ```c
-// #define BLAST_GAP_PROB 0.5         /**< Gap probability for ungapped search */
-// #define BLAST_GAP_PROB_GAPPED 1.0  /**< Gap probability for gapped search */
-// #define BLAST_GAP_DECAY_RATE 0.5   /**< Gap decay rate for ungapped search */
-// #define BLAST_GAP_DECAY_RATE_GAPPED 0.1/**< Gap decay rate for gapped search */
-// #define BLAST_GAP_SIZE 40          /**< Default gap size */
-// #define BLAST_OVERLAP_SIZE 9      /**< Default overlap size */
-// ```
 // With a gap probability of 1, the preliminary stage (which also links with small gaps) never
 // takes a large-gap set of more than one HSP (`1 - gap_prob == 0` gives it `INT4_MAX`); the
 // traceback links with large gaps only and does not divide by the probability. `BLAST_GAP_SIZE`
@@ -72,41 +49,7 @@ pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 /// 4): the even-gap linking (`BLAST_LinkHsps`, link_hsps.c:1779 `longest_intron <= 0`).
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:77-78
-/// ```c
-/// #ifndef DEFAULT_LONGEST_INTRON
-/// #define DEFAULT_LONGEST_INTRON 122
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-815
-/// ```c
-///           /* The program may use Blast_UnevenGapLinkHSPs find significant
-///              collections of distinct alignments */
-///           Int4 max_protein_gap; /* the largest gap permitted in the
-///                                * translated sequence */
-///
-///           max_protein_gap = (options->longest_intron - 2)/3;
-///           if(gapped_calculation) {
-///               if(options->longest_intron == 0) {
-///                   /* a zero value of longest_intron invokes the
-///                    * default behavior, which for gapped calculation is
-///                    * to set longest_intron to a predefined value. */
-///                   params->link_hsp_params->longest_intron =
-///                       (DEFAULT_LONGEST_INTRON - 2) / 3;
-///               } else if(max_protein_gap <= 0) {
-///                   /* A nonpositive value of max_protein_gap disables linking */
-///                   params->link_hsp_params =
-///                       BlastLinkHSPParametersFree(params->link_hsp_params);
-///                   params->do_sum_stats = FALSE;
-///               } else { /* the value of max_protein_gap is positive */
-///                   params->link_hsp_params->longest_intron = max_protein_gap;
-///               }
-///           } else { /* This is an ungapped calculation. */
-///               /* For ungapped calculations, we preserve the old behavior
-///                * of the longest_intron parameter to maintain
-///                * backward-compatibility with older versions of BLAST. */
-///               params->link_hsp_params->longest_intron =
-///                 MAX(max_protein_gap, 0);
-///           }
-/// ```
 /// The option is not negative (the command line refuses a negative value, as NCBI's does), so
 /// `longest_intron - 2` cannot pass the range of `Int4`; C's division truncates toward zero, as
 /// Rust's does.
@@ -128,25 +71,8 @@ pub(crate) fn translated_longest_intron(max_intron_length: i32, gapped: bool) ->
 /// even-gap linking: a gapped one (`preliminary`, `traceback`; psiblast) or an ungapped one
 /// (`ungapped`; BLASTX), and whether the query is translated.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:609-617
-/// ```c
-///    if (program_number == eBlastTypeBlastn || !gapped_calculation) {
-///       params->gap_prob = BLAST_GAP_PROB;
-///       params->gap_decay_rate = BLAST_GAP_DECAY_RATE;
-///    } else {
-///       params->gap_prob = BLAST_GAP_PROB_GAPPED;
-///       params->gap_decay_rate = BLAST_GAP_DECAY_RATE_GAPPED;
-///    }
-///    params->gap_size = BLAST_GAP_SIZE;
-///    params->overlap_size = BLAST_OVERLAP_SIZE;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:609-618
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:633-637
-/// ```c
-///    if (gapped_calculation) {
-///       /* FIXME, is this correct?? */
-///       hit_params->link_hsp_params->cutoff_small_gap =
-///                                 word_params->cutoff_score_min;
-/// ```
 /// A gapped search sets no `cutoff_big_gap` (`CalculateLinkHSPCutoffs` runs only for ungapped
 /// searches, blast_engine.c:1448-1455), so it stays at the 0 of the `calloc`. The preliminary stage
 /// sets `cutoff_small_gap` to the smallest cutoff of the initial words
@@ -246,78 +172,6 @@ pub(crate) struct LinkCutoffs {
 /// only an RPS search scales its matrix), so the factor is left out.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1011-1081
-/// ```c
-///     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
-///     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
-///     if (!kbp)
-///         return;
-///
-///     window_size
-///         = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
-///     gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
-///     gap_decay_rate = link_hsp_params->gap_decay_rate;
-///     /* Use average query length */
-///
-///     query_length =
-///         (query_info->contexts[query_info->last_context].query_offset +
-///         query_info->contexts[query_info->last_context].query_length - 1)
-///         / (query_info->last_context + 1);
-///
-///     if (Blast_SubjectIsTranslated(program) || program == eBlastTypeRpsTblastn) {
-///         /* Lengths in subsequent calculations should be on the protein scale */
-///         subject_length /= CODON_LENGTH;
-///         db_length /= CODON_LENGTH;
-///     }
-///
-///
-///     /* Subtract off the expected score. */
-///    expected_length = (Int4)BLAST_Nint(log(kbp->K*((double) query_length)*
-///                                     ((double) subject_length))/(kbp->H));
-///    query_length = query_length - expected_length;
-///
-///    subject_length = subject_length - expected_length;
-///    query_length = MAX(query_length, 1);
-///    subject_length = MAX(subject_length, 1);
-///
-///    /* If this is a database search, use database length, else the single
-///       subject sequence length */
-///    if (db_length > subject_length) {
-///       y_variable = log((double) (db_length)/(double) subject_length)*(kbp->K)/
-///          (gap_decay_rate);
-///    } else {
-///       y_variable = log((double) (subject_length + expected_length)/
-///                        (double) subject_length)*(kbp->K)/(gap_decay_rate);
-///    }
-///
-///    search_sp = ((Int8) query_length)* ((Int8) subject_length);
-///    x_variable = 0.25*y_variable*((double) search_sp);
-///
-///    /* To use "small" gaps the query and subject must be "large" compared to
-///       the gap size. If small gaps may be used, then the cutoff values must be
-///       adjusted for the "bayesian" possibility that both large and small gaps
-///       are being checked for. */
-///
-///    if (search_sp > 8*window_size*window_size) {
-///       x_variable /= (1.0 - gap_prob + kEpsilon);
-///       link_hsp_params->cutoff_big_gap =
-///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
-///       x_variable = y_variable*(window_size*window_size);
-///       x_variable /= (gap_prob + kEpsilon);
-///       link_hsp_params->cutoff_small_gap =
-///          MAX(word_params->cutoff_score_min,
-///              (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
-///    } else {
-///       link_hsp_params->cutoff_big_gap =
-///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
-///       /* The following is equivalent to forcing small gap rule to be ignored
-///          when linking HSPs. */
-///       link_hsp_params->gap_prob = 0;
-///       link_hsp_params->cutoff_small_gap = 0;
-///    }
-///
-///    link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
-///    link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
-/// ```
 pub(crate) fn calculate_link_hsp_cutoffs(
     kbp: &KarlinParams,
     avg_query_length: i32,
@@ -336,9 +190,16 @@ pub(crate) fn calculate_link_hsp_cutoffs(
     } else {
         (subject_length as i32, db_length)
     };
-    // `BLAST_Nint`: rounds half away from zero.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441 (`BLAST_Nint` rounds
+    // half away from zero and converts to `long`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1036-1037 (the `(Int4)`
+    // of that `long`)
+    // An average query length of 0 makes the logarithm -inf: NCBI's `long` is then LONG_MIN (x86-64
+    // cvttsd2si; aarch64 saturates to the same value) and its low 32 bits, the `Int4`, are 0. Rust's
+    // `as i64` saturates to the same LONG_MIN and `as i32` keeps the same low bits; a direct `as i32`
+    // would give i32::MIN. Finite values in range convert the same either way.
     let expected = (kbp.k * query_length as f64 * subject_length as f64).glibc_ln() / kbp.h;
-    let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
+    let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i64 as i32;
     query_length = (query_length - expected_length).max(1);
     subject_length = (subject_length - expected_length).max(1);
     let y_variable = if db_length > subject_length as i64 {
@@ -408,30 +269,7 @@ pub(crate) struct LinkedHsp {
 const SMALL: usize = 0;
 const LARGE: usize = 1;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:67-97 (LinkHSPStruct, BlastHSPLink)
-// ```c
-// typedef struct BlastHSPLink {
-//    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
-//                                            choice of HSP to link with */
-//    Int2  num[eOrderingMethods]; /**< number of HSP in the ordering. */
-//    Int4  sum[eOrderingMethods]; /**< Sum-Score of HSP. */
-//    double   xsum[eOrderingMethods]; /**< Sum-Score of HSP,
-//                                      multiplied by the appropriate Lambda. */
-//    Int4  changed; /**< Has the link been changed since previous access? */
-// } BlastHSPLink;
-// ...
-//    Int4 linked_to;     /**< Where this HSP is linked to? */
-//    Boolean linked_set;      /**< Is this HSp part of a linked set? */
-//    Boolean start_of_chain;  /**< If TRUE, this HSP starts a chain along the
-//                                "link" pointer. */
-//    Int4 q_offset_trim;   /**< Start of trimmed hsp in query */
-// ...
-//    ELinkOrderingMethod ordering_method; /**< Which method (max or
-//                                              no max for gaps) was
-//                                              used for this HSP? */
-//    struct LinkHSPStruct* prev;         /**< Previous HSP in a set, if any */
-//    struct LinkHSPStruct* next;         /**< Next HSP in a set, if any */
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-97 (LinkHSPStruct, BlastHSPLink)
 /// `LinkHSPStruct`; the links are slots of `even_gap_link_hsps`'s `nodes` (slot 0 is `hp_start`, the HSP of
 /// sorted position `i` is slot `i + 1`). `num` is NCBI's `Int2`: a set of more than 32,767 HSPs
 /// wraps on the store `H->hsp_link.num[index] = H_hsp_num+1` (an `Int4` converted to `Int2`,
@@ -489,18 +327,6 @@ impl From<Option<usize>> for Link {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:100-109
-// ```c
-// typedef struct LinkHelpStruct {
-//   LinkHSPStruct* ptr;         /**< The HSP to which the info belongs */
-//   Int4 q_off_trim;            /**< query start of trimmed HSP */
-//   Int4 s_off_trim;            /**< subject start of trimmed HSP */
-//   Int4 sum[eOrderingMethods]; /**< raw score of linked set containing HSP(?) */
-//   Int4 maxsum1;               /**< threshold for stopping link attempts (?) */
-//   Int4 next_larger;           /**< offset into array of HelpStructs containing
-//                                    HSP with higher score, used in bailout
-//                                    calculations */
-// } LinkHelpStruct;
-// ```
 /// `LinkHelpStruct` (`maxsum1` is read only in NCBI's disabled `if(0)` test, so it is not kept).
 #[derive(Debug, Clone, Copy, Default)]
 struct Helper {
@@ -512,34 +338,6 @@ struct Helper {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:276-318
-// ```c
-// s_RevCompareHSPsTbn(const void *v1, const void *v2)
-// ...
-//    if (h1->context < h2->context)
-//       return -1;
-//    else if (h1->context > h2->context)
-//       return 1;
-//
-// 	if (SIGN(h1->subject.frame) != SIGN(h2->subject.frame))
-// ...
-// 	if (h1->query.offset < h2->query.offset)
-// 		return  1;
-// 	if (h1->query.offset > h2->query.offset)
-// 		return -1;
-// 	if (h1->query.end < h2->query.end)
-// 		return  1;
-// 	if (h1->query.end > h2->query.end)
-// 		return -1;
-// 	if (h1->subject.offset < h2->subject.offset)
-// 		return  1;
-// 	if (h1->subject.offset > h2->subject.offset)
-// 		return -1;
-// 	if (h1->subject.end < h2->subject.end)
-// 		return  1;
-// 	if (h1->subject.end > h2->subject.end)
-// 		return -1;
-// 	return 0;
-// ```
 /// `s_RevCompareHSPsTbn` (the subject frames are all 0), with the query frame (`frame1`, `frame2`:
 /// `context / strand_factor`) in place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375)
 /// for a translated query, whose `NUM_FRAMES / 2` is the `strand_factor` 3.
@@ -553,50 +351,11 @@ fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:197-224
-// ```c
-// s_RevCompareHSPs(const void *v1, const void *v2)
-// ...
-//    if (h1->context < h2->context)
-//       return -1;
-//    else if (h1->context > h2->context)
-//       return 1;
-//
-// 	if (h1->query.offset < h2->query.offset)
-// 		return  1;
-// 	if (h1->query.offset > h2->query.offset)
-// 		return -1;
-// 	/* Necessary in case both HSP's have the same query offset. */
-// 	if (h1->subject.offset < h2->subject.offset)
-// 		return 1;
-// 	if (h1->subject.offset > h2->subject.offset)
-// 		return -1;
-// 	return 0;
-// ```
 // `s_RevCompareHSPs` (and `s_RevCompareHSPsTransl`, link_hsps.c:226-262) compares the fields that
 // `s_FwdCompareHSPs` compares, in the other direction; `even_gap_link_hsps` explains why the stable
 // sort by `fwd_compare` alone gives the order of the two sorts.
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:119-144
-// ```c
-// s_FwdCompareHSPs(const void* v1, const void* v2)
-// ...
-//     if (h1->context < h2->context)
-//         return -1;
-//     if (h1->context > h2->context)
-//         return 1;
-//
-//     if (h1->query.offset < h2->query.offset)
-//         return -1;
-//     if (h1->query.offset > h2->query.offset)
-//         return 1;
-//     /* Necessary in case both HSP's have the same query offset. */
-//     if (h1->subject.offset < h2->subject.offset)
-//         return -1;
-//     if (h1->subject.offset > h2->subject.offset)
-//         return 1;
-//
-//     return 0;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:119-146
 /// `s_FwdCompareHSPs`, and with a `strand_factor` of 3 `s_FwdCompareHSPsTransl`
 /// (link_hsps.c:157-188).
 fn fwd_compare(h1: &SortedHsp, h2: &SortedHsp) -> Ordering {
@@ -662,28 +421,7 @@ pub(crate) fn even_gap_link_hsps(
     if total_number_of_hsps == 0 {
         return;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:468-493
-    // ```c
-    //    /* For convenience, include overlap size into the gap size */
-    // 	window_size = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
-    //    trim_size = (link_hsp_params->overlap_size + 1) / 2;
-    // 	gap_prob = link_hsp_params->gap_prob;
-    // 	gap_decay_rate = link_hsp_params->gap_decay_rate;
-    // ...
-    //    /* Sort by (reverse) position. */
-    //    if (kTranslatedQuery) {
-    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_RevCompareHSPsTbx);
-    //    } else {
-    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_RevCompareHSPsTbn);
-    //    }
-    //
-    //    cutoff[0] = link_hsp_params->cutoff_small_gap;
-    //    cutoff[1] = link_hsp_params->cutoff_big_gap;
-    //
-    //    ignore_small_gaps = (cutoff[0] == 0);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:465-495
     // `link_hsp_params->gap_size` and `overlap_size` are the constants (`EvenGapLinkParams`); the
     // window of 50 is then the one every caller of `small_gap_sum_e` passes.
     let window_size = GAP_SIZE + OVERLAP_SIZE + 1;
@@ -718,34 +456,6 @@ pub(crate) fn even_gap_link_hsps(
     let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1].hsp };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:510-536
-    // ```c
-    //    /* Put entries from different strands into separate 'query_frame's. */
-    //    {
-    //       Int4 cur_frame=0;
-    //       Int4 strand_factor = (kTranslatedQuery ? 3 : 1);
-    //       for (index=0;index<number_of_hsps;index++)
-    //       {
-    //         H=link_hsp_array[index];
-    //         H->start_of_chain = FALSE;
-    //         hp_frame_number[cur_frame]++;
-    //
-    //         H->prev= index ? link_hsp_array[index-1] : NULL;
-    //         H->next= index<(number_of_hsps-1) ? link_hsp_array[index+1] : NULL;
-    //         if (H->prev != NULL &&
-    //             ((H->hsp->context/strand_factor) !=
-    // 	     (H->prev->hsp->context/strand_factor) ||
-    //              (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-    //         { /* If frame switches, then start new list. */
-    //            hp_frame_number[cur_frame]--;
-    //            hp_frame_number[++cur_frame]++;
-    //            hp_frame_start[cur_frame] = H;
-    //            H->prev->next = NULL;
-    //            H->prev = NULL;
-    //         }
-    //       }
-    //       num_query_frames = cur_frame+1;
-    //    }
-    // ```
     // (frame start slot, number of HSPs) of each query frame (a context, or the three contexts of a
     // strand of a translated query).
     let mut frames: Vec<(usize, usize)> = vec![(1, 0)];
@@ -764,20 +474,6 @@ pub(crate) fn even_gap_link_hsps(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:538-552
-    // ```c
-    //    for (index=0;index<number_of_hsps;index++)
-    //    {
-    //        Int4 q_length, s_length;
-    //        H = link_hsp_array[index];
-    //        hsp = H->hsp;
-    //        q_length = (hsp->query.end - hsp->query.offset) / 4;
-    //        s_length = (hsp->subject.end - hsp->subject.offset) / 4;
-    //        H->q_offset_trim = hsp->query.offset + MIN(q_length, trim_size);
-    //        H->q_end_trim = hsp->query.end - MIN(q_length, trim_size);
-    //        H->s_offset_trim = hsp->subject.offset + MIN(s_length, trim_size);
-    //        H->s_end_trim = hsp->subject.end - MIN(s_length, trim_size);
-    //    }
-    // ```
     for slot in 1..=total_number_of_hsps {
         let hsp = *hsp_of(slot);
         let q_length = (hsp.query_end - hsp.query_offset) / 4;
@@ -790,11 +486,6 @@ pub(crate) fn even_gap_link_hsps(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:451-454
-    // ```c
-    //    lh_helper_size = MAX(1024,hsp_list->hspcnt+5);
-    //    lh_helper = (LinkHelpStruct *)
-    //       calloc(lh_helper_size, sizeof(LinkHelpStruct));
-    // ```
     let mut lh_helper: Vec<Helper> = vec![Helper::default(); total_number_of_hsps + 5];
 
     for &(frame_start, frame_count) in &frames {
@@ -818,19 +509,6 @@ pub(crate) fn even_gap_link_hsps(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:988-1001
-    // ```c
-    //    if (kTranslatedQuery) {
-    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_RevCompareHSPsTransl);
-    //       qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_FwdCompareHSPsTransl);
-    //    } else {
-    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_RevCompareHSPs);
-    //       qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //             s_FwdCompareHSPs);
-    //    }
-    // ```
     // The two sorts compare the same fields (the query frame, `query.offset`, `subject.offset`; the
     // offsets in the other direction), so a pair is equal under one exactly when it is equal under
     // the other. As stable sorts, the first keeps HSPs with equal fields in the slots' order and the
@@ -839,41 +517,7 @@ pub(crate) fn even_gap_link_hsps(
     let mut array: Vec<usize> = (1..=total_number_of_hsps).collect();
     array.sort_by(|&a, &b| fwd_compare(&sorted[a - 1], &sorted[b - 1]));
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1006-1080
-    // ```c
-    //    /* hook up the HSP's. */
-    // 	first_hsp = NULL;
-    // 	for (index=0, last_hsp=NULL;index<total_number_of_hsps; index++)
-    //    {
-    // 		H = link_hsp_array[index];
-    //
-    //       /* If this is not a single piece or the start of a chain, then Skip it. */
-    //       if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-    // 			continue;
-    // ...
-    // 		if (H->hsp_link.link[ordering_method] == NULL)
-    // 		{
-    //          /* Grab the next HSP that is not part of a chain or the start of a chain */
-    // ...
-    // 		}
-    // 		else
-    // 		{
-    // 			/* The first one has the number of links correct. */
-    // 			num_links = H->hsp_link.num[ordering_method];
-    // 			link = H->hsp_link.link[ordering_method];
-    // 			while (link)
-    // 			{
-    // 				H->hsp->num = num_links;
-    //                 H->xsum = H->hsp_link.xsum[ordering_method];
-    // 				H->next = (LinkHSPStruct*) link;
-    // ...
-    // 			}
-    // 			/* Set these for last link in chain. */
-    // 			H->hsp->num = num_links;
-    // ...
-    //    for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-    //       hsp_list->hsp_array[index] = H->hsp;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1006-1081
     // The list NCBI builds visits, in the array's order, each HSP that is not inside a chain,
     // and after a chain's head the rest of its chain.
     let mut emitted = 0usize;
@@ -943,30 +587,6 @@ fn link_frame(
     } = k;
     let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1].hsp };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:554-591
-    // ```c
-    //       hp_start = s_LinkHSPStructReset(hp_start);
-    //       hp_start->next = hp_frame_start[frame_index];
-    //       hp_frame_start[frame_index]->prev = hp_start;
-    //       number_of_hsps = hp_frame_number[frame_index];
-    //       query_context = hp_start->next->hsp->context;
-    //       length_adjustment = query_info->contexts[query_context].length_adjustment;
-    //       query_length = query_info->contexts[query_context].query_length;
-    //       query_length = MAX(query_length - length_adjustment, 1);
-    //       subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
-    // ...
-    //       subject_length = MAX(subject_length - length_adjustment, 1);
-    //
-    //       lh_helper[0].ptr = hp_start;
-    //       lh_helper[0].q_off_trim = 0;
-    //       lh_helper[0].s_off_trim = 0;
-    //       lh_helper[0].maxsum1  = -10000;
-    //       lh_helper[0].next_larger  = 0;
-    // ...
-    //       first_pass=1;    /* do full search */
-    //       path_changed=1;
-    //       for (H=hp_start->next; H!=NULL; H=H->next)
-    //          H->hsp_link.changed=1;
-    // ```
     const HP_START: usize = 0;
     nodes[HP_START] = Node::default();
     nodes[HP_START].next = Link::some(frame_start);
@@ -1005,58 +625,6 @@ fn link_frame(
     while number_of_hsps > 0 {
         let mut best: [Option<usize>; 2] = [None, None];
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-656
-        // ```c
-        //          use_current_max=0;
-        //          if (!first_pass){
-        //             Int4 max0,max1;
-        //             /* Find the current max sums */
-        //             if(!ignore_small_gaps){
-        //                max0 = -cutoff[0];
-        //                max1 = -cutoff[1];
-        //                for (H=hp_start->next; H!=NULL; H=H->next) {
-        //                   Int4 sum0=H->hsp_link.sum[0];
-        //                   Int4 sum1=H->hsp_link.sum[1];
-        //                   if(sum0>=max0)
-        //                   {
-        //                      max0=sum0;
-        //                      best[0]=H;
-        //                   }
-        //                   if(sum1>=max1)
-        //                   {
-        //                      max1=sum1;
-        //                      best[1]=H;
-        //                   }
-        //                }
-        //             } else {
-        //                maxscore = -cutoff[1];
-        //                for (H=hp_start->next; H!=NULL; H=H->next) {
-        //                   Int4  sum=H->hsp_link.sum[1];
-        //                   if(sum>=maxscore)
-        //                   {
-        //                      maxscore=sum;
-        //                      best[1]=H;
-        //                   }
-        //                }
-        //             }
-        //             if(path_changed==0){
-        //                /* No path was changed, use these max sums. */
-        //                use_current_max=1;
-        //             }
-        //             else{
-        //                /* If max path hasn't chaged, we can use it */
-        //                /* Walk down best, give up if we find a removed item in path */
-        //                use_current_max=1;
-        //                if(!ignore_small_gaps){
-        //                   for (H=best[0]; H!=NULL; H=H->hsp_link.link[0])
-        //                      if (H->linked_to==-1000) {use_current_max=0; break;}
-        //                }
-        //                if(use_current_max)
-        //                   for (H=best[1]; H!=NULL; H=H->hsp_link.link[1])
-        //                      if (H->linked_to==-1000) {use_current_max=0; break;}
-        //
-        //             }
-        //          }
-        // ```
         let mut use_current_max = false;
         if !first_pass {
             if !ignore_small_gaps {
@@ -1110,33 +678,7 @@ fn link_frame(
         }
 
         if !use_current_max {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:663-692
-            // ```c
-            //             for (H=hp_start,H_index=1; H!=NULL; H=H->next,H_index++) {
-            //                Int4 s_frame = H->hsp->subject.frame;
-            //                Int4 s_off_t = H->s_offset_trim;
-            //                Int4 q_off_t = H->q_offset_trim;
-            //                lh_helper[H_index].ptr = H;
-            //                lh_helper[H_index].q_off_trim = q_off_t;
-            //                lh_helper[H_index].s_off_trim = s_off_t;
-            //                for(i=0;i<eOrderingMethods;i++)
-            //                   lh_helper[H_index].sum[i] = H->hsp_link.sum[i];
-            // ...
-            //                /* set next_larger to link back to closest entry with a sum1
-            //                   larger than this */
-            //                {
-            //                   Int4 cur_sum=lh_helper[H_index].sum[1];
-            //                   Int4 prev = H_index-1;
-            //                   Int4 prev_sum = lh_helper[prev].sum[1];
-            //                   while((cur_sum>=prev_sum) && (prev>0)){
-            //                      prev=lh_helper[prev].next_larger;
-            //                      prev_sum = lh_helper[prev].sum[1];
-            //                   }
-            //                   lh_helper[H_index].next_larger = prev;
-            //                }
-            //                H->linked_to = 0;
-            //             }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:660-692
             let mut h = Some(HP_START);
             let mut h_index = 1usize;
             while let Some(slot) = h {
@@ -1152,72 +694,7 @@ fn link_frame(
             }
 
             if !ignore_small_gaps {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:697-768
-                // ```c
-                //                index=0;
-                //                maxscore = -cutoff[index];
-                //                H_index = 2;
-                //                for (H=hp_start->next; H!=NULL; H=H->next,H_index++)
-                //                {
-                // ...
-                //                   if (H->hsp->score > cutoff[index]) {
-                //                      Int4 H_query_etrim = H->q_end_trim;
-                //                      Int4 H_sub_etrim = H->s_end_trim;
-                //                      Int4 H_q_et_gap = H_query_etrim+window_size;
-                //                      Int4 H_s_et_gap = H_sub_etrim+window_size;
-                // ...
-                //                      for (H2_index=H_index-1; H2_index>1; H2_index=H2_index-1)
-                //                      {
-                // ...
-                //                         q_off_t = lh_helper[H2_index].q_off_trim;
-                //                         s_off_t = lh_helper[H2_index].s_off_trim;
-                //
-                //                         /* combine tests to reduce mispredicts -cfj */
-                //                         b1 = q_off_t <= H_query_etrim;
-                //                         b2 = s_off_t <= H_sub_etrim;
-                //                         sum = lh_helper[H2_index].sum[index];
-                //
-                //
-                //                         b4 = ( q_off_t > H_q_et_gap ) ;
-                //                         b5 = ( s_off_t > H_s_et_gap ) ;
-                // ...
-                //                         if(q_off_t > (H_q_et_gap+trim_size))
-                //                            break;
-                //
-                //                         if (b1|b2|b5|b4) continue;
-                //
-                //                         if (sum>H_hsp_sum)
-                //                         {
-                //                            H2=lh_helper[H2_index].ptr;
-                //                            H_hsp_num=H2->hsp_link.num[index];
-                //                            H_hsp_sum=H2->hsp_link.sum[index];
-                //                            H_hsp_xsum=H2->hsp_link.xsum[index];
-                //                            H_hsp_link=H2;
-                //                         }
-                //                      } /* end for H2... */
-                //                   }
-                //                   {
-                //                      Int4 score=H->hsp->score;
-                //                      double new_xsum =
-                //                        H_hsp_xsum + score*kbp[H->hsp->context]->Lambda -
-                //                        kbp[H->hsp->context]->logK;
-                //                      Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
-                //
-                //                      H->hsp_link.sum[index] = new_sum;
-                //                      H->hsp_link.num[index] = H_hsp_num+1;
-                //                      H->hsp_link.link[index] = H_hsp_link;
-                //                      lh_helper[H_index].sum[index] = new_sum;
-                //                      if (new_sum >= maxscore)
-                //                      {
-                //                         maxscore=new_sum;
-                //                         best[index]=H;
-                //                      }
-                //                      H->hsp_link.xsum[index] = new_xsum;
-                //                      if(H_hsp_link)
-                //                         ((LinkHSPStruct*)H_hsp_link)->linked_to++;
-                //                   }
-                //                } /* end for H=... */
-                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:693-768
                 let index = SMALL;
                 let mut maxscore = -cutoff[index];
                 let mut h_index = 2usize;
@@ -1276,100 +753,7 @@ fn link_frame(
                 }
             }
 
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:770-889
-            // ```c
-            //             index=1;
-            //             maxscore = -cutoff[index];
-            //             H_index = 2;
-            //             for (H=hp_start->next; H!=NULL; H=H->next,H_index++)
-            //             {
-            // ...
-            //                H->hsp_link.changed=1;
-            //                H2 = H->hsp_link.link[index];
-            //                if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0)))
-            //                {
-            // ...
-            //                   if(H2){
-            //                      H_hsp_num=H2->hsp_link.num[index];
-            //                      H_hsp_sum=H2->hsp_link.sum[index];
-            //                      H_hsp_xsum=H2->hsp_link.xsum[index];
-            //                   }
-            //                   H_hsp_link=H2;
-            //                   H->hsp_link.changed=0;
-            //                } else if (H->hsp->score > cutoff[index]) {
-            //                   Int4 H_query_etrim = H->q_end_trim;
-            //                   Int4 H_sub_etrim = H->s_end_trim;
-            // ...
-            //                   if(!first_pass&&H2&&H2->linked_to>=0){
-            //                      if(1){
-            //                         /* We set this to less than the real value to keep the
-            //                            original ordering in case of ties. */
-            //                         H_hsp_sum=H2->hsp_link.sum[index]-1;
-            // ...
-            //                   for (H2_index=H_index-1; H2_index>1;)
-            //                   {
-            //                      Int4 b0,b1,b2;
-            //                      Int4 q_off_t,s_off_t,sum,next_larger;
-            //                      LinkHelpStruct * H2_helper=&lh_helper[H2_index];
-            //                      sum = H2_helper->sum[index];
-            //                      next_larger = H2_helper->next_larger;
-            //
-            //                      s_off_t = H2_helper->s_off_trim;
-            //                      q_off_t = H2_helper->q_off_trim;
-            //
-            //                      b0 = sum <= H_hsp_sum;
-            //
-            //                      /* Compute the next H2_index */
-            //                      H2_index--;
-            //                      if(b0){	 /* If this sum is too small to beat H_hsp_sum, advance to a larger sum */
-            //                         H2_index=next_larger;
-            //                      }
-            //
-            //                      /* combine tests to reduce mispredicts -cfj */
-            //                      b1 = q_off_t <= H_query_etrim;
-            //                      b2 = s_off_t <= H_sub_etrim;
-            // ...
-            //                      if (!(b0|b1|b2) )
-            //                      {
-            //                         H2 = H2_helper->ptr;
-            //
-            //                         H_hsp_num=H2->hsp_link.num[index];
-            //                         H_hsp_sum=H2->hsp_link.sum[index];
-            //                         H_hsp_xsum=H2->hsp_link.xsum[index];
-            //                         H_hsp_link=H2;
-            //                      }
-            //                   } /* end for H2_index... */
-            //                } /* end if(H->score>cuttof[]) */
-            //                {
-            //                   Int4 score=H->hsp->score;
-            //                   double new_xsum =
-            //                      H_hsp_xsum + score*kbp[H->hsp->context]->Lambda -
-            //                      kbp[H->hsp->context]->logK;
-            //                   Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
-            //
-            //                   H->hsp_link.sum[index] = new_sum;
-            //                   H->hsp_link.num[index] = H_hsp_num+1;
-            //                   H->hsp_link.link[index] = H_hsp_link;
-            //                   lh_helper[H_index].sum[index] = new_sum;
-            //                   lh_helper[H_index].maxsum1 = MAX(lh_helper[H_index-1].maxsum1, new_sum);
-            //                   /* Update this entry's 'next_larger' field */
-            //                   {
-            // ...
-            //                   }
-            //
-            //                   if (new_sum >= maxscore)
-            //                   {
-            //                      maxscore=new_sum;
-            //                      best[index]=H;
-            //                   }
-            //                   H->hsp_link.xsum[index] = new_xsum;
-            //                   if(H_hsp_link)
-            //                      ((LinkHSPStruct*)H_hsp_link)->linked_to++;
-            //                }
-            //             }
-            //             path_changed=0;
-            //             first_pass=0;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:770-898
             let index = LARGE;
             let mut maxscore = -cutoff[index];
             let mut h_index = 2usize;
@@ -1441,54 +825,7 @@ fn link_frame(
             first_pass = false;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:891-946
-        // ```c
-        //          if (!ignore_small_gaps)
-        //          {
-        // ...
-        //             best[0]->hsp_link.sum[0] +=
-        //                (best[0]->hsp_link.num[0])*cutoff[0];
-        //
-        //             prob[0] = BLAST_SmallGapSumE(window_size,
-        //                          best[0]->hsp_link.num[0], best[0]->hsp_link.xsum[0],
-        //                          query_length, subject_length,
-        //                          query_info->contexts[query_context].eff_searchsp,
-        //                          BLAST_GapDecayDivisor(gap_decay_rate,
-        //                                               best[0]->hsp_link.num[0]) );
-        //
-        //             /* Adjust the e-value because we are performing multiple tests */
-        //             if( best[0]->hsp_link.num[0] > 1 ) {
-        //               if( gap_prob == 0 || (prob[0] /= gap_prob) > INT4_MAX ) {
-        //                 prob[0] = INT4_MAX;
-        //               }
-        //             }
-        //
-        //             prob[1] = BLAST_LargeGapSumE(best[1]->hsp_link.num[1],
-        //                          best[1]->hsp_link.xsum[1],
-        //                          query_length, subject_length,
-        //                          query_info->contexts[query_context].eff_searchsp,
-        //                          BLAST_GapDecayDivisor(gap_decay_rate,
-        //                                               best[1]->hsp_link.num[1]));
-        //
-        //             if( best[1]->hsp_link.num[1] > 1 ) {
-        //               if( 1 - gap_prob == 0 || (prob[1] /= 1 - gap_prob) > INT4_MAX ) {
-        //                 prob[1] = INT4_MAX;
-        //               }
-        //             }
-        //             ordering_method =
-        //                prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
-        //          }
-        //          else
-        //          {
-        //             /* We only consider the case of big gaps. */
-        //             best[1]->hsp_link.sum[1] +=
-        //                (best[1]->hsp_link.num[1])*cutoff[1];
-        //
-        //             prob[1] = BLAST_LargeGapSumE(
-        // ...
-        //             ordering_method = eLinkLargeGaps;
-        //          }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:891-952
         let large_gap_e = |nodes: &[Node], best: usize| {
             let num = nodes[best].num[LARGE];
             ncbi_large_gap_sum_e(
@@ -1550,34 +887,6 @@ fn link_frame(
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:948-980
-        // ```c
-        //          best[ordering_method]->start_of_chain = TRUE;
-        //          best[ordering_method]->hsp->evalue    = prob[ordering_method];
-        //
-        //          /* remove the links that have been ordered already. */
-        //          if (best[ordering_method]->hsp_link.link[ordering_method])
-        //             linked_set = TRUE;
-        //          else
-        //             linked_set = FALSE;
-        //
-        //          if (best[ordering_method]->linked_to>0) path_changed=1;
-        //          for (H=best[ordering_method]; H!=NULL;
-        //               H=H->hsp_link.link[ordering_method])
-        //          {
-        //             if (H->linked_to>1) path_changed=1;
-        //             H->linked_to=-1000;
-        //             H->hsp_link.changed=1;
-        //             /* record whether this is part of a linked set. */
-        //             H->linked_set = linked_set;
-        //             H->ordering_method = ordering_method;
-        //             H->hsp->evalue = prob[ordering_method];
-        //             if (H->next)
-        //                (H->next)->prev=H->prev;
-        //             if (H->prev)
-        //                (H->prev)->next=H->next;
-        //             number_of_hsps--;
-        //          }
-        // ```
         let chosen = best[ordering_method].expect("the chosen ordering has a best set");
         nodes[chosen].start_of_chain = true;
         nodes[chosen].evalue = prob[ordering_method];
@@ -1612,19 +921,7 @@ fn link_frame(
 /// `next_larger` of `lh_helper[h_index]`: the closest earlier entry whose large-gap sum is
 /// larger.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:679-688 (the same at 864-873)
-/// ```c
-///                {
-///                   Int4 cur_sum=lh_helper[H_index].sum[1];
-///                   Int4 prev = H_index-1;
-///                   Int4 prev_sum = lh_helper[prev].sum[1];
-///                   while((cur_sum>=prev_sum) && (prev>0)){
-///                      prev=lh_helper[prev].next_larger;
-///                      prev_sum = lh_helper[prev].sum[1];
-///                   }
-///                   lh_helper[H_index].next_larger = prev;
-///                }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:676-688 (the same at 864-873)
 fn next_larger(lh_helper: &[Helper], h_index: usize) -> usize {
     let cur_sum = lh_helper[h_index].sum[LARGE];
     let mut prev = h_index - 1;
@@ -1637,151 +934,5 @@ fn next_larger(lh_helper: &[Helper], h_index: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI blast_parameters.c:788-815 with `DEFAULT_LONGEST_INTRON` 122: the values of
-    // `-max_intron_length` on both sides of each branch.
-    #[test]
-    fn the_longest_intron_of_a_translated_search_follows_ncbis_branches() {
-        for (option, gapped) in [
-            (0, Some(40)),
-            (1, None),
-            (2, None),
-            (4, None),
-            (5, Some(1)),
-            (7, Some(1)),
-            (8, Some(2)),
-            (121, Some(39)),
-            (122, Some(40)),
-            (123, Some(40)),
-            (125, Some(41)),
-            (i32::MAX, Some(715_827_881)),
-        ] {
-            assert_eq!(translated_longest_intron(option, true), gapped, "{option}");
-        }
-        for (option, ungapped) in [
-            (0, 0),
-            (1, 0),
-            (4, 0),
-            (5, 1),
-            (125, 41),
-            (i32::MAX, 715_827_881),
-        ] {
-            assert_eq!(
-                translated_longest_intron(option, false),
-                Some(ungapped),
-                "{option}"
-            );
-        }
-    }
-
-    fn context() -> LinkContext {
-        // BLOSUM62 11/1 gapped Lambda and K (blast_stat.c), a query of 300 letters.
-        LinkContext {
-            lambda: 0.267,
-            log_k: 0.041f64.glibc_ln(),
-            query_length: 300,
-            length_adjustment: 40,
-            eff_searchsp: 260 * 960,
-        }
-    }
-
-    /// The list `even_gap_link_hsps` gives for HSPs of one context.
-    fn linked(
-        hsps: &[LinkHsp],
-        ctx: LinkContext,
-        subject_length: i32,
-        params: &EvenGapLinkParams,
-    ) -> Vec<LinkedHsp> {
-        let mut out = Vec::new();
-        even_gap_link_hsps(hsps, &|_| ctx, subject_length, params, &mut |l| out.push(l));
-        out
-    }
-
-    fn hsp(q: (i32, i32), s: (i32, i32), score: i32) -> LinkHsp {
-        LinkHsp {
-            context: 0,
-            query_offset: q.0,
-            query_end: q.1,
-            subject_offset: s.0,
-            subject_end: s.1,
-            score,
-        }
-    }
-
-    #[test]
-    fn a_lone_hsp_gets_the_e_value_of_one_segment() {
-        let hsps = [hsp((10, 60), (20, 70), 80)];
-        let ctx = context();
-        let out = linked(&hsps, ctx, 1000, &EvenGapLinkParams::traceback());
-        assert_eq!(out.len(), 1);
-        assert_eq!((out[0].index, out[0].num), (0, 1));
-        let xsum = 80.0 * ctx.lambda - ctx.log_k;
-        let expected = (ctx.eff_searchsp as f64) * (-xsum).glibc_exp() / 0.9;
-        assert_eq!(out[0].evalue, expected);
-    }
-
-    #[test]
-    fn two_hsps_in_order_on_both_sequences_link_into_one_set() {
-        // The first HSP ends before the second starts on the query and on the subject.
-        let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
-        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::traceback());
-        // The chain starts at the upstream HSP (the head) and follows its link downstream.
-        assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
-        assert!(out.iter().all(|l| l.num == 2));
-        assert_eq!(out[0].evalue, out[1].evalue);
-    }
-
-    #[test]
-    fn hsps_in_opposite_orders_on_the_sequences_stay_apart() {
-        let hsps = [hsp((200, 260), (20, 70), 60), hsp((10, 60), (500, 560), 80)];
-        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::traceback());
-        assert!(out.iter().all(|l| l.num == 1));
-        // The list is in the forward order of the query starts.
-        assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
-    }
-
-    #[test]
-    fn the_preliminary_cutoff_keeps_hsps_at_or_below_it_out_of_small_gap_sets() {
-        // Close HSPs (a gap of 10 letters on both sequences) with scores at the small-gap cutoff:
-        // NCBI walks for a predecessor only for a score above the cutoff.
-        let hsps = [hsp((70, 120), (80, 130), 41), hsp((10, 60), (20, 70), 41)];
-        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::preliminary(41));
-        assert!(out.iter().all(|l| l.num == 1), "{out:?}");
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:871 (the store into the `Int2`
-    // `num`, as at :756) and blast_stat.c:4390-4391 (`s_BlastSumP`: `if (r < 1) return 0.;`)
-    // ```c
-    //                   H->hsp_link.num[index] = H_hsp_num+1;
-    // ```
-    #[test]
-    fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
-        // 32,770 HSPs in order on both sequences link into one large-gap set; NCBI's count wraps
-        // to -32766, and the sum statistics give a count below 1 the E-value 0.
-        let n = 32_770;
-        let hsps: Vec<LinkHsp> = (0..n)
-            .map(|i| hsp((100 * i, 100 * i + 30), (100 * i, 100 * i + 30), 60))
-            .collect();
-        let ctx = LinkContext {
-            query_length: 100 * n + 100,
-            eff_searchsp: (100 * n as i64) * (100 * n as i64),
-            ..context()
-        };
-        let params = EvenGapLinkParams {
-            gap_prob: 0.0,
-            gap_decay_rate: BLAST_GAP_DECAY_RATE,
-            cutoff_small_gap: 0,
-            cutoff_big_gap: 1,
-            query_translated: false,
-        };
-        let out = linked(&hsps, ctx, 100 * n + 100, &params);
-        assert_eq!(out.len(), n as usize);
-        assert!(out.iter().all(|l| l.num == -32766), "{:?}", &out[..2]);
-        assert!(out.iter().all(|l| l.evalue == 0.0), "{:?}", &out[..2]);
-        // One HSP fewer than the wrap keeps its count.
-        let out = linked(&hsps[..32_767], ctx, 100 * n + 100, &params);
-        assert!(out.iter().all(|l| l.num == 32_767), "{:?}", &out[..2]);
-    }
-}
+#[path = "link_hsps_tests.rs"]
+mod tests;

@@ -2,49 +2,22 @@ use std::cmp::Ordering;
 
 // =============================================================================
 // Gap Edit Script for traceback trimming
-// Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 // =============================================================================
 
 /// Gap edit operation type for traceback
-/// Reference: blast_hits.c eGapAlignOpType
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c eGapAlignOpType
 ///
-/// ```c
-/// // NCBI GapEditScript structure (gapinfo.h)
-/// typedef enum {
-///     eGapAlignSub = 0,  // Substitution (match or mismatch)
-///     eGapAlignDel = 1,  // Deletion from query (gap in query)
-///     eGapAlignIns = 2   // Insertion to query (gap in subject)
-/// } EGapAlignOpType;
-///
-/// typedef struct GapEditScript {
-///     Uint1 *op_type;  // Array of operation types
-///     Int4 *num;       // Array of counts for each operation
-///     Int4 size;       // Number of operations
-/// } GapEditScript;
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GapEditOp {
     /// Substitution (match or mismatch): consumes `num` query and `num` subject positions
-    /// Reference: blast_hits.c:2404-2407
-    /// ```c
-    /// if (esp->op_type[index] == eGapAlignSub) {
-    ///    qid++;
-    ///    sid++;
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2404-2407
     Sub(u32),
     /// Deletion: gap in query, consumes `num` subject positions only
-    /// Reference: blast_hits.c:2408-2410
-    /// ```c
-    /// } else if (esp->op_type[index] == eGapAlignDel) {
-    ///    sid+=esp->num[index];
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2408-2410
     Del(u32),
     /// Insertion: gap in subject, consumes `num` query positions only
-    /// Reference: blast_hits.c:2411-2413
-    /// ```c
-    /// } else if (esp->op_type[index] == eGapAlignIns) {
-    ///    qid+=esp->num[index];
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2411-2413
     Ins(u32),
 }
 
@@ -66,27 +39,10 @@ impl GapEditOp {
 
 #[derive(Debug, Clone)]
 pub struct Hit {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-    //    Int4 hspcnt; /**< Number of HSPs saved */
-    //    ...
-    // } BlastHSPList;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
     pub identity: f64,
     pub length: usize,
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
-    // ```c++
-    // inline void CBlastTabularInfo::x_PrintMismatches(void)
-    // {
-    //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
-    //     m_Ostream << num_mismatches;
-    // }
-    // ```
     // Fewer than none when a stored gap character of the subject (`-`) faces a gap of the
     // query: the letters are equal, an identity, and the column is a gap.
     pub mismatch: i64,
@@ -97,63 +53,21 @@ pub struct Hit {
     pub s_end: usize,
     pub e_value: f64,
     pub bit_score: f64,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-    // ```c
-    // typedef struct BlastHSP {
-    //    Int4 score;           /**< This HSP's raw score */
-    //    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-    //    double bit_score;     /**< Bit score, calculated from score */
-    //    double evalue;        /**< This HSP's e-value */
-    //    BlastSeg query;       /**< Query sequence info. */
-    //    BlastSeg subject;     /**< Subject sequence info. */
-    //    Int4     context;     /**< Context number of query */
-    //    GapEditScript* gap_info;/**< ALL gapped alignment is here */
-    //    ...
-    //    Int4 num_positives;
-    // } BlastHSP;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub num_ident: usize,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-    // ```c
-    // if (hsp->query.frame != hsp->subject.frame) {
-    //    *q_end = query_length - hsp->query.offset;
-    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-    //    *s_end = hsp->subject.offset + 1;
-    //    *s_start = hsp->subject.end;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
     pub query_frame: i32,
     pub query_length: usize,
     // Fields for NCBI-style output ordering (not printed, used for sorting)
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    //    ...
-    // } BlastHSPList;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
     /// Query index (input order) - NCBI uses query order for grouping
     pub q_idx: u32,
     /// Subject index (oid) - NCBI uses oid for tie-breaking in s_EvalueCompareHSPLists
     pub s_idx: u32,
     /// Raw alignment score - NCBI ScoreCompareHSPs uses raw score, not bit score
     pub raw_score: i32,
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-    // ```c
-    // typedef struct BlastHSP {
-    //    BlastSeg query;       /**< Query sequence info. */
-    //    BlastSeg subject;     /**< Subject sequence info. */
-    // } BlastHSP;
-    // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2388
-    // ```c
-    // init_hsp->offsets.qs_offsets.q_off -= query_start;
-    // if (init_hsp->ungapped_data) {
-    //     init_hsp->ungapped_data->q_start -= query_start;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2388
     // Optional context/frame-relative BlastSeg offsets used by ScoreCompareHSPs
     // when formatted nucleotide coordinates cannot recover the translated HSP
     // coordinates.
@@ -163,40 +77,18 @@ pub struct Hit {
     pub sort_subject_end: usize,
     pub has_sort_offsets: bool,
     /// Edit script for traceback trimming (NCBI: gap_info in BlastHSP)
-    /// Reference: blast_hits.c BlastHSP.gap_info (GapEditScript*)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c BlastHSP.gap_info (GapEditScript*)
     ///
     /// This is used by Blast_HSPListPurgeHSPsWithCommonEndpoints to trim
     /// overlapping HSPs instead of deleting them entirely.
-    /// Reference: blast_hits.c:2490-2492, 2516-2518
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2490-2492, 2516-2518
     pub gap_info: Option<Vec<GapEditOp>>,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-    // ```c
-    // typedef struct BlastHSP {
-    //    ...
-    //    Int4 num_positives;
-    //
-    //    BlastHSPMappingInfo* map_info;
-    // } BlastHSP;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub num_positives: usize,
 }
 
 impl Hit {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-    // ```c
-    // s_Blast_HSPGetNumIdentitiesAndPositives(..., Int4* num_ident_ptr, ...,
-    //                                         Int4* num_pos_ptr)
-    // {
-    //    ...
-    //    if (align_length_ptr) {
-    //        *align_length_ptr = align_length;
-    //    }
-    //    *num_ident_ptr = num_ident;
-    //
-    //    if(NULL != matrix)
-    //        *num_pos_ptr = num_pos + num_ident;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
     #[inline]
     pub fn gap_letters(&self) -> usize {
         usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
@@ -205,20 +97,11 @@ impl Hit {
 
 // =============================================================================
 // NCBI-style comparators for outfmt6 output ordering
-// Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 // =============================================================================
 
 /// Compare two evalues, treating both as equal if they're close enough to zero.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c s_EvalueComp()
-/// ```c
-/// static int s_EvalueComp(double evalue1, double evalue2) {
-///     const double epsilon = 1.0e-180;
-///     if (evalue1 < epsilon && evalue2 < epsilon) { return 0; }
-///     if (evalue1 < evalue2) { return -1; }
-///     else if (evalue1 > evalue2) { return 1; }
-///     else { return 0; }
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c s_EvalueComp()
 #[inline]
 fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     const EPSILON: f64 = 1.0e-180;
@@ -235,31 +118,10 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
 
 /// NCBI ScoreCompareHSPs - compare two HSPs by score and coordinates.
 /// Used to sort HSPs within a subject (BlastHSPList).
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c ScoreCompareHSPs()
-/// ```c
-/// int ScoreCompareHSPs(const void* h1, const void* h2) {
-///    BlastHSP* hsp1,* hsp2;
-///    int result = 0;
-///    hsp1 = *((BlastHSP**) h1);
-///    hsp2 = *((BlastHSP**) h2);
-///    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-///        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-///        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-///        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-///        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-///    }
-///    return result;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1335-1355 ScoreCompareHSPs()
 /// Order: score DESC → s_start ASC → s_end DESC → q_start ASC → q_end DESC
 pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-    // ```c
-    // if (hsp->query.frame != hsp->subject.frame) {
-    //    *q_end = query_length - hsp->query.offset;
-    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
     // Recover internal query offsets from output coordinates for blastn minus strand.
     let query_offsets = |hit: &Hit| {
         if hit.query_length > 0 && hit.query_frame < 0 {
@@ -273,15 +135,7 @@ pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
             (hit.q_start.saturating_sub(1), hit.q_end)
         }
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
-    // ```c
-    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
     let (a_q_offset, a_q_end, a_s_offset, a_s_end) = if a.has_sort_offsets {
         (
             a.sort_query_offset,
@@ -339,16 +193,7 @@ pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
     b_q_end.cmp(&a_q_end)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1415-1434
-// ```c
-// static int
-// s_EvalueCompareHSPs(const void* v1, const void* v2)
-// {
-//    if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
-//       return retval;
-//    return ScoreCompareHSPs(v1, v2);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1414-1434
 pub(crate) fn evalue_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
     match evalue_comp(a.e_value, b.e_value) {
         Ordering::Equal => score_compare_hsps(a, b),

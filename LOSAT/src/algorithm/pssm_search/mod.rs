@@ -11,18 +11,7 @@
 //! databases, the hit lists, the reports) as for blastp.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2826
-//! ```c
-//!    sbp->kbp = Blast_QueryIsPssm(program) ? sbp->kbp_psi : sbp->kbp_std;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:113-126
-//! ```c
-//!     if (Blast_QueryIsPssm(program_number)) {
-//!         ...
-//!                 Blast_KarlinBlkCopy(sbp->kbp_gap_psi[index],
-//!                                     sbp->kbp_gap_std[index]);
-//!         ...
-//!         sbp->kbp_gap = sbp->kbp_gap_psi;
-//! ```
 
 pub(crate) mod annot_index;
 pub(crate) mod evalue;
@@ -42,18 +31,6 @@ use crate::stats::KarlinParams;
 /// `CPssm::kInvalidStat` (the member is absent, or 0.0).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:101-155
-/// ```c++
-/// double
-/// CPssm::GetLambda() const
-/// {
-///     if ( !CanGetFinalData() || !GetFinalData().CanGetLambda() ) {
-///         return kInvalidStat;
-///     }
-///     return GetFinalData().GetLambda();
-/// }
-/// ...
-/// const double CPssm::kInvalidStat = 0.0;
-/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct PssmStats {
     pub(crate) lambda_ungapped: Option<f64>,
@@ -135,6 +112,16 @@ pub struct PsiSearch {
     /// (`blast_engine::psi_round::RoundQuery::split`). `None` otherwise: a query that NCBI does
     /// not split, and a PSSM query (`-in_pssm`), which NCBI never splits.
     pub(crate) split_setup: Option<crate::algorithm::tblastx::translation::QueryFrame>,
+    /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
+    /// refusals that name the option name that one.
+    pub(crate) from_msa: bool,
+    /// The query's Seq-inst has the molecule `other` (psiblast only), with the coding number of
+    /// its Seq-data (`CSeq_data::E_Choice`: iupacaa 2, ncbieaa 8, ncbistdaa 10). NCBI searches it
+    /// as a protein; the tabular formats read the query's letters through the object manager for
+    /// the fields `qseq`, `sseq`, `btop`, `positive`, `ppos`, `nident`, `mismatch` and `pident`
+    /// (the default fields among them), which throws `CSeqVectorException` at the first row
+    /// (`report::tabular::query_sequence_exception`).
+    pub(crate) query_other_coding: Option<i32>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -147,24 +134,6 @@ pub(crate) struct PssmQueryRequest {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:279-304
-// ```c++
-//     CRef<CSearchDatabase> search_db = db_args->GetSearchDatabase();
-//     if (search_db.NotEmpty())
-//     {
-//         if (pssm.NotEmpty())
-//         {
-//             _ASSERT(queries.Empty());
-//             if(num_iters != 0)
-//             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
-//     ...
-//     else
-//     {
-//         if (pssm.NotEmpty())
-//         {
-//             NCBI_THROW(CInputException, eInvalidInput,
-//                        "Remote PSI-BL2SEQ is not supported");
-//         }
-// ```
 /// Whether NCBI writes the search strategy's request of a PSSM query (`s_InitializeExportStrategy`
 /// of psiblast and tblastn): with `-export_search_strategy` (`strategy`) and a database
 /// (`database`: `-db`); with `-subject` it stops instead ("Remote PSI-BL2SEQ is not supported").
@@ -213,13 +182,6 @@ impl PssmQueryStop {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-262
-    // ```c++
-    //             while (itr) {
-    //
-    //                 SavePssmToFile(pssm, &itr);
-    //                 ...
-    //                    results = psiblast->Run();
-    // ```
     /// Whether psiblast's round 1 has written the input PSSM's files (`SavePssmToFile`, `-out_pssm`
     /// and `-out_ascii_pssm`) when NCBI stops: the query set-up fails in `CPsiBlast::Run`, after
     /// them; the other stops come before the rounds.
@@ -229,9 +191,6 @@ impl PssmQueryStop {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537
-// ```c++
-// 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
-// ```
 // NCBI's scope holds the subjects that its reader read, then the PSSM's Bioseq; the command line
 // reads its `-subject` records in the scope that the query joins (`IdScope`), while the records'
 // entries (the library API) get records read in a scope of their own (`api::read_inputs`).
@@ -259,33 +218,8 @@ pub(crate) fn scope_of_subjects(
 impl PsiSearch {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:338-340 and
     // c++/src/app/blast/tblastn_app.cpp:307,324 (the request, then the search object)
-    // ```c++
-    //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
-    //
-    //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
-    // ...
-    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
-    // ...
-    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-534
-    // ```c++
-    //     // Throw exception if pssm is invalid
-    //     CPsiBlastValidate::Pssm(*pssm);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67
-    // ```c++
-    // CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
-    //                              CRef<CLocalDbAdapter> subject,
-    //                              CConstRef<CPSIBlastOptionsHandle> options)
-    // : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
-    //     m_ResultType(eDatabaseSearch)
-    // {
-    //     x_Validate();
-    //     x_ExtractQueryFromPssm();
-    //     x_CreatePssmScoresFromFrequencyRatios();
-    // }
-    // ```
     /// What stops the run of this PSSM query before its search (psiblast's and tblastn's one rule):
     /// with `-export_search_strategy` (`strategy`) and no database (`database`), the request's
     /// "Remote PSI-BL2SEQ" before anything else; then NCBI's check of the PSSM (the request makes
@@ -307,11 +241,6 @@ impl PsiSearch {
             return Some(PssmQueryStop::Scores(message.clone()));
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-151
-        // ```c++
-        //     // 1. Initialize the query data (borrow it from the factory)
-        //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
-        //     retval->m_InternalData->m_Queries = query_data->GetSequenceBlk();
-        // ```
         // The search's first step (`CBlastPrelimSearch`'s set-up in `CPsiBlast::Run`) sets the
         // query up (`SetupQueries_OMF`), before the score block, the lookup table and any read of
         // the database.
@@ -329,27 +258,6 @@ impl PsiSearch {
     /// with the search's matrix, which NCBI also computes for `kbp_psi` before it overwrites them).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-107
-    /// ```c++
-    ///     // Assign the ungapped Karlin-Altschul block
-    ///     if (pssm->GetPssm().GetLambdaUngapped() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_psi[0]->Lambda = pssm->GetPssm().GetLambdaUngapped();
-    ///     } else if (score_blk->kbp_std[0]->Lambda > 0.0) {
-    ///         score_blk->kbp_psi[0]->Lambda = score_blk->kbp_std[0]->Lambda;
-    ///     }
-    ///
-    ///     if (pssm->GetPssm().GetKappaUngapped() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_psi[0]->K = pssm->GetPssm().GetKappaUngapped();
-    ///     } else if (score_blk->kbp_std[0]->K > 0.0) {
-    ///         score_blk->kbp_psi[0]->K = score_blk->kbp_std[0]->K;
-    ///     }
-    ///     score_blk->kbp_psi[0]->logK = log(score_blk->kbp_psi[0]->K);
-    ///
-    ///     if (pssm->GetPssm().GetHUngapped() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_psi[0]->H = pssm->GetPssm().GetHUngapped();
-    ///     } else if (score_blk->kbp_std[0]->K > 0.0) {
-    ///         score_blk->kbp_psi[0]->H = score_blk->kbp_std[0]->H;
-    ///     }
-    /// ```
     /// `kbp_psi[0]` holds `kbp_std[0]`'s values before (`Blast_ScoreBlkKbpUngappedCalc`,
     /// blast_stat.c:2799-2808: the same calculation), so either branch leaves those values.
     pub(crate) fn ungapped_karlin(&self, kbp_std: &KarlinParams) -> KarlinParams {
@@ -366,16 +274,6 @@ impl PsiSearch {
     /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp = kbp_psi`, blast_stat.c:2826).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
-    /// ```c
-    /// static Boolean s_BlastKarlinBlkIsValid(const Blast_KarlinBlk* kbp)
-    /// {
-    ///     if ( !kbp ) {
-    ///         return FALSE;
-    ///     } else {
-    ///         return (kbp->Lambda > 0 && kbp->K > 0 && kbp->H > 0);
-    ///     }
-    /// }
-    /// ```
     pub(crate) fn ungapped_karlin_valid(&self, kbp_std: &KarlinParams) -> bool {
         let kbp = self.ungapped_karlin(kbp_std);
         kbp.lambda > 0.0 && kbp.k > 0.0 && kbp.h > 0.0
@@ -385,27 +283,6 @@ impl PsiSearch {
     /// of the search's matrix and gap costs, which `kbp_gap_psi` is a copy of).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:109-127
-    /// ```c++
-    ///     // Assign the gapped Karlin-Altschul block
-    ///     if (pssm->GetPssm().GetLambda() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_gap_psi[0]->Lambda = pssm->GetPssm().GetLambda();
-    ///     } else if (score_blk->kbp_gap_std[0]->Lambda > 0.0) {
-    ///         score_blk->kbp_gap_psi[0]->Lambda = score_blk->kbp_gap_std[0]->Lambda;
-    ///     }
-    ///
-    ///     if (pssm->GetPssm().GetKappa() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_gap_psi[0]->K = pssm->GetPssm().GetKappa();
-    ///     } else if (score_blk->kbp_gap_std[0]->K > 0.0) {
-    ///         score_blk->kbp_gap_psi[0]->K = score_blk->kbp_gap_std[0]->K;
-    ///     }
-    ///     score_blk->kbp_gap_psi[0]->logK = log(score_blk->kbp_gap_psi[0]->K);
-    ///
-    ///     if (pssm->GetPssm().GetH() != CPssm::kInvalidStat) {
-    ///         score_blk->kbp_gap_psi[0]->H = pssm->GetPssm().GetH();
-    ///     } else if (score_blk->kbp_gap_std[0]->H > 0.0) {
-    ///         score_blk->kbp_gap_psi[0]->H = score_blk->kbp_gap_std[0]->H;
-    ///     }
-    /// ```
     pub(crate) fn gapped_karlin(&self, kbp_gap_std: &KarlinParams) -> KarlinParams {
         KarlinParams {
             lambda: self.stats.lambda.unwrap_or(kbp_gap_std.lambda),
@@ -510,36 +387,10 @@ impl PsiSearch {
     /// (`setup_messages`, made by the caller from the engine's PSSM).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:303-310
-    /// ```c++
-    ///                         CConstRef<CBioseq> seq =
-    ///                          s_GetQueryBioseq(query, scope, pssm);
-    ///                         pssm =
-    ///                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
-    ///                                      results_1st_query.GetAncillaryData());
-    ///                         psiblast->SetPssm(pssm);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:157-161 (`s_GetQueryBioseq`)
-    /// ```c++
-    ///         if (query->GetQuerySeqLoc(0)->GetId()) {
-    ///             CBioseq_Handle bh =
-    ///                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
-    ///             _ASSERT(bh);
-    ///             retval.Reset(bh.GetBioseqCore());
-    /// ```
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:173-181
-    /// ```c++
-    /// CPsiBlastImpl::SetPssm(CConstRef<objects::CPssmWithParameters> pssm)
-    /// {
-    ///     if (pssm.Empty()) {
-    ///         NCBI_THROW(CBlastException, eInvalidArgument,
-    ///                    "Setting empty reference for pssm");
-    ///     }
-    ///     CPsiBlastValidate::Pssm(*pssm, true);
-    ///     m_Pssm.Reset(const_cast<CPssmWithParameters*>(&*pssm));
-    /// }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660 (quoted at
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660 (cited at
     /// `algorithm::psiblast::pssm::pssm_with_parameters`: the scores and values that the next
     /// round's `PsiBlastSetupScoreBlock` reads)
     pub(crate) fn from_engine(
@@ -579,6 +430,8 @@ impl PsiSearch {
             defline_reads_annot: false,
             round_query: None,
             split_setup: None,
+            from_msa: false,
+            query_other_coding: None,
         }
     }
 

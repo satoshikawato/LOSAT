@@ -155,8 +155,11 @@ impl Fail {
 /// the reading path around it keeps nothing for its return.
 #[cold]
 #[inline(never)]
-pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl fmt::Display) -> Fail {
-    Fail::serial(NcbiException::new(site, format!("{position}: {message}")))
+pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl AsRef<[u8]>) -> Fail {
+    Fail::serial(NcbiException::new(
+        site,
+        [position.as_bytes(), b": ", message.as_ref()].concat(),
+    ))
 }
 
 /// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
@@ -170,18 +173,6 @@ const fn istr_site(line: u32, kind: &'static str, function: &'static str) -> Thr
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
-// ```c++
-// void CObjectIStream::HandleEOF(CEofException& expt)
-// {
-//     string msg(TopFrame().GetFrameInfo());
-//     PopFrame();
-//     if (GetStackDepth() < 2) {
-//         NCBI_RETHROW_SAME(expt,msg);
-//     } else {
-//         ThrowError(fEOF, msg);
-//     }
-// }
-// ```
 const HANDLE_EOF: ThrowSite = istr_site(
     606,
     "CSerialException::eEOF",
@@ -198,16 +189,6 @@ const EXPECTED_MEMBER: ThrowSite = istr_site(
     "ncbi::CObjectIStream::ExpectedMember",
 );
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
-// ```c++
-// const CReadObjectInfo&
-// CObjectIStream::GetRegisteredObject(CReadObjectInfo::TObjectIndex index)
-// {
-//     if ( !m_Objects ) {
-//         ThrowError(fFormatError,"invalid object index: NO_COLLECT defined");
-//     }
-//     return m_Objects->GetRegisteredObject(index);
-// }
-// ```
 // (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
 // 2.17.0 on `@0` and `@1`.)
 const GET_REGISTERED_OBJECT: ThrowSite = istr_site(
@@ -229,26 +210,6 @@ pub(super) const STRING_CREATE_LENGTH_ERROR: &str = "basic_string::_M_create";
 /// `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the end of
 /// the file.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:496-523
-// ```c++
-// void CIStreamBuffer::GetChars(string& str, size_t count)
-//     THROWS1((CIOException))
-// {
-//     // cache pos
-//     const char* pos = m_CurrentPos;
-//     size_t in_buffer = m_DataEndPos - pos;
-//     if ( in_buffer >= count ) {
-//         // simplest case - plain copy
-//         str.assign(pos, count);
-//         m_CurrentPos = pos + count;
-//         return;
-//     }
-//     str.reserve(count);
-//     str.assign(pos, in_buffer);
-//     for ( ;; ) {
-//         count -= in_buffer;
-//         m_CurrentPos = pos += in_buffer;
-//         pos = FillBuffer(pos);
-// ```
 // (checked with makeblastdb 2.17.0 on lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST ran
 // out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255.)
 pub(super) fn reserve_string(length: u64) -> R<()> {
@@ -305,18 +266,6 @@ impl MaskPost {
     /// The line makeblastdb writes on its standard error (`ReplacedChar::post`,
     /// `ncbi_exception::post_line`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
-    // ```c++
-    //         static CSafeStatic<NCBI_PARAM_TYPE(SERIAL, READ_ANY_VISIBLESTRING_TAG)> sx_ReadAny;
-    //         if ( sx_ReadAny->Get() ) {
-    //             // may be eUTF8String
-    //             TByte alt_tag = MakeTagByte(eUniversal,ePrimitive,eUTF8String);
-    //             if ( PeekTagByte() == alt_tag ) {
-    //                 // optionally issue a warning
-    //                 if ( sx_ReadAny->Get() == 1 ) {
-    //                     ERR_POST_X_ONCE(10, Warning<<
-    //                                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member "<<GetStackTraceASN()<<", ASN.1 specification may need an update");
-    //                 }
-    // ```
     pub(crate) fn line(&self) -> Vec<u8> {
         match self {
             MaskPost::BadChar(replaced) => replaced.post(Some("makeblastdb")),
@@ -469,7 +418,7 @@ struct Trace {
     steps: Vec<StackStep<'static>>,
 }
 
-/// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, quoted at `read_seq_loc_parts`):
+/// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, cited at `read_seq_loc_parts`):
 /// each Seq-loc starts a walk of its own (`my_id`, NULL), takes the Seq-ids of its parts in
 /// order, and hands its own to the Seq-loc around it (`x_UpdateId(id, my_id)`) once its walk is
 /// done. makeblastdb's `GetId` of a mask is this walk of the mask's Seq-loc.
@@ -536,30 +485,6 @@ pub(super) struct Rd<I: Input> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
-// ```c++
-// void CMemberInfoFunctions::ReadWithSetFlagMember(CObjectIStream& in,
-//                                                  const CMemberInfo* memberInfo,
-//                                                  TObjectPtr classPtr)
-// {
-//     _ASSERT(!memberInfo->CanBeDelayed());
-//     _ASSERT(memberInfo->HaveSetFlag());
-//     memberInfo->UpdateSetFlagYes(classPtr);
-//     try {
-//         in.ReadObject(memberInfo->GetItemPtr(classPtr),
-//                       memberInfo->GetTypeInfo());
-//     }
-//     catch (CSerialException& e) {
-//         if (e.GetErrCode() == CSerialException::eNullValue) {
-//             ...
-//         } else if (e.GetErrCode() == CSerialException::eMissingValue) {
-//             ...
-//         } else {
-//             NCBI_RETHROW_SAME(e,
-//                 "error while reading " + memberInfo->GetId().GetName());
-//         }
-//     }
-// }
-// ```
 // (`eNullValue` and `eMissingValue` are not thrown for these types: `ExpectedMember` throws
 // `eFormatError` with the default `eSerialVerifyData_Yes`.)
 const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
@@ -593,9 +518,9 @@ impl<I: Input> Rd<I> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (quoted at
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (cited at
     // `report::serial::object_frame::text_frame_site`)
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, quoted at
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, cited at
     // `HANDLE_EOF`)
     /// One `BEGIN_OBJECT_FRAME` ... `END_OBJECT_FRAME` of a frame of `kind` (of the type
     /// `type_name`): an error that leaves it gets NCBI's handling. A `CSerialException` takes the
@@ -736,15 +661,6 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1038
-    // ```c++
-    // bool CObjectIStream::ExpectedMember(const CMemberInfo* memberInfo)
-    // {
-    //     const CItemInfo* info = CItemsInfo::FindNextMandatory(memberInfo);
-    //     if (info) {
-    //         if (GetVerifyData() == eSerialVerifyData_Yes) {
-    //             ThrowError(fFormatError,
-    //                     "member "+info->GetId().ToString()+" expected");
-    // ```
     /// `ReadMissingSimpleMember` of the members `missing` (`ExpectedMember` of the first that is
     /// neither `OPTIONAL` nor has a `DEFAULT`).
     #[inline]
@@ -762,70 +678,18 @@ impl<I: Input> Rd<I> {
         throw_error(
             EXPECTED_MEMBER,
             &self.inp.position(),
-            format_args!("member {} expected", m.name),
+            format!("member {} expected", m.name),
         )
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
     // the binary stream's, objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
-    // ```c++
-    //     BEGIN_OBJECT_FRAME3(eFrameClass, classType, classPtr);
-    //     StartBlock();
-    //
-    //     ReadClassSequentialContentsBegin(classType);
-    //
-    //     TMemberIndex index;
-    //     while ( (index = BeginClassMember(classType,*pos)) != kInvalidMember ) {
-    //         ReadClassSequentialContentsMember(classPtr);
-    //     }
-    //
-    //     ReadClassSequentialContentsEnd(classPtr);
-    //
-    //     EndBlock();
-    //     END_OBJECT_FRAME();
-    // ```
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-107
-    // ```c++
-    // #define ClassSequentialContentsBegin(classType) \
-    // { \
-    //     CClassTypeInfo::CIterator pos(classType); \
-    //     BEGIN_OBJECT_FRAME(eFrameClassMember); \
-    //     {
-    //
-    // #define ClassSequentialContentsMember(Func, Args) \
-    //     { \
-    //         const CMemberInfo* memberInfo = classType->GetMemberInfo(index); \
-    //         SetTopMemberId(memberInfo->GetId()); \
-    //         for ( TMemberIndex i = *pos; i < index; ++i ) { \
-    //             classType->GetMemberInfo(i)->NCBI_NAME2(Func,MissingMember)Args; \
-    //         } \
-    //         { \
-    //             memberInfo->NCBI_NAME2(Func,Member)Args; \
-    //         } \
-    //         pos.SetIndex(index + 1); \
-    //     }
-    //
-    // #define ClassSequentialContentsEnd(Func, Args) \
-    //     } \
-    //     END_OBJECT_FRAME(); \
-    //     for ( ; pos.Valid(); ++pos ) { \
-    //         classType->GetMemberInfo(pos)->NCBI_NAME2(Func,MissingMember)Args; \
-    //     } \
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109
     // NCBI reference (598d8ae6): c++/src/serial/member.cpp:871-876
-    // ```c++
-    // void CMemberInfoFunctions::ReadMissingSimpleMember(CObjectIStream& in,
-    //                                                    const CMemberInfo* memberInfo,
-    //                                                    TObjectPtr classPtr)
-    // {
-    //     _ASSERT(!memberInfo->Optional());
-    //     in.ExpectedMember(memberInfo);
-    // ```
     /// A SEQUENCE read member by member, in declaration order (`ReadClassSequential`): a member
     /// that is not in the file is an error unless it is `OPTIONAL` or has a `DEFAULT`. `read`
     /// reads the value of member `index`; a member with a set flag reads it in
-    /// `ReadWithSetFlagMember` (quoted at [`READ_WITH_SET_FLAG_MEMBER`]). An `OPTIONAL` member held
+    /// `ReadWithSetFlagMember` (cited at [`READ_WITH_SET_FLAG_MEMBER`]). An `OPTIONAL` member held
     /// by `CRef<>` (`Member::pointer`) is read by `read_pointer`: `read` is not called for a
     /// `NULL`, which leaves the member unset.
     pub(super) fn read_class(
@@ -868,27 +732,6 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1500
-    // ```c++
-    // void CObjectIStream::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
-    //                                       TObjectPtr choicePtr)
-    // {
-    //     BEGIN_OBJECT_FRAME3(eFrameChoice, choiceType, choicePtr);
-    //     BeginChoice(choiceType);
-    //     BEGIN_OBJECT_FRAME(eFrameChoiceVariant);
-    //     TMemberIndex index = BeginChoiceVariant(choiceType);
-    //     if ( index == kInvalidMember ) {
-    //         ThrowError(fFormatError,"choice variant id expected");
-    //     }
-    //     const CVariantInfo* variantInfo = choiceType->GetVariantInfo(index);
-    //     SetTopMemberId(variantInfo->GetId());
-    //
-    //     variantInfo->ReadVariant(*this, choicePtr);
-    //
-    //     EndChoiceVariant();
-    //     END_OBJECT_FRAME();
-    //     EndChoice();
-    //     END_OBJECT_FRAME();
-    // ```
     /// A CHOICE: `read` reads the value of the variant.
     pub(super) fn read_choice<T>(
         &mut self,
@@ -910,27 +753,6 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1318-1346
-    // ```c++
-    // void CObjectIStream::ReadContainer(const CContainerTypeInfo* containerType,
-    //                                    TObjectPtr containerPtr)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameArray, containerType);
-    //     BeginContainer(containerType);
-    //
-    //     TTypeInfo elementType = containerType->GetElementType();
-    //     BEGIN_OBJECT_FRAME2(eFrameArrayElement, elementType);
-    //     ...
-    //     while ( BeginContainerElement(elementType) ) {
-    //         ...
-    //         EndContainerElement();
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    //
-    //     EndContainer();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     // (The containers of these types are the anonymous `SEQUENCE OF` and `SET OF` of a member or
     // of an implicit class such as `Packed-seqint`, which NCBI reads as its member without a
     // class frame: the container frame's type has no name, its element frame names none,
@@ -954,81 +776,8 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/ptrinfo.cpp:210-227
-    // ```c++
-    // void CPointerTypeInfo::ReadPointer(CObjectIStream& in,
-    //                                    TTypeInfo objectType,
-    //                                    TObjectPtr objectPtr)
-    // {
-    //     ...
-    //     TObjectPtr pointedPtr = pointerType->GetObjectPointer(objectPtr);
-    //     if ( pointedPtr ) {
-    //         //pointedType->SetDefault(pointedPtr);
-    //         in.ReadObject(pointedPtr, pointedType);
-    //     }
-    //     else {
-    //         pointerType->SetObjectPointer(objectPtr,
-    //                                       in.ReadPointer(pointedType).first);
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1133-1213
-    // ```c++
-    // pair<TObjectPtr, TTypeInfo> CObjectIStream::ReadPointer(TTypeInfo declaredType)
-    // {
-    //     ...
-    //     switch ( ReadPointerType() ) {
-    //     case eNullPointer:
-    //         return pair<TObjectPtr, TTypeInfo>((TObjectPtr)0, declaredType);
-    //     case eObjectPointer:
-    //         {
-    //             TObjectIndex index = ReadObjectPointer();
-    //             const CReadObjectInfo& info = GetRegisteredObject(index);
-    //             ...
-    //         }
-    //     case eThisPointer:
-    //         {
-    //             ...
-    //             RegisterObject(objectPtr, declaredType);
-    //             ReadObject(objectPtr, declaredType);
-    //             ...
-    //             return make_pair(objectPtr, declaredType);
-    //         }
-    //     case eOtherPointer:
-    //         {
-    //             string className = ReadOtherPointer();
-    //             objectType = MapType(className);
-    //
-    //             BEGIN_OBJECT_FRAME2(eFrameNamed, objectType);
-    //             ...
-    //             RegisterObject(objectPtr, objectType);
-    //             ReadObject(objectPtr, objectType);
-    //             ...
-    //             END_OBJECT_FRAME();
-    //
-    //             ReadOtherPointerEnd();
-    //             break;
-    //         }
-    //     ...
-    //     }
-    //     while ( objectType != declaredType ) {
-    //         // try to check parent class pointer
-    //         if ( objectType->GetTypeFamily() != eTypeFamilyClass ) {
-    //             ThrowError(fFormatError,"incompatible member type");
-    //         }
-    //         ...
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/classinfob.cpp:244-252
-    // ```c++
-    // TTypeInfo CClassTypeInfoBase::GetClassInfoByName(const string& name)
-    // {
-    //     TClassesByName& classes = ClassesByName();
-    //     pair<TClassesByName::iterator, TClassesByName::iterator> i =
-    //         classes.equal_range(name);
-    //     if (  i.first == i.second ) {
-    //         NCBI_THROW_FMT(CSerialException, eInvalidData,
-    //                        "class not found: "<<name);
-    //     }
-    // ```
     // (`MapType` is `GetClassInfoByName`. The classes it knows are those whose type information
     // the process has built so far: the declared type is one of them, another type may or may not
     // be (makeblastdb 2.17.0: "class not found: Seq-interval" for `:Seq-interval` as the first
@@ -1170,21 +919,6 @@ impl<I: Input> Rd<I> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:416-432
-    // ```c++
-    // void CEnumeratedTypeInfo::ReadEnum(CObjectIStream& in,
-    //                                    TTypeInfo objectType,
-    //                                    TObjectPtr objectPtr)
-    // {
-    //     const CEnumeratedTypeInfo* enumType =
-    //         CTypeConverter<CEnumeratedTypeInfo>::SafeCast(objectType);
-    //     try {
-    //         enumType->m_ValueType->SetValueInt(objectPtr,
-    //                                            in.ReadEnum(enumType->Values()));
-    //     }
-    //     catch ( CException& e ) {
-    //         NCBI_RETHROW_SAME(e,"invalid enum value");
-    //     }
-    // ```
     // (A `CEofException` stays one through `NCBI_RETHROW_SAME`: `HandleEOF` does not report it.)
     /// An ENUMERATED or an INTEGER with named values (`CEnumeratedTypeInfo::ReadEnum`).
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32> {
@@ -1520,130 +1254,10 @@ impl<I: Input> Rd<I> {
         Ok((interval, id))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3620
-    // ```c++
-    // bool CSeq_loc::x_CheckId(const CSeq_id*& id, bool may_throw) const
-    // {
-    //     switch ( Which() ) {
-    //     case e_not_set:
-    //     case e_Null:
-    //         {
-    //             // no Seq-id
-    //             return true;
-    //         }
-    //     case e_Empty:
-    //         {
-    //             return x_UpdateId(id, &GetEmpty(), may_throw);
-    //         }
-    //     case e_Whole:
-    //         {
-    //             return x_UpdateId(id, &GetWhole(), may_throw);
-    //         }
-    //     case e_Int: ... x_UpdateId(id, &loc.GetId(), may_throw);
-    //     case e_Pnt: ... x_UpdateId(id, &pnt.GetId(), may_throw);
-    //     case e_Packed_int:
-    //         {
-    //             // Check ID of each interval
-    //             const CPacked_seqint& ints = GetPacked_int();
-    //             ITERATE ( CPacked_seqint::Tdata, ii, ints.Get() ) {
-    //                 const CSeq_interval& loc = **ii;
-    //                 if ( !x_UpdateId(id, &loc.GetId(), may_throw) ) {
-    //                     return false;
-    //                 }
-    //             }
-    //             return true;
-    //         }
-    //     case e_Packed_pnt: ... x_UpdateId(id, &pnts.GetId(), may_throw);
-    //     case e_Mix:
-    //         {
-    //             // Check ID of each sub-location.
-    //             const CSeq_loc_mix& mix = GetMix();
-    //             ITERATE( CSeq_loc_mix::Tdata, li, mix.Get() ) {
-    //                 if ( !(*li)->CheckId(id, may_throw) ) {
-    //                     return false;
-    //                 }
-    //             }
-    //             return true;
-    //         }
-    //     case e_Bond: ... A, then B when it is set ...
-    //     case e_Equiv: ... (*li)->CheckId(id, may_throw) for each, as e_Mix ...
-    //     case e_Feat:
-    //     default:
-    //         if (may_throw) { NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...); }
-    //         return false;
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3528-3620
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:403-422
-    // ```c++
-    // bool CSeq_loc::x_UpdateId(const CSeq_id*& total_id, const CSeq_id* id,
-    //                           bool may_throw) const
-    // {
-    //     if ( total_id == id ) {
-    //         return true;
-    //     }
-    //
-    //     if ( !total_id ) {
-    //         total_id = id;
-    //     } else if ( (id  &&  !total_id->Equals(*id)) ) {
-    //         if (may_throw) {
-    //             ...
-    //         } else {
-    //             return false;
-    //         }
-    //     }
-    //     return true;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_loc.hpp:926-945
-    // ```c++
-    // inline
-    // bool CSeq_loc::CheckId(const CSeq_id*& id, bool may_throw) const
-    // {
-    //     const CSeq_id* my_id = m_IdCache.load(memory_order_acquire);
-    //     if ( my_id == NULL ) {
-    //         if ( !x_CheckId(my_id, may_throw) ) {
-    //             return false;
-    //         }
-    //         m_IdCache.store(my_id, memory_order_release);
-    //     }
-    //     return x_UpdateId(id, my_id, may_throw);
-    // }
-    //
-    //
-    // inline
-    // const CSeq_id* CSeq_loc::GetId(void) const
-    // {
-    //     const CSeq_id* sip = NULL;
-    //     return CheckId(sip, false) ? sip : NULL;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1439-1555,1559-1600
-    // ```c++
-    // void CSeq_loc_CI_Impl::x_ProcessLocation(const CSeq_loc& loc)
-    // {
-    //     switch ( loc.Which() ) {
-    //     case CSeq_loc::e_not_set:
-    //     case CSeq_loc::e_Null:
-    //     case CSeq_loc::e_Empty:
-    //         ... (a range only with eEmpty_Allow: TRange::GetEmpty(), the Seq-id of `empty`) ...
-    //     case CSeq_loc::e_Whole:
-    //         ... info.m_Range = TRange::GetWhole(); ...
-    //     case CSeq_loc::e_Int:  x_ProcessInterval(loc.GetInt(), loc);
-    //     case CSeq_loc::e_Pnt:  x_ProcessPoint(loc.GetPnt(), loc);
-    //     case CSeq_loc::e_Packed_int: ... x_ProcessInterval(**ii, loc) for each ...
-    //     case CSeq_loc::e_Packed_pnt:
-    //         ... strand of the pack; for each point: info.m_Range.Set(*pi, *pi) ...
-    //     case CSeq_loc::e_Mix:   ... x_ProcessLocation(**li) for each ...
-    //     case CSeq_loc::e_Equiv: ... x_ProcessLocation(**li) for each part ...
-    //     case CSeq_loc::e_Bond:
-    //         x_ProcessPoint(bond.GetA(), loc);
-    //         if ( bond.IsSetB() ) { x_ProcessPoint(bond.GetB(), loc); }
-    //     default:
-    //         NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...);
-    //     }
-    // }
-    // ```
     /// One `Seq-loc` (any variant, nested `mix` and `equiv` included): appends the ranges
     /// `CSeq_loc_CI` visits to `parts`, in its order (a `whole` Seq-loc is the interval 0 to
     /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
@@ -1849,48 +1463,9 @@ impl<I: Input> Rd<I> {
         Ok(mandatory(list))
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-901
-    // ```c++
-    // // root reader
-    // void CObjectIStream::SkipFileHeader(TTypeInfo typeInfo)
-    // {
-    //     ResetState();
-    //     ...
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     string name = ReadFileHeader();
-    //     const string& tname = typeInfo->GetName();
-    //     if ( !name.empty() && !tname.empty() && name != tname ) {
-    //         ThrowError(fFormatError,
-    //                    "incompatible type "+name+"<>"+typeInfo->GetName());
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:971-975
-    // ```c++
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo)
-    // {
-    //     // root object
-    //     SkipFileHeader(typeInfo);
-    //     Read(object, typeInfo, eNoFileHeader);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
-    // ```c++
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo, ENoFileHeader)
-    // {
-    //     // root object
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     ReadObject(object, typeInfo);
-    //
-    //     EndOfRead();
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     /// `file >> MSerial_Asn... >> *obj` of the type `def`: `SkipFileHeader`, then `Read` with
     /// `read`, each in a frame of its own.
     fn read_top(&mut self, def: &'static ClassDef, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
@@ -1902,11 +1477,13 @@ impl<I: Input> Rd<I> {
                 Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(
                     SKIP_FILE_HEADER,
                     &s.inp.position(),
-                    format_args!(
-                        "incompatible type {}<>{}",
-                        String::from_utf8_lossy(&name),
-                        def.name
-                    ),
+                    [
+                        b"incompatible type ".as_slice(),
+                        &name,
+                        b"<>",
+                        def.name.as_bytes(),
+                    ]
+                    .concat(),
                 )),
                 _ => Ok(()),
             }
@@ -1993,25 +1570,8 @@ impl fmt::Debug for MaskFileReader {
 }
 
 impl MaskFileReader {
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:933-943
-    // ```c++
-    //         CNcbiIfstream mask_file(file_list[i].c_str(), ios::binary);
-    //         CFormatGuess::EFormat mask_file_format = CFormatGuess::eUnknown;
-    //         {{
-    //              CFormatGuess fg(mask_file);
-    //              fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eBinaryASN);
-    //              fg.GetFormatHints().AddPreferredFormat(CFormatGuess::eTextASN);
-    //              fg.GetFormatHints().DisableAllNonpreferred();
-    //              mask_file_format = fg.GuessFormat();
-    //          }}
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:160-176
-    // ```c++
-    //     switch (fmt) {
-    //     ...
-    //     default:
-    //         NCBI_THROW(CInvalidDataException, eInvalidInput, string("Unknown encoding for ") + msg);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:933-947
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:160-181
     /// [`open_named`](Self::open_named) for a file that messages call by its path.
     #[cfg(test)]
     pub(crate) fn open(path: &Path) -> Result<Self, MaskFileError> {
@@ -2035,6 +1595,12 @@ impl MaskFileReader {
     #[cfg(test)]
     pub(crate) fn from_bytes(path: &Path, data: Vec<u8>) -> Result<Self, MaskFileError> {
         Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
+    }
+
+    /// The reader of the bytes `input` gives; `path` is only used in messages.
+    #[cfg(test)]
+    pub(crate) fn from_read(path: &Path, input: Box<dyn Read>) -> Result<Self, MaskFileError> {
+        Self::from_reader(path, input)
     }
 
     /// The reader of the file `input`; `path` is only used in messages.
@@ -2124,21 +1690,6 @@ impl MaskFileReader {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-263 (`CATCH_ALL`)
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    //     ...
-    //     catch (const std::bad_alloc&) {                                         \
-    //         LOG_POST(Error << "BLAST ran out of memory");                       \
-    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-    //     }                                                                       \
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     /// The error of the reader's `fail`: what makeblastdb's `CATCH_ALL` reports for what NCBI's
     /// reader threw.
     fn fail(&mut self, fail: Fail) -> MaskFileError {
@@ -2163,19 +1714,6 @@ impl MaskFileReader {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:947-960
-    // ```c++
-    //         int algo_id = -1;
-    //         while (true) {
-    //             CRef<CBlast_db_mask_info> first_obj;
-    //
-    //             try {
-    //                 s_ReadObject(mask_file, mask_file_format, first_obj, "mask data in '" + file_list[i] + "'");
-    //             }
-    //             catch (CEofException&) {
-    //                 // must be end of file
-    //                 break;
-    //             }
-    // ```
     /// The next `Blast-db-mask-info`; `None` at the end of the file. A `CEofException` of the
     /// serial reader (nothing left but white space and comments, or a file that ends inside the
     /// type name or the first bytes of an object) is the end, as in `x_ProcessMaskData`; a
@@ -2196,13 +1734,7 @@ impl MaskFileReader {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:994-996
-    // ```c++
-    //                 if (! masks->GetMore())
-    //                     break;
-    //
-    //                 s_ReadObject(mask_file, mask_file_format, masks, "mask data (continuation)");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:994-998
     /// The `Blast-mask-list` that follows an object with `more TRUE`. A file that ends there is
     /// [`MaskFileError::EofInContinuation`]. After an error every call is an error again.
     pub(crate) fn next_list(&mut self) -> Result<MaskList, MaskFileError> {

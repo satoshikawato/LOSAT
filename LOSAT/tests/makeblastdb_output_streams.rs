@@ -34,6 +34,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// Proteins with a GI, a trace id and an accession (the probe's `RICH_P`).
 const RICH_P: &str = ">gi|1001|ref|NP_000001.1| alpha\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n>gnl|ti|12345 trace one\nMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNA\n>sp|P55555|CCC_HUMAN Gamma\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARR\n";
 /// Three proteins whose last one repeats the id of the second.
@@ -41,7 +42,7 @@ const DUP_END: &str = ">a\nMKTAYIAKQ\n>b\nMKTAYIAKR\n>b\nMKTAYIAKS\n";
 
 const LOG_3: &str = "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n";
 const LOG_130: &str = "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n";
-const NO_INDEX: &str = "BLAST Database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n";
+const NO_INDEX: &str = "LOSAT database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n";
 
 /// 130 proteins of 60 residues.
 fn many() -> String {
@@ -152,7 +153,7 @@ const CASES: &[Case] = &[
         setup: Setup::None,
         status: 1,
         stdout: LOG_3,
-        stderr: "BLAST Database creation error: Error: Duplicate seq_ids are found: \nLCL|B\n\n",
+        stderr: "LOSAT database creation error: Error: Duplicate seq_ids are found: \nLCL|B\n\n",
         files: "db.00.phd:26 db.00.phi:65 db.00.pog:40 db.pos:28 db.pot:32 db.ptf:16384 db.pto:12",
     },
     Case {
@@ -161,7 +162,7 @@ const CASES: &[Case] = &[
         setup: Setup::None,
         status: 1,
         stdout: LOG_3,
-        stderr: "BLAST Database creation error: Error: Duplicate seq_ids are found: \nLCL|B\n\n",
+        stderr: "LOSAT database creation error: Error: Duplicate seq_ids are found: \nLCL|B\n\n",
         files: "db.00.phd:26 db.00.phi:65 db.00.pog:40 db.00.psd:24 db.00.psi:56",
     },
     // The alias file of several volumes cannot be created.
@@ -180,7 +181,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked("db.00.pin"),
         status: 2,
         stdout: LOG_130,
-        stderr: "BLAST Database error: Could not find volume or alias file (db.00) referenced in alias file (<D>/db).\n",
+        stderr: "LOSAT database error: Could not find volume or alias file (db.00) referenced in alias file (<D>/db).\n",
         files: "~db.00.pin/ -db.pjs",
     },
     // A metadata text of more than 4096 bytes fails at the serializer's first write.

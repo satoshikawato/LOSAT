@@ -10,22 +10,7 @@
 //! with the formats that use them.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-36
-//! ```text
-//! Seq-id ::= CHOICE {
-//!     local Object-id ,            -- local use
-//!     ...
-//!     general Dbtag ,              -- for other databases
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objects/general/general.asn:71-80
-//! ```text
-//! Dbtag ::= SEQUENCE {
-//!     db VisibleString ,          -- name of database or system
-//!     tag Object-id }         -- appropriate tag
-//! ...
-//! Object-id ::= CHOICE {
-//!     id INTEGER ,
-//!     str VisibleString }
-//! ```
 
 use crate::report::serial::encoder::Encoder;
 use crate::seqid::model::{Date, ObjectId, PatentNumber, PDB_DEFAULT_CHAIN};
@@ -38,42 +23,13 @@ pub enum SeqId<'a> {
     /// `FastaRecord::local_id`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    /// ```c++
-    ///     CRef<CSeqIdGenerator> idgen
-    ///         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
-    ///                              m_Config.GetLocalIdPrefix()));
-    ///     m_InputReader->SetIDGenerator(*idgen);
-    /// ```
     /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:189-191
-    /// ```c++
-    ///     void SetQueryLocalIdMode() {m_LocalIdPrefix = "Query_";}
-    ///     ...
-    ///     void SetSubjectLocalIdMode() {m_LocalIdPrefix = "Subject_";}
-    /// ```
     Local(&'a str),
     /// `general { db "BL_ORD_ID", tag id <oid> }`: a sequence of a BLAST database without
     /// parsed Seq-ids, by its 0-based ordinal ID in the database.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1782-1787
-    /// ```c++
-    ///     if (!parse_ids) {
-    ///
-    ///         // Generate an BL_ORD_ID in case no parse is needed
-    ///         CRef<CSeq_id> gnl_id(new CSeq_id());
-    ///         gnl_id->SetGeneral().SetDb("BL_ORD_ID");
-    ///         gnl_id->SetGeneral().SetTag().SetId(0);  // will be filled later
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2221-2238
-    /// ```c++
-    ///     if (adjust_oids && bdls.NotEmpty() && m_VolStart) {
-    ///         ...
-    ///                 if (seqid.Which() == CSeq_id::e_General) {
-    ///                     CDbtag & dbt = seqid.SetGeneral();
-    ///
-    ///                     if (dbt.GetDb() == "BL_ORD_ID") {
-    ///                         int vol_oid = dbt.GetTag().GetId();
-    ///                         dbt.SetTag().SetId(m_VolStart + vol_oid);
-    /// ```
     /// The tag is the sequence's OID in the opened database (its volume's start plus its
     /// position in the volume), not its rank in a list that restricts the search
     /// (`seqdb::Oid`).
@@ -92,13 +48,6 @@ impl SeqId<'_> {
     /// `AdjustSeqIdType` give.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:111-115
-    /// ```c++
-    /// string CSAM_CIGAR_Formatter::x_GetSeqIdString(const CSeq_id& id, TFlags flags) const
-    /// {
-    ///     return (flags & CSAM_Formatter::fSAM_PlainSeqIds) ?
-    ///         id.GetSeqIdString(true) : id.AsFastaString();
-    /// }
-    /// ```
     pub fn sam_name(&self, out: &mut Vec<u8>) {
         match *self {
             SeqId::Local(id) => out.extend_from_slice(id.as_bytes()),
@@ -108,7 +57,7 @@ impl SeqId<'_> {
     }
 
     /// Writes the Seq-id object (a CHOICE) through `enc`, in the member order of the ASN.1
-    /// modules quoted above: `local` (variant 0) holds an Object-id `str` (variant 1);
+    /// modules cited above: `local` (variant 0) holds an Object-id `str` (variant 1);
     /// `general` (variant 10) holds a Dbtag (`db` member 0, `tag` member 1 = Object-id `id`,
     /// variant 0). A parsed Seq-id is written by `write_parsed`.
     pub fn write<E: Encoder>(&self, enc: &mut E) {
@@ -142,35 +91,7 @@ impl SeqId<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:444-454
-// ```c++
-//     else {
-//         // have set flag
-//         getConstFunc = &TFunc::GetConstSimpleMember;
-//         getFunc = &TFunc::GetWithSetFlagMember;
-//         readFuncs.first = &TFunc::ReadWithSetFlagMember;
-//         writeFunc = &TFunc::WriteWithSetFlagMember;
-//         if ( (GetDefault() || Nillable()) && GetId().HaveNoPrefix()) {
-//             readFuncs.first = &TFunc::ReadWithDefaultMemberX;
-//             writeFunc = &TFunc::WriteWithDefaultMemberX;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1015-1027
-// ```c++
-// void CMemberInfoFunctions::WriteWithSetFlagMember(CObjectOStream& out,
-//                                                   const CMemberInfo* memberInfo,
-//                                                   TConstObjectPtr classPtr)
-// {
-//     _ASSERT(!memberInfo->CanBeDelayed());
-//     _ASSERT(memberInfo->HaveSetFlag());
-//     if (out.IsWritingDefaultValuesEnforced() &&  memberInfo->GetDefault()) {
-//         goto do_write;
-//     }
-//     if ( memberInfo->GetSetFlagNo(classPtr) ) {
-//         if (memberInfo->Optional()) {
-//             return;
-//         }
-// ```
 // The members of a type from an ASN.1 module have a prefix (`HaveNoPrefix` is false), so
 // they all take `WriteWithSetFlagMember`, and a member with a DEFAULT is optional
 // (`CMemberInfo::Optional`, serial/impl/member.inl:42-51). `PDB-seq-id.chain` is therefore
@@ -178,7 +99,7 @@ impl SeqId<'_> {
 // stream, `Encoder::writes_defaults`), with its DEFAULT 32: NCBI's outfmt 12 writes
 // `"chain": 32` for a pdb id stored without one, outfmt 8 nothing.
 /// Writes a parsed Seq-id (a CHOICE) through `enc`, in the member order of the ASN.1 modules
-/// quoted in `seqid::model`, with the calls of `SeqId::write` for `local` and `general`. An
+/// cited in `seqid::model`, with the calls of `SeqId::write` for `local` and `general`. An
 /// absent OPTIONAL member is skipped.
 fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
     enc.variant("Seq-id", id.alternative_name(), id.alternative());

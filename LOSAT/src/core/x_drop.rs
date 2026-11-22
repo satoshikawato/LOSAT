@@ -25,23 +25,8 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:426-429 (the same at
 //! 783-786 in `Blast_SemiGappedAlign`, 1032-1035, 1387-1390 and 2003-2006)
-//! ```c
-//!     x_dropoff = gap_align->gap_x_dropoff;
-//!
-//!     if (x_dropoff < gap_open_extend)
-//!         x_dropoff = gap_open_extend;
-//! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:855-860 (the same at 911-916,
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-860 (the same at 911-916,
 //! 960-965 and 1007-1012)
-//! ```c
-//!     for (i = q_off; i < query->length; i++) {
-//!         score += matrix[q[i]][s[i]];
-//!
-//!         if (score > maxscore) {
-//! ...
-//!         if (score <= 0 || (maxscore - score) >= dropoff)
-//!             break;
-//! ```
 
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::utils::glibc_fma_libm::GlibcLibm;
@@ -56,15 +41,6 @@ const NCBIMATH_LN2: f64 = std::f64::consts::LN_2;
 /// `-gap_trigger 1e300`, `-1e300` or `-inf`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
-/// ```c
-///       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
-///          kbp = sbp->kbp_std[context];
-///          if (s_BlastKarlinBlkIsValid(kbp)) {
-///             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
-///                                      kbp->logK) / kbp->Lambda);
-///          }
-///       }
-/// ```
 #[inline]
 pub(crate) fn gap_trigger_raw_score(bits: f64, lambda: f64, k: f64) -> i32 {
     ncbi_int4_from_double((bits * NCBIMATH_LN2 + k.glibc_ln()) / lambda)
@@ -75,11 +51,6 @@ pub(crate) fn gap_trigger_raw_score(bits: f64, lambda: f64, k: f64) -> i32 {
 /// product, `INT_MIN` past `Int4`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:218-221
-/// ```c
-///         p->cutoffs[context].x_dropoff_init =
-///             (Int4)(sbp->scale_factor *
-///                    ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-/// ```
 #[inline]
 pub(crate) fn ungapped_x_dropoff(bits: f64, lambda: f64, scale_factor: f64) -> i32 {
     ncbi_int4_from_double(scale_factor * (bits * NCBIMATH_LN2 / lambda).ceil())
@@ -90,18 +61,6 @@ pub(crate) fn ungapped_x_dropoff(bits: f64, lambda: f64, scale_factor: f64) -> i
 /// larger of its own double and the preliminary raw X-drop, then converted.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463
-/// ```c
-///    if (sbp->kbp_gap) {
-///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-///       params->gap_x_dropoff = (Int4)
-///           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-///       /* Note that this conversion from bits to raw score is done prematurely
-///          when rescaling and composition based statistics is applied, as we
-///          lose precision. Therefore this is redone in Kappa_RedoAlignmentCore */
-///       params->gap_x_dropoff_final = (Int4)
-///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-///    }
-/// ```
 #[inline]
 pub(crate) fn gapped_x_dropoffs(gap_bits: f64, final_bits: f64, min_lambda: f64) -> (i32, i32) {
     let gapped = ncbi_int4_from_double(gap_bits * NCBIMATH_LN2 / min_lambda);
@@ -114,17 +73,6 @@ pub(crate) fn gapped_x_dropoffs(gap_bits: f64, final_bits: f64, min_lambda: f64)
 /// bits, the smallest gapped Lambda of the scaled score block and the search's final raw X-drop.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2374-2382
-/// ```c
-///     for (i = 0;  i < num_queries;  i++) {
-///         if (context->sbp->kbp_gap[i] != NULL &&
-///             context->sbp->kbp_gap[i]->Lambda < min_lambda) {
-///             min_lambda = context->sbp->kbp_gap[i]->Lambda;
-///         }
-///     }
-///     gapping_params->x_dropoff = (Int4)
-///         MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
-///             extendParams->gap_x_dropoff_final);
-/// ```
 #[inline]
 pub(crate) fn redo_x_dropoff(final_bits: f64, scaled_min_lambda: f64, extension_final: i32) -> i32 {
     ncbi_int4_from_double(
@@ -148,24 +96,8 @@ pub(crate) const KERNEL_X_DROP_QUOTIENT_LIMIT: i64 = (1 << 30) - 103;
 /// X-drop.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:457-464
-/// ```c
-///     if (gap_extend > 0)
-///         num_extra_cells = x_dropoff / gap_extend + 3;
-///     else
-///         num_extra_cells = N + 3;
-///
-///     if (num_extra_cells > gap_align->dp_mem_alloc) {
-///         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
-///                                       2 * gap_align->dp_mem_alloc);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-644 (the same at
 /// 923-926 in `Blast_SemiGappedAlign`)
-/// ```c
-///         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
-///
-///             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
-///                                           2 * gap_align->dp_mem_alloc);
-/// ```
 pub(crate) fn kernel_x_drop_fits(x_dropoff: i32, gap_open: i32, gap_extend: i32) -> bool {
     let gap_open_extend = i64::from(gap_open) + i64::from(gap_extend);
     let x_dropoff = i64::from(x_dropoff).max(gap_open_extend);
@@ -175,8 +107,14 @@ pub(crate) fn kernel_x_drop_fits(x_dropoff: i32, gap_open: i32, gap_extend: i32)
 /// The refusal of an X-drop in bits (`option`, as the command line names it) whose raw X-drop
 /// NCBI's gapped kernels cannot size (`kernel_x_drop_fits`) in `program`'s search.
 pub(crate) fn kernel_x_drop_error(program: &str, option: &str, bits: f64) -> anyhow::Error {
+    kernel_x_drop_value_error(program, option, &format!("{bits:?} bits"))
+}
+
+/// [`kernel_x_drop_error`] of an option value given in its own words (`value`): BLASTN's
+/// matrix-only scoring reads the X-drop options as raw scores, not bits.
+pub(crate) fn kernel_x_drop_value_error(program: &str, option: &str, value: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "an {option} of {bits:?} bits, whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's {program}"
+        "an {option} of {value}, whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's {program}"
     )
 }
 
@@ -189,17 +127,6 @@ pub(crate) fn kernel_x_drop_error(program: &str, option: &str, bits: f64) -> any
 /// X-drop fits (the quotient stays below 2^26), as rpsblast's engine checks it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1496
-/// ```c
-///     if ((ext_options->compositionBasedStats != eNoCompositionBasedStats) ||
-///         ext_options->eTbackExt == eSmithWatermanTbck) {
-///         Int2 status = 0;
-///         ...
-///             status =
-///                 Blast_RedoAlignmentCore_MT(program_number, num_threads, queryBlk,
-///                                            query_info, sbp, NULL, seq_src, gen_code_string,
-///                                            pHspStream, extend_params, hit_params,
-///                                            psi_options, results);
-/// ```
 pub(crate) fn check_gapped_x_dropoffs(
     program: &str,
     (gap_bits, final_bits): (f64, f64),

@@ -10,22 +10,24 @@
 //! Seq-locs, PSSM and Seq-aligns are kept as read, for the formats that write them again).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1657-1664
-//! ```c++
-//! bool
-//! CRemoteBlast::LoadFromArchive()
-//! {
-//!       if (m_ObjectStream->EndOfData())
-//!          return false;
 //!
-//!       m_Archive.Reset(new CBlast4_archive);
-//!       *m_ObjectStream >> *m_Archive;
-//! ```
+//! What NCBI makes of the parts of a stored request (a search strategy of
+//! `-import_search_strategy`):
+//!
+//! - `options`: the request's options lists as the program's options (`CBlastOptionsBuilder`);
+//! - `queries`: the request's query Bioseqs as the FASTA text NCBI writes and reads back
+//!   (`s_ImportQueries`, `CFastaOstream`).
 
+pub(crate) mod import;
+pub mod options;
+pub mod queries;
 pub(crate) mod request;
 pub(crate) mod results;
 
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod strategy_tests;
 
 use std::io::Read;
 
@@ -138,12 +140,6 @@ impl Archive {
     /// of the request (none for an error archive, `IsErrMsgArchive`) and what blast_formatter
     /// reads of the results.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1700-1705
-    // ```c++
-    //       if (!IsErrMsgArchive()) {
-    //     	  x_GetRequestInfoFromFile(); // update info.
-    //       }
-    //       return true;
-    // ```
     pub(crate) fn from_value(mut value: Value) -> Archive {
         let ty = named::BLAST4_ARCHIVE;
         let messages = value
@@ -174,26 +170,6 @@ pub(crate) fn member_type(ty: u16, name: &str) -> u16 {
 /// The stored messages as `LoadFromArchive` posts them: each with a `message`, its `code` taken
 /// as the severity.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1667-1698
-// ```c++
-//       if(m_Archive->IsSetMessages()) {
-//     	  const list< CRef< CBlast4_error > >  & msgs = m_Archive->GetMessages();
-//     	  ITERATE(list< CRef< CBlast4_error > >, itr, msgs) {
-//     		  if((*itr)->IsSetMessage()) {
-//     			  string msg = (*itr)->GetMessage();
-//     			  if((*itr)->IsSetCode()) {
-//     				  switch ((*itr)->GetCode()) {
-//     			  	  case EDiagSev::eDiag_Info :
-//     			  		  LOG_POST(Info << msg);
-//     			  		  break;
-//     			  	  ...
-//     				  case EDiagSev::eDiag_Trace :
-//     			  		  LOG_POST(Trace << msg);
-//     					  break;
-//     				  default :
-//     			  		  LOG_POST(Error <<"Unknown Error Code: " << msg);
-//     					  break;
-//     				  }
-// ```
 // (`code` is mandatory, so it is always set; `EDiagSev` is Info 0, Warning 1, Error 2,
 // Critical 3, Fatal 4, Trace 5, corelib/ncbidiag.hpp.)
 fn messages(list: V<'_>) -> Vec<Message> {
@@ -220,84 +196,8 @@ fn messages(list: V<'_>) -> Vec<Message> {
 /// `CSeq_loc::GetId()`: the one Seq-id of a location, `None` when it has none (`null`), when
 /// its parts name ids that are not equal (`Equals`), or for a `feat`.
 // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_loc.hpp:940-945
-// ```c++
-// inline
-// const CSeq_id* CSeq_loc::GetId(void) const
-// {
-//     const CSeq_id* sip = NULL;
-//     return CheckId(sip, false) ? sip : NULL;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-// ```c++
-// bool CSeq_loc::x_CheckId(const CSeq_id*& id, bool may_throw) const
-// {
-//     switch ( Which() ) {
-//     case e_not_set:
-//     case e_Null:
-//         {
-//             // no Seq-id
-//             return true;
-//         }
-//     case e_Empty:
-//         {
-//             return x_UpdateId(id, &GetEmpty(), may_throw);
-//         }
-//     ...
-//     case e_Packed_int:
-//         {
-//             // Check ID of each interval
-//             const CPacked_seqint& ints = GetPacked_int();
-//             ITERATE ( CPacked_seqint::Tdata, ii, ints.Get() ) {
-//                 const CSeq_interval& loc = **ii;
-//                 if ( !x_UpdateId(id, &loc.GetId(), may_throw) ) {
-//                     return false;
-//                 }
-//             }
-//             return true;
-//         }
-//     ...
-//     case e_Mix:
-//         {
-//             // Check ID of each sub-location.
-//             const CSeq_loc_mix& mix = GetMix();
-//             ITERATE( CSeq_loc_mix::Tdata, li, mix.Get() ) {
-//                 if ( !(*li)->CheckId(id, may_throw) ) {
-//                     return false;
-//                 }
-//             }
-//             return true;
-//         }
-//     ...
-//     case e_Feat:
-//     default:
-//         if (may_throw) {
-//             ...
-//         }
-//         return false;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:403-421
-// ```c++
-// bool CSeq_loc::x_UpdateId(const CSeq_id*& total_id, const CSeq_id* id,
-//                           bool may_throw) const
-// {
-//     if ( total_id == id ) {
-//         return true;
-//     }
-//
-//     if ( !total_id ) {
-//         total_id = id;
-//     } else if ( (id  &&  !total_id->Equals(*id)) ) {
-//         if (may_throw) {
-//             ...
-//         } else {
-//             return false;
-//         }
-//     }
-//     return true;
-// ```
 // (A `mix` or `equiv` checks each part with its own id first, then that id against the total:
 // the same as checking every id of the parts against one total, in any order. `bond` checks `a`,
 // then `b` when set.)
@@ -369,120 +269,8 @@ fn seqalign_exception(file: &'static str, line: u32, kind: &'static str, text: &
 /// `CSeq_align::GetSeq_id(row)`: the Seq-id of the row `row` of an alignment, or NCBI's
 /// `CSeqalignException` when the segments name none.
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:317-400
-// ```c++
-// const CSeq_id& CSeq_align::GetSeq_id(TDim row) const
-// {
-//     switch (GetSegs().Which()) {
-//     case C_Segs::e_Denseg:
-//         return GetSegs().GetDenseg().GetSeq_id(row);
-//
-//     case C_Segs::e_Sparse:
-//         return GetSegs().GetSparse().GetSeq_id(row);
-//
-//     case C_Segs::e_Dendiag:
-//         {{
-//             // If segments have different number of rows, this will try
-//             // to find the segment with enough rows to get the id.
-//             ITERATE(CSeq_align::C_Segs::TDendiag, seg, GetSegs().GetDendiag()) {
-//                 if( (*seg)->IsSetIds()  &&
-//                     (size_t)row < (*seg)->GetIds().size() ) {
-//                     return *(*seg)->GetIds()[row];
-//                 }
-//             }
-//             break;
-//         }}
-//
-//     case C_Segs::e_Std:
-//         {{
-//             ITERATE(CSeq_align::C_Segs::TStd, seg, GetSegs().GetStd()) {
-//                 if ( (*seg)->IsSetIds()  &&
-//                      (size_t)row < (*seg)->GetIds().size()) {
-//                     return *((*seg)->GetIds()[row]);
-//                 }
-//                 else if ( (*seg)->IsSetLoc()  &&
-//                      (size_t)row < (*seg)->GetLoc().size() ) {
-//                     const CSeq_loc& loc = *(*seg)->GetLoc()[row];
-//                     CConstRef<CSeq_id> id(loc.GetId());
-//                     if (id) {
-//                         return *id;
-//                     }
-//                 }
-//             }
-//         }}
-//         break;
-//
-//     case C_Segs::e_Disc:
-//         {{
-//             // Try to find a sub-alignment for which we can get a
-//             // Seq-id for this row.
-//             ITERATE (CSeq_align_set::Tdata, sub_aln, GetSegs().GetDisc().Get()) {
-//                 try {
-//                     const CSeq_id& rv = (*sub_aln)->GetSeq_id(row);
-//                     return rv;
-//                 }
-//                 catch (const CSeqalignException&) {
-//                 }
-//             }
-//         }}
-//         break;
-//
-//     case C_Segs::e_Spliced:
-//         {{
-//             const C_Segs::TSpliced& spliced_seg = GetSegs().GetSpliced();
-//             if (row == 0 && spliced_seg.IsSetProduct_id()) {
-//                 return spliced_seg.GetProduct_id();
-//             } else if (row == 1 && spliced_seg.IsSetGenomic_id()) {
-//                 return spliced_seg.GetGenomic_id();
-//             }
-//         }}
-//         break;
-//
-//     default:
-//         NCBI_THROW(CSeqalignException, eUnsupported,
-//                    "CSeq_align::GetSeq_id() currently does not handle "
-//                    "this type of alignment.");
-//     }
-//
-//     NCBI_THROW(CSeqalignException, eInvalidRowNumber,
-//                "CSeq_align::GetSeq_id(): "
-//                "can not get seq-id for the row requested.");
-//     // return CSeq_id();
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:154-162
-// ```c++
-// const CSeq_id& CDense_seg::GetSeq_id(TDim row) const
-// {
-//     if ( IsSetIds()  && (size_t)row < GetIds().size()) {
-//         return *GetIds()[row];
-//     }
-//     NCBI_THROW(CSeqalignException, eInvalidRowNumber,
-//                "CDense_seg::GetSeq_id(): "
-//                "can not get seq-id for the row requested.");
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Sparse_seg.cpp:72-90
-// ```c++
-// const CSeq_id& CSparse_seg::GetSeq_id(TDim row) const
-// {
-//     if ( row == 0 ) {
-//         // consensus sequence - first-id
-//         if ( !GetRows().empty() ) {
-//             const CSparse_align& align = *GetRows()[0];
-//             return align.GetFirst_id();
-//         }
-//     }
-//     else {
-//         if ( size_t(row) <= GetRows().size() ) {
-//             const CSparse_align& align = *GetRows()[row-1];
-//             return align.GetSecond_id();
-//         }
-//     }
-//     NCBI_THROW(CSeqalignException, eInvalidRowNumber,
-//                "CSparse_seg::GetSeq_id(): "
-//                "can not get seq-id for the row requested.");
-// }
-// ```
 // (`GetSeq_id` is a `const` method, so NCBI's report names no function. The sub-alignments of
 // `disc` are searched in order from a list, not by a recursion as deep as they nest: the reader
 // reads any depth.)

@@ -16,22 +16,7 @@
 //! inputs `tests/db_search/make_xpost_inputs.py`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
-//! ```c++
-//! inline bool BAD_CHAR(char x) {
-//!     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
-//! }
-//! inline char CObjectOStreamXml::x_VerifyChar(char x) {
-//!     return BAD_CHAR(x) ?
-//!         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375
-//! ```c++
-//!     const CSeq_id& kSeqId = kAlignSet.Get().front()->GetSeq_id(1);
-//!
-//!     try {
-//!         const CBioseq_Handle& kSubjBioseqHandle = scope->GetBioseqHandle(kSeqId);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -419,10 +404,22 @@ fn tests_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
 }
 
+/// The path of the case's query file (`-query`), as `run` gives it to LOSAT.
+fn query_path(case: &Case) -> Option<PathBuf> {
+    let (_, _, options, taxdb, ..) = *case;
+    let at = options.iter().position(|&option| option == "-query")?;
+    let db_search = tests_dir().join("db_search");
+    Some(match taxdb {
+        None => db_search.join("xpost").join(options[at + 1]),
+        Some(_) => db_search.join(options[at + 1]),
+    })
+}
+
 /// Runs a case with standard output and standard error into one file, in a fresh directory of the
 /// target's temporary space: its exit status, the merged stream's bytes and, for `-out`, the
-/// files the run wrote (each `=== <name> <length>` and its bytes, by name).
-fn run(case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
+/// files the run wrote (each `=== <name> <length>` and its bytes, by name). With `defline`, the
+/// query is that file's text instead of the case's (`balanced_title`).
+fn run(case: &Case, query: Option<&str>) -> (i32, Vec<u8>, Vec<u8>) {
     let (name, program, options, taxdb, to_file, _) = *case;
     let dir = std::env::temp_dir().join(format!(
         "losat-xml-post-order-{}-{name}",
@@ -433,22 +430,34 @@ fn run(case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
     let path = dir.join("merged");
     let file = std::fs::File::create(&path).unwrap();
     let db_search = tests_dir().join("db_search");
+    let balanced_query = query.map(|query| {
+        // Beside the run's directory: the files of `-out` are read from it.
+        let path = dir.with_extension("q.faa");
+        std::fs::write(&path, query).unwrap();
+        path
+    });
+    let options: Vec<std::ffi::OsString> = options
+        .iter()
+        .enumerate()
+        .map(|(at, &option)| match &balanced_query {
+            Some(query) if at > 0 && options[at - 1] == "-query" => query.clone().into_os_string(),
+            _ => option.into(),
+        })
+        .collect();
     let mut command = Command::new(BIN);
     command.arg(program);
     match taxdb {
         None => {
-            command
-                .current_dir(&dir)
-                .args(options.iter().map(|&option| {
-                    if option.ends_with(".faa") {
-                        db_search.join("xpost").join(option).into_os_string()
-                    } else {
-                        option.into()
-                    }
-                }));
+            command.current_dir(&dir).args(options.iter().map(|option| {
+                if option.to_string_lossy().ends_with(".faa") && Path::new(option).is_relative() {
+                    db_search.join("xpost").join(option).into_os_string()
+                } else {
+                    option.clone()
+                }
+            }));
         }
         Some(_) => {
-            command.current_dir(&db_search).args(options);
+            command.current_dir(&db_search).args(&options);
         }
     }
     if to_file {
@@ -489,6 +498,9 @@ fn run(case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();
+    if let Some(query) = balanced_query {
+        std::fs::remove_file(query).unwrap();
+    }
     (status.code().unwrap_or(-1), merged, files)
 }
 
@@ -499,20 +511,77 @@ fn expected_merged(fixtures: &Path, name: &str) -> Vec<u8> {
     losat::wording::losat_output_bytes(&frozen).into_owned()
 }
 
+/// The merged run of `case` and what LOSAT writes then: where LOSAT's version adds bytes before
+/// NCBI's first post (`Error: (` or `Warning: (`, NCBI's standard output before it), the query
+/// with a shorter title (`balanced_title`); otherwise the case and [`expected_merged`].
+fn merged_run(fixtures: &Path, case: &Case) -> (Option<String>, Vec<u8>) {
+    let (name, _, options, ..) = *case;
+    let frozen = std::fs::read(fixtures.join(format!("{name}.merged"))).unwrap();
+    let first_post = (0..frozen.len()).find(|&at| {
+        frozen[at..].starts_with(b"Error: (") || frozen[at..].starts_with(b"Warning: (")
+    });
+    let balanced = first_post.zip(query_path(case)).and_then(|(at, query)| {
+        let query = std::fs::read_to_string(query).unwrap();
+        let parse_deflines = options.contains(&"-parse_deflines");
+        crate::balanced_title::balanced_title(&frozen, &frozen[..at], &query, parse_deflines)
+    });
+    match balanced {
+        Some(balanced) => (Some(balanced.query), balanced.expected),
+        None => (None, expected_merged(fixtures, name)),
+    }
+}
+
+/// NCBI's files of the row `name` in LOSAT's words: the `=== <name> <length>` records of `run`,
+/// each file's bytes through `losat::wording` (AGENTS.md rule 8) and its length that of the words.
+fn expected_files(fixtures: &Path, name: &str) -> Vec<u8> {
+    let frozen = std::fs::read(fixtures.join(format!("{name}.files"))).unwrap();
+    let mut words = Vec::new();
+    let mut rest = frozen.as_slice();
+    while !rest.is_empty() {
+        let line_end = rest.iter().position(|&byte| byte == b'\n').unwrap();
+        let header = std::str::from_utf8(&rest[..line_end]).unwrap();
+        let (file, length) = header
+            .strip_prefix("=== ")
+            .and_then(|header| header.rsplit_once(' '))
+            .expect("=== <name> <length>");
+        let length: usize = length.parse().unwrap();
+        let data = &rest[line_end + 1..line_end + 1 + length];
+        let data = losat::wording::losat_output_bytes(data);
+        words.extend_from_slice(format!("=== {file} {}\n", data.len()).as_bytes());
+        words.extend_from_slice(&data);
+        rest = &rest[line_end + 1 + length..];
+    }
+    words
+}
+
 #[test]
 fn the_xml_streams_post_where_ncbi_posts_in_a_merged_stream() {
     let fixtures = tests_dir().join("fixtures").join("xml_post_order");
     for case in CASES {
         let (name, .., to_file, rc) = *case;
-        let (status, merged, files) = run(case);
-        let expected = expected_merged(&fixtures, name);
+        let (query, expected) = merged_run(&fixtures, case);
+        let (status, merged, files) = run(case, query.as_deref());
+        let first = merged
+            .iter()
+            .zip(&expected)
+            .position(|(got, want)| got != want)
+            .unwrap_or(merged.len().min(expected.len()));
+        let around = |bytes: &[u8]| {
+            String::from_utf8_lossy(&bytes[first.saturating_sub(80)..(first + 80).min(bytes.len())])
+                .into_owned()
+        };
         assert!(
             status == rc && merged == expected,
-            "{name}: exit {status} (NCBI {rc}):\n{}",
-            String::from_utf8_lossy(&merged)
+            "{name}: exit {status} (NCBI {rc}); the streams differ from byte {first} (balanced \
+             title: {}):\n--- LOSAT\n{}\n--- NCBI in LOSAT's words\n{}",
+            query
+                .as_deref()
+                .map_or("no", |query| query.lines().next().unwrap_or("")),
+            around(&merged),
+            around(&expected)
         );
         if to_file {
-            let expected = std::fs::read(fixtures.join(format!("{name}.files"))).unwrap();
+            let expected = expected_files(&fixtures, name);
             assert!(
                 files == expected,
                 "{name}: the files:\n{}",
@@ -597,7 +666,11 @@ fn a_strategy_fifo_gets_the_requests_that_ncbi_writes() {
         String::from_utf8_lossy(&merged)
     );
     assert!(
-        strategy == std::fs::read(fixtures.join(format!("{name}.ss"))).unwrap(),
+        strategy
+            == losat::wording::losat_output_bytes(
+                &std::fs::read(fixtures.join(format!("{name}.ss"))).unwrap()
+            )
+            .into_owned(),
         "{name}: the strategy:\n{}",
         String::from_utf8_lossy(&strategy)
     );

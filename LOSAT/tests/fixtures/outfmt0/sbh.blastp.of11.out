@@ -1,0 +1,2025 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63074.1"
+                  }
+                }
+              },
+              title "BDT63074.1"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 897,
+              seq-data ncbieaa "MRTKKVHWSNNINEHDNGGDERDACDNEDRNNCYEDRPNSHEDRDE
+NISGNNKSTVDNSVNISIVSPGSHKNADEYKTYNDEDDLESELIIMIITVAIMLIYRYILFIFCYILQDTVYIPTCSR
+KIKDSSSTRHQIENILKAPNIKPDKPTCSICNKQYVKLKRHIRDIHKKYGKDLEEIYSRAISEHKGVHLLICNLCGKG
+VRHMMHHLKNIHGLTPNNKPEEYLTALGTNSSRLRTVSQRRRRINQEKREGLAKVPVTVHAWIAYESRGGLTTTEGRR
+GMLKNIRLVIEILKDHSMDIADFIDHTKVERSYRFLYEALSEKRKYKHMSISVILGHLKRFMDWACSEANSPPICELA
+NREHNFYTKLCRKKGKMENMERKTAQYVPTVEEMGPLINYSRHQHIIDGMLDRPVETIEEYSIDLIHSVLAWPLIIRS
+GARTGVIRNLLTSDIQTGSKIESSGGVVISVKNHKTCLQYGPYQLGITPREHTMFLNYIKSRNWTSEYVFSTRKGAQF
+SLANIQRFMRKLFCLYDLPLLRIATVRKFLTTQAHKEGDSEIQEATASLLKHSMKTAKRDYKAMQRDHDALHTANRLS
+KILRDRLEQKTSGENALSAITATTANFDEYDDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANA
+NATTNANATTTGNCIPAYSVITATITNFDECDDDDNDDTVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTTGN
+CIPAYSVITATITNFDECDDDDNDDTVTATPTTTTTTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQ
+RHHKVRFKSHHLELIKKIFQRNILNKRIVTVKKIDERRNELQEIYADNTYNQATLTRKIYEAIRSQIRSRR"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63075.1"
+                  }
+                }
+              },
+              title "BDT63075.1"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 1142,
+              seq-data ncbieaa "MDREDEVNDCTVASTSTALTLEQVVQHSLGELAFDFSDIKIEEEFF
+DNVKIDEEFFNNPKRWLGTGWDFNPVETLRVFGELQGDYLPEEEEAEAAVETEATFKAEDAETATIESEAETALEAKA
+ETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIGE
+FVRGEIDATTCVGMLRSVATAYGCGPIIRIALSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMHPEALNA
+TNPSKVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKMEQHVLRKQGMQPPI
+ERVELLKQKSVLCAIHSLTQYFSGPVRDSDVNDDDRTRRGVPSGKHLFAAPLRLPPFDAHPVVNLENHPLFTTDPLST
+DGNPLRVLASVSTPAHSAVALKHRSGRRPKKLLGLSKNGIELHVLPALKDTGSRRRKKKVVRSDVMTNRQRDPLLHMA
+TKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCDGLFAPDLIRKYRSEQITTTPLRNRRIDTRFEGLELVD
+AMGHTSGFRIRPASLSDDHCGGDSDDGGLGVIGARDNPFYTKTNRPAWYSDASLEDLFGRVTLEQHVRAFDDRIGVFE
+DLLEGDDRWLVNLQDKKDVLDRCKLALTFLLEAQTVMLLNVHGLSEQEVRDAIRDLKSATPMLTTLGKEDEDPAARKI
+LATETRRRELCSTAESLIEMVPLHSLVEDRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTFLSIDLCQFMLQSCEE
+NKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAGVPRCKMSRLLSCIEKSSGTN
+PLPTVAVAAGKEVLTLPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCMEADPKRFYGPVYESVM
+EIKCPRRPELLGMPPRGTKRKMCQHLEQLSDAQKISCWLKDDIRCHPFRVCFPKFRKAASKIDALRPHSRGESEAESE
+VGSGSGYPAGTAAKDDVFVFKSIYSNITAPPRQKPLFGEKKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIET
+DISI"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0_same"
+                }
+              }
+            },
+            title "s0_same"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1864,
+            seq-data ncbieaa "RWTPLHFQEQFFLHRNMGWVLDLCENWPNMPNNAVWINIQNINEHDNG
+GMESDAKDNEDRNNCYEDPPNSHEDRDENISGTNKSTVMNSVNISIVSGGSDKNADEYKTYNDNDDLELELIIWIITE
+AIMLIYRYILFIFCYILQDTVYIPTCDRKIKDSSSTRHQIENILTAPNIKPDKPTCSICNKYYVKGKRHIRDEHKKYG
+WDLEEIYERAISEKKFVILGICLLCGKGMFHMMHYLKGIHGLTCNNKPEEYLTALGWNMSRLRTVSQRRRRINHEKRE
+YLNKVGVTVHAWIAYESCGSETYTEGRRGMLKNIENVIEILKDHCMNIADFIDHTKVERSHRGLYEAVSEKWKYKEMS
+ISVTLGHLKSFMDWACSEENSPPIRHLANNEHNFYTKLCRCKGKMENMERKTAQYVPGLEECDPPINYSRHQHIIDGM
+LDRPSETGEPMSIDLIHSVLAWTGIIRSGARTGVIRGLDTSDLQTGSKICSSGGVVISVKNHKTCLFYGPYQLGWTPR
+EHDMFLRYIKSRNWTSHYVFHTAKGAQFQLANITRFMPKLFCLYDLPLLRIATVRSFLTCPALKETDSKIQEATASGL
+KHSMKTAKRDYKAMQRDHDALETANRTSKILRDRFILLTSGWNALSAITATTANFDEYDDNDNDDTVTSTATATATAT
+TTTDTTTTPTYTTTTTMTTTTTTTNAVFPATKNANATTTGNTIPAYSVITATITNFIECHDDDNDDTVLATRTTTTTT
+TTTATTCTTTTNANANARTNANAQTTGNCIFAYSVPTATITNFDECDDDQFDDTVTATPGTMTTDTTGTTSTTSTTTT
+VGATATSTVDCIDNVKHVPIYSDNLNRQRHHKVRFKGHHLELNKKIFYRLILNKRIVTVKKIDERRNELQEIMADNTY
+NQAPLTRWIYEWKYFCIFHCEYIQYGYKYHFHPSTRVHHPNNINLHDNGGDECDACDNEDRNNCVEDRSNSHEDRFEN
+WSFNNKSTFDNSVNGSIVSWGSHKNATEFTKYNQWDDLEFELIIMPIKVAHMLIHRYICFIFCCILQNTVFIPTCSRK
+IKWSSSWRHQKENILFKPEIKPDKPTCSICNKQVVKLKRKSRDIHKKYGKDYECIWSLAISFHNGVHLTICVLCGKGV
+RHMMHHLKNIHGLTPNNKPEEYKTALTTNSWRLRTVAQRNRRINQEKRSLLPKVPVTVHAWIAYEQIWGLTTANGRRG
+MLKFICSVIEILKDLRMEYADFPTHTKVKRSYRFLYEALHDKRKYFHMSICVITGHRQRMDGIACQEANWPPICELAN
+REHFLYTKLCRKKGKMNNSSRKRAQFVRTVERMGNLINYSRHQHHIDGWLDRPVETIEEYSIDLIVSVLAWKLIKRSG
+ARTGSIAHLATFIIQKGSKIELSGGHVISVKQHAYCAQKGPPQMGWTPRWAYMFLNYIFWRNWTWQKVFSTRWKAQFW
+LANHQSFMTKLFCLNDLPLLRPATLRDCLTEQAHKEGDSSIAEDFMSLLFHSLKTAKDRYNAYQRDHDALGCANRWSK
+HLRCPLEQKTSTENALSAITAITANFDEYDDNDNDDRVTATPAAAATATTTTTTTTTTTTTTTTTTTTTTALTHANAN
+AYTNAAATTTGNCIPAYSVITATITYFWECDDDDNDDTETADQTTDKTTFYTTHTTTTTINANANATTNANAETTGFC
+IVAYSVECSTIVFFDECDDMDNDKTLTATPTTGCTTTTTPKSTTFTTITHSATQTSTVDAIDNVKDVPISQDTPNMQN
+CHKVRFKSHHLELNKKIFDYNILNKRIPLVKKIDERENELQEWYADNADNQATLFRKLVETNLTKQRYVQEMFPCGPP
+MNCWKFCRFVTSTKVEYYIQNP"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0_nest"
+                }
+              }
+            },
+            title "s0_nest"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 470,
+            seq-data ncbieaa "PERGICDMMWHPSAPRPCSTGKCDPLTVDVERDACDNEDRNNCYEDRP
+NSHEDRDHNISGNNKSTVDNSVNISIVSPGYHKRADEYKTYNDFDDLESELIIMIITVAFMLSYRYILTIFCYILQSR
+VLIPTCNRKIKDVSSNRHQIENILREEYHTLDNTWFMGQLGILAKIDGLDACDNEDRNRCWEDRPNSFEDREENIYGF
+NKSTVDNSVNISIVCPGSHKRADIYKTGNYEDSLEYELIVTIITVAIMLIMRYDVFIFCYILQDTVYHRTWSRKIKDS
+SSGRHEKFSRCIVRWECLTGHSSWRNLAHLHEVDNGGDERDACDNEHRNNCYKDRYNSHETQDEGISGNNKDTVGNSV
+NISIVSPGSPKIPDESGTLNDESDLECHLINMIITVKRMLIYQMILFIFSYIHQDRVYIPTQSIKIKDSSSTEHQIFN
+ILAENTIESFYKCQDGSTQGDNAGHTRESRFA"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0_indel"
+                }
+              }
+            },
+            title "s0_indel"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1846,
+            seq-data ncbieaa "TRNTNSASCPHWHRDPFAMLMRTKKPRWDPNGINEHDAGNDERDACDN
+EDRNNCYEERPSHEEDRNENIKGNPKSTVDNSVNISIVSPGSHKSAAEYKTYLDEDDLESELFIMIITCAIMLYYRYP
+LFIFCYTGQDTVYIPTESWCIKMSSSTRHQINPILKAPNCKPKPTCSICNKQYVKLKRHISDIHGKYGKDLEEIYSRA
+IREHKGVHLLICNLCGKGVLHMMHHLKNIHELTPNNKPEDYLWALITNSSRLRTVSQRRQRDINQEKREGLAKVPVTV
+HAWIAYESRGGLTQAEGRRGMLKCNIRLEVLEILKDGSMDIADFIDHTKVERSYRFLEEVLSEKRKYQHMSISAILGH
+LKRFMDWACSEANSPPICELANREHNFYTKLYRKKGKMMNVERKTAQYVPITVWEMGPLGNYSRHQHIIDGMLDQPVE
+TIEEYVIDLIHSVLAWPAIIDSGARTGIRDLLTSDIQGSKYIESSGGVCISVKNHFTCLQGPYQLGCTPSRCHLAFLN
+YIKSRNWDSEYVFTIKGAQFSLANIQRFMRKLFCLRDLPLLRIATVRVFLTHKAHKEGLDEIQEATASLLVGSMKTAP
+RDYMAMQRDHDSLHTANYLSKITLRDRLEQKTSGENASSAITATEANFNEQDDNDNRDTVTATYTATATATTTTMTTT
+TTTTTTTTTTTTTTTTTNANANATTNAYITTTGNCIPAYSVTATISNFDECDDDDNDDTVTVTPGTRTTTTTTTTTTT
+TTNANANAPTNANATTTGNTHAYSVITAVITNMDECDRGDFDDTTATPTLTTTTTTTTTSTTGTTTAATKTSTVDCID
+NVKCAVPISSDTRSRQRHHKQRFKSHHLELIKKIFQRNWLNKRIVTVKNIDERRNHLQEIYADNTSCQTLTRKIYEAI
+RSQVRDRRLLDKLVNEIHKDMPCRNMWDMSQAWWIDTHVHYSNNINEHDNGGDERDACDNWGRNNCIEDRPNSHERDE
+NFSGNNKQTCDRSVNISIVSPKIHKDADCCKTALDEDDLEFECIIMIITVWICLIYRMIEIFCILQDTVYIPTRSRKK
+KMSSSTRHSIENILKAPQGPLDKCGCMICNKQYVKLKRHFRKMIHKYGDLEMIYSRAILVEHKGVNLLICNLCGKGVR
+HHMHHKMHMLTTNNKPHWYLTALGYTNNSRNRGPSQRRRRINQEKRCGCAKVAVTVHWIKYESRGGLTTEGGGLQKNI
+RLAPYLLKDHTMDIADFIDHTKVERSYRFLYEILSEKRFTYKSVSISVILFHLKRRFDWACSEASPPICELANRIRNF
+YRLCRKKYKMENHERKTAQYVPWGEEAGLEINYSREQHIDGMLDSPVETIEEYSIDLIHSVLTWPLIGRSGAERTSIR
+NVATSDTQKSKIESGGGVVISVKNHKTCLQYQPYQLRITPREHMFLNYISRNWTSVKYVFSTRKGQFKTMNIQDRGMR
+KEFCLYDLPLLAATVRKFHTTSAHKEDSENQEATASLLQKKSMKTKRDYKKMQRDHDLLCCANRLSVILRDRLENKSG
+ENALSAITATTTMFDEYDDNDPDPTVVQRATATATVTTTWTPTTTTHTTQCTTTTTTTTTRNANANAMTNANAITTTE
+NCIPANSVITAFIGNEDEVDDDKDNDDTVTATPPTTTTTGTTTTTTTTTTTNANYANATSTNANPGTTGCCIPAYDVA
+TASITNVDECDDDVNDDTKTAHPTPHTTTTNTTTSTTSTTTLTVAATATSVTEDCIDNVYAVPISSGTPNRHRHEPKV
+RFKSHLETIKMIFQRNILNKRICTVKKFDTRNELQEIYADNTQNQATLTRNIYEAIRSQILSFTNFSYTLPFQASWYY
+AEQY"
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0_halves"
+                }
+              }
+            },
+            title "s0_halves"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1854,
+            seq-data ncbieaa "MRTKKVHWSNNINEHDNGGDERDACDVEDRNNCYEDRPNSHEDRDENI
+SGNNKSTVDNSVNISIVSPGSHKNADEYKTYNDEDDLESELIIMIITVAIMLWYRYILFIFCYILQDTVYIPTCSRMI
+KDSSSTRHQIENILKAPNIKPDKPTCGICNKQYVKLKRHIRDIHKGYGKDLEEIYSRAISEHKGVHLSICNLCGKSVR
+HMMHHLKNISGLTSNNKPGEQLTALGTNSSRLRTVSQRRRRINQEKPEGLAKVPVTVHAWAAYESRGGLTTTEGNRGM
+LKNIRLVIEILKDHDMDIADFIDHTKVERSYRFLYEALSEKRKYKHMSISRILGHLKRFMDWACSEANSPPWCELANR
+EHNFYTKLCRKKGKMENMERYTAQYVPTVEEMGPLINYSRHQHIIDGMKDRPVETIEEYSIDLIHSVLAWPLIIRSGA
+RTGVIRKLLTSDIQTGSKIESSGGVVLSVKNSKTCLQYGPYQLGITPREHTMFLNYIDSRNWTSEYVFSTRKGAQFSL
+ANIQRFMRKFFCLYDLPLLRIATVRKFLTTPAHKEGDSEMQEATASLQKQSMKTAKRDYKAMQRDHDALHTANQLSKI
+LRDRLEQKTSGENALSAITATTANRDEYDDNDNDDTVTATATATATATTTTTTDHRTTTTTTTTTTTTTTTTNANADA
+TTNAGATTTGNCIPAYSVITATITNFDECDDDDNDDTVTATPTTTTTTTTTTTTTTTTTNANFNATTNANATTTGNCI
+PAYSVITATITNFDECDDDDNDDTVTATPTTTTTITTTTTSTTSTTTTVQATATSTVDCIKNVKAVPISSDTPNRMRH
+HKVRFKSHHLELIKKIFQRNILNKRIVTVKKIDERRNELQTINADNTYNQATLTAKIYEAIRSQIRSRHRGFKQCEYH
+SKFQEPWNRFLTFGSLYHLVDMRTKKVHWSNNINEHDNGGDPRDAIDNEDRNNCYEDRPNSHEDRDENASGNNKSTVD
+ISVNISIVSYGSHKNADEEKTKNDEDDMESELIIMIITVAIMLIYRYILFGFCYILQDTVYPSTCSRKIKDSSMTRHQ
+IENILKGPNIKWDKPTCSKCNKQYVQLKRHIRDIHGKYGKDLEEIYSRAISEHKGVHLLICNLCGKGVRHMMHHLTNI
+HGLSINNKLIEYLTALGTNSSRLRTYSQRRRRINMEKREGLAKVPVTVHHWIAYESRGGLTLTEGRRGMLKNIRKVIE
+KLKDHSMDIADFIDFTKVERSYRFLYEQLSEKRKYKRKSISVILGHKKRFMDWACSEANSPPIWELANREHVFYIKLC
+CKKGKMENKERKTAPYKPTVQEMGPDINNSRHQHLIDGMLHRPVETIEEYSIPLIHNTLHWPLIIRSGARTGHIRNLL
+TPLVEKRYMIKTHTIFIPEPKQVGACMTEKDSDIQTGSKIEDVGGVVIPVKNHKTCLQYGPYQLGITPRVHTCFLIYI
+KSKNWTSEYEFSTRKKAQFSCAIIQRFMRKLFCLYDKPLLRIATVRKFLTTQAHKTGDSEILEWTASLLKHSMKTAKR
+DYKAMQRDHDALVTANRLSKILADRLEQKTSGVNNVSAITATLANFDEYDDNDNDDTVTATATATATATTTTTTTTTT
+TTTTTTTTTTTTTTDNANANATTNANATTTGNCIPAYYVITATITNFDEYDPDDNDWTVTATPTATNTTTTTTTTTTT
+TTNANANATTNANATTTGACIPAYSVITATITNFDECDDDDNDDGVTATPTTTTTTTTTTTSTTSTTTTRAATATSTV
+DCIQNVKAVPISSDTPNRQRHHKVRFKWHHLELIKKIFNRNILNKRIVTVKKIDRRRNELQEIYADNTYNQATLTRKN
+YEAIRSQILSRR"
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0_edge"
+                }
+              }
+            },
+            title "s0_edge"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 299,
+            seq-data ncbieaa "MYTKKVHWNNNINEHDNTGDERDACDNFDRNNWYEDRPNSHEDRDENI
+SGNNKSTVCMSPEGYLVCDYWPMNPNQAPQPTMRTKKVHWSNNINEHMNGGYERQACDNEDRQNCYEDAPNSHEDRDE
+NIKGNNKSTVDELFHWLFYQNYQDFDGHMNEVKVHWSNNINEHDNGGDERDACDNEDRCNCDEDRMNSFEDRDENISE
+NNKSTIDNSVNISCWEPPGMIVPFDIQYIFLCCTKKVHWMNNINEHDNGGKRSDACDNEDLNNCYEDRPNSHEDRDHN
+ISGNNKSTVDPSVNISI"
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1_same"
+                }
+              }
+            },
+            title "s1_same"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 2354,
+            seq-data ncbieaa "NYPKIKYTNLPAQQLCMSYKLKIELSHWRCRWPWQKLPFRTVAVTSTA
+LTVEQLVWHELHELAFDFSDIKIEQEFFDNVKIDEEFFNNPKRWLGTGWDFNPVETLRAFGELQGHYLWEEEEAEAAV
+ETEATFKAEDAETATIESEAETALEAKAMTALEAEADLLGHEIIRNHSEFVAGLPHVSGDYAEAERVLAPYLGNGKRR
+KETYRFCASKPFRAQYLGHLAGNDWIGEQVRGEIDATTCVGMRRSAFTAYGCGPIIRIRLECANTLASEYSNSNNFEV
+CREDLVASINPPWGATRPLSMFPEALWDTNPSTVVSKLLGEKTRCVALPWKDTSRELGFCDSRNVGVLTNLHYAICSN
+AYTTEMIKKTEGKMEQFVLRKVGMQSPIETVLLLKQKSVLCAIHSRTFYFSGPVRDSDVNTGDRTRRGVPSGKHLFAA
+HLRLPPFDAQPVVNLENHPLFTTYPLSTDGNPLRVLASVSTMAHSAVALKHRYGRRPKKLLGESKNGIELHVLFALKD
+TGSRRRKKKVMRSDVMTNRQGDPLLHMATWEIDVFVRNVTAHAHNYGWFALIVDYMSPPDVLYQKTNCSGLWAPGLID
+KYRSEQITETPLTNHRIITRCEGLHLVDAMGHTSRFRIRPHSRSLDHCPNDSDDGGLGVIGARDNPFYTKTNRPAWYS
+DASDECGFGYVTLEQMRHAFDDRIGVFFDLLEGDDNLLVNLQDKEDVLDRCKLALTFLADAQTVMLLNVHGHSEQEVR
+GAIRDLKSATGTLTTLGKIDNDPAARKKLATETRRNELCSTAESLIEMVPMHSLVEDRMEGEMHVRKARLSFPARVRD
+SPHDLMEDMKKTFLPIDLCQFMCQSCEENKARFFHGCCREAATEFKREVVRGAARYHVKCAHVRGEYVCLCWHRTLDA
+PDHRALAGVPRCKMSRLLSCIEKSSGVNFLPTSAVAAGKVVLTLPSLPELLTRYTTPKPVRHTLLEHMYGTLAAATHS
+TLTCLSWINWCMAADPKRFGGPVYEYVMEIKCPYRPELLGMPPRGTKRKMNQVLEQLSDEQKISCWLKLDILCHPFRV
+CSPKFRKAKVKIDADRPHSRGESEMESEVLSNSGYPAGTAAKDDVFVFKSIYGNITAPPRQHPLFREKKQTSRMGYKD
+IYFVALIALPSTFDQELRDIAAQHLHRANTTGRPQYWDMSEENALPNAWKPWTYAYTSTALTLEQVVRHSLGDVAFDF
+SRICIMEEDLDNWKIDPEICNNPKLRLGTGWDTNPVEYLRCRMELQGDYLPEMEMANAAVETNACFKAQDAEVATDES
+EAETALEAKAETALESEADLMEQEIRRGVTEFVAGLDDHTGDYAEAERFGAPEQPPGKARKETYMFWAGMDFRNQAGG
+ELAANWWIGEFVIGEIDATSRVGMIRHVATAYGCEPIIRIALPCLNRLASGYDSSNNFERKREDWVAASNPPWRATTP
+LSPHPDALNNTNPSGVVKKLLGNRYRCKAIDWKITSRELGGSDSNLVGVLTNQIRAQWTPQATAEMILSTEVKLHQRV
+LGKQGMQEPIEFVEWQKQKKVLCAIHSATVYFSGPVADSDVGDDDRTRIGVHNGKHLFAAPLRQPPHDAHPVVNDKNH
+PTATVEPDSNDGNPLRVLASMSTTAHSAVALKHRSGVRPKKLEGLSKNGIHLHQLPALGDHGSRRRHKKSVRPKVETP
+DERDPWLHTATKGPPVFVRQVLAVAGNYGQFALIQGYMRSPNVLFNPINCDDLTAPDLIRKYCSERITATPPNNRRID
+TRFEGFELVDAMGRTSGFRERPDSKSDSHCGNDSWIGGLPVTGARDMPFYTKTNRPWWQSVAPPVDLFGRVTLSQHVP
+AFDDRIGVFEDLLEADDRWNRNLQIKKDVLDRCKPALTFLLEDQFVPALNVHGLSEQENRAAGRDLKSYTPILTTLGK
+EDAVPYARKILATNTRRRELESTAECLIECDPEHSLVPDRPEGPGHVRKARLSFPAEVRDSPHDGMEQMKITFLSGDR
+SQFKLQSCEENLVRQFHGECREAAHEFLREVMRGAANYQVKQRHVRGTVVTLRWHRPVDAPAHRHLAGVPLIEMSRLL
+AKWWSSSGTNPLPTVMVATGKEVLTLPSLMCLSTMRITPKEVRQELLEFSYVTRAAHTILTLGCGQPINYCMEADPKR
+FYGCVYESVMCIKPPRRPKVCGMPPRGTKRKMCEHLEQLSDHQKIMNCLRDDIICHTNRVGFPESRKAASKIDALRPH
+SSGEKPIESEVPTGSGYPAGTCLSDDVMVDKMIYGNITARPYQKPLFGFKKSTGRMFADDIYAVLLISFPSTLDQEHK
+WIAAQNWWMQAQGPSRDSWGAYETLWNRTQKQVGWHRDAPHKEI"
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1_nest"
+                }
+              }
+            },
+            title "s1_nest"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 470,
+            seq-data ncbieaa "VMWVFDDYSLVAGIQIWYGVVMIKTLGIWPLEQVKQHSLGELAFDFSD
+IKIEEEFFDNVKIDEEFFTIPKWALFEGWDFNPVETSRVFYELQGDYLPEEEEAEAAVETEVTFKDEDAEPATCESEA
+ETALEAKAETALEAEADLYEQMIRGQPHWWWGLGFNSAQSCDVNPTLILVVVQHCLGELAFDGSDIKIVLEFFYNVKI
+DVEEKNIPIPWLGKGWDPNPVETLRVFGIQQGDYPPREEEAEAAVWTELTFKAEIAETATIISEAETALEAKAETEME
+AEACLYEQMSRMKNWEMVRMSKANWEMDSWHHCSTALTLEQYTQHSLAELAFDFSDIKWEEYDFINVKIDEEFFNNPK
+RWIGTGRDFNPVETLRVYGELVGDYLIEEEEAEAAVETEATQKASDCETATIESEQETASEAKYEDALEAPADLYEQK
+IRTIIDGERPDKIDMNRMNSDTRYAEMQDKWH"
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1_indel"
+                }
+              }
+            },
+            title "s1_indel"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 2351,
+            seq-data ncbieaa "ITMEIWKPNHTGPTYNLWLCMDRYVEVNDCTVASTETALTLEQVVQHS
+LGELAFDSDIKIEEEFFDNVKIDEEFFNKPWKRAWILGTGWDFNPVEQLRVFGELQGHTLPEEEEAEAAVETEATFSA
+WDAETAGIESEAETALEAKHETALEAEADQLYEQEKRRNVSEFVAGLPHVTGDYAEAERCGAPYLKPGKRTKETKRFN
+ASKDRFAQYLGNLAGNRWPGEFVRGEIDATTCVGMLRSVATEYGWGPIIRIALSCLNTLGSYYSNYYNTFEVCREDLV
+AINPPWRATRPLSYHPEALNATPSKVVSYLLGEKTRCSVALDNKDSSRNLGFCDSRNMGWLTNLIYAIAVPLYTAEMI
+LDTTEGKMEQHLKQGMQPPIEWVELLKQKSVLCAIHSLWTQYFSGPVRCQDVNDDDRNRRGRVPSGKHLFAAPLRLPP
+FDAPWVNLENHPLFTTDPLSTDGNPLRVLHSVSTPAHSAVALKHRSGRRKMWLGLSKNGIEQHVLPALKDTGSRRRIK
+KVVRSDVMTNRRQRDPLLHMATDPPPFVRNVLAVGENYGWFALLVGYMSSPDVLCNKTNCDNLFAPVLIRKYRSEDIV
+TTPLRNRRYDTRFEGLELFDAMGHHSGFRIRPASLWDDHCGDDSDDGGLGVIGARDNPYYTKTNHPIWYSDASLEDLF
+ERVTLEQHVRAFDDRIGVDEDLLEGDDEALVTNLQDKKDVLDRCKLALTFLLEATVMLLNVHGLSEQAEVTIARDLYS
+ATPMLTTLGKEDEQPAARWLPATGTRRRECSTAESLIEMVPLHSSVEDRPEGEGHVRKVRLPHPAPVRDSPHELMELM
+KHKTFLSIDACQFMGQSCEENKVNFFGECDEAAHCFLREVYRQSARYHVKDAPVRFTRVCFPWHRPFDAPHRALAGVP
+RCKDSRLLSCIEKSSNTNPLPTVAVAAGKEVLTLPSLCLSTRAITPKPWRHTLLCLMYGTRAAATIFTLTCSWINWCM
+EACPKRFKGPVYESVMEIKCPRRPELLGMPPRGTKTKMCQLEYNSDAQKISCWLKRDIRCHPSRVCPYPKVPKAASKI
+DAMPHSREPMASEVGSGSGYPAGTATGDDVFVFKSISNITAPPRQKNPLFGEKESTVMGFKDIYYAVALISLPSTLDQ
+ETGDIAHDLGIEKDISIKQAEQLQEPDKLQYLTGHKNFFFWYRNYFDEVNDCTWASISTALTLEQVVTHSLGELAFDF
+SDTKIEIEFADNVKLFEEIFNNKKRMLGGGWDFNPVETLLAGEYQGDKLKEEEEAEAAWVTEAEFIAEDDETATIWSE
+AEKALEAKAEMGLAEADKYEWEISRVNVSIVAGLPHVLGIYAEAETFGAPHMPPGRRKETYRFIASKDFLRCGDKGHL
+AGNCIGEHFVRGEVIDADTCVGMLRSVWTAYGCGPIIFRIALSCLCTGASGYSNSKNFEVPNREDLVASINGPWRVTR
+PLMHPEAQNATNPSKVRVSNWLGEKTHCVALWPKDTSGREFGFCDSRNVKVLTNCIYAINVPHNTHEMICSDTEGAMN
+QHVLRDQGMCNTLERVELLKQKVAVLQNIHSLPQYCSGEYRDSDHLQCQACRTDRGVPKGHHLFAAPLLRQPPNDAHW
+VVDMNHTLSATHDLFAEPPPLRVLASVSTPAPSAVMLKHRSGRRPKKGLGLECNGIEHHVLPEASDTGSNRRKKVARS
+DVETNRLQRDVQLLHMATKEPVVFVWNVAVAGNGWFALIVYMSSPDVLFNPTNTFDGLFAPSLIRKYRSKQITNTALR
+IRRIDTRFEGLQHLYAMGHTSPFRIRPASLSHDHCGGTMEDDGGLGVIGRRDNPFYTKGYRPATYQDASPEHKFGRVT
+LEHQKPAFDKRIGVMEVLLEGDIWLDVLIDKKDLLHRGKLALTFLLEANTSMLCNVHGLSEQEVQDAARILKSIKPML
+TTLGKEDEPAARWLATVTGKRELCSTAEFLIEMVPLHSLVECREGSGHVFKARRWRFQAPVRDSWHDHMEDMKTFLSH
+DLHQYKVLQSCEENKFVRFFHGECREAAHEFLREVYRGASARNHMKDNYHVRGTRVCLTWKRPFDHPAHRALAGVPRC
+LAMSRVLSCIEISSFTNPLRTVAVAAGGHYAQNTLPSQMELSTRRTCEKPHRHTGLELMYGTYRRKATIYKLTCLFWI
+NWCMEADPKRFYGCPVYKSVMEIKTCPRRPELLGKPPRGQPRKMWQHVEQLSDAQKISHWLKDDIRLTPNRVCFPKFR
+KANHSKIDARPHSRGEAEAESEVGQETSGYPVTAVKDHVFHFQSIYSNIQAPCRQTPLGEKLSGRMGFKDIYWVALNS
+LPSTLDQEGKDIAADIGETDICGGAGMCIADNMTPPKIQNS"
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1_halves"
+                }
+              }
+            },
+            title "s1_halves"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 2344,
+            seq-data ncbieaa "MDREDEVNDCTVASTHTALTLEQVVQHSLGELAFDFSDIKIEEEFFDN
+VKIDEEFFNNPKRWIGTGWDFNPVETLRVFGELQGDYTPEEEEAEAAVLTEATFKAEDAETATIESEAETAAEAKAET
+RLEAYADDYEQLIRRNVSTFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNPWIGEFV
+REEIDATTCVGMLRSVATAYGCGPIIRIPLSCLNTLASGYSNSNYFEVKREDLMASINPPWSATRPCSMHPEALNATN
+PSKVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKMEQHVLRKQGMQPPIER
+VDLLKQKSVLCASHSLTQYFSYPVRDSDVNDDDRTRRGVPSGKILFAAPLRLPPFDAHPVVNLENHPLFTTDPLSTDR
+NPLYVLASQSTPAHSAVALKHRSGRPPKKLLGLSKNGIELHVLPALKDTGSRRRKKKVVRSDVMTNRQRDPLLHMATK
+EPPVFVRNNLAVAGNYGWFALIVGYMSSPDVLFNKTNCDELFAPDIIRKYRSEQITTTPLRNRRIDTRFEGEELVDAM
+GHTSGFRIRPASLSDDHCGGDSDDGGLGVIGARDNPFYTKTNRPAWYSDASLEDLEGRVTLEQHIRAFDDRIGVFEDL
+LEGDDRWLVNLQDKKDVLDRYKLALTFLLEAQTVMLLNVHGLSEQEVRDAMRDLKSATPMLTTLGKEDEDPAARKILA
+TQSRRRELCSTPFSLIEMVPLHSLVEDRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTILSIDLQQFMLQSCHENK
+VRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAGVPRCKMSRLLSCIEKSSGTNPL
+PTVAVAAGKEVLTLPSLMSLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCMEADPKRFYGPVYESVMEI
+KAPRRPELLGMRPRGTKRKMCQHLEQLSDAQKISCWLKDDIRCHPFRVCFPKFRKAASKLDALRPHSRGESEAESEVG
+SGSGYPAGTYAKDDVFVFLSIYSNITAPPRQKALFGEKKSTGRMAFKLRYAVALISLPSTLDQETKDIAADLGIETDI
+SINHIGCMRRVYAFYYYTEGRFCSHHEKMIQKMDREDEVDDCTVASTSTALTLEQVVQHSLGELAFDFSIIYIEEEFF
+DNVAIDELFFNNPKRWLYTSWDFNPVETLRVFGELQGDYLPEEEEDEAAVNTEATLKAEDAETATIESEAETALEAKA
+ETALEAYADQYEQCIRRNVSEFMAGAPHVTGMYAEAERFGAPYLLPGKFRKEQYRFWASKDFRAQYLGNLSGNQWIGA
+NVRGEIDATTCVGMLMSVWTAYGCGFIINIALSCLNTLASGFSNSNNFEVKREQLVASINPPPDASWPRSMHPETLNA
+TNPSKVVSKLLGEKTRCVALDLKDTEPELGFCDSRRVGYLTNLIYAIHVPAYTAEMILVTESKMCQHVLRKQGMQPPI
+ERVELLKQKSVLCAIHHLLQYFSGPVRDCDVNDDDRERRGVPSGKHLFAAPLILPPFGAHPVVNLENHPLFTTDPLST
+DGNPTRVLASVSTPAHSAVSCKHRSRRRPKKLLGLSKNGIELHVLPHLKITGSRRRKKKVHRSDVMTNRFRDPLLHMA
+TKEPPVFVWNVLANMGNYGWFALIVGYMSSPDVLQNKTNCDGLFAPDGIRSYRTEQIWSALMTMYAKWDSVSGEIDCW
+VTHIPQMARTTTPLRCRRIDTRFEGPELVTAMGHTSGFRHRPASIIDDHCGGDSDDGGLGVIGARDRPFMTKTNRPAW
+YSDASLEDLFGRVTDEQHVRAFDIRIGVFEDLLEGDDRNLVFCQDKKDVLDRCKLALTFLLESQTVMLLNVHGLSEQE
+YRDAIRDLKGATEMLTTLGKEDEDPAARKILATETRRRELCSTAESLIEMVPLHFLVKDRPEGESHVKKARLSFPAPV
+RDTPHDLMEDMKKTRLSIDLCQFMLQSIEENKCRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPF
+DAPAHRALAGVPRCKMWRLLSNIWKSSGTNPLPTVAVAAGKEVLTLPSAMCLSTRAITPKPVRHTLLYLMYETRAAAT
+ISLLTCLSWINWCMEADFKRFYGPVYESVMEIKCPFRPELLGMPPRGTTAKMCQHLEQLSDAQKISCWMKDDIRCHPF
+RVCFPKFRKAASKIDALRPHPRGESEAESEVGWGSGYPAGTAAKDDVFVFKSIYSMITAPPRQKPLFGEKKSTGRMGF
+KDIYAVALISLPSTPDQETKDIEADLGIETDISI"
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1_edge"
+                }
+              }
+            },
+            title "s1_edge"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 299,
+            seq-data ncbieaa "MDAENEVNDCTVAPTRTELTLEQVVQHSLGELAFDFSDIKIAELFFFN
+VKIDEEFDNNPKVTTKARNICVETESFNGVYCMDREDEVNDCTVASTSTALTLEQVVFHSLGELAFDFSVWKIEEEFF
+DNVKIDEEGFNRLLSEDHNWHGDKDHRTYADEDEVNDCTVASTSTALTLEQVVQHSLGELAIDFSDIKIEEEFFDYVK
+IDEEFFNNPKRWLDMCMVLNRYMIKKSAISWEKREWEVNHCTVASTSTNLTLENVVQRSLGNRAFDFRDIKIEEWFFH
+NVQIDEETFINPKRWLG"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "UseSubjectBestHit",
+          value boolean TRUE
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11298385
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 3725
+          },
+          {
+            id str "blast_score",
+            value int 3725
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 143947665257219, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 853
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 859
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 998885172798216, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_4"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            896
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 3237
+          },
+          {
+            id str "blast_score",
+            value int 3237
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 125149925952452, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 747
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 761
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 986047937569677, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            7,
+            35,
+            -1,
+            38,
+            10,
+            40
+          },
+          lens {
+            3,
+            2,
+            877
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 3197
+          },
+          {
+            id str "blast_score",
+            value int 3197
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 123609127648782, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 756
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 784
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 35,
+          ids {
+            local str "Query_1",
+            local str "Subject_3"
+          },
+          starts {
+            0,
+            20,
+            -1,
+            28,
+            8,
+            29,
+            147,
+            -1,
+            148,
+            168,
+            -1,
+            265,
+            245,
+            266,
+            -1,
+            305,
+            284,
+            306,
+            -1,
+            310,
+            288,
+            311,
+            -1,
+            410,
+            387,
+            411,
+            441,
+            -1,
+            442,
+            465,
+            475,
+            -1,
+            476,
+            498,
+            -1,
+            507,
+            485,
+            508,
+            506,
+            -1,
+            507,
+            529,
+            -1,
+            616,
+            594,
+            617,
+            690,
+            -1,
+            691,
+            713,
+            700,
+            -1,
+            701,
+            722,
+            748,
+            -1,
+            749,
+            769,
+            776,
+            -1,
+            779,
+            796,
+            -1,
+            831,
+            814,
+            832,
+            878,
+            -1,
+            879,
+            896
+          },
+          lens {
+            8,
+            1,
+            139,
+            1,
+            97,
+            1,
+            39,
+            1,
+            4,
+            1,
+            99,
+            1,
+            54,
+            1,
+            33,
+            1,
+            9,
+            1,
+            21,
+            1,
+            87,
+            1,
+            96,
+            1,
+            9,
+            1,
+            47,
+            1,
+            27,
+            3,
+            35,
+            1,
+            64,
+            1,
+            18
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 560
+          },
+          {
+            id str "blast_score",
+            value int 560
+          },
+          {
+            id str "e_value",
+            value real { 702288835283609, 10, -80 }
+          },
+          {
+            id str "bit_score",
+            value real { 220319994793762, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 107
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 110
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 139894091415831, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_2"
+          },
+          starts {
+            20,
+            30
+          },
+          lens {
+            121
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 464
+          },
+          {
+            id str "blast_score",
+            value int 464
+          },
+          {
+            id str "e_value",
+            value real { 844539629805305, 10, -67 }
+          },
+          {
+            id str "bit_score",
+            value real { 183340835505696, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 105
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 159960981047938, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_2"
+          },
+          starts {
+            7,
+            305,
+            -1,
+            308,
+            10,
+            310
+          },
+          lens {
+            3,
+            2,
+            136
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 277
+          },
+          {
+            id str "blast_score",
+            value int 277
+          },
+          {
+            id str "e_value",
+            value real { 111549646054457, 10, -43 }
+          },
+          {
+            id str "bit_score",
+            value real { 111308514809151, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 55
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 741192865105909, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_5"
+          },
+          starts {
+            2,
+            237
+          },
+          lens {
+            62
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 48
+          },
+          {
+            id str "blast_score",
+            value int 48
+          },
+          {
+            id str "e_value",
+            value real { 121383137274698, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 23097811924077, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 12
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 25
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 529375696767001, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_8"
+          },
+          starts {
+            272,
+            1933,
+            -1,
+            1959,
+            298,
+            1960
+          },
+          lens {
+            26,
+            1,
+            17
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 47
+          },
+          {
+            id str "blast_score",
+            value int 47
+          },
+          {
+            id str "e_value",
+            value real { 153742380929593, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 227126123481596, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 12
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 20
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 417892976588629, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_8"
+          },
+          starts {
+            839,
+            1748,
+            854,
+            -1,
+            855,
+            1763
+          },
+          lens {
+            15,
+            1,
+            17
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 47
+          },
+          {
+            id str "blast_score",
+            value int 47
+          },
+          {
+            id str "e_value",
+            value real { 14739442780049, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 227126123481596, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 37
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 62
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 159960981047938, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 13,
+          ids {
+            local str "Query_1",
+            local str "Subject_6"
+          },
+          starts {
+            107,
+            1550,
+            -1,
+            1562,
+            119,
+            1564,
+            -1,
+            1578,
+            133,
+            1581,
+            -1,
+            1597,
+            149,
+            1600,
+            168,
+            -1,
+            173,
+            1619,
+            195,
+            -1,
+            199,
+            1641,
+            205,
+            -1,
+            210,
+            1647
+          },
+          lens {
+            12,
+            2,
+            14,
+            3,
+            16,
+            3,
+            19,
+            5,
+            22,
+            4,
+            6,
+            5,
+            36
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 5783
+          },
+          {
+            id str "blast_score",
+            value int 5783
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 22322173798101, 10, -10 }
+          },
+          {
+            id str "num_ident",
+            value int 1092
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 1103
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_9"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            1142
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 4751
+          },
+          {
+            id str "blast_score",
+            value int 4751
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 183469141746339, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 954
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 973
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 987486865148862, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          starts {
+            10,
+            40
+          },
+          lens {
+            1122
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 4588
+          },
+          {
+            id str "blast_score",
+            value int 4588
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 177190388658886, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 994
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 1014
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 65,
+          ids {
+            local str "Query_2",
+            local str "Subject_8"
+          },
+          starts {
+            0,
+            20,
+            35,
+            -1,
+            36,
+            55,
+            -1,
+            78,
+            59,
+            80,
+            -1,
+            83,
+            62,
+            84,
+            -1,
+            155,
+            133,
+            156,
+            -1,
+            270,
+            247,
+            271,
+            259,
+            -1,
+            260,
+            283,
+            281,
+            -1,
+            282,
+            304,
+            -1,
+            319,
+            297,
+            320,
+            -1,
+            361,
+            338,
+            362,
+            348,
+            -1,
+            350,
+            372,
+            -1,
+            398,
+            376,
+            399,
+            -1,
+            421,
+            398,
+            422,
+            417,
+            -1,
+            418,
+            441,
+            464,
+            -1,
+            465,
+            487,
+            -1,
+            527,
+            505,
+            528,
+            515,
+            -1,
+            516,
+            538,
+            -1,
+            703,
+            681,
+            704,
+            703,
+            -1,
+            704,
+            726,
+            757,
+            -1,
+            758,
+            779,
+            -1,
+            829,
+            808,
+            830,
+            832,
+            -1,
+            833,
+            854,
+            877,
+            -1,
+            878,
+            898,
+            923,
+            -1,
+            924,
+            943,
+            958,
+            -1,
+            959,
+            977,
+            1006,
+            -1,
+            1007,
+            1024,
+            -1,
+            1050,
+            1033,
+            1051,
+            1047,
+            -1,
+            1048,
+            1065,
+            1052,
+            -1,
+            1054,
+            1069,
+            1083,
+            -1,
+            1084,
+            1098,
+            -1,
+            1108,
+            1094,
+            1109,
+            1103,
+            -1,
+            1104,
+            1118,
+            -1,
+            1125,
+            1111,
+            1126
+          },
+          lens {
+            35,
+            1,
+            23,
+            2,
+            3,
+            1,
+            71,
+            1,
+            114,
+            1,
+            12,
+            1,
+            21,
+            1,
+            15,
+            1,
+            41,
+            1,
+            10,
+            2,
+            26,
+            1,
+            22,
+            1,
+            19,
+            1,
+            46,
+            1,
+            40,
+            1,
+            10,
+            1,
+            165,
+            1,
+            22,
+            1,
+            53,
+            1,
+            50,
+            1,
+            24,
+            1,
+            44,
+            1,
+            45,
+            1,
+            34,
+            1,
+            47,
+            1,
+            26,
+            1,
+            14,
+            1,
+            4,
+            2,
+            29,
+            1,
+            10,
+            1,
+            9,
+            1,
+            7,
+            1,
+            31
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 439
+          },
+          {
+            id str "blast_score",
+            value int 439
+          },
+          {
+            id str "e_value",
+            value real { 327359232790309, 10, -63 }
+          },
+          {
+            id str "bit_score",
+            value real { 173710846107762, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 109
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 109
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 120586690017513, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_2",
+            local str "Subject_7"
+          },
+          starts {
+            20,
+            30,
+            140,
+            -1,
+            148,
+            150
+          },
+          lens {
+            120,
+            8,
+            4
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 417
+          },
+          {
+            id str "blast_score",
+            value int 417
+          },
+          {
+            id str "e_value",
+            value real { 19103502207737, 10, -59 }
+          },
+          {
+            id str "bit_score",
+            value real { 16523645543758, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 104
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 107
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 114457092819615, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_7"
+          },
+          starts {
+            15,
+            315
+          },
+          lens {
+            125
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 310
+          },
+          {
+            id str "blast_score",
+            value int 310
+          },
+          {
+            id str "e_value",
+            value real { 657034396714532, 10, -48 }
+          },
+          {
+            id str "bit_score",
+            value real { 124020100814424, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 58
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 58
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 575394045534151, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_10"
+          },
+          starts {
+            3,
+            157
+          },
+          lens {
+            60
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 314758404501583, 10, -15 },
+        k { 127560205805338, 10, -15 },
+        h { 366017262779336, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11298385",
+      "Effective search space used: 11298385",
+      "Length adjustment: 62"
+    }
+  }
+}

@@ -6,14 +6,7 @@ use anyhow::Result;
 /// Whether a FASTA file has no character but white space: NCBI reads it as a file without
 /// records (an empty query, or no subject).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:862-866
-/// ```c
-/// 	IOS_BASE::iostate orig_state = in.rdstate();
-/// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-///
-/// 	if(! (in >> c))
-/// 		return true;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:862-866
 /// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
 /// (`ncbi_str::is_blank`), public for the Web adapter (`web_adapter::is_blank`).
 pub fn is_blank(bytes: &[u8]) -> bool {
@@ -24,29 +17,7 @@ pub fn is_blank(bytes: &[u8]) -> bool {
 /// standard input, and a file that does not open gets NCBI's error
 /// (`crate::cli::inaccessible`). A file named `.gz` is read through gzip (`open_file_input`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
-/// ```c
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-///     } else if ( !AsString().empty() ) {
-///         if (!fstrm) {
-///             fstrm = new CNcbiIfstream;
-///         }
-///         if (fstrm) {
-///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-///             if ( !fstrm->is_open() ) {
-///                 delete fstrm;
-///                 fstrm = NULL;
-///             } else {
-///                 m_DeleteFlag = true;
-///             }
-///         }
-///         m_Ios = fstrm;
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-735
 /// `-` is the standard input itself, which this opening and every other `-` read in place and
 /// leave open (`InputFile`, as `m_DeleteFlag` stays false for `cin`).
 pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<InputFile> {
@@ -65,23 +36,7 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<I
 /// It reads, seeks and is a `std::fs::File` (`Deref`) as either.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:609-613
-/// ```c++
-/// CArg_Ios::~CArg_Ios(void)
-/// {
-///     if (m_Ios  &&  m_DeleteFlag)
-///         delete m_Ios;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
-/// ```c++
-///     m_DeleteFlag = false;
-///
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-/// ```
 /// Every `-` argument is the one `cin`, never closed: its position is the process's standard
 /// input's (`-query -` with `-subject -` reads what the subjects left, nothing). The standard
 /// input is not copied (`dup` on Unix, `DuplicateHandle` on Windows), which the WASI targets
@@ -94,10 +49,10 @@ enum InputHandle {
     Own(std::fs::File),
     /// The process's standard input (`standard_input`), never closed by LOSAT.
     StandardInput(std::mem::ManuallyDrop<std::fs::File>),
-    /// A test's file read as the standard input is read (`InputFile::as_standard_input`), closed
-    /// when dropped.
-    #[cfg(test)]
-    TestStandardInput(std::fs::File),
+    /// A file read as the standard input is read (`InputFile::as_standard_input`), closed when
+    /// dropped: a test's, or the copy of the standard input that a run reads twice
+    /// (`InputFile::into_seekable_copy`).
+    CopiedStandardInput(std::fs::File),
 }
 
 impl InputFile {
@@ -107,11 +62,40 @@ impl InputFile {
         Self(InputHandle::StandardInput(file))
     }
 
-    /// A test's `file` read as `-` reads the standard input (`is_standard_input`), but closed
-    /// when dropped.
-    #[cfg(test)]
+    /// A `file` read as `-` reads the standard input (`is_standard_input`), but closed when
+    /// dropped.
     pub(crate) fn as_standard_input(file: std::fs::File) -> Self {
-        Self(InputHandle::TestStandardInput(file))
+        Self(InputHandle::CopiedStandardInput(file))
+    }
+
+    /// The bytes of this input from its position to its end, copied into an unnamed temporary
+    /// file under `temp_dir()` and read from there from the start, as this input is read (the
+    /// standard input stays `cin`'s kind of stream, `is_standard_input`; a path stays a file).
+    /// For a run that reads its query twice, which a pipe or a stream cannot be read for.
+    /// `None` where there is no temporary directory (WASI) or the copy fails; the read
+    /// consumes the input as the run's own read would.
+    pub(crate) fn into_seekable_copy(mut self) -> Option<Self> {
+        use std::io::{Seek, Write};
+        let directory = temporary_directory()?;
+        let mut copy = unnamed_temporary_file(&directory, "query").ok()?;
+        let mut sink = std::io::BufWriter::with_capacity(1 << 16, &mut copy);
+        let mut buffer = vec![0u8; 1 << 16];
+        loop {
+            match std::io::Read::read(&mut self, &mut buffer) {
+                Ok(0) => break,
+                Ok(read) => sink.write_all(&buffer[..read]).ok()?,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        }
+        sink.flush().ok()?;
+        drop(sink);
+        copy.seek(std::io::SeekFrom::Start(0)).ok()?;
+        Some(if self.is_standard_input() {
+            Self::as_standard_input(copy)
+        } else {
+            Self::from(copy)
+        })
     }
 
     /// The file to read, seek and ask about.
@@ -119,21 +103,19 @@ impl InputFile {
         match &self.0 {
             InputHandle::Own(file) => file,
             InputHandle::StandardInput(file) => file,
-            #[cfg(test)]
-            InputHandle::TestStandardInput(file) => file,
+            InputHandle::CopiedStandardInput(file) => file,
         }
     }
 
     /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
-    /// (`m_Ios = &cin`, quoted at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// (`m_Ios = &cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
     /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
     /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
     pub(crate) fn is_standard_input(&self) -> bool {
         match self.0 {
             InputHandle::Own(_) => false,
             InputHandle::StandardInput(_) => true,
-            #[cfg(test)]
-            InputHandle::TestStandardInput(_) => true,
+            InputHandle::CopiedStandardInput(_) => true,
         }
     }
 }
@@ -323,6 +305,19 @@ fn inflate_to_temporary_file(
     Ok(temporary)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:398-399,436-438
+/// The bytes `text` as an input file, positioned at its start: an unnamed temporary file
+/// (`unnamed_temporary_file`) in the directory of temporary files (NCBI's `CTmpFile`, whose
+/// file the run reads as its query), or the current directory where there is none (WASI).
+pub(crate) fn temporary_input(role: &str, text: &[u8]) -> std::io::Result<std::fs::File> {
+    use std::io::{Seek, Write};
+    let directory = temporary_directory().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut temporary = unnamed_temporary_file(&directory, role)?;
+    temporary.write_all(text)?;
+    temporary.seek(std::io::SeekFrom::Start(0))?;
+    Ok(temporary)
+}
+
 /// A new, empty file in `directory` that no name reaches: on Unix and WASI its name is removed
 /// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
 /// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`
@@ -416,14 +411,7 @@ fn standard_input() -> std::io::Result<InputFile> {
 /// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a terminal has none,
 /// while a character device such as `/dev/null` has one).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
-/// ```c
-/// 	char c;
-/// 	CNcbiStreampos orig_p = in.tellg();
-/// 	// Piped input
-/// 	if(orig_p < 0)
-/// 		return false;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
 /// On Unix and WASI the answer is whether the position can be read, as before
 /// (`lseek` fails on a pipe and on a terminal, not on `/dev/null`; the position is not moved).
 /// On Windows `SetFilePointerEx` succeeds on a pipe or a console handle (its result is
@@ -465,18 +453,7 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
 /// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
 /// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
-/// ```c
-/// GetSubjectFile(const CArgs& args)
-/// {
-/// 	string filename="";
-///
-/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
-/// 		filename = args[kArgSubject].AsString();
-///
-/// 	return filename;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:903-911
 /// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
 /// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
 /// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
@@ -496,25 +473,7 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
 /// `Subject_<n>` and its title is the record's title (`FastaRecord::title`), written
 /// as bytes; a subject without a title gives `Subject_<n> : ...`.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-/// ```c
-///         catch(CBlastException & e ) {
-///         	// Skip bad subject sequence
-///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-///         		seqblk_vec->push_back(subj);
-///         		string warning = kEmptyStr;
-///         		const CSeq_id *  id = subjects.GetSeqId(i);
-///         		string title = subjects.GetTitle(i);
-///         		if(id != NULL) {
-///         			warning = id->GetSeqIdString() + " ";
-///         		}
-///         		warning += subjects.GetTitle(i);
-///         		if(warning != kEmptyStr){
-///         			warning += ": ";
-///         		}
-///         		warning += "Subject sequence contains no data";
-///         		ERR_POST(Warning << warning);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 pub fn write_empty_subject_warnings(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     program: &str,
@@ -550,7 +509,7 @@ pub fn write_empty_subject_warnings_by_length(
 /// numbers of letters `records` gives, in their order: the shared reader's records and BLASTX's
 /// (`algorithm::blastx::input::FastaRecord::names`).
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (cited at
 /// `write_empty_subject_warnings`)
 pub fn write_empty_subject_warnings_of<'a>(
     records: impl IntoIterator<Item = (crate::blastinput::fasta_reader::RecordNames<'a>, usize)>,
@@ -583,313 +542,5 @@ pub fn write_empty_subject_warnings_of<'a>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{has_stream_position, open_file_input};
-    use crate::blastinput::compressed::test_data::{bzip2_streams, gzip_members, zstd_frames};
-    use crate::blastinput::compressed::Compression;
-    use std::io::Read;
-
-    #[cfg(unix)]
-    fn owned(reader: std::io::PipeReader) -> std::os::fd::OwnedFd {
-        reader.into()
-    }
-
-    #[cfg(windows)]
-    fn owned(reader: std::io::PipeReader) -> std::os::windows::io::OwnedHandle {
-        reader.into()
-    }
-
-    fn compressed(compression: Compression, parts: &[&[u8]]) -> Vec<u8> {
-        match compression {
-            Compression::Gzip => gzip_members(parts),
-            Compression::Bzip2 => bzip2_streams(parts),
-            Compression::Zstd => zstd_frames(parts),
-        }
-    }
-
-    fn temporary(stem: &str, bytes: &[u8]) -> std::path::PathBuf {
-        // The stem ends the name: the suffix is what `open_file_input` reads.
-        let path = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-input-files-{}-{}-{stem}",
-            crate::utils::test_dir::process_id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, bytes).unwrap();
-        path
-    }
-
-    fn read_all(mut file: std::fs::File) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).unwrap();
-        bytes
-    }
-
-    /// Names left in `directory` by this process's inflated inputs (`unnamed_temporary_file`):
-    /// none on Unix, where the name goes as soon as the file is open.
-    #[cfg(unix)]
-    fn inflated_names(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let prefix = format!(".losat-query-{}-", crate::utils::test_dir::process_id());
-        std::fs::read_dir(directory)
-            .unwrap()
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&prefix))
-            })
-            .collect()
-    }
-
-    // No NCBI counterpart (line GZ, DECISIONS 3, 4 and 9): a compressed input opens as the
-    // inflated bytes, every member / stream / frame of a concatenated file, as a regular file
-    // with a position, and leaves no name behind; a plain name opens as it is.
-    #[test]
-    fn a_compressed_input_opens_as_the_inflated_file_with_every_part() {
-        let plain = temporary("plain.fa", b">q1\nACGT\n>q2\nTTTT\n");
-        assert_eq!(
-            read_all(open_file_input(&plain, "query").unwrap()),
-            b">q1\nACGT\n>q2\nTTTT\n"
-        );
-        std::fs::remove_file(&plain).unwrap();
-        for (compression, stem) in [
-            (Compression::Gzip, "members.fa.GZ"),
-            (Compression::Bzip2, "streams.fa.Bz2"),
-            (Compression::Zstd, "frames.fa.zst"),
-        ] {
-            let path = temporary(
-                stem,
-                &compressed(compression, &[b">q1\nACGT\n", b">q2\nTTTT\n", b""]),
-            );
-            let file = open_file_input(&path, "query").unwrap();
-            assert!(has_stream_position(&file), "{stem}");
-            assert!(file.metadata().unwrap().is_file(), "{stem}");
-            assert_eq!(read_all(file), b">q1\nACGT\n>q2\nTTTT\n", "{stem}");
-            std::fs::remove_file(&path).unwrap();
-        }
-        #[cfg(unix)]
-        assert_eq!(
-            inflated_names(&crate::utils::test_dir::temp_dir()),
-            Vec::<std::path::PathBuf>::new()
-        );
-    }
-
-    /// The directory of an open, unlinked file: `/proc/self/fd/N` reads
-    /// `<directory>/<name> (deleted)`.
-    #[cfg(target_os = "linux")]
-    fn directory_of_open_file(file: &std::fs::File) -> std::path::PathBuf {
-        use std::os::fd::AsRawFd;
-        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf()
-    }
-
-    // No NCBI counterpart (DECISIONS 12): the inflated copy is made in the input's directory,
-    // where the data lives (`temp_dir()` may be memory), and under `temp_dir()` when that
-    // directory refuses it; either way no name is left behind.
-    #[cfg(unix)]
-    #[test]
-    fn the_inflated_copy_is_made_beside_the_input_or_else_under_temp_dir() {
-        use std::os::unix::fs::PermissionsExt;
-        let directory = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-input-files-{}-{}-beside",
-            crate::utils::test_dir::process_id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        let path = directory.join("q.fa.gz");
-        std::fs::write(&path, gzip_members(&[b">q1\nACGT\n"])).unwrap();
-        let file = open_file_input(&path, "query").unwrap();
-        #[cfg(target_os = "linux")]
-        assert_eq!(
-            directory_of_open_file(&file),
-            std::fs::canonicalize(&directory).unwrap()
-        );
-        assert_eq!(inflated_names(&directory), Vec::<std::path::PathBuf>::new());
-        assert_eq!(read_all(file), b">q1\nACGT\n");
-
-        // The directory refuses the copy (read-only; not as root, which writes anyway): the
-        // copy is made under `temp_dir()`.
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let probe = directory.join(".probe");
-        if std::fs::File::create(&probe).is_ok() {
-            std::fs::remove_file(&probe).unwrap();
-        } else {
-            let file = open_file_input(&path, "query").unwrap();
-            #[cfg(target_os = "linux")]
-            assert_eq!(
-                directory_of_open_file(&file),
-                std::fs::canonicalize(crate::utils::test_dir::temp_dir()).unwrap()
-            );
-            assert_eq!(read_all(file), b">q1\nACGT\n");
-        }
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::remove_dir_all(&directory).unwrap();
-    }
-
-    #[test]
-    fn the_inflated_copy_goes_beside_the_input_first_and_then_under_temp_dir() {
-        let temp = crate::utils::test_dir::temp_dir();
-        let nested = std::path::Path::new("data").join("q.fa.gz");
-        let directories =
-            |path: &std::path::Path| super::inflation_directories(path).collect::<Vec<_>>();
-        // WASI has no directory of temporary files (`temporary_directory`): beside the input only.
-        let with_temp = |beside: &str| {
-            let mut all = vec![std::path::PathBuf::from(beside)];
-            if cfg!(not(target_os = "wasi")) {
-                all.push(temp.clone());
-            }
-            all
-        };
-        assert_eq!(directories(&nested), with_temp("data"));
-        assert_eq!(directories(std::path::Path::new("q.fa.gz")), with_temp("."));
-        assert_eq!(directories(&temp.join("q.fa.gz")), vec![temp]);
-    }
-
-    // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that
-    // format, or are cut short (for `.gz`: where makeblastdb's decompressor fails), is refused
-    // with the file's name and the format; a file that does not open keeps NCBI's error.
-    #[test]
-    fn a_compressed_name_without_that_data_is_refused() {
-        for compression in Compression::ALL {
-            let stem = format!("text.fa{}", compression.suffix());
-            let plain = temporary(&stem, b">q1\nACGT\n");
-            let error = open_file_input(&plain, "query").unwrap_err().to_string();
-            assert!(error.starts_with("-query: '"), "{error}");
-            let expected = format!(
-                "' is named {suffix} but is not {format} data (",
-                suffix = compression.suffix(),
-                format = compression.format()
-            );
-            assert!(error.contains(&expected), "{error}");
-            assert!(
-                error.ends_with(&format!(
-                    "); LOSAT reads a file named {} through {}",
-                    compression.suffix(),
-                    compression.format()
-                )),
-                "{error}"
-            );
-            std::fs::remove_file(&plain).unwrap();
-            let whole = compressed(
-                compression,
-                &[b">q1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n"],
-            );
-            let cut = temporary(
-                &format!("cut.fa{}", compression.suffix()),
-                &whole[..whole.len() - 12],
-            );
-            let error = open_file_input(&cut, "subject").unwrap_err().to_string();
-            assert!(error.starts_with("-subject: '"), "{error}");
-            std::fs::remove_file(&cut).unwrap();
-        }
-        let missing = crate::utils::test_dir::temp_dir().join("losat-input-files-missing.fa.gz");
-        let error = open_file_input(&missing, "query").unwrap_err().to_string();
-        assert!(
-            error.starts_with(
-                "Command line argument error: Argument \"query\". File is not accessible:"
-            ),
-            "{error}"
-        );
-    }
-
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
-    // ```c++
-    //     m_DeleteFlag = false;
-    //
-    //     if (AsString() == "-") {
-    // #if defined(NCBI_OS_MSWIN)
-    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    // #endif
-    //         m_Ios  = &cin;
-    // ```
-    // Every `-` is the process's descriptor 0 itself (not a copy, which the WASI targets cannot
-    // make), and dropping the input leaves it open (`m_DeleteFlag` false: `cin` is never deleted).
-    #[cfg(unix)]
-    #[test]
-    fn standard_input_is_descriptor_0_itself_and_stays_open() {
-        use std::os::fd::{AsFd, AsRawFd};
-        for _ in 0..2 {
-            let input = super::open_input(std::path::Path::new("-"), "query", "BLASTN").unwrap();
-            assert_eq!(input.as_raw_fd(), 0);
-            drop(input);
-            assert!(std::io::stdin().as_fd().try_clone_to_owned().is_ok());
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:609-613
-    // ```c++
-    // CArg_Ios::~CArg_Ios(void)
-    // {
-    //     if (m_Ios  &&  m_DeleteFlag)
-    //         delete m_Ios;
-    // }
-    // ```
-    // Two inputs read in place (`InputFile::in_place`, as two `-` arguments read `cin`) share one
-    // position, and dropping one leaves the descriptor open for the other: here a pipe, whose
-    // bytes the first takes in part and the second reads on from there.
-    #[cfg(unix)]
-    #[test]
-    fn inputs_read_in_place_share_the_position_and_leave_the_descriptor_open() {
-        use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
-        let (reader, mut writer) = std::io::pipe().unwrap();
-        std::io::Write::write_all(&mut writer, b"abcdef").unwrap();
-        drop(writer);
-        let raw = owned(reader).into_raw_fd();
-        // SAFETY: `raw` is the open read end of the pipe, which this test owns; the two inputs
-        // only borrow it (`in_place` never closes), and it is closed once, by the `OwnedFd`
-        // made of it at the end.
-        let view = || super::InputFile::in_place(unsafe { std::fs::File::from_raw_fd(raw) });
-        let (mut first, mut second) = (view(), view());
-        let mut head = [0u8; 3];
-        first.read_exact(&mut head).unwrap();
-        assert_eq!(&head, b"abc");
-        drop(first);
-        let mut rest = Vec::new();
-        second.read_to_end(&mut rest).unwrap();
-        assert_eq!(rest, b"def");
-        drop(second);
-        // SAFETY: `raw` is still open (neither input closed it) and nothing else owns it.
-        drop(unsafe { OwnedFd::from_raw_fd(raw) });
-    }
-
-    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
-    // input). A regular file has a position; a pipe has none, on Linux because `lseek`
-    // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
-    #[test]
-    fn a_regular_file_has_a_position_and_a_pipe_has_none() {
-        let path = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-input-files-has-stream-position-{}",
-            crate::utils::test_dir::process_id()
-        ));
-        std::fs::write(&path, b">q\nACGT\n").unwrap();
-        let file = std::fs::File::open(&path).unwrap();
-        assert!(has_stream_position(&file));
-        drop(file);
-        std::fs::remove_file(&path).unwrap();
-        // WASI has no pipe to make here.
-        #[cfg(any(unix, windows))]
-        {
-            let (reader, mut writer) = std::io::pipe().unwrap();
-            std::io::Write::write_all(&mut writer, b">q\nACGT\n").unwrap();
-            drop(writer);
-            let pipe = std::fs::File::from(owned(reader));
-            assert!(!has_stream_position(&pipe));
-        }
-        // `NUL` is a character device that is not a console: it has a position, as
-        // `/dev/null` has on Linux (`Stdio::null()` with `-query -` is an empty file).
-        #[cfg(windows)]
-        assert!(has_stream_position(&std::fs::File::open("NUL").unwrap()));
-        #[cfg(unix)]
-        assert!(has_stream_position(
-            &std::fs::File::open("/dev/null").unwrap()
-        ));
-    }
-}
+#[path = "input_files_tests.rs"]
+mod tests;

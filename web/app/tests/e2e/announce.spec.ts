@@ -94,10 +94,11 @@ test('a failed run is told as an alert, with its reason', async ({ page }) => {
   await forget(page);
   await submit(page);
   await waitStatus(page, 1, 'failed');
-  // Both runs write a warning before their error, which the run keeps (line WQA's sweep, D3, 2026-11-19).
+  // Both runs write a warning before their error, which the run keeps (line WQA's sweep, D3, 2026-11-19), and the
+  // output of the command line (outfmt 0: its prolog, or the FakeEngine's marked line; D15, 2026-11-20).
   await expect
     .poll(() => told(page, 'alert'))
-    .toContainEqual(expect.stringMatching(/^Run 1 failed: .+ A failed run keeps no results\. It keeps the warnings written before the error\.$/));
+    .toContainEqual(expect.stringMatching(/^Run 1 failed: .+ It keeps the outputs written before the error\. It keeps the warnings written before the error\.$/));
 });
 
 test('a cancelled run is told; Cancel leaves the focus on the Results heading, and Tab goes on from there', async ({ page }) => {

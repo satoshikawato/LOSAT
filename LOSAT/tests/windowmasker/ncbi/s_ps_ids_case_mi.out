@@ -1,0 +1,371 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 237,
+          to 255,
+          id local str "rec2"
+        },
+        {
+          from 308,
+          to 321,
+          id local str "rec2"
+        },
+        {
+          from 446,
+          to 459,
+          id local str "rec2"
+        },
+        {
+          from 695,
+          to 713,
+          id local str "rec2"
+        },
+        {
+          from 766,
+          to 779,
+          id local str "rec2"
+        },
+        {
+          from 904,
+          to 917,
+          id local str "rec2"
+        },
+        {
+          from 1158,
+          to 1171,
+          id local str "rec2"
+        },
+        {
+          from 1250,
+          to 1263,
+          id local str "rec2"
+        },
+        {
+          from 1341,
+          to 1354,
+          id local str "rec2"
+        },
+        {
+          from 1381,
+          to 1395,
+          id local str "rec2"
+        },
+        {
+          from 1404,
+          to 1420,
+          id local str "rec2"
+        },
+        {
+          from 1426,
+          to 1439,
+          id local str "rec2"
+        },
+        {
+          from 2002,
+          to 2020,
+          id local str "rec2"
+        },
+        {
+          from 2143,
+          to 2172,
+          id local str "rec2"
+        },
+        {
+          from 2196,
+          to 2214,
+          id local str "rec2"
+        },
+        {
+          from 2287,
+          to 2304,
+          id local str "rec2"
+        },
+        {
+          from 2330,
+          to 2343,
+          id local str "rec2"
+        },
+        {
+          from 2400,
+          to 2414,
+          id local str "rec2"
+        },
+        {
+          from 2766,
+          to 2778,
+          id local str "rec2"
+        },
+        {
+          from 2808,
+          to 2828,
+          id local str "rec2"
+        },
+        {
+          from 2944,
+          to 2962,
+          id local str "rec2"
+        }
+      },
+      packed-int {
+        {
+          from 2,
+          to 18,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 41,
+          to 67,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 92,
+          to 106,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 130,
+          to 143,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 360,
+          to 374,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 405,
+          to 420,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1115,
+          to 1135,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1666,
+          to 1687,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2379,
+          to 2394,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2463,
+          to 2477,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2530,
+          to 2547,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2661,
+          to 2677,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2837,
+          to 2853,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3023,
+          to 3035,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3049,
+          to 3064,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3094,
+          to 3109,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3190,
+          to 3207,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3319,
+          to 3332,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3345,
+          to 3358,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3362,
+          to 3377,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 33,
+          to 55,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 74,
+          to 88,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 146,
+          to 163,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 336,
+          to 370,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 384,
+          to 396,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 461,
+          to 479,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 636,
+          to 651,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1342,
+          to 1360,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1722,
+          to 1734,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1849,
+          to 1863,
+          id swissprot {
+            name "abc_human",
+            accession "P12345",
+            release "reviewed"
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

@@ -16,8 +16,9 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - **Query.** `-query` takes a nucleotide FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you.
 - **Subject.** `-subject` takes a nucleotide FASTA file in the same forms. LOSAT compares each query with each record, with no database to build first.
 - **Database.** `-db` searches a nucleotide BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded nucleotide databases. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data` (see [Masks](../databases.md#masks)).
 - **Genetic codes.** `-query_gencode` and `-db_gencode` (both default 1) select the codes that translate the query and the subject. They take the NCBI genetic code numbers 1 to 6, 9 to 16, 21 to 31 and 33. See [Genetic code of the subject](#genetic-code-of-the-subject).
+- **Strand.** `-strand` (`both`, `plus`, `minus`) limits the query's frames to one strand. The subject is always searched in all six frames.
 - **Locations.** `-query_loc START-STOP` searches part of the query, and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are in nucleotides, 1-based and inclusive.
 - **Masking.** SEG is on by default (`12 2.2 2.5`; `-seg no` turns it off). `-lcase_masking` treats lower-case letters of the query as masked.
 
@@ -42,6 +43,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-num_threads` | 1 | Number of threads. The output is the same at every thread count |
 | `-query_gencode` | 1 | Genetic code for the query |
 | `-db_gencode` | 1 | Genetic code for the subject |
+| `-strand` | `both` | Query strands to translate |
 | `-max_target_seqs` | 500 | Keep at most this many subject sequences per query |
 | `-max_hsps` | no limit | Keep at most this many alignments per subject |
 | `-qcov_hsp_perc` | 0 (off) | Drop alignments that cover less than this percent of the query frame |
@@ -54,6 +56,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-max_intron_length` | 0 | Only 0 runs: linking with uneven gaps is for blastx and tblastn, and any other value stops with an options error, as in NCBI BLAST+ |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
 
 For every option: `losat tblastx -help`.
@@ -81,21 +84,22 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a reading frame whose first part, from its first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence) is searched over that part alone. NCBI BLAST+ 2.17.0 reads the masked letters of the frame there and can crash or report other alignments, some of them many times. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-subject` and a `-db_gencode` other than 1, LOSAT translates the subject with that code (see [Genetic code of the subject](#genetic-code-of-the-subject)). See [the decision record on genetic codes for local tblastx subjects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - On large genome pairs with the default options, NCBI BLAST+ 2.17.0 turns a cutoff that is out of the range of a double into a word cutoff of 1. In the runs we made (a 1.2 Mb query against a 5.5 Mb genome) it ran out of memory or time and wrote nothing. LOSAT keeps the equal finite cutoff and writes the hits. Where the cutoff stays finite, both give the same bytes. With an extreme `-searchsp` and `-evalue` on small inputs, NCBI BLAST+ reports more rows than LOSAT. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - In format 0, a subject title that consists only of punctuation is written; NCBI BLAST+ crashes on it. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With so many very short queries in one batch that its average translated length is 0, against one subject sequence, NCBI BLAST+ 2.17.0 crashes; LOSAT writes the linked hits. See [`tblastx` with very many short queries against one subject](../differences.md#tblastx-with-very-many-short-queries-against-one-subject) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 
 LOSAT stops with an error for these `tblastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-strand` and `-subject_besthit`.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation.
-- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-db_soft_mask` and `-db_hard_mask`.
+- `-html`, `-remote`, `-entrez_query` and `-gilist`.
+- `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
 
 ## Examples
 

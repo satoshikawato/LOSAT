@@ -9,7 +9,6 @@ const record = (index: number, id: string): DatasetRecord => ({
   sequence_offset: index * 10 + 3,
   end_offset: index * 10 + 10,
   length: 6,
-  line_layout: { kind: 'uniform', width: 6, eol: 1 },
   residue_counts: { A: 6 },
   sha256: `hash-${id}`,
 });

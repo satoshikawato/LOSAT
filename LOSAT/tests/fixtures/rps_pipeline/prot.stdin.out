@@ -1,0 +1,55 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	stdin
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	rps_cdd	BLOSUM62	10
+QUERY	Query_1	Peptide	60	allx a query of X only
+ENDQUERY
+QUERY	Query_2	Peptide	398	oj_tk TK-TMK with an O at 30 and a J at 60
+DOMAINS
+1	Query_2	Specific	177038	1	190	3.09392e-111	312.471	CHL00113	rps4	-	-
+1	Query_2	Non-specific	439874	216	244	0.300586	18.9251	COG0104	PurA	NC	-
+1	Query_2	Non-specific	439874	355	365	7.37803	14.6879	COG0104	PurA	NC	-
+1	Query_2	Non-specific	440288	180	189	8.81704	14.338	COG0522	RpsD	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_3	Peptide	240	rr_part ribonucleotide reductase residues 281-520
+DOMAINS
+1	Query_3	Non-specific	439874	21	200	2.63017e-127	346.345	COG0104	PurA	C	-
+1	Query_3	Non-specific	177038	200	228	0.450759	17.7932	CHL00113	rps4	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

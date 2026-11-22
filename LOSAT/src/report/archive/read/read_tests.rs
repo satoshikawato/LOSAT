@@ -82,7 +82,7 @@ fn exception(stop: Stop) -> (&'static str, u32, &'static str, String) {
             e.site().file,
             e.site().line,
             e.kind(),
-            e.get_msg().to_string(),
+            String::from_utf8_lossy(e.get_msg()).into_owned(),
         ),
         other => panic!("not an exception: {other:?}"),
     }
@@ -1193,4 +1193,19 @@ fn an_alignment_row_has_the_id_of_its_segments() {
             "CSeq_align::GetSeq_id() currently does not handle this type of alignment.".to_string()
         ))
     );
+}
+
+/// A strategy's request needs no `ident` (`CImportStrategy` never asks for it); an error
+/// archive's request is no search there (`No body in CBlast4_request`).
+#[test]
+fn a_strategy_request_needs_no_ident() {
+    let text = "Blast4-request ::= { body queue-search { program \"blastn\", service \"plain\", \
+                queries seq-loc-list { whole local str \"q\" }, subject database \"db\" } }";
+    let request = Request::from_strategy(value(named::BLAST4_REQUEST, text)).unwrap();
+    assert_eq!(&request.program[..], &b"blastn"[..]);
+    let error = "Blast4-request ::= { body get-request-info { request-id \"Error\" } }";
+    match Request::from_strategy(value(named::BLAST4_REQUEST, error)) {
+        Err(e) => assert_eq!(e.get_msg(), b"No body in CBlast4_request"),
+        other => panic!("{other:?}"),
+    }
 }

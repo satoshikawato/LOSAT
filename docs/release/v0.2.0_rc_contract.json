@@ -350,7 +350,8 @@
       "megablast",
       "blastn",
       "dc-megablast",
-      "blastn-short"
+      "blastn-short",
+      "rmblastn"
     ],
     "blastp_tasks": [
       "blastp",
@@ -368,9 +369,7 @@
     "tblastx_tasks": [
       "tblastx"
     ],
-    "rejected_tasks": [
-      "rmblastn"
-    ]
+    "rejected_tasks": []
   },
   "smoke": [
     {

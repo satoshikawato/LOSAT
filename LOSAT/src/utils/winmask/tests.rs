@@ -9,7 +9,7 @@
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use super::istat::{discover, hash_code, reverse_complement};
+use super::istat::{discover, extract_uints, hash_code, reverse_complement};
 use super::*;
 
 fn fixture_dir() -> PathBuf {
@@ -65,15 +65,6 @@ fn params_from_flags(flags: &str) -> MaskerParams {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:40-54
-/// ```c
-///     PrintId( bsh, parsed_id );
-///     os << endl;
-///     PrintMasks(os, mask);
-/// ...
-///     ITERATE(TMaskList, i, mask) {
-///         os << i->first << " - " << i->second << "\n";
-///     }
-/// ```
 fn interval_text(records: &[(String, Vec<u8>)], masker: &SeqMasker) -> String {
     let mut out = String::new();
     for (title, seq) in records {
@@ -615,29 +606,40 @@ fn a_binary_data_part_of_minus_8_bytes_reads_the_trailer_after_the_header() {
 }
 
 #[test]
-fn binary_lookup_probes_as_libstdcxx_lower_bound() {
-    // Units out of order: AC (1), AT (3), CC (5) stored as 5, 1, 3. The halving loop finds
-    // AT, misses AC and CC.
+fn binary_lookup_of_units_out_of_order_is_ncbis() {
+    // A binary file's units are not checked for order: `get_info` finds what NCBI's
+    // `lower_bound` finds (`utils::lower_bound`), here 50 but neither 40, 60 nor 0. Units of 4
+    // letters, each smaller than its reverse complement.
     let w = |x: u32| x.to_ne_bytes().to_vec();
-    let file = [
-        w(0),
-        w(2),
-        w(5),
-        w(10),
-        w(1),
-        w(20),
-        w(3),
-        w(30),
-        w(1),
-        w(2),
-        w(3),
-        w(4),
-    ]
-    .concat();
-    let counts = read_counts(file).unwrap();
-    assert_eq!(counts.true_count(3).unwrap(), 30);
-    assert_eq!(counts.true_count(1).unwrap(), 0);
-    assert_eq!(counts.true_count(5).unwrap(), 0);
+    let mut file = vec![w(0), w(4)];
+    for (unit, count) in [(40, 1), (60, 2), (0, 3), (50, 4)] {
+        file.push(w(unit));
+        file.push(w(count));
+    }
+    file.extend([w(1), w(2), w(3), w(4)]);
+    let counts = read_counts(file.concat()).unwrap();
+    for unit in [40, 60, 0, 50] {
+        assert!(unit < reverse_complement(unit, 4));
+    }
+    let found: Vec<u32> = [40, 60, 0, 50]
+        .iter()
+        .map(|&unit| counts.true_count(unit).unwrap())
+        .collect();
+    assert_eq!(found, [0, 0, 0, 4]);
+    // Units 0, 0, 1, 2, 0 (observed with `observe_lower_bound one`): unit 1 finds the count at
+    // index 2 and unit 2 finds no entry, where `slice::partition_point` would find index 3.
+    let mut file = vec![w(0), w(4)];
+    for (unit, count) in [(0, 1), (0, 2), (1, 3), (2, 4), (0, 5)] {
+        file.push(w(unit));
+        file.push(w(count));
+    }
+    file.extend([w(1), w(2), w(3), w(4)]);
+    let counts = read_counts(file.concat()).unwrap();
+    for unit in [0, 1, 2] {
+        assert!(unit < reverse_complement(unit, 4));
+    }
+    assert_eq!(counts.true_count(1).unwrap(), 3);
+    assert_eq!(counts.true_count(2).unwrap(), 0);
 }
 
 #[test]
@@ -683,9 +685,12 @@ fn a_bare_pct_line_is_the_factorys_substr_error() {
 
 /// The report of an error as blastn prints it: the reader's exception, then the factory's rethrow.
 fn reader_report(error: &WinMaskError) -> String {
-    error
-        .create_report()
-        .unwrap_or_else(|| panic!("no report: {error}"))
+    String::from_utf8(
+        error
+            .create_report()
+            .unwrap_or_else(|| panic!("no report: {error}")),
+    )
+    .unwrap()
 }
 
 /// NCBI's report in LOSAT's words (`crate::wording::losat_text`).
@@ -919,24 +924,6 @@ fn the_optimized_ascii_reader_reads_as_ncbis() {
 }
 
 #[test]
-fn hash_parameters_are_read_as_libstdcxx_reads_unsigned_ints() {
-    use super::istat::extract_uints;
-    let read = |line: &[u8]| extract_uints::<4>(line);
-    assert_eq!(read(b"3694 17 0 2"), ([3694, 17, 0, 2], 4));
-    assert_eq!(read(b"\t3694\x0b17 0 2 99 x"), ([3694, 17, 0, 2], 4));
-    assert_eq!(read(b"+1 -1 -4294967295 2x"), ([1, u32::MAX, 1, 2], 4));
-    // A failure sets 0 (no digit) or UINT_MAX (overflow); nothing is read after it.
-    assert_eq!(read(b"1 x 3 4"), ([1, 0, 0, 0], 2));
-    assert_eq!(read(b"1 4294967296 3 4"), ([1, u32::MAX, 0, 0], 2));
-    assert_eq!(read(b"1 - 3 4"), ([1, 0, 0, 0], 2));
-    // Nothing is read after the end of the line.
-    assert_eq!(read(b"1 2"), ([1, 2, 0, 0], 2));
-    assert_eq!(read(b"1 2\r"), ([1, 2, 0, 0], 2));
-    assert_eq!(read(b""), ([0; 4], 0));
-    assert_eq!(read(b" "), ([0; 4], 0));
-}
-
-#[test]
 fn the_masker_checks_the_unit_size_of_an_ascii_file() {
     let counts = |unit: &str| {
         Arc::new(
@@ -1009,4 +996,81 @@ fn the_version_of_binary_metadata_is_read_from_its_bytes() {
         "{error}"
     );
     assert!(with(b"\xff\xffwindowmasker-statistics-algorithm-version:1.0.0").is_ok());
+}
+
+/// The unescaped text of a `tests/fixtures/winmask_uints/oascii_hash_line.tsv` line: `\t \n \r \v \f \0 \\` and `\xHH`.
+fn unescape_line(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'\\' {
+            out.push(bytes[at]);
+            at += 1;
+            continue;
+        }
+        let escaped = bytes[at + 1];
+        at += 2;
+        out.push(match escaped {
+            b't' => b'\t',
+            b'r' => b'\r',
+            b'n' => b'\n',
+            b'v' => 0x0b,
+            b'f' => 0x0c,
+            b'0' => 0,
+            b'\\' => b'\\',
+            b'x' => {
+                at += 2;
+                u8::from_str_radix(&text[at - 2..at], 16).unwrap()
+            }
+            other => panic!("no escape \\{}", other as char),
+        });
+    }
+    out
+}
+
+/// The hash parameters are read as NCBI's `istringstream >> M >> k >> roff >> bc` reads them: every
+/// line of the table observed with NCBI 2.17.0's C++ library gives the same values and the same
+/// number of stored ones (for four values, and for each prefix of them).
+#[test]
+fn hash_parameters_are_read_as_cxx_stream_reads_unsigned_ints() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/winmask_uints/oascii_hash_line.tsv");
+    let table = std::fs::read_to_string(&path).unwrap();
+    let mut rows = 0;
+    for row in table.lines().filter(|row| !row.starts_with('#')) {
+        let cols: Vec<&str> = row.split('\t').collect();
+        assert_eq!(cols.len(), 6, "{row:?}");
+        let line = unescape_line(cols[0]);
+        // The stored values are a prefix of the four; the rest were left unchanged (`-`).
+        let stored: Vec<Option<u32>> = cols[1..5]
+            .iter()
+            .map(|col| (*col != "-").then(|| col.parse().unwrap()))
+            .collect();
+        let count = stored.iter().take_while(|value| value.is_some()).count();
+        assert!(stored[count..].iter().all(Option::is_none), "{row:?}");
+        let want: Vec<u32> = stored.iter().map(|value| value.unwrap_or(0)).collect();
+        assert_eq!(
+            extract_uints::<4>(&line),
+            ([want[0], want[1], want[2], want[3]], count),
+            "{row:?}"
+        );
+        assert_eq!(
+            extract_uints::<3>(&line),
+            ([want[0], want[1], want[2]], count.min(3)),
+            "{row:?}"
+        );
+        assert_eq!(
+            extract_uints::<2>(&line),
+            ([want[0], want[1]], count.min(2)),
+            "{row:?}"
+        );
+        assert_eq!(
+            extract_uints::<1>(&line),
+            ([want[0]], count.min(1)),
+            "{row:?}"
+        );
+        rows += 1;
+    }
+    assert!(rows > 3000, "{rows} rows");
 }

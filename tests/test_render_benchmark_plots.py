@@ -21,7 +21,7 @@ assert SPEC and SPEC.loader
 RENDERER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RENDERER)
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
 # defines the default tabular alignment fields and identifies `length` and
 # `pident`; the fixture below exercises LOSAT's normalized representation only.
 ALIGNMENT_HEADER = [
@@ -191,10 +191,7 @@ class RendererTests(unittest.TestCase):
                         ]
                         + [""] * 14
                     )
-            # NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-194
-            # CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
-            # lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-            # results = lcl_blast.Run();
+            # NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:191-194
             for mode_index, (mode, implementation, threads, effective) in enumerate(
                 (
                     ("ncbi_n1", "NCBI BLAST+", "1", "requested/configured 1"),
@@ -260,8 +257,7 @@ class RendererTests(unittest.TestCase):
         ):
             self.assertEqual(sha256(first / filename), sha256(second / filename))
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:111-113
-    # SFormatSpec("length", "Alignment length", eAlignmentLength),
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:111-113
     # Canonicalize derived coordinates only, preserving recorded lengths/weights.
     def test_derived_edge_neighboring_floats_serialize_identically(self) -> None:
         value = 532580.1009576048  # First differing edge in PR #105's push run.
@@ -359,11 +355,7 @@ class RendererTests(unittest.TestCase):
             [1.3, 2.3, 3.3, 4.3, 5.3, 6.3],
         )
 
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
-    # static const char kProgram[] = "blastn";
-    # static const char kDefaultTask[] = "megablast";
-    # SetTask(kDefaultTask);
-    # arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
     # Validate presentation of the recorded task identities and samples only.
     def test_current_snapshot_has_independent_linear_facets_and_all_modes(self) -> None:
         snapshot = ROOT / "benchmarks" / "v0.1.0"

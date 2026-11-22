@@ -3,22 +3,6 @@
 //! their residues on the query's plus strand, and the motifs as ranges of bases.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1266-1280
-//! ```c++
-//! 	else	//na
-//! 	{
-//! 		(*m_ostream) << QUERY_TYPE_NUCLEOTIDE << DELIMIT << q.m_uiSeqLen << DELIMIT << q.m_strTitle << endl;
-//!
-//! 		vector<TDomSeqAlignIndex::__TCdAlignRecord> dimDomAligns[READINGFRAME::TOTAL_RFS], dimFeatVecs[READINGFRAME::TOTAL_RFS];
-//!
-//! 		bool bHasFeats = false, bHasRegFeats = false;
-//!
-//! 		for (READINGFRAME::TFRAMEINDEX rfidx = 0; rfidx < READINGFRAME::TOTAL_RFS; ++rfidx)
-//! 		{
-//! 			q.m_dimSplitAligns[rfidx].CreateRecordSets(q.m_vecAlignments, m_dom_cluster_src, dimDomAligns[rfidx], dimFeatVecs[rfidx], m_dmode);
-//! 			bHasFeats = bHasFeats || !dimFeatVecs[rfidx].empty();
-//! 			bHasRegFeats = (bHasRegFeats || !(dimFeatVecs[rfidx].empty() || dimFeatVecs[rfidx][0].pCdInfo->m_bIsStructDom));
-//! 		}
-//! ```
 
 use std::collections::BTreeMap;
 
@@ -40,88 +24,6 @@ use super::{
 /// The DOMAINS and SUPERFAMILIES parts of a nucleotide query (`-t doms` and `both`), then its
 /// SITES and MOTIFS parts (`-t feats` and `both`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1281-1362
-// ```c++
-// 		if (TTargetData::e_feats != m_tdata)
-// 		{
-// 			map<int, TDomSeqAlignIndex::__TCdAlignRecord > dimDomFams[READINGFRAME::TOTAL_RFS];
-//
-// 			(*m_ostream) << DOMSTART << endl;
-// 			for (READINGFRAME::TFRAMEINDEX rfidx = 0; rfidx < READINGFRAME::TOTAL_RFS; ++rfidx)
-// 			{
-// 				READINGFRAME::TFRAMEID rf = READINGFRAME::RF_IDS[rfidx];
-// 				if (!dimDomAligns[rfidx].empty())
-// 				{
-// 					if (TDataModes::e_rep == m_dmode)
-// 					{
-// 						for (vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterRec = dimDomAligns[rfidx].begin(), iterRecEnd = dimDomAligns[rfidx].end(); iterRecEnd != iterRec; ++iterRec)
-// 						{
-// 							if (NULL == iterRec->pCdInfo) continue;
-// 							(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << '[' << rf << ']' << DELIMIT;
-// 							if (1 == iterRec->pAlign->m_iRepClass)	//multi
-// 								PrintDomLine(HITTYPE_MULTIDOM, *iterRec);
-// 							else if (iterRec->pAlign->m_bSpecQualified)
-// 							{
-// 								PrintDomLine(HITTYPE_SPECIFIC, *iterRec);
-// 								if (NULL != iterRec->pClst)
-// 								{
-// 									int key = iterRec->pAlign->m_iRegionIdx * OVERLAPLEADING + iterRec->pCdInfo->m_uiClusterPssmId;
-// 									//if (dimDomFams[rfidx].end() == dimDomFams[rfidx].find(key))
-// 									dimDomFams[rfidx].emplace(key, *iterRec);
-// 								}
-// 							}
-// 							else if (NULL != iterRec->pClst)
-// 								PrintClstLine(*iterRec);
-// 							else	//not qualified for specific, but no cluster -- non-specific
-// 								PrintDomLine(HITTYPE_NONSPECIFIC, *iterRec);
-// 							(*m_ostream) << endl;
-// 						}	//dom loops end
-// 					}	//rep mode
-// 					else	//nonrep mode
-// 					{
-// 						for (...)
-// 						{
-// 							if (NULL == iterRec->pCdInfo) continue;
-// 							(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << '[' << rf << ']' << DELIMIT;
-// 							if (1 == iterRec->pAlign->m_iRepClass)	//multi
-// 								PrintDomLine(HITTYPE_MULTIDOM, *iterRec);
-// 							else if (iterRec->pAlign->m_bRep && iterRec->pAlign->m_bSpecQualified)
-// 								PrintDomLine(HITTYPE_SPECIFIC, *iterRec);
-// 							else
-// 								PrintDomLine(HITTYPE_NONSPECIFIC, *iterRec);
-//
-// 							if (NULL != iterRec->pClst)
-// 							{
-// 								int key = iterRec->pAlign->m_iRegionIdx * OVERLAPLEADING + iterRec->pCdInfo->m_uiClusterPssmId;
-// 								//if (dimDomFams[rfidx].end() == dimDomFams[rfidx].find(key))
-// 								dimDomFams[rfidx].emplace(key, *iterRec);
-// 							}
-//
-// 							(*m_ostream) << endl;
-// 						}
-// 					}
-// 				}
-// 			}
-// 			(*m_ostream) << DOMEND << endl;
-//
-// 			if (m_show_clusters)	//user want to see all superfams
-// 			{
-// 				(*m_ostream) << FAMSTART << endl;
-// 				for (READINGFRAME::TFRAMEINDEX rfidx = 0; rfidx < READINGFRAME::TOTAL_RFS; ++rfidx)
-// 				{
-// 					//int rf = READINGFRAME::RF_IDS[rfidx];
-//
-// 					for (const auto & v : dimDomFams[rfidx])
-// 					{
-// 						(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT;
-// 						PrintClstLine(v.second);
-// 						(*m_ostream) << endl;
-// 					}
-//
-// 				}
-// 				(*m_ostream) << FAMEND << endl;
-// 			}
-// 		}
-// ```
 // Unlike a protein query's, the DOMAINS part (and SUPERFAMILIES with `-f`) is printed when no
 // frame has a hit. The key of a superfamily is the `unsigned int` product of the region and
 // `OVERLAPLEADING` (the cluster's PSSM-ID is 0, see `print_dom_query`) converted to `int`: the
@@ -210,104 +112,8 @@ enum Source {
 }
 
 /// The SITES and MOTIFS parts of a nucleotide query.
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1364-1394
-// ```c++
-// 		if (TTargetData::e_doms != m_tdata)
-// 		{
-//
-// 			if (bHasFeats)
-// 			{
-//
-// 				const _TOfflDomQuery * p_ofl_q = dynamic_cast< const _TOfflDomQuery * > (&q);
-// 				string __dimTranslated[READINGFRAME::TOTAL_RFS];
-//
-// 				const string *dimTranslated = __dimTranslated;
-// 				if (nullptr == p_ofl_q)	//not _TOfflDomQuery
-// 				{
-// 					TranslateAll(q.m_strSeqData, q.m_iGenCode, __dimTranslated);
-// 				}
-// 				else
-// 					dimTranslated = p_ofl_q->m_dimTranslated;
-// 				...
-// 				vector<TDomSeqAlignIndex::__MotifType_base> dimMotifTypes[READINGFRAME::TOTAL_RFS];
-// 				...
-// 				bool bHasMotifs = false;
-//
-// 				if (bHasRegFeats)
-// 					(*m_ostream) << FEATSTART << endl;
-//
-// 				int iNegRF = READINGFRAME::TOTAL_RFS / 2;
-// 				for (READINGFRAME::TFRAMEINDEX rfidx = 0; rfidx < iNegRF; ++rfidx)	//plus strand reading frames
-// 				{
-//
-// 					READINGFRAME::TFRAMEID rf = READINGFRAME::Idx2Id(rfidx);
-//
-// 					vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterFeatAlign = dimFeatVecs[rfidx].begin(), iterFeatAlignEnd = dimFeatVecs[rfidx].end();
-// 					...
-// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
-// 					{
-// 						if (iterFeatAlign->pCdInfo->m_bIsStructDom)
-// 						{
-// 							...
-// 							break;
-// 						}
-//
-// 						bool bIsSpecific = iterFeatAlign->pAlign->m_bRep && iterFeatAlign->pAlign->m_bSpecQualified;
-// 						const char * pType = ANNOTTYPE_SPECIFIC;
-// 						const list <TDomSite> * pFeats = &(iterFeatAlign->pCdInfo->m_lstSpecificFeatures);;
-// 						unsigned int uiSrcPssmId = iterFeatAlign->pAlign->m_uiPssmId;
-//
-// 						if (!bIsSpecific && NULL != iterFeatAlign->pRootCdInfo)
-// 						{
-// 							pType = ANNOTTYPE_GENERIC;
-// 							pFeats = &(iterFeatAlign->pCdInfo->m_lstGenericFeatures);
-// 							uiSrcPssmId = iterFeatAlign->pCdInfo->m_uiHierarchyRoot;
-// 						}
-//
-// 						for (list<TDomSite> :: const_iterator iterFeat = pFeats->begin(); iterFeat != pFeats->end(); ++iterFeat)
-// 						{
-// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
-// 							{
-// 								dimMotifTypes[rfidx].emplace_back(iterFeat, iterFeatAlign, bIsSpecific, uiSrcPssmId);
-// 								bHasMotifs = true;
-// 								continue;
-// 							}
-// 							...
-// 					// -- non-motif from sd domains
-// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
-// 					{
-// 						...
-// 						for (list<TDomSite> :: const_iterator iterFeat = iterFeatAlign->pCdInfo->m_lstSpecificFeatures.begin(); iterFeat != iterFeatAlign->pCdInfo->m_lstSpecificFeatures.end(); ++iterFeat)
-// 						{
-// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
-// 							{
-// 								dimMotifTypes[rfidx].emplace_back(iterFeat, iterFeatAlign, true, 0);
-// 								bHasMotifs = true;
-// 								continue;
-// 							}
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1364-1525
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1573-1594,1700-1706
-// ```c++
-// 				for (READINGFRAME::TFRAMEINDEX rfidx = iNegRF; rfidx < READINGFRAME::TOTAL_RFS; ++rfidx)	//minus strand reading frames
-// 				{
-// 					READINGFRAME::TFRAMEID rf = READINGFRAME::Idx2Id(rfidx);
-//
-// 					vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterFeatAlign = dimFeatVecs[rfidx].begin(), iterFeatAlignEnd = dimFeatVecs[rfidx].end();
-// 					//SeqLen_t alnLen = iterFeatAlign->pAlign->m_ReadingFrame >> 2, alnLenAdjust = dimTranslated[rfidx].size() - alnLen;
-//
-// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
-// 					{
-// 						if (iterFeatAlign->pCdInfo->m_bIsStructDom)
-// 						{
-// 							...
-// 							break;
-// 						}
-// 						... (as the plus strand's)
-// 				}	//negative strand reading frames
-//
-// 				if (bHasRegFeats)
-// 					(*m_ostream) << FEATEND << endl;
-// ```
 // The SITES header and footer depend on a regular (not structural) first record in some frame;
 // the structural domains' sites of a frame are printed between them, or without them when no
 // frame starts with a regular record. The translations are made only when some frame has a
@@ -333,18 +139,6 @@ fn print_features(
             .is_some_and(|record| !data.domains[record.domain].is_struct_dom)
     });
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1370-1379
-    // ```c++
-    // 				const _TOfflDomQuery * p_ofl_q = dynamic_cast< const _TOfflDomQuery * > (&q);
-    // 				string __dimTranslated[READINGFRAME::TOTAL_RFS];
-    //
-    // 				const string *dimTranslated = __dimTranslated;
-    // 				if (nullptr == p_ofl_q)	//not _TOfflDomQuery
-    // 				{
-    // 					TranslateAll(q.m_strSeqData, q.m_iGenCode, __dimTranslated);
-    // 				}
-    // 				else
-    // 					dimTranslated = p_ofl_q->m_dimTranslated;
-    // ```
     // (A query of the XML input is a `_TOfflDomQuery`: its frames' residues are those that its
     // alignments wrote, `offline::OfflineQuery`.)
     let translated;
@@ -452,9 +246,6 @@ fn print_features(
 /// `TranslateAll` of a query whose hits have sites or motifs, or the refusal where NCBI's
 /// `TranslateAll` erases from an empty string (`frames::translate_all`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1376
-// ```c++
-// 					TranslateAll(q.m_strSeqData, q.m_iGenCode, __dimTranslated);
-// ```
 fn translations(residues: &[u8]) -> Result<[Vec<u8>; 6], PrintError> {
     translate_all(residues).ok_or_else(|| {
         PrintError::Unsupported(
@@ -478,56 +269,8 @@ struct Frame<'a> {
 /// One site line of a nucleotide query: the residues of the frame's translation with the
 /// plus-strand codon of each (`L33-35`; descending on the minus strand, `L35-33`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1435-1459
-// ```c++
-// 							CSegSet featsegs(*iterFeat);
-// 							iterFeatAlign->pAlign->MapSegSet(featsegs, false);
-//
-// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterFeat->GetCompleteSize() > 0.8))
-// 							{
-// 								vector<TSeg_base::TResiduePos> vecMappedPos;
-// 								iterFeatAlign->pAlign->GetTranslatedPosMap(featsegs, q.m_uiSeqLen, vecMappedPos);
-//
-// 								if (iterFeat->MotifCheck(vecMappedPos, dimTranslated[rfidx]) > 0) continue;	//failed motif check
-//
-// 								(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << '[' << rf << ']' << DELIMIT << pType << DELIMIT << iterFeat->m_strTitle << DELIMIT;
-//
-// 								size_t mapped = 0;
-// 								char dimDelimit[2] = {0, 0};
-//
-//
-// 								for (vector<TSeg_base::TResiduePos> :: const_iterator iterRP = vecMappedPos.begin(), iterEnd = vecMappedPos.end(); iterEnd != iterRP; ++iterRP)
-// 								{
-// 									SeqPos_t xres = READINGFRAME::PlusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
-// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres + codonEnd + COORDSBASE);
-// 									dimDelimit[0] = COORDELIMIT;
-// 								}
-// ```
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1484-1496
-// ```c++
-// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT;
-// 								if (uiSrcPssmId < INVALIDPSSMID)
-// 									(*m_ostream) << uiSrcPssmId;
-// 								else
-// 								{
-// 									const TDomain *pSrcDom = m_dom_cluster_src.FindCdInfo(uiSrcPssmId);
-// 									if (nullptr != pSrcDom)
-// 										(*m_ostream) << pSrcDom->m_strAccession;
-// 									else
-// 										(*m_ostream) << uiSrcPssmId;
-// 								}
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1478-1496
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1628-1652
-// ```c++
-// 								for (vector<TSeg_base::TResiduePos> :: const_iterator iterRP = vecMappedPos.begin(), iterEnd = vecMappedPos.end(); iterEnd != iterRP; ++iterRP)
-// 								{
-// 									SeqPos_t xres = READINGFRAME::MinusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
-//
-// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres - codonEnd + COORDSBASE);
-// 									dimDelimit[0] = COORDELIMIT;
-// 								}
-// 								...
-// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT << uiSrcPssmId << endl;
-// ```
 // `mapped` is never counted in this branch (0 in every line). `codonEnd` is a `SeqLen_t`
 // (`unsigned int`), so the second number of a codon is an `unsigned int` (`xres + 2 + 1`,
 // `xres - 2 + 1`, modulo 2^32) while the first is `xres + 1` in `int` (`printed_position`). The
@@ -617,20 +360,12 @@ fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
     }
 }
 
-/// The two numbers of the codon of residue `curr` of the frame's translation (quoted at
+/// The two numbers of the codon of residue `curr` of the frame's translation (cited at
 /// `print_site`): `xres + COORDSBASE` in `int`, `xres + codonEnd + COORDSBASE` (minus strand
 /// `xres - codonEnd + COORDSBASE`) in `unsigned int`. The `int` arithmetic that overflows (`pr -
 /// 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`; undefined) is computed as its
 /// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
-// ```c++
-// 	static constexpr const SeqLen_t codonEnd = READINGFRAME::RF_SIZE - 1;
-// 									SeqPos_t xres = READINGFRAME::PlusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
-// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres + codonEnd + COORDSBASE);
-// 									SeqPos_t xres = READINGFRAME::MinusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
-//
-// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres - codonEnd + COORDSBASE);
-// ```
 fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
     let (xres, last) = if frame.rfidx < RF_SIZE {
         let xres = plus_pr_to_plus_na(curr, frame.rfidx);
@@ -645,54 +380,6 @@ fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
 /// The MOTIFS part of a nucleotide query: each motif as the range of bases of its mapped
 /// residues.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1709-1795
-// ```c++
-// 				if (bHasMotifs)
-// 				{
-// 					(*m_ostream) << MOTIFSTART << endl;
-//
-// 					// -- plus strand
-// 					for (READINGFRAME::TFRAMEINDEX rfidx = 0; rfidx < iNegRF; ++rfidx)
-// 					{
-// 						READINGFRAME::TFRAMEID rf = READINGFRAME::Idx2Id(rfidx);
-// 						for (vector<TDomSeqAlignIndex::__MotifType_base> :: const_iterator iterM = dimMotifTypes[rfidx].begin(), iterMEnd = dimMotifTypes[rfidx].end(); iterMEnd != iterM; ++iterM)
-// 						{
-// 							CSegSet featsegs(*iterM->iterMotifFeat);
-// 							iterM->iterAlignRec->pAlign->MapSegSet(featsegs, false);
-//
-// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterM->iterMotifFeat->GetCompleteSize() > 0.8))
-// 							{
-// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
-// 								(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << '[' << rf << ']' << DELIMIT << iterM->iterMotifFeat->m_strTitle << DELIMIT << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() + codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
-// 								...
-// 							}
-// 						}
-// 						...
-// 					}
-//
-// 					// -- minus strand
-// 					for (READINGFRAME::TFRAMEINDEX rfidx = iNegRF; rfidx < READINGFRAME::TOTAL_RFS; ++rfidx)
-// 					{
-// 						int rf = 2 - rfidx;
-// 						vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterFeatAlign = dimFeatVecs[rfidx].begin(), iterFeatAlignEnd = dimFeatVecs[rfidx].end();
-// 						SeqLen_t alnLen = iterFeatAlign->pAlign->m_ReadingFrame >> 2, alnLenAdjust = dimTranslated[rfidx].size() - alnLen;
-//
-// 						for (vector<TDomSeqAlignIndex::__MotifType_base> :: const_iterator iterM = dimMotifTypes[rfidx].begin(), iterMEnd = dimMotifTypes[rfidx].end(); iterMEnd != iterM; ++iterM)
-// 						{
-// 							CSegSet featsegs(*iterM->iterMotifFeat);
-// 							iterM->iterAlignRec->pAlign->MapSegSet(featsegs, false);
-//
-// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterM->iterMotifFeat->GetCompleteSize() > 0.8))
-// 							{
-// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
-// 								(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << '[' << rf << ']' << DELIMIT << iterM->iterMotifFeat->m_strTitle << DELIMIT << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() - codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
-//
-// 							}
-// 						}
-//
-// 					}
-// 					(*m_ostream) << MOTIFEND << endl;
-// 				}
-// ```
 // No residue letter and no clipping of the structural domains' motifs (unlike a protein
 // query's); the source is the PSSM-ID as it is. The minus-strand loop reads `alnLen` from the
 // first record of a frame that may have none (survey 8.7): unused, so dead (no motif of that
@@ -731,18 +418,12 @@ fn print_motifs(
     Ok(())
 }
 
-/// The two numbers of a motif line of frame `rfidx` (quoted at `print_motifs`):
+/// The two numbers of a motif line of frame `rfidx` (cited at `print_motifs`):
 /// `GetLeft() + COORDSBASE` in `int`, `GetRight() + codonEnd + COORDSBASE` (minus strand
 /// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert` of the set (not empty: `mostly_mapped`).
 /// The `int` arithmetic that overflows (`domains::pr2na_ends`,
 /// and `+ 1` at `INT_MAX`; undefined) is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1746-1747,1788-1789
-// ```c++
-// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
-// 								(*m_ostream) << ... << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() + codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
-// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
-// 								(*m_ostream) << ... << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() - codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
-// ```
 fn motif_ends(featsegs: &SegSet, align: &DomAlign, rfidx: usize) -> (i64, u32) {
     let (left, right) = pr2na_ends(featsegs, align).expect("a mapped motif is not empty");
     let last = if rfidx < 3 {

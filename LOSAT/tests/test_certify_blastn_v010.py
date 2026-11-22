@@ -21,15 +21,7 @@ SPEC.loader.exec_module(certification)
 EXCEPTION_CASE = "Sakai.MG1655.megablast"
 
 
-# NCBI reference: ncbi-blast-2.17.0+-src/c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ```c
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-#     if (iter != m_FieldsToShow.begin())
-#         m_Ostream << m_FieldDelimiter;
-#     x_PrintField(*iter);
-# }
-# m_Ostream << "\n";
-# ```
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 def tabular_row(
     qstart: int,
     *,

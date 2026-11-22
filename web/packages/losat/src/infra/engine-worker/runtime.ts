@@ -13,12 +13,13 @@
 // search only, and the files that a run makes besides its outputs (stream 8: the file of
 // -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
 // never go to the Data worker. Where the run's messages go (stream 10: the diagnostics, the file of
-// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20). The
-// warnings of a run (stream 3) go to the Data worker; a run that the engine failed ends its output
-// with `fail`, so that the Data worker keeps those of a failed run (line WQA's sweep, D3,
-// 2026-11-19).
+// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20), and so does
+// the text that a run prints in place of a search (stream 11: the command line's help or version), which
+// registers no input (line WQA's D14, 2026-11-20). The warnings of a run (stream 3) go to the Data worker;
+// a run that the engine failed ends its output with `fail`, so that the Data worker keeps those of a failed
+// run (line WQA's sweep, D3, 2026-11-19).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
@@ -32,6 +33,7 @@ import {
   loadFile,
   MESSAGES_STREAM,
   messagesSignal,
+  PRINTED_STREAM,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
@@ -69,6 +71,8 @@ export interface RuntimeOptions {
 
 interface Retained {
   readonly key: string;
+  /** Whether the engine read the subject with NCBI's data loaders on (a run with them on takes no subject read with them off). */
+  readonly dataLoaders: boolean;
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
@@ -207,29 +211,39 @@ export class EngineRuntime {
       }
     };
     try {
-      const invalid = abi.validate(argv);
-      if (invalid !== undefined) throw new EngineCallError(invalid);
+      const validation = abi.validate(argv);
+      if (!validation.ok) throw new EngineCallError(validation.message);
+      // The inputs are read with the data loaders of the argv's registry, as the CLI reads them (line WQA's D16, 2026-11-20).
+      const { dataLoaders } = validation;
       const started = abi.start(argv);
       if (!started.ok) throw new EngineCallError(started.message);
 
+      // A run that prints the command line's help or version in place of a search reads no input, as the command line
+      // reads no file for it (ABI v2 §4): nothing is registered, and the run takes the handles 0 (line WQA's D14).
+      const prints = started.start.prints !== null;
       // -parse_deflines (line WQA's sweep, D7, 2026-11-19): the CLI reads the subjects and then the
       // query of this argv in one scope of IDs, so the engine reads both inputs together for it, and
       // the two handles are this search's alone. The retained subject, read without the IDs, is
       // released first: the instance does not hold two copies of the subject.
       let together: RegisteredInputs | undefined;
-      if (started.start.registerInputs) {
+      if (!prints && started.start.registerInputs) {
         this.releaseRetained(loaded);
         together = abi.registerInputs(argv, request.query.bytes, request.subject.bytes);
         ownSubject = together.subject.handle;
       }
-      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
-      query = registered.handle;
-      const queryMismatch = recordMismatch(request.query.records, registered.records);
-      if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-      const subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
-      const subject = together?.subject ?? this.subject(loaded, request);
-      const subjectMismatch = recordMismatch(request.subject.records, subject.records);
-      if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+      let handles: readonly [number, number] = [0, 0];
+      let subjectRetained = false;
+      if (!prints) {
+        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
+        query = registered.handle;
+        const queryMismatch = recordMismatch(request.query.records, registered.records);
+        if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
+        subjectRetained = together === undefined && this.retains(loaded, request, dataLoaders);
+        const subject = together?.subject ?? this.subject(loaded, request, dataLoaders);
+        const subjectMismatch = recordMismatch(request.subject.records, subject.records);
+        if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+        handles = [registered.handle, subject.handle];
+      }
       const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
@@ -238,12 +252,15 @@ export class EngineRuntime {
       loaded.instance.wasi.clear();
       phase('running');
       // The run's files (stream 8) stay here, apart from the outputs, and so does where its messages go (stream 10).
+      // The text that the run prints in place of a search (stream 11) stays here too.
       const archive: Uint8Array[] = [];
+      const printed: Uint8Array[] = [];
       let messages: MessagePlace | undefined;
       try {
-        abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
+        abi.run(argv, ...handles, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
+          else if (stream === PRINTED_STREAM) printed.push(bytes.slice());
           else if (stream === MESSAGES_STREAM) messages = messagesPlace(bytes);
           else if (stream === DISCARD_STREAM) writer.discard(...discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
@@ -280,6 +297,7 @@ export class EngineRuntime {
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
         ...(runFiles.length === 0 ? {} : { runFiles }),
+        ...(prints ? { printed: joined(printed) } : {}),
       };
     } finally {
       if (abi.stoppedBy === undefined) release();
@@ -398,13 +416,22 @@ export class EngineRuntime {
     return info;
   }
 
-  /** The subject handle: the retained one if its key matches, else a new registration. */
-  private subject(loaded: Loaded, request: WorkerRun): Retained {
+  /**
+   * Whether the instance retains the run's subject: the same key, read with the data loaders on, or
+   * off as the run has them (a subject read with them on is the one that a reader without them reads).
+   */
+  private retains(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): boolean {
+    const retained = loaded.retained;
+    return retained !== undefined && retained.key === request.subject.key && (retained.dataLoaders || !dataLoaders);
+  }
+
+  /** The subject handle: the retained one if it is the run's (`retains`), else a new registration. */
+  private subject(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): Retained {
     const abi = loaded.instance.abi;
-    if (loaded.retained?.key === request.subject.key) return loaded.retained;
+    if (this.retains(loaded, request, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
-    loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
+    const registered = abi.register(request.program, ROLE_SUBJECT, dataLoaders, request.subject.bytes);
+    loaded.retained = { key: request.subject.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 
@@ -469,12 +496,13 @@ function messageOf(error: unknown): string {
 /**
  * The output that the engine's signal of stream 9 names (ABI v2 §5), an output stream of the run
  * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
- * file of -logfile) or nowhere. Another number breaks the ABI.
+ * file of -logfile), nowhere, or the error that ended the run (an output that a failed run does not keep, version 7). Another
+ * number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
-  const { stream, errorStream } = discardSignal(bytes);
+function discardedOutput(bytes: Uint8Array): [RunOutput, OutputPlace] {
+  const { stream, errorStream, ended } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
+  const error: OutputPlace | undefined = ended ? 'run' : errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
   if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
   return [stream, error];
 }
@@ -495,6 +523,17 @@ const PLACES: ReadonlyMap<number, MessagePlace> = new Map([
   [DIAGNOSTICS_STREAM, 'diagnostics'],
   [RUN_FILES_STREAM, 'logfile'],
 ]);
+
+/** The chunks of a stream as one array. */
+function joined(chunks: readonly Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
 
 /** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
 function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {

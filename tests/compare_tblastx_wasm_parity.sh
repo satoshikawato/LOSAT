@@ -19,8 +19,7 @@ SUBJECT="$CRATE_DIR/tests/fasta/LC738875.fasta"
 OUTFMT="6"
 THREADS="1"
 
-# NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-96
-# m_Outfile(ostr);
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-96
 # Distinct Rust/WASI build paths and the shared host preserve this output stream.
 NATIVE_BIN="$CRATE_DIR/target/release/losat"
 WASM_BIN="$CRATE_DIR/target/serial-command/wasm32-wasip1/release/losat.wasm"

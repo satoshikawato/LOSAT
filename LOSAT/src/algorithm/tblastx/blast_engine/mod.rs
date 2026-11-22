@@ -1,6 +1,6 @@
 //! TBLASTX search coordination and execution
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:438-1497
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438-1497
 //!
 //! This module contains the main `run()` function
 //! that coordinate the TBLASTX search process:
@@ -15,18 +15,7 @@
 //! - `mod.rs` - Shared structures and helpers (WorkerState, atomic ops, reevaluation)
 //! - `run_impl.rs` - Main run() function for backbone mode
 
-// NCBI reference (main search loop):
-// ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427
-// ```c
-// /* iterate over all subject sequences */
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    ...
-//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//        continue;
-//    }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1427 (main search loop)
 mod run_impl;
 
 // Re-export the main run function
@@ -49,16 +38,7 @@ pub(crate) use run_impl::ErrorAfterBatchReports;
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use indicatif::ProgressBar;
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-// ```c
-// CMTArgs(...)
-// {
-// #ifdef NCBI_NO_THREADS
-//     m_NumThreads = CThreadable::kMinNumThreads;
-//     m_MTMode = eNotSupported;
-// #endif
-// }
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -70,13 +50,7 @@ pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering a
 pub(crate) use std::sync::mpsc::channel;
 pub(crate) use std::time::Instant;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-// ```c
-// // Sort HSPs with e-values as first priority and scores as
-// // tie-breakers, since that is the order we want to see them in
-// // in Seq-aligns.
-// Blast_HSPListSortByEvalue(hsp_list);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 pub(crate) use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
 pub(crate) use crate::common::Hit;
 pub(crate) use crate::config::ScoringMatrix;
@@ -108,14 +82,7 @@ pub(crate) use super::reevaluate::{
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScore, TbxScore};
 pub(crate) use super::stage_dump;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// if (sum_params->link_hsp_params) {
-//     Blast_HSPListGetEvalues(query_info, hsp_list, score_params, sbp, 0, FALSE);
-//     hsp_list = Blast_HSPListPHIGetEvalues(query_info, hsp_list, score_params, sbp,
-//                                           sum_params->link_hsp_params, FALSE);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
     compute_avg_query_length_ncbi, find_smallest_lambda_params, link_one_hit_with_int4_ends,
@@ -148,26 +115,8 @@ pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
 // Shared structures
 // ---------------------------------------------------------------------------
 
-// NCBI reference: c++/include/algo/blast/core/blast_hits.h:126-148
-// ```c
-// typedef struct BlastHSP {
-//    Int4 score;           /**< This HSP's raw score */
-//    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-//    double bit_score;     /**< Bit score, calculated from score */
-//    double evalue;        /**< This HSP's e-value */
-//    BlastSeg query;       /**< Query sequence info. */
-//    BlastSeg subject;     /**< Subject sequence info. */
-//    Int4     context;     /**< Context number of query */
-//    GapEditScript* gap_info;/**< ALL gapped alignment is here */
-//    Int4 num;             /**< How many HSP's are linked together for sum
-// ```
-// NCBI reference: c++/include/algo/blast/core/blast_hits.h:96-99
-// ```c
-// typedef struct BlastSeg {
-//    Int2 frame;  /**< Translation frame */
-//    Int4 offset; /**< Start of hsp */
-//    Int4 end;    /**< End of hsp */
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-148
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-99
 /// One HSP of the final TBLASTX result: the tabular record, and the parts of NCBI's
 /// `BlastHSP` that the pairwise report adds (the Seq-align of `blast_seqalign.cpp`).
 #[derive(Debug, Clone)]
@@ -179,18 +128,7 @@ pub(crate) struct TblastxHsp {
     pub num: i32,
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:72-100
-// ```c++
-// CBlastAncillaryData::CBlastAncillaryData(EBlastProgramType program_type,
-//                     int query_number,
-//                     const BlastScoreBlk *sbp,
-//                     const BlastQueryInfo *query_info)
-// ...
-//         if (ctx->is_valid) {
-//             m_SearchSpace = ctx->eff_searchsp;
-//     ...
-//         s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-100
 /// What the reports show of one query apart from its HSPs.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TblastxQueryStats {
@@ -213,16 +151,7 @@ pub(crate) struct TblastxQueryStats {
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-195
-// ```c
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//     ...
-//                 CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-195
 /// The result of one query batch. The query indices of `hits` and `queries` are the
 /// queries' positions in the batch. `hits` are in report order (`hit_collector.rs`: each
 /// query's `-max_target_seqs` subjects in NCBI's order), so the batches' hits follow each other
@@ -241,14 +170,7 @@ pub(crate) struct TblastxBatch {
 }
 
 pub(crate) struct WorkerState<S> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    ...
-    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1475
     /// The channel to the writer thread (`hit_collector.rs`), which takes each subject's final
     /// HSPs with the subject's index; `None` when the subject loop keeps the collector itself.
     pub tx: Option<std::sync::mpsc::Sender<(usize, Vec<TblastxHsp>)>>,
@@ -304,7 +226,7 @@ pub(crate) fn atomic_max_i32(dst: &AtomicI32, val: i32) {
 // ---------------------------------------------------------------------------
 
 /// NCBI Blast_HSPListReevaluateUngapped equivalent
-/// Reference: blast_hits.c:2609-2737, blast_engine.c:1492-1497
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2609-2737, c++/src/algo/blast/core/blast_engine.c:1492-1497
 ///
 /// NCBI code flow:
 /// 1. For each HSP in the list
@@ -314,17 +236,7 @@ pub(crate) fn atomic_max_i32(dst: &AtomicI32, val: i32) {
 /// 5. Delete HSPs that fail tests
 /// 6. Sort by score (scores may have changed)
 ///
-/// NCBI reference (verbatim, blast_hits.c:2694-2706):
-/// ```c
-/// context = hsp->context;
-/// query_start = query_blk->sequence + query_info->contexts[context].query_offset;
-/// if (kTranslateSubject)
-///     subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-/// if (kNucleotideSubject) {
-///     delete_hsp = Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
-///         subject_start, word_params, sbp, kTranslateSubject);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2694-2706
 ///
 /// This function performs batch reevaluation on all HSPs in the list,
 /// updating scores and trimming boundaries. HSPs that fail reevaluation
@@ -356,15 +268,12 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         let ctx = &contexts[hit.ctx_idx as usize];
         let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];
         let s_frame_report = &s_frames_report[usize::from(hit.s_f_idx)];
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
-        // ```c
-        // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:686-688
         let cutoff = cutoff_scores[hit.ctx_idx as usize];
 
         // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
         // query->sequence points past the leading NULLB sentinel.
-        // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, c++/src/algo/blast/core/blast_util.c:112-116.
         let query_full = &ctx.aa_seq;
         let query = &query_full[1..query_full.len() - 1];
         let subject_full = &s_frame_scoring.aa_seq;
@@ -379,11 +288,9 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
             continue;
         }
 
-        // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
-        // Reference: blast_hits.c:675-733
-        // NCBI reference (verbatim, blast_hits.c:688):
-        //   Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
-        //   return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score, ...);
+        // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (c++/src/algo/blast/core/blast_hits.c:2702-2705)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:675-733
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:688
         // If score < cutoff_score, the HSP is deleted (s_UpdateReevaluatedHSPUngapped returns FALSE)
         let t0 = if timing_enabled {
             Some(std::time::Instant::now())
@@ -396,7 +303,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
             result
         } else {
             // Deleted by NCBI reevaluation (score < cutoff_score)
-            // NCBI reference: blast_hits.c:730-732 (s_UpdateReevaluatedHSPUngapped returns FALSE)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:730-732 (s_UpdateReevaluatedHSPUngapped returns FALSE)
             if is_long_sequence {
                 *stats_hsp_filtered_by_reeval += 1;
             }
@@ -414,22 +321,15 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         }
 
         // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
-        // Reference: blast_hits.c:2708-2720
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2720
         // NCBI uses sequence_nomask that is also offset past the leading NULLB.
-        // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381-1382, c++/src/algo/blast/core/blast_util.c:112-116.
         let query_nomask_full = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
         let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
         // NCBI uses the HSP's scoring subject for reevaluation above, then
         // recomputes identities from the reporting sequence buffers.
         //
-        // NCBI reference:
-        // ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2717
-        // ```c
-        // const Uint1* query_nomask = query_blk->sequence_nomask +
-        //     query_info->contexts[context].query_offset;
-        // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
-        //     subject_start, hsp, score_params->options, &align_length, sbp);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2717
         //
         // For local `-subject` TBLASTX, NCBI BLAST+ scores the translated
         // subject with the search-time subject buffer, while qseq/sseq and
@@ -451,19 +351,9 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
             continue;
         };
 
-        // NCBI: Blast_HSPTest (blast_hits.c:2719)
-        // NCBI reference (defaults are zero via calloc in BlastHitSavingOptionsNew):
-        // ncbi-blast/c++/src/algo/blast/core/blast_options.c:1444-1449
-        // ```c
-        // *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
-        // ```
-        // NCBI reference (Blast_HSPTest uses percent_identity/min_hit_length):
-        // ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-999
-        // ```c
-        // return ((hsp->num_ident * 100.0 <
-        //         align_length * hit_options->percent_identity) ||
-        //         align_length < hit_options->min_hit_length) ;
-        // ```
+        // NCBI: Blast_HSPTest (c++/src/algo/blast/core/blast_hits.c:2719)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1444-1449 (defaults are zero via calloc in BlastHitSavingOptionsNew)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-999 (Blast_HSPTest uses percent_identity/min_hit_length)
         let percent_identity = 0.0;
         let min_hit_length = 0;
         if crate::core::blast_hits::hsp_test(
@@ -494,20 +384,8 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         kept_hits.push(hit);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
-    // ```c
-    // /* Sort the HSP array by score (scores may have changed!) */
-    // Blast_HSPListSortByScore(hsp_list);
-    // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
-    // ```c
-    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2733-2734
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
     if !ungapped_hits_is_sorted_by_score_ncbi(&kept_hits) {
         sort_ungapped_hits_by_score_ncbi(&mut kept_hits);
     }

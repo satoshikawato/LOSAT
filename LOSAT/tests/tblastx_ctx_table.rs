@@ -6,16 +6,6 @@
 //! made once per batch instead of the binary search over the batch's frame bases.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
-//! ```c
-//!     while (b < e - 1) {
-//! 	m = (b + e) / 2;
-//! 	if (A->contexts[m].query_offset > n)
-//! 	    e = m;
-//! 	else
-//! 	    b = m;
-//!     }
-//!     return b;
-//! ```
 //! The table gives the binary search's index for every offset (the lib test
 //! `the_context_table_gives_the_binary_search_index`), so the property under test is that the
 //! report does not depend on the switch; that reports equal NCBI's is the business of the fixture

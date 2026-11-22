@@ -26,9 +26,9 @@ pub const USAGE: &str = include_str!("usage.txt");
 // query strands (`-strand`) and `-ungapped`, in the order of NCBI's `-help` (the struct is
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
-// statistics 0 to 3 included (the default 1, item PS12b). `-use_sw_tback` with composition-based
-// statistics is refused until item PS12c (`check_options`); `-html`, the remote options and
-// `-import_search_strategy` by the parser (its rows of `ncbi_app::args::refusal`).
+// statistics 0 to 3 included (the default 1, item PS12b), with `-use_sw_tback` NCBI's
+// Smith-Waterman redo of the frames (item PS12c); `-html`, the remote options and
+// `-import_search_strategy` are refused by the parser (their rows of `ncbi_app::args::refusal`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpstblastnArgs {
@@ -122,8 +122,9 @@ pub struct RpstblastnArgs {
     #[arg(long, value_name = "int_value", value_parser = rpsblast_mt_mode)]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
-    /// `-use_sw_tback`: without composition-based statistics NCBI's search does not read it
-    /// (accepted); with them it is refused until item PS12c.
+    /// `-use_sw_tback`: the composition-based redo (modes 1 to 3) is NCBI's Smith-Waterman redo
+    /// of the frames (`RpsSearch::use_sw_tback`); without composition-based statistics it changes
+    /// nothing.
     #[arg(long = "use_sw_tback", default_value_t = false)]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (cited at `USAGE`)
@@ -150,9 +151,8 @@ impl RpstblastnArgs {
     }
 
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after NCBI's reading
-    /// of `-outfmt`, which comes before its option handlers. The refusals of the options that a
-    /// later item runs (`-use_sw_tback` with composition-based statistics) come once per run
-    /// before the first byte, after NCBI's own errors of the options and the database
+    /// of `-outfmt`, which comes before its option handlers. LOSAT's refusals of options come once
+    /// per run before the first byte, after NCBI's own errors of the options and the database
     /// (`TranslatedRpsSearch::check_options`; review A of PS12a, N1).
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
         // NCBI reads `-outfmt` before the option handlers (`rpsblast::args::check_rps_outfmt`);
@@ -169,13 +169,9 @@ impl RpstblastnArgs {
                 x_drop_gapped_bits: self.xdrop_gap,
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
-                // rpstblastn's `-use_sw_tback` with composition-based statistics is refused
-                // (`TranslatedRpsSearch::check_options`); without them NCBI does not read it.
-                use_sw_tback: false,
+                use_sw_tback: self.use_sw_tback,
             },
             ungapped: self.ungapped,
-            use_sw_tback: self.use_sw_tback,
-            comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
             costs: None,
             strategy_db_length: None,

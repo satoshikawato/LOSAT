@@ -256,7 +256,7 @@ pub enum QueryEnd {
     Input,
     /// Blank and comment lines where the reader expected a record (`eEOF`): the batch being read
     /// ends there. An input that has nothing else gives a first batch without a query, NCBI's
-    /// `BLAST engine error: Empty CBlastQueryVector`.
+    /// `Empty CBlastQueryVector` (`LOSAT engine error: Empty CBlastQueryVector`).
     BlankLines,
     /// The reader's error on the record after the records read: the run ends with it in that
     /// record's batch.

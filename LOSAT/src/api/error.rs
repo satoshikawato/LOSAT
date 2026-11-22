@@ -68,7 +68,7 @@ pub enum Error {
     /// A FASTA input: the reader's message (`read_fasta`, `read_inputs`, `read_input_file`)
     /// without its last newlines, and without the `Error: ` before LOSAT's own refusals (a file
     /// named `.gz`, `.bz2` or `.zst` that is not of that format). It may hold a NUL byte where
-    /// NCBI writes one: a subject input that does not start with a defline ends with `BLAST
+    /// NCBI writes one: a subject input that does not start with a defline ends with `LOSAT
     /// query/options error: Query input doesn't start with a defline or comment, line N`, a NUL,
     /// a newline and `Please refer to the LOSAT user manual.` (`read_inputs`).
     Input(Vec<u8>),

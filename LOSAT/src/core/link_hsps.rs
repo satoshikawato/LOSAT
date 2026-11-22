@@ -470,7 +470,7 @@ pub(crate) fn even_gap_link_hsps(
     let mut order: Vec<u64> = hsps
         .iter()
         .enumerate()
-        .map(|(i, h)| (link_group(frame(h), h.subject_frame) as u64) << 32 | i as u64)
+        .map(|(i, h)| ((link_group(frame(h), h.subject_frame) as u64) << 32) | i as u64)
         .collect();
     order.sort_by(|&a, &b| {
         rev_compare_tbn(&hsps[position(a)], group(a), &hsps[position(b)], group(b))

@@ -17,8 +17,8 @@ use crate::blastinput::value_parsers::*;
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
 // searches with mode 0), and with `-use_sw_tback` NCBI's Smith-Waterman redo (PS11c-3); the
-// argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (`cli.rs`
-// `is_unported_rpsblast_arg`).
+// argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (its row of
+// `ncbi_app::args::refusal`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {

@@ -3,10 +3,10 @@
 //! this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that LOSAT
 //! does not provide.
 //!
-//! The page is read at compile time. The lists under test are the ones that
-//! `unknown_option_error` consults (`UNPORTED_*_ARGS`) and
-//! `crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS`. Refusals of a value (`-word_size 4`) or
-//! of an input (a database sequence) are in no list and are not checked here.
+//! The page is read at compile time. The list under test is the one list of the arguments that
+//! LOSAT refuses by name or at the run (`ncbi_app::args::refusals`, the rows of `REFUSED` in
+//! `build/ncbi_args.rs`). Refusals of a value (`-word_size 4`) or of an input (a database
+//! sequence) are in no list and are not checked here.
 //!
 //! How the page is read (kept simple on purpose):
 //! - A line that starts with `## ` opens a section; its heading is the rest of the line. The lines
@@ -144,33 +144,12 @@ fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
 #[test]
 fn every_refused_option_is_in_the_manual_for_its_program() {
     let lines = refusal_lines();
-    let psiblast: Vec<&str> = UNPORTED_PSIBLAST_OWN_ARGS
-        .iter()
-        .chain(UNPORTED_BLASTP_ARGS)
-        .copied()
-        .filter(|name| is_unported_psiblast_arg(name))
-        .collect();
-    let lists: Vec<(&str, Vec<&str>)> = vec![
-        ("blastn", UNPORTED_BLASTN_ARGS.to_vec()),
-        ("blastp", UNPORTED_BLASTP_ARGS.to_vec()),
-        ("blastx", UNPORTED_BLASTX_ARGS.to_vec()),
-        ("tblastn", UNPORTED_TBLASTN_ARGS.to_vec()),
-        ("tblastx", UNPORTED_TBLASTX_ARGS.to_vec()),
-        ("psiblast", psiblast),
-        ("rpsblast", UNPORTED_RPSBLAST_ARGS.to_vec()),
-        (
-            "makeblastdb",
-            crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.to_vec(),
-        ),
-    ];
     let mut missing = Vec::new();
-    for (program, names) in &lists {
-        for name in names {
-            if !documented(&lines, program, name) {
-                missing.push(format!(
-                    "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
-                ));
-            }
+    for (program, name, _) in crate::ncbi_app::args::refusals() {
+        if !documented(&lines, program, name) {
+            missing.push(format!(
+                "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
+            ));
         }
     }
     assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));

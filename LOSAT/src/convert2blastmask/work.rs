@@ -59,7 +59,10 @@ fn file_failure(error: ArgException) -> Failure {
     match file_exception(&error) {
         Some(exception) => Failure::Caught(exception),
         None => Failure::Refused(crate::seqmasks_io::run::unsupported(
-            &format!("the argument error '{}' inside the run", error.message()),
+            &format!(
+                "the argument error '{}' inside the run",
+                error.message_text()
+            ),
             super::PROGRAM,
         )),
     }

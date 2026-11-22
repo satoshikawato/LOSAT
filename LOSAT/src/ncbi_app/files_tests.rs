@@ -226,7 +226,7 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
         open_input_file("in", missing, &mut cin)
             .err()
             .unwrap()
-            .message(),
+            .message_text(),
         "Argument \"in\". File is not accessible:  `no/such/dir/x.fa'"
     );
     let mut stdout = Vec::new();
@@ -238,7 +238,7 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
         open_output_file("out", "/no/such/dir/x.out", &mut stdout)
             .err()
             .unwrap()
-            .message(),
+            .message_text(),
         "Argument \"out\". File is not accessible:  `/no/such/dir/x.out'"
     );
 }

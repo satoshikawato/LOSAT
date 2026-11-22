@@ -28,7 +28,7 @@ pub const USAGE: &str = include_str!("usage.txt");
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
 // statistics 0 to 3 included (the default 1, item PS12b). `-use_sw_tback` with composition-based
 // statistics is refused until item PS12c (`check_options`); `-html`, the remote options and
-// `-import_search_strategy` by the parser (`cli.rs` `is_unported_rpstblastn_arg`).
+// `-import_search_strategy` by the parser (its rows of `ncbi_app::args::refusal`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpstblastnArgs {

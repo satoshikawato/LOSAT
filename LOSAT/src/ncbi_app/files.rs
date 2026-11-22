@@ -15,7 +15,7 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 fn not_accessible(name: &str, value: &str) -> ArgException {
     ArgException::new(
         "eNoFile",
-        arg_message(name, "File is not accessible", value),
+        arg_message(name, "File is not accessible", value.as_bytes()),
     )
 }
 
@@ -260,10 +260,10 @@ pub(crate) fn read_input_file(
         return Ok(Vec::new());
     }
     let mut file =
-        open_input_file(name, value, stdin).map_err(|error| error.message().to_string())?;
+        open_input_file(name, value, stdin).map_err(|error| error.message_text().into_owned())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|_| not_accessible(name, value).message().to_string())?;
+        .map_err(|_| not_accessible(name, value).message_text().into_owned())?;
     Ok(bytes)
 }
 

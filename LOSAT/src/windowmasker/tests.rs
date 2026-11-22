@@ -81,8 +81,7 @@ fn mk_counts_and_convert_are_refused() {
 // integers that a constraint allows.
 #[test]
 fn the_keys_read_as_ncbi_s() {
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     let args = crate::ncbi_app::args::parse(
         &TOOL,
         &words(&[

@@ -4,12 +4,14 @@
 //! `LOSAT/build/ncbi_args.rs`; line RG DECISIONS K4i-1), this module adds those that every
 //! `CArgDescriptions` has (the help flags, `-logfile`, `-conffile`), reads the words, and refuses
 //! every command line that NCBI's reader refuses with NCBI's text: NCBI's conversion of each type
-//! (`Kind`) and NCBI's constraints (`Constraint`). The values are read as NCBI's `CArgs` gives them
-//! (`Args`): the text of a key, a flag, the integer of an `eInteger` key, the number of an
-//! `eDouble` key, and the streams of the file keys (`files::open_input_file`,
-//! `Args::output_file`, module `files`).
+//! (`Kind`) and NCBI's constraints (`Constraint`). NCBI reads the bytes of each word, and so does
+//! this reader (`parse`): an error quotes the bytes of the word, and a value keeps its bytes. The
+//! values are read as NCBI's `CArgs` gives them (`Args`): the text of a key, a flag, the integer of
+//! an `eInteger` key, the number of an `eDouble` key, and the streams of the file keys
+//! (`files::open_input_file`, `Args::output_file`, module `files`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 
 use super::files::{self, OutputFile};
@@ -150,6 +152,8 @@ pub(crate) struct Arguments {
     /// the first argument of the map that requires it; neither depends on where the `eRequires`
     /// entries stand among the others.
     dependencies: Span,
+    /// The arguments that LOSAT refuses (rows of `REFUSALS`): the name and how (`Refusal`).
+    refusals: Span,
 }
 
 impl Arguments {
@@ -169,10 +173,90 @@ impl Arguments {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
         dependencies.map(|&(first, dep, second)| (first.get(), dep, second.get()))
     }
+
+    /// The arguments that LOSAT refuses: (name, how).
+    fn refusals(self) -> impl Iterator<Item = (&'static str, Refusal)> {
+        let refusals = self.refusals.of(&REFUSALS).iter();
+        refusals.map(|&(name, refused)| (name.get(), refused.view()))
+    }
+}
+
+/// A row of `REFUSALS` as the tables hold it (`Refusal`, its texts as spans).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refused {
+    Read(Option<Text>),
+    Run(Text),
+}
+
+impl Refused {
+    fn view(self) -> Refusal {
+        match self {
+            Refused::Read(why) => Refusal::Read(why.map(Text::get)),
+            Refused::Run(what) => Refusal::Run(what.get()),
+        }
+    }
+}
+
+/// How LOSAT refuses one of NCBI's arguments that it does not run (AGENTS.md rule 2: explicit
+/// unsupported errors): the one list of them, the rows of `REFUSED` in `build/ncbi_args.rs` (line
+/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::named_refusal`,
+/// `cli::run_refusal`) and `-xmlhelp` (`cli::xml_help_text`) read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    /// By name, where the reader meets it: why, if the refusal says it after the program's name.
+    Read(Option<&'static str>),
+    /// Where NCBI starts the search, whatever the value (NCBI's reader reads it, so that NCBI's
+    /// own errors about it and the other arguments come first): what the argument is.
+    Run(&'static str),
+}
+
+/// How LOSAT refuses `program`'s argument `name`; `None` for an argument it runs, or one that
+/// `program` does not have.
+pub(crate) fn refusal(program: &str, name: &str) -> Option<Refusal> {
+    let mut refusals = arguments(program)?.refusals();
+    refusals
+        .find(|&(refused, _)| refused == name)
+        .map(|(_, refusal)| refusal)
+}
+
+/// Every argument that LOSAT refuses: (program, name, how).
+#[cfg(test)]
+pub(crate) fn refusals() -> Vec<(&'static str, &'static str, Refusal)> {
+    let programs = PROGRAMS.iter();
+    programs
+        .flat_map(|&(program, arguments)| {
+            let refusals = arguments.refusals();
+            refusals.map(move |(name, refusal)| (program.get(), name, refusal))
+        })
+        .collect()
+}
+
+/// The genetic codes that `program`'s key `name` allows (`CArgAllowGeneticCodeInteger`, with
+/// LOSAT's code 32 where PD-TLOSAN-LOCAL-GENCODE-32 adds it), in increasing order; `None` for a
+/// key of no genetic code. What the library API's and LOSAT Web's descriptions of a program list
+/// (`api::describe`, `web_adapter`).
+pub fn genetic_codes(program: &str, name: &str) -> Option<Vec<u32>> {
+    match find_desc(arguments(program)?, name)?.constraint? {
+        Constraint::GeneticCode { with_32 } => Some(constraint::genetic_codes(with_32)),
+        _ => None,
+    }
+}
+
+/// The values that `program`'s key `name` allows where its constraint is a set of strings
+/// (`CArgAllow_Strings`, `CArgAllowStringSet`), in the order of NCBI's set; `None` for a key of
+/// another constraint or none. LOSAT Web's defaults are resolved for each of `-task`'s
+/// (`web_adapter`).
+pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
+    match find_desc(arguments(program)?, name)?.constraint? {
+        Constraint::Strings(values) | Constraint::StringSet(values) => {
+            Some(constraint::strings(values).collect())
+        }
+        _ => None,
+    }
 }
 
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `PROGRAMS`), written by `LOSAT/build.rs`
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `PROGRAMS`), written by `LOSAT/build.rs`
 // (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
 // arguments of every `CArgDescriptions` before the program's own (the help flags of its
 // constructor), `FILE_ARGUMENTS` those of every application after them
@@ -239,24 +323,31 @@ pub(crate) enum Dep {
 
 /// A `CArgException` with the code name `code` (`eInvalidArg`, ...): `messages` are the
 /// messages of the exceptions it was thrown for (`NCBI_RETHROW`), oldest first, then its own.
+/// A message is bytes: NCBI's quote the bytes of the words, which need not be UTF-8.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ArgException {
     pub(crate) code: &'static str,
-    pub(crate) messages: Vec<String>,
+    pub(crate) messages: Vec<Vec<u8>>,
 }
 
 impl ArgException {
     /// `NCBI_THROW(CArgException, code, message)`.
-    pub(crate) fn new(code: &'static str, message: String) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<Vec<u8>>) -> Self {
         ArgException {
             code,
-            messages: vec![message],
+            messages: vec![message.into()],
         }
     }
 
     /// `GetMsg()`: the message of the exception itself.
-    pub(crate) fn message(&self) -> &str {
-        self.messages.last().map_or("", String::as_str)
+    pub(crate) fn message(&self) -> &[u8] {
+        self.messages.last().map_or(&[], Vec::as_slice)
+    }
+
+    /// The message as text, for a program's own message about the exception (a byte that is not
+    /// UTF-8 replaced).
+    pub(crate) fn message_text(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(self.message())
     }
 }
 
@@ -274,18 +365,22 @@ pub(crate) enum ArgsError {
     Invalid(ArgException),
 }
 
-fn invalid(code: &'static str, message: String) -> ArgsError {
+fn invalid(code: &'static str, message: impl Into<Vec<u8>>) -> ArgsError {
     ArgsError::Invalid(ArgException::new(code, message))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
-pub(crate) fn arg_message(name: &str, what: &str, attr: &str) -> String {
+/// The message of an exception about the argument `name`: what is wrong, and the bytes `attr`
+/// (a value of the command line), if any.
+pub(crate) fn arg_message(name: &str, what: &str, attr: &[u8]) -> Vec<u8> {
     let name = if name.is_empty() { "...." } else { name };
-    if attr.is_empty() {
-        format!("Argument \"{name}\". {what}")
-    } else {
-        format!("Argument \"{name}\". {what}:  `{attr}'")
+    let mut message = format!("Argument \"{name}\". {what}").into_bytes();
+    if !attr.is_empty() {
+        message.extend_from_slice(b":  `");
+        message.extend_from_slice(attr);
+        message.push(b'\'');
     }
+    message
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:207-209, 223-224
@@ -293,16 +388,16 @@ pub(crate) fn arg_message(name: &str, what: &str, attr: &str) -> String {
 fn no_value(name: &str) -> ArgException {
     ArgException::new(
         "eNoValue",
-        arg_message(name, "The argument has no value", ""),
+        arg_message(name, "The argument has no value", b""),
     )
 }
 
 /// The arguments of one command line: those given and the defaults NCBI adds.
 #[derive(Debug)]
 pub(crate) struct Args {
-    /// The value of each argument that has one: the value given (`None` for a flag), else the
-    /// default of a key that no given argument excludes.
-    values: BTreeMap<&'static str, Option<String>>,
+    /// The value of each argument that has one: the value given, its bytes (`None` for a flag),
+    /// else the default of a key that no given argument excludes.
+    values: BTreeMap<&'static str, Option<OsString>>,
     /// The converted value of each `eBoolean`, `eInteger` and `eDouble` key that has a value
     /// (`CArg_Boolean`, `CArg_Integer`, `CArg_Double`).
     numbers: BTreeMap<&'static str, Number>,
@@ -316,9 +411,37 @@ impl Args {
         self.given.contains(&name)
     }
 
-    /// The value of the key `name` as text (`AsString`): given, or its default.
+    /// The value of the key `name` as text (`AsString`): given, or its default; `None` for a
+    /// value that is not UTF-8, which the programs of `ncbi_app` do not run
+    /// (`text_values_refusal`).
     pub(crate) fn value(&self, name: &str) -> Option<&str> {
-        self.values.get(name).and_then(|value| value.as_deref())
+        self.values
+            .get(name)
+            .and_then(|value| value.as_deref())
+            .and_then(OsStr::to_str)
+    }
+
+    // No NCBI counterpart: NCBI's `AsString` is the value's bytes; LOSAT's programs of `ncbi_app`
+    // read their values as text.
+    /// LOSAT's refusal of a value that is not UTF-8 of an argument that a program of `ncbi_app`
+    /// reads as text (`value`), which `ncbi_app::run_app` writes after the reader, so that NCBI's
+    /// errors of the reader come first: NCBI's `Run` reads the bytes. The file arguments of
+    /// every application (`-logfile`, `-conffile`) are not the program's: the application reads
+    /// their bytes before the reader (`ncbi_environment`).
+    pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
+        let not_text = self.values.iter().any(|(name, value)| {
+            !FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
+                && value
+                    .as_deref()
+                    .is_some_and(|value| value.to_str().is_none())
+        });
+        not_text.then(|| {
+            format!(
+                "a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which is \
+                 not supported by LOSAT's {}",
+                tool.refusal_name
+            )
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
@@ -380,28 +503,31 @@ impl Args {
 /// application takes before the reader: `ncbi_environment::preparse`) as NCBI's
 /// `CArgDescriptions::CreateArgs` reads `tool`'s: each word in its order, then the dependencies
 /// and the defaults (`x_PostCheck`). NCBI's programs on this reader have no positional argument,
-/// so a word that is not an option, and every word after `--`, is one too many.
-pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
+/// so a word that is not an option, and every word after `--`, is one too many. The words are
+/// read as their bytes, as NCBI reads `argv`: a name is the bytes after the dash up to `=`, and
+/// a name that is not ASCII is not an argument's name (`is_argument_name`).
+pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> {
     let arguments = tool_arguments(tool);
-    let mut values: BTreeMap<&'static str, Option<String>> = BTreeMap::new();
+    let mut values: BTreeMap<&'static str, Option<OsString>> = BTreeMap::new();
     let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
     let mut given: Vec<&'static str> = Vec::new();
     // `n_plain`: `None` until the positional arguments start (NCBI's `kMax_UInt`).
     let mut n_plain: Option<u32> = None;
     let mut at = 0;
     while at < words.len() {
-        let arg1 = words[at].as_str();
+        let arg1 = words[at].as_os_str();
+        let bytes = arg1.as_encoded_bytes();
         let arg2 = words.get(at + 1);
-        let mut name = "";
+        let mut name: &[u8] = b"";
         if n_plain.is_none() {
-            if arg1 == "--" {
+            if bytes == b"--" {
                 n_plain = Some(0);
                 at += 1;
                 continue;
             }
-            if arg1.len() > 1 && arg1.starts_with('-') {
-                name = &arg1[1..];
-                if let Some(eq) = name.find('=') {
+            if bytes.len() > 1 && bytes[0] == b'-' {
+                name = &bytes[1..];
+                if let Some(eq) = name.iter().position(|&byte| byte == b'=') {
                     name = &name[..eq];
                 }
             } else {
@@ -410,10 +536,11 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
         }
         if let Some(count) = n_plain {
             let count = count + 1;
-            return Err(invalid(
-                "eSynopsis",
-                format!("Too many positional arguments ({count}), the offending value: {arg1}"),
-            ));
+            let mut message =
+                format!("Too many positional arguments ({count}), the offending value: ")
+                    .into_bytes();
+            message.extend_from_slice(bytes);
+            return Err(invalid("eSynopsis", message));
         }
         let Created {
             desc,
@@ -451,19 +578,23 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
 /// written apart).
 fn create_arg(
     arguments: Arguments,
-    arg1: &str,
-    name: &str,
-    arg2: Option<&String>,
+    arg1: &OsStr,
+    name: &[u8],
+    arg2: Option<&OsString>,
 ) -> Result<Created, ArgsError> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:921-929
     // The lookup of `name` (`x_Find`) makes a `CArgDesc_NameOnly` of it, so a name that is no
     // argument name fails there.
-    if !is_argument_name(name) {
+    let Some(name) = std::str::from_utf8(name)
+        .ok()
+        .filter(|name| is_argument_name(name))
+    else {
         return Err(invalid(
             "eInvalidArg",
-            format!("Invalid argument name: {name}"),
+            [b"Invalid argument name: ".as_slice(), name].concat(),
         ));
-    }
+    };
+    let bytes = arg1.as_encoded_bytes();
     let find = |name: &str| find_desc(arguments, name);
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
     // The confidential arguments read their value from a file (`-name-file`); LOSAT's programs
@@ -491,20 +622,23 @@ fn create_arg(
             format!("Unknown argument: \"{name}\""),
         ));
     };
-    let eq_separator = arg1.as_bytes().get(name.len() + 1) == Some(&b'=');
+    let eq_separator = bytes.get(name.len() + 1) == Some(&b'=');
     if desc.kind == Kind::Flag {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
-        match arg1 {
-            "-h" => return Err(ArgsError::Usage),
+        match bytes {
+            b"-h" => return Err(ArgsError::Usage),
             // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
             // text is that of `-help` (probe C05 of line BDC).
-            "-help" | "-help-full" => return Err(ArgsError::Help),
+            b"-help" | b"-help-full" => return Err(ArgsError::Help),
             // The help in XML (`ncbi_xmlhelp`).
-            "-xmlhelp" => return Err(ArgsError::XmlHelp),
+            b"-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}
         }
         if eq_separator {
-            return Err(invalid("eInvalidArg", format!("Invalid argument: {arg1}")));
+            return Err(invalid(
+                "eInvalidArg",
+                [b"Invalid argument: ".as_slice(), bytes].concat(),
+            ));
         }
         return Ok(Created {
             desc,
@@ -514,14 +648,24 @@ fn create_arg(
         });
     }
     let (value, used) = if eq_separator {
-        (arg1[name.len() + 2..].to_string(), false)
+        // SAFETY: the value is the rest of the word after the ASCII `=`, so it starts at a
+        // boundary of the platform's encoding and ends where the word ends.
+        let value = unsafe { OsStr::from_encoded_bytes_unchecked(&bytes[name.len() + 2..]) };
+        (value.to_os_string(), false)
     } else {
         match arg2 {
             Some(value) => (value.clone(), true),
-            None => return Err(invalid("eNoArg", arg_message(arg1, "Value is missing", ""))),
+            // Without `=` the word is the dash and the name, which is ASCII.
+            None => {
+                let word = format!("-{name}");
+                return Err(invalid(
+                    "eNoArg",
+                    arg_message(&word, "Value is missing", b""),
+                ));
+            }
         }
     };
-    let number = process_value(desc, &value)?;
+    let number = process_value(desc, value.as_encoded_bytes())?;
     Ok(Created {
         desc,
         value: Some(value),
@@ -535,7 +679,7 @@ struct Created {
     /// Its description.
     desc: &'static Desc,
     /// Its value (`None` for a flag).
-    value: Option<String>,
+    value: Option<OsString>,
     /// The number of an `eInteger` or `eDouble` key.
     number: Option<Number>,
     /// Whether the next word was its value.
@@ -559,8 +703,9 @@ fn is_argument_name(name: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1228-1262
 /// `CArgDesc::ProcessArgument` (and `ProcessDefault`): the conversion of `value` to the key's
 /// type, then its constraint, which reads the text of the value (`Constraint::verify`); the
-/// converted value of an `eBoolean`, `eInteger` or `eDouble` key.
-fn process_value(desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> {
+/// converted value of an `eBoolean`, `eInteger` or `eDouble` key. `value` is the bytes of the
+/// value.
+fn process_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError> {
     let number = match desc.kind {
         Kind::Integer => Some(Number::Integer(integer_value(desc, value)?)),
         Kind::Int8 => {
@@ -588,7 +733,7 @@ fn process_value(desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> 
 /// the conversion's exception is its predecessor, whose text (with the position,
 /// `NcbiException::text`, in LOSAT's words) is the first message (`Cannot convert string 'x' to
 /// Int8` and the position).
-fn not_converted(desc: &Desc, value: &str, predecessor: String) -> ArgsError {
+fn not_converted(desc: &Desc, value: &[u8], predecessor: Vec<u8>) -> ArgsError {
     ArgsError::Invalid(ArgException {
         code: "eConvert",
         messages: vec![
@@ -600,14 +745,13 @@ fn not_converted(desc: &Desc, value: &str, predecessor: String) -> ArgsError {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
 /// The value of an `eInt8` key (`CArg_Int8`: `s_StringToInt8`, `string_to_int8`).
-fn int8_value(desc: &Desc, value: &str) -> Result<i64, ArgsError> {
-    string_to_int8(value)
-        .map_err(|error| not_converted(desc, value, String::from_utf8_lossy(&error.text()).into()))
+fn int8_value(desc: &Desc, value: &[u8]) -> Result<i64, ArgsError> {
+    string_to_int8(value).map_err(|error| not_converted(desc, value, error.text()))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:383-390
 /// The value of an `eInteger` key (`CArg_Integer`): that of `CArg_Int8`, in the range of `int`.
-fn integer_value(desc: &Desc, value: &str) -> Result<i32, ArgsError> {
+fn integer_value(desc: &Desc, value: &[u8]) -> Result<i32, ArgsError> {
     let number = int8_value(desc, value)?;
     i32::try_from(number).map_err(|_| {
         invalid(
@@ -619,22 +763,24 @@ fn integer_value(desc: &Desc, value: &str) -> Result<i32, ArgsError> {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
 /// The number of an `eDouble` key (`CArg_Double`).
-fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
-    crate::ncbi_str::string_to_double_posix_or_local(value.as_bytes())
+fn double_value(desc: &Desc, value: &[u8]) -> Result<Number, ArgsError> {
+    crate::ncbi_str::string_to_double_posix_or_local(value)
         .map(Number::Double)
-        .map_err(|error| not_converted(desc, value, String::from_utf8_lossy(&error.text()).into()))
+        .map_err(|error| not_converted(desc, value, error.text()))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-497
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2837-2838
 /// The value of an `eBoolean` key (`CArg_Boolean`: `NStr::StringToBool`, whose exception, at
 /// position 0, is the predecessor of the reader's; in LOSAT's words, `crate::wording`).
-fn boolean_value(desc: &Desc, value: &str) -> Result<bool, ArgsError> {
-    crate::ncbi_str::string_to_bool(value).ok_or_else(|| {
-        let predecessor =
-            crate::wording::losat_text("String cannot be converted to bool (m_Pos = 0)");
-        not_converted(desc, value, predecessor.into_owned())
-    })
+fn boolean_value(desc: &Desc, value: &[u8]) -> Result<bool, ArgsError> {
+    let text = std::str::from_utf8(value).ok();
+    text.and_then(crate::ncbi_str::string_to_bool)
+        .ok_or_else(|| {
+            let predecessor =
+                crate::wording::losat_text("String cannot be converted to bool (m_Pos = 0)");
+            not_converted(desc, value, predecessor.into_owned().into_bytes())
+        })
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
@@ -643,7 +789,7 @@ fn boolean_value(desc: &Desc, value: &str) -> Result<bool, ArgsError> {
 fn post_check(
     tool: &Tool,
     arguments: Arguments,
-    values: &mut BTreeMap<&'static str, Option<String>>,
+    values: &mut BTreeMap<&'static str, Option<OsString>>,
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
@@ -661,7 +807,7 @@ fn post_check(
                 if given.contains(&second) {
                     return Err(invalid(
                         "eConstraint",
-                        arg_message(second, "Incompatible with argument", first),
+                        arg_message(second, "Incompatible with argument", first.as_bytes()),
                     ));
                 }
                 exclude.insert(second);
@@ -681,18 +827,18 @@ fn post_check(
                 arg_message(
                     desc.name(),
                     "Must be specified, as it is required by argument",
-                    requester,
+                    requester.as_bytes(),
                 ),
             )
         } else if exclude.contains(desc.name()) {
             continue;
         } else if let Some(default) = desc.default() {
-            match process_value(desc, default) {
+            match process_value(desc, default.as_bytes()) {
                 Ok(number) => {
                     if let Some(number) = number {
                         numbers.insert(desc.name(), number);
                     }
-                    values.insert(desc.name(), Some(default.to_string()));
+                    values.insert(desc.name(), Some(OsString::from(default)));
                     continue;
                 }
                 Err(error) => error,
@@ -726,7 +872,7 @@ fn mandatory_missing(desc: &Desc) -> ArgsError {
     }
     invalid(
         "eNoArg",
-        arg_message(desc.name(), "Mandatory value is missing", &attr),
+        arg_message(desc.name(), "Mandatory value is missing", attr.as_bytes()),
     )
 }
 

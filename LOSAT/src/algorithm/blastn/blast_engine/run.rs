@@ -6914,11 +6914,12 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`); a
-    // caller without settings (ABI version 1) has no repeat search.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
+    // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
+    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
-            "-filtering_db (a BLAST database of repeats) is not supported on ABI version 1; use ABI version 2"
+            "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.

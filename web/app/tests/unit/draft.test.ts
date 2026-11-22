@@ -1220,12 +1220,32 @@ describe('SearchDraft submit', () => {
     expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
   });
 
-  it('opens a file named .gz under its plain name and inflated size', async () => {
-    const { draft } = setup();
+  // Line WQA's D21, 2026-11-23 (S3-3, and F1/F2 of the review of D20): the card shows the plain name and the inflated size, but the
+  // run's argv names the file as the user gave it, where the command line writes the name (outfmt 0 and 7's `Input:` line, SAM's
+  // command line) and the command shown can be typed.
+  it("opens a file named .gz under its plain name and inflated size, and names it in the argv as the user gave it", async () => {
+    const { draft, requests } = setup();
     draft.addFiles('subject', [new File([gzipSync('>a\nACGT\n')], 'x.fa.gz')]);
+    draft.addFiles('query', [new File([zstdCompressSync('>q\nACGT\n')], 'Q.FA.ZST')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
+    expect(draft.inputName('subject')).toBe('x.fa.gz');
+    expect(draft.inputName('query')).toBe('Q.FA.ZST');
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'subject').name).toBe('x.fa.gz');
+    expect(datasetOf(request!, 'query').name).toBe('Q.FA.ZST');
+  });
+
+  it('names several files searched together, or pasted text, as before', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('subject', [file('a.fa', '>a\nACGT\n'), new File([gzipSync('>b\nACGT\n')], 'b.fa.gz')]);
+    await draft.idle();
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query').name).toBe('query.fa');
+    expect(datasetOf(request!, 'subject').name).toBe('combined_subject.fa');
   });
 
   // Line WQA's D20, S3-2, 2026-11-23: the button's count is the number of runs that Run LOSAT starts (one `inputGroups`).
@@ -1365,7 +1385,7 @@ describe('SearchDraft submit', () => {
     draft.addFiles('subject', [new File([zstdCompressSync('>a\nACGT\n')], 'x.fa.zst')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
+    expect(draft.inputName('subject')).toBe('x.fa.zst');
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {

@@ -190,7 +190,8 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             // run of a search (psiblast's `-use_sw_tback`; rpstblastn's `-ungapped`, which needs a
             // database, is in `cli::RUN_REFUSALS` with it). The arguments left in are read
             // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
-            // statistics, line RG item X4; blastp's `-ungapped` runs, line NP item O4b, and
+            // statistics, line RG item X4, tblastn's in every mode, item X4b, blastx's in every
+            // mode, item X4b-2; blastp's `-ungapped` runs, line NP item O4b, and
             // tblastn's, item O4c).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {

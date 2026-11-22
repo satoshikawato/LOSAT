@@ -598,12 +598,12 @@ fn other_formats<'f>(formats: &[&'f str], group: &[usize]) -> Vec<&'f str> {
 // where the command line asks (`common::database::subject_taxonomy`).
 /// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` (as `app`'s
 /// formatter writes it, `TabularSpec::of_app`) looks every taxid up (the plural names of the
-/// taxonomy database, the organism report); `None` otherwise, without reading the settings.
+/// taxonomy database, the organism report); `None` otherwise.
 fn taxdb_setting(
-    outputs: &mut ReportOutputs<'_>,
-    start: &mut CallStart,
+    outputs: &ReportOutputs<'_>,
+    start: &CallStart,
     app: RequestKind,
-) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
+) -> Option<crate::algorithm::common::database::TaxdbSetting> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     let looks_up = outputs.formats.iter().any(|format| {
         parse_formatting_string(format.outfmt).is_ok_and(|choice| {
@@ -614,21 +614,15 @@ fn taxdb_setting(
                 .is_some_and(|spec| spec.looks_up_every_taxid())
         })
     });
-    if !looks_up {
-        return Ok(None);
-    }
-    let settings = start.settings(&mut *outputs.diagnostics)?;
-    Ok(Some(crate::algorithm::common::database::TaxdbSetting::of(
-        &settings,
-    )))
+    looks_up.then(|| crate::algorithm::common::database::TaxdbSetting::of(&start.settings()))
 }
 
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
-// change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid`, the taxonomy database of the plural names and the organism report
-// (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
-// BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
+// change the output. A search of records reads them where NCBI's library looks something up
+// itself: the directory of BLASTN's `-window_masker_taxid`, the taxonomy database of the plural
+// names and the organism report (outfmt 18) and the file of a `-matrix` that NCBI's tables do not
+// have (TBLASTX, ungapped BLASTX). The settings are the call's application start's
 // (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`
 /// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
@@ -644,7 +638,10 @@ pub(super) fn run_local(
     // `run_batches` after another's of another call, too), and its searches' workers with it
     // (`utils::threading::with_search_pool`).
     let _run = start.enter();
-    let Err(error) = run_local_entry(command, inputs, outputs, start) else {
+    let result = run_local_entry(command, inputs, outputs, start);
+    // The `-out` file of `run_to_file` ends as the command line's run ends its `-out` stream
+    // (`ReportOutputs::finish_out`), before the run's error is written as `CATCH_ALL` writes it.
+    let Err(error) = outputs.finish_out(result) else {
         return Ok(());
     };
     let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
@@ -684,7 +681,7 @@ fn run_local_entry(
     // (`Inputs::query_end`).
     let end = inputs.end();
     if inputs.database {
-        let settings = start.settings(&mut *outputs.diagnostics)?;
+        let settings = start.settings();
         return match command {
             Commands::Blastp(args) => {
                 run_local_database_blastp(args, query, end, settings, outputs)
@@ -715,11 +712,11 @@ fn run_local_entry(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp);
             // The file of an ungapped search's `-matrix` that NCBI's tables do not have, looked up
             // where the options are resolved, as on the command line (`BlastpArgs::matrix_search`).
             if args.unknown_matrix_name() {
-                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+                args.matrix_search = Some(start.settings().matrix_search);
             }
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
@@ -729,14 +726,14 @@ fn run_local_entry(
             if args.unknown_matrix_name()
                 == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
             {
-                let settings = start.settings(&mut *outputs.diagnostics)?;
+                let settings = start.settings();
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
             run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn);
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
@@ -748,7 +745,7 @@ fn run_local_entry(
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
             if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
-                let settings = start.settings(&mut *outputs.diagnostics)?;
+                let settings = start.settings();
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
@@ -756,7 +753,7 @@ fn run_local_entry(
             // The database of `-filtering_db` is looked up as the database of `-db` (the call's
             // settings), by the repeat search of each query batch.
             if args.filtering_db.is_some() {
-                let settings = start.settings(&mut *outputs.diagnostics)?;
+                let settings = start.settings();
                 args.resolve_repeat_filter(&settings);
             }
             run_local_blastn(args, query, end, subject, outputs)
@@ -765,24 +762,24 @@ fn run_local_entry(
             // The file of a `-matrix` that NCBI's tables do not have, first, as the command
             // line's `run` looks it up (with the call's settings; `TblastxArgs::find_matrix_file`).
             if args.scoring_matrix() == crate::algorithm::tblastx::args::TblastxMatrix::Unknown {
-                let settings = start.settings(&mut *outputs.diagnostics)?;
+                let settings = start.settings();
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx);
             run_local_tblastx(args, query, end, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx);
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
-                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+                args.matrix_search = Some(start.settings().matrix_search);
             }
             run_local_blastx(args, query, end, subject, outputs)
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
-            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast);
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -837,6 +834,7 @@ fn searches(
     search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
+    start: &CallStart,
     log: &mut RunLog,
 ) -> Result<(Vec<Vec<usize>>, usize), Error> {
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
@@ -859,16 +857,16 @@ fn searches(
     if numbers.contains(&ARCHIVE_FORMAT) {
         check_archive_inputs(search.program(), inputs)?;
     }
-    let command = search.command(inputs)?;
-    let groups = search_groups(&command, &numbers);
+    let command = start.command_ref();
+    let groups = search_groups(command, &numbers);
     if groups.len() > 1 {
-        if let Some(option) = pssm_file_option(&command) {
+        if let Some(option) = pssm_file_option(command) {
             return Err(Error::Argv(format!(
                 "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
             ).into()));
         }
     }
-    Ok((groups, num_threads(&command)))
+    Ok((groups, num_threads(command)))
 }
 
 // No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
@@ -913,14 +911,14 @@ pub fn run(
     }
     let mut log = start.take_log();
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
-    let (groups, threads) = searches(search, inputs, &formats, &mut log)?;
+    let (groups, threads) = searches(search, inputs, &formats, &start, &mut log)?;
     let mut writers: Vec<Option<&mut (dyn Write + Send)>> = reports
         .iter_mut()
         .map(|(_, writer)| Some(&mut **writer))
         .collect();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
-            let command = search.command(inputs)?;
+            let command = start.command();
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the command line writes them once.
             let mut repeated = Vec::new();
@@ -996,10 +994,10 @@ pub fn run_to_file(
     let mut log = start.take_log();
     let threads = {
         let formats = [outfmt];
-        searches(search, inputs, &formats, &mut log)?.1
+        searches(search, inputs, &formats, &start, &mut log)?.1
     };
-    let command = search.command(inputs)?;
-    let mut file = OutFile::new(path, out_file_program(search.program()));
+    let command = start.command();
+    let mut file = OutFile::new(path, out_file_program(search.program()), outfmt);
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
@@ -1018,9 +1016,7 @@ pub fn run_to_file(
             run_local(command, inputs, &mut outputs, &mut start)
         };
         result.map_err(|error| sink.failed(&error))
-    })?;
-    file.flush()
-        .map_err(|error| Error::search(&anyhow::Error::from(error)))
+    })
 }
 
 /// The program whose `-out` file names must be UTF-8, as its command line checks them
@@ -1050,14 +1046,13 @@ struct Searched {
 
 /// One search of `run_collect`: the formats at `positions` of `formats`.
 fn collect_one(
-    search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
     start: &mut CallStart,
     mut sink: RunSink<'_>,
 ) -> Result<Searched, Error> {
-    let command = search.command(inputs)?;
+    let command = start.command();
     let query_range = query_range_of(&command);
     let ordinals = searched_queries(query_range, inputs.query);
     let mut writers: Vec<CountingWriter> =
@@ -1268,7 +1263,7 @@ pub fn run_collect(
         });
     }
     let mut log = start.take_log();
-    let (groups, threads) = searches(search, inputs, formats, &mut log)?;
+    let (groups, threads) = searches(search, inputs, formats, &start, &mut log)?;
     let mut searched: Vec<Searched> = Vec::new();
     // The searches of one call share one thread pool (`with_run_pool`), as the command line's
     // one search has one.
@@ -1283,9 +1278,7 @@ pub fn run_collect(
             } else {
                 log.sink(&mut repeated, false)
             };
-            searched.push(collect_one(
-                search, inputs, formats, group, &mut start, sink,
-            )?);
+            searched.push(collect_one(inputs, formats, group, &mut start, sink)?);
         }
         Ok(())
     })?;

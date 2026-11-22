@@ -463,11 +463,45 @@ fn tblastn_redo_one_alignment_callback(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2389-2394
-const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
+pub(super) const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
     calc_lambda: Some(redo_calc_lambda),
     get_range: translated_subject_get_range,
     redo_one_alignment: tblastn_redo_one_alignment_callback,
 };
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:795-800
+/// The incoming alignments of a match (`s_ResultHspToDistinctAlign`): its preliminary HSPs in
+/// order, each score times the redo's scale (`localScalingFactor`, `score_divisor`), each naming
+/// its preliminary HSP. The X-drop redo (`redo_preliminary_match`) and the Smith-Waterman redo
+/// (`match_redo::SmithWatermanRedo`) start from this list.
+#[inline(always)]
+pub(super) fn incoming_alignments(
+    preliminary_hits: &[GappedHsp],
+    query_context: i32,
+    score_divisor: f64,
+) -> Option<Box<BlastCompoAlignment>> {
+    let mut incoming = None;
+    let mut tail = &mut incoming;
+    for (index, hit) in preliminary_hits.iter().enumerate() {
+        let node = blast_compo_alignment_new(
+            ((hit.score as f64) * score_divisor) as i32,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            hit.q_start,
+            hit.q_end,
+            query_context,
+            hit.s_start,
+            hit.s_end,
+            i32::from(hit.frame),
+            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
+        );
+        *tail = Some(node);
+        tail = &mut tail
+            .as_mut()
+            .expect("TBLASTN incoming alignment inserted")
+            .next;
+    }
+    incoming
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639
 #[allow(dead_code)] // The public TBLASTN path stays gated until D and E complete.
@@ -491,26 +525,7 @@ pub(super) fn redo_preliminary_match<'s>(
     if params.compo_adjust_mode == BlastCompoAdjustMode::NoCompositionBasedStats {
         bail!("TBLASTN Kappa redo requires composition mode");
     }
-    let mut incoming = None;
-    let mut tail = &mut incoming;
-    for (index, hit) in preliminary_hits.iter().enumerate() {
-        let node = blast_compo_alignment_new(
-            ((hit.score as f64) * params.score_divisor) as i32,
-            EMatrixAdjustRule::DontAdjustMatrix,
-            hit.q_start,
-            hit.q_end,
-            query_context,
-            hit.s_start,
-            hit.s_end,
-            i32::from(hit.frame),
-            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
-        );
-        *tail = Some(node);
-        tail = &mut tail
-            .as_mut()
-            .expect("TBLASTN incoming alignment inserted")
-            .next;
-    }
+    let incoming = incoming_alignments(preliminary_hits, query_context, params.score_divisor);
     let matching_seq =
         BlastCompoMatchingSequence::new_translated(0, subject_nt.into(), genetic_code_id)?;
     let context = TblastnRedoContext {

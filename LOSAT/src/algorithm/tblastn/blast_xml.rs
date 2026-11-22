@@ -577,7 +577,6 @@ impl PreparedXml {
                                     hsp.s_start,
                                     hsp.s_end,
                                     &payload.edit_script,
-                                    &[],
                                     &mut qrow,
                                     &mut srow,
                                 )?;

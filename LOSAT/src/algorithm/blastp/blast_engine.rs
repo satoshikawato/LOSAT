@@ -1122,7 +1122,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
@@ -2690,50 +2689,79 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4318
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
-/// The outfmt 0 rows `hits` with the columns of their query rows that a SEG mask of
-/// `masks` (`query_record_masks`) covers in lowercase. A mask that covers the whole query is
-/// not shown; a mask position outside the aligned range is the first or last column
-/// (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
-fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
+/// The outfmt 0 rows `hits` (the report's copies; the library API's records keep their letters)
+/// with their masks in lower case (`HspMasks::lower_row`): a query row's SEG masks of
+/// `query_masks` (`query_record_masks`), a subject row's runs of each list of `subject_masks`
+/// (the record's lower-case runs with `-lcase_masking`, `x_soft_subject::x_subject_masks`; a
+/// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
+/// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
+/// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+fn set_row_masks(
+    hits: &mut [PairwiseHit],
+    query_masks: Option<&[Vec<(i32, i32)>]>,
+    subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+) {
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
-        let query_masks = &masks[hit.hit.q_idx as usize];
-        if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
-            let mut bytes = std::mem::take(row).into_bytes();
-            // The 0-based query position of each column that holds a residue.
-            let first = hit.hit.q_start as i32 - 1;
-            let last = hit.hit.q_end as i32 - 1;
-            // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap residue).
-            let mut columns = Vec::with_capacity(bytes.len());
-            for (column, &residue) in bytes.iter().enumerate() {
-                if residue != b'-'
-                    || hit
-                        .query_stored_gaps
-                        .binary_search(&(column as u32))
-                        .is_ok()
-                {
-                    columns.push(column);
-                }
-            }
-            let width = bytes.len();
-            let column_of = |position: i32| -> usize {
-                if position < first {
-                    0
-                } else if position > last {
-                    width - 1
-                } else {
-                    columns[(position - first) as usize]
-                }
-            };
-            for &(from, to) in query_masks {
-                if to < first || from > last {
-                    continue;
-                }
-                let (start, stop) = (column_of(from), column_of(to));
-                for residue in &mut bytes[start..=stop] {
-                    *residue = residue.to_ascii_lowercase();
-                }
-            }
-            *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
+        // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
+        // starts) has no mask.
+        if let Some(shown) = hit
+            .query_seq
+            .as_mut()
+            .filter(|row| !query.is_empty() && !row.is_empty())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            masks.set_row(
+                0,
+                0,
+                row,
+                // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap
+                // residue).
+                |column| {
+                    row[column] != b'-'
+                        || hit
+                            .query_stored_gaps
+                            .binary_search(&(column as u32))
+                            .is_ok()
+                },
+                (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
+                true,
+                1,
+                query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(0, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        let key = (hit.hit.q_idx, hit.hit.s_idx);
+        let mut runs = subject_masks
+            .iter()
+            .filter_map(|masks| masks.get(&key))
+            .flatten()
+            .peekable();
+        if let Some(shown) = hit
+            .subject_seq
+            .as_mut()
+            .filter(|row| !row.is_empty() && runs.peek().is_some())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
+            let stored = &hit.subject_stored_gaps;
+            masks.set_row(
+                1,
+                0,
+                row,
+                |column| row[column] != b'-' || stored.contains(&(column as u32)),
+                (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+                true,
+                1,
+                runs.map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(1, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
         }
     }
 }
@@ -4382,23 +4410,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
-    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
-    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
-    if (stream.failed || badbit) && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // report's where NCBI's buffer writes it (`cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -4519,10 +4534,8 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it

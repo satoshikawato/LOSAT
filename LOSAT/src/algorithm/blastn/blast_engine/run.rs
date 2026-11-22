@@ -7,7 +7,7 @@ use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutpu
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -6285,22 +6285,11 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut report);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // exit 6; `cli::ReportStream::finish`).
+    report.finish(result, pairwise || tax_report)
 }
 
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
@@ -10597,8 +10586,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
 
     // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
-    // database search keeps one, `mb_index::MegablastIndex::check`).
+    // database search keeps one, `mb_index::MegablastIndex::check`), and whether the index leaves
+    // database volumes to the scan (a mixed search).
     let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
+    let index_mixed = args
+        .megablast_index_loaded
+        .as_deref()
+        .is_some_and(crate::dbindex::search::LoadedIndex::mixed);
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10612,9 +10606,13 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-114
-            // A search with a MegaBLAST database index has no lookup table.
-            split: split_prelim_lists.is_some() || index_search,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-163
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:460-462
+            // A search with a MegaBLAST database index has no lookup table, except a mixed
+            // one (`eMixedMBLookupTable`: the table without an index). (NCBI also builds the
+            // table for an old-style index found after the new style left a database volume
+            // without an index, `partial`, and never reads it: every OID is the index's.)
+            split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10774,7 +10772,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                 encoded_query_concat_blastna,
                 &query_contexts,
                 &context_valid,
-                effective_word_size,
+                crate::dbindex::search::SearchOptions {
+                    word_size: effective_word_size as u64,
+                    two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
+                        as u64,
+                },
             ))
         }
         _ => None,
@@ -10868,7 +10870,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        // A batch split into query chunks traces what its chunks' indexed searches kept. (With
+        // an index of only some volumes this is 1 for every subject: the traceback sees only
+        // subjects with kept HSPs, and a scanned subject shorter than a word has none.)
         shortest_subject: prelim_subject::shortest_subject(
             effective_word_size,
             args.megablast_index_loaded.is_some(),

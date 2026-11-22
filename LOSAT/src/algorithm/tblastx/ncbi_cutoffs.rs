@@ -244,8 +244,16 @@ pub fn cutoff_score_sum_stats(
     let searchsp = min_len * (avg_subject_len as i64);
 
     // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp, TRUE, gap_decay_rate)
-    // When dodecay=TRUE, apply gap decay divisor to E-value before conversion
-    cutoff_score_from_evalue_with_decay(evalue_hsp, searchsp, gap_decay_rate, karlin_params)
+    // When dodecay=TRUE, apply gap decay divisor to E-value before conversion. Every caller's
+    // cutoff starts at 1 (blast_parameters.c:321 and 965), so a search space too small for
+    // E = 1 gives 1, not a score below it (with `-db` SeqDB's shortest length 10 makes TBLASTN's
+    // `n` 3: NCBI's cutoff is 1, which the Smith-Waterman redo's `cutoff_s` reads).
+    blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
+        evalue_hsp,
+        searchsp,
+        gap_decay_rate,
+        karlin_params,
+    ))
 }
 
 /// Calculate cutoff_score from E-value with gap decay adjustment.

@@ -993,21 +993,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
-    // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
+    // `cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -1254,10 +1243,8 @@ fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
@@ -2526,6 +2513,8 @@ fn write_tblastx_outputs(
                                     }
                                     None => {
                                         let mut buffer = Vec::new();
+                                        let mut row_masks =
+                                            crate::report::query_anchored::HspMasks::default();
                                         window
                                             .iter()
                                             .enumerate()
@@ -2534,6 +2523,7 @@ fn write_tblastx_outputs(
                                                     hsp,
                                                     identities.map(|identities| identities[index]),
                                                     &mut buffer,
+                                                    &mut row_masks,
                                                 )
                                             })
                                             .collect()

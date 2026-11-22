@@ -2,18 +2,18 @@
 """Build frozen benchmark snapshot tables in benchmarks/v0.2.0/snapshot/ from measured TSV/JSON outputs.
 
 Every input path is an argument (defaults: the v0.2.0 runs on the release candidate 93ca2f652).
-metadata.json records the sha256 of every input file read and the LOSAT build of each source:
---losat-commit for the standard grid and its extension (psiblast, rpsblast, rpstblastn, utilities,
-thread and size scaling), the `build` field of toolmt.json (downstream tools at the tool's thread
-count, cold-cache and core_nt rows), <dt-dir>/<tag>_sha.txt (downstream tools at one thread) and the
-`commit` column of the WebAssembly CSV.
+metadata.json records the sha256 of every input file read, paired `-db` parity from
+<ext-dir>/bp_db_parity.tsv (backing the `subject_vs_db` rows for `bp` and `bpff`), and the LOSAT
+build of each source: --losat-commit for the standard grid and its extension (psiblast, rpsblast,
+rpstblastn, utilities, thread and size scaling), the `build` field of toolmt.json (downstream tools
+at the tool's thread count, cold-cache and core_nt rows), <dt-dir>/<tag>_sha.txt (downstream tools
+at one thread), and the `commit` column of the WebAssembly CSV.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import hashlib
 import json
 import os
@@ -51,6 +51,8 @@ MODES_ORDER = [
 ]
 
 # Single-thread tool benchmarks from official test sets (DT1 / DT13 / DT15)
+DT_TAGS = ("dt1", "dt13", "dt15")
+
 ST_TOOLS = [
     ("blastn", "ResFinder / PlasmidFinder", "1", "dt15", ["CGE_core.cgecore", "CGE_pf.cgecore", "CGE_res01.cgecore", "CGE_res03.cgecore", "CGE_res05.cgecore"]),
     ("blastn", "Bakta", "1", "dt15", ["BAK_oric.Bakta", "BAK_orit.Bakta", "BAK_toy.Bakta"]),
@@ -94,7 +96,201 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
+RunRecord = tuple[float, float, str, float | None]
+
+
+def sanitize_input_key(path: Path, base: Path) -> str:
+    """Record provenance key relative to base without machine-local home prefixes."""
+    resolved_base = base.resolve()
+    resolved_path = path.resolve()
+    try:
+        rel = resolved_path.relative_to(resolved_base)
+    except ValueError:
+        sys.exit(f"input path is outside baselines root {resolved_base}: {resolved_path}")
+    return f"losat-baselines/{rel.as_posix()}"
+
+
+def collect_input_checksums(paths: list[Path], base: Path) -> dict[str, str]:
+    """Validate input paths against base, reject duplicate keys or unreadable files, and hash them."""
+    checksums: dict[str, str] = {}
+    for p in paths:
+        key = sanitize_input_key(p, base)
+        if key in checksums:
+            sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
+        try:
+            checksums[key] = sha256_file(p)
+        except OSError as exc:
+            sys.exit(f"cannot read input file {p}: {exc}")
+    return checksums
+
+
+def row_sha16(row: dict[str, str]) -> str:
+    """Read and strip the sha16 column from a benchmark row (empty if missing)."""
+    return (row.get("sha16") or "").strip()
+
+
+def require_single_sha16(values: list[str], context: str) -> str:
+    """Ensure all rounds in an arm report one identical, non-empty sha16."""
+    cleaned = {(v or "").strip() for v in values}
+    if not cleaned or "" in cleaned:
+        sys.exit(f"missing or empty sha16 for {context}")
+    if len(cleaned) != 1:
+        sys.exit(f"sha16 differs across rounds for {context}: {sorted(cleaned)}")
+    return next(iter(cleaned))
+
+
+def validate_bp_db_parity(rows: list[dict[str, str]], path: Path) -> list[dict[str, str]]:
+    """Validate bp_db_parity.tsv rows for bp and bpff before writing outputs."""
+    if not rows:
+        sys.exit(f"empty bp_db_parity provenance file: {path}")
+    seen: set[str] = set()
+    validated: list[dict[str, str]] = []
+    for row in rows:
+        if None in row:
+            sys.exit(f"malformed row in {path}: {row}")
+        cid = (row.get("case") or "").strip()
+        if not cid:
+            sys.exit(f"missing or empty case in {path}: {row}")
+        if cid in seen:
+            sys.exit(f"duplicate case {cid!r} in {path}")
+        seen.add(cid)
+        lo_sha = (row.get("losat_db_sha16") or "").strip()
+        nc_sha = (row.get("ncbi_db_sha16") or "").strip()
+        if not lo_sha or not nc_sha:
+            sys.exit(f"missing or empty db sha16 for {cid} in {path}: {row}")
+        equal = (row.get("equal") or "").strip()
+        expected_equal = "yes" if lo_sha == nc_sha else "no"
+        if equal != expected_equal:
+            sys.exit(
+                f"inconsistent equal field for {cid} in {path}: "
+                f"got {equal!r}, expected {expected_equal!r}"
+            )
+        normalized = dict(row)
+        normalized["case"] = cid
+        normalized["losat_db_sha16"] = lo_sha
+        normalized["ncbi_db_sha16"] = nc_sha
+        normalized["equal"] = equal
+        validated.append(normalized)
+    missing = [cid for cid in ("bp", "bpff") if cid not in seen]
+    if missing:
+        sys.exit(f"missing required bp_db_parity row(s) {missing} in {path}")
+    return validated
+
+
+def parse_disk_bytes(inputs_ext: dict[str, dict[str, str]], inp_key: str) -> int:
+    """Validate and parse positive integer disk_bytes from inputs_ext."""
+    if inp_key not in inputs_ext:
+        sys.exit(f"missing inputs_ext entry for {inp_key}")
+    raw = (inputs_ext[inp_key].get("disk_bytes") or "").strip()
+    try:
+        val = int(raw)
+    except ValueError:
+        sys.exit(f"invalid disk_bytes for inputs_ext entry {inp_key}: {raw!r}")
+    if val <= 0:
+        sys.exit(f"non-positive disk_bytes for inputs_ext entry {inp_key}: {raw!r}")
+    return val
+
+
+def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
+    """Parse optional anonymous private RSS (MiB) from raw benchmark rows."""
+    if row.get("rss_anon_mib"):
+        return float(row["rss_anon_mib"])
+    if row.get("rss_anon_kb"):
+        return int(row["rss_anon_kb"]) / 1024.0
+    return None
+
+
+def make_standard_row(
+    *,
+    group: str,
+    cid: str,
+    prog: str,
+    task: str,
+    label: str,
+    th: int,
+    qdesc: str,
+    sdesc: str,
+    target: str,
+    opts: str,
+    lo_list: list[RunRecord],
+    nc_list: list[RunRecord],
+    v0_list: list[RunRecord],
+    is_ncbi_timeout: bool = False,
+    subject_vs_db: bool = False,
+    ncbi_n1_sha: set[str] | None = None,
+) -> dict[str, object]:
+    """Assemble and validate one standard workload summary row."""
+    if not lo_list:
+        sys.exit(f"missing LOSAT runs for {cid} t={th}")
+    lo_w = statistics.median(x[0] for x in lo_list)
+    lo_w_min = min(x[0] for x in lo_list)
+    lo_w_max = max(x[0] for x in lo_list)
+    lo_m = statistics.median(x[1] for x in lo_list)
+    lo_sha16 = require_single_sha16([x[2] for x in lo_list], f"standard {cid} LOSAT t={th}")
+    lo_sha = {lo_sha16}
+
+    nc_w = statistics.median(x[0] for x in nc_list) if nc_list else None
+    nc_m = statistics.median(x[1] for x in nc_list) if nc_list else None
+    nc_sha = {(x[2] or "").strip() for x in nc_list}
+    if nc_list and "" in nc_sha:
+        sys.exit(f"missing or empty sha16 for standard {cid} NCBI t={th}")
+    cleaned_n1_sha: set[str] | None = None
+    if ncbi_n1_sha is not None:
+        cleaned_n1_sha = {(v or "").strip() for v in ncbi_n1_sha}
+        if not cleaned_n1_sha or "" in cleaned_n1_sha:
+            sys.exit(f"missing or empty NCBI 1-thread sha16 for {cid} t={th}")
+    v0_w = statistics.median(x[0] for x in v0_list) if v0_list else ""
+    v0_m = round(statistics.median(x[1] for x in v0_list), 2) if v0_list else ""
+
+    parity = "same"
+    ncbi_runs = len(nc_list)
+    if not nc_list and th == 1 and is_ncbi_timeout:
+        parity = "ncbi_timeout_6000s"
+        ncbi_runs = 1
+    elif subject_vs_db:
+        parity = "subject_vs_db"
+    elif cleaned_n1_sha is not None and th == 16 and lo_sha != nc_sha:
+        parity = "same_as_ncbi_n1" if lo_sha == cleaned_n1_sha else "diff"
+    elif lo_sha != nc_sha:
+        parity = "diff"
+
+    row_entry: dict[str, object] = {
+        "group": group,
+        "case": cid,
+        "program": prog,
+        "task": task,
+        "label": label,
+        "threads": th,
+        "losat_wall_s": round(lo_w, 3),
+        "losat_wall_min_s": round(lo_w_min, 3),
+        "losat_wall_max_s": round(lo_w_max, 3),
+        "losat_rss_mib": round(lo_m, 2),
+        "ncbi_wall_s": round(nc_w, 3) if nc_w is not None else "",
+        "ncbi_rss_mib": round(nc_m, 2) if nc_m is not None else "",
+        "v010_wall_s": round(v0_w, 3) if v0_w != "" else "",
+        "v010_rss_mib": v0_m,
+        "speedup": round(nc_w / lo_w, 4) if nc_w else "",
+        "mem_reduction": round(nc_m / lo_m, 4) if nc_m else "",
+        "losat_runs": len(lo_list),
+        "ncbi_runs": ncbi_runs,
+        "losat_sha16": lo_sha16,
+        "ncbi_sha16": ",".join(sorted(nc_sha)),
+        "parity": parity,
+        "query_desc": qdesc,
+        "subject_desc": sdesc,
+        "target": target,
+        "options": opts,
+    }
+    lo_anon = [x[3] for x in lo_list if x[3] is not None]
+    nc_anon = [x[3] for x in nc_list if x[3] is not None]
+    if lo_anon:
+        row_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon), 2)
+    if nc_anon:
+        row_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon), 2)
+    return row_entry
+
+
+def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> list[dict[str, object]]:
     tm = json.loads(toolmt_path.read_text(encoding="utf-8"))
     by_prog_tool: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
     for r in tm:
@@ -154,19 +350,19 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[s
 
     # Load dt1/dt13/dt15 for single-thread tools
     dt_cache: dict[str, dict[tuple[str, str], list[float]]] = {}
-    dt_meta: dict[str, dict[tuple[str, str], set[str]]] = {}
+    dt_meta: dict[str, dict[tuple[str, str], list[str]]] = {}
     wanted: dict[str, set[str]] = defaultdict(set)
     for _prog, _tool, _th, tag, case_ids in ST_TOOLS:
         wanted[tag].update(case_ids)
-    for tag, fn in (("dt1", "dt1.tsv"), ("dt13", "dt13.tsv"), ("dt15", "dt15.tsv")):
-        p = dt_dir / fn
+    for tag in DT_TAGS:
+        p = dt_dir / f"{tag}.tsv"
         g: dict[tuple[str, str], list[float]] = defaultdict(list)
-        s: dict[tuple[str, str], set[str]] = defaultdict(set)
+        s: dict[tuple[str, str], list[str]] = defaultdict(list)
         for row in read_tsv(p):
             if row["case"] in wanted.get(tag, set()) and row.get("rc", "0") != "0":
                 sys.exit(f"{tag} rc != 0: {row}")
             g[(row["case"], row["arm"])].append(float(row["wall_s"]))
-            s[(row["case"], row["arm"])].add(row.get("sha16", ""))
+            s[(row["case"], row["arm"])].append(row_sha16(row))
         dt_cache[tag] = g
         dt_meta[tag] = s
 
@@ -181,9 +377,11 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[s
             lo_vals = g.get((cid, "losat"))
             if not nc_vals or not lo_vals:
                 sys.exit(f"missing {cid} in {tag}")
+            nc_sha = require_single_sha16(s.get((cid, "ncbi"), []), f"{tag} {cid} NCBI")
+            lo_sha = require_single_sha16(s.get((cid, "losat"), []), f"{tag} {cid} LOSAT")
             nc_tot += statistics.median(nc_vals)
             lo_tot += statistics.median(lo_vals)
-            if s.get((cid, "ncbi")) != s.get((cid, "losat")):
+            if nc_sha != lo_sha:
                 shas_match = False
         out.append({
             "program": prog,
@@ -201,11 +399,10 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[s
             "note": f"1t_only_{tag}",
         })
 
-    sources = [str(toolmt_path), str(dt_dir / "dt1.tsv"), str(dt_dir / "dt13.tsv"), str(dt_dir / "dt15.tsv")]
-    return out, sources
+    return out
 
 
-def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, float]] | None) -> list[dict[str, object]]:
+def build_webassembly(wasm_csv: Path) -> list[dict[str, object]]:
     rows = []
     with wasm_csv.open(newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
@@ -218,9 +415,6 @@ def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, flo
             was = float(r["wasm_s"])
             ncbi = float(r["ncbi_s"]) if r["ncbi_s"] else None
             note = f"commit_{r['commit']}"
-            if c == "tbx" and ncbi is None and j_tblastx_ncbi and th in j_tblastx_ncbi:
-                ncbi, _ = j_tblastx_ncbi[th]
-                note = f"commit_{r['commit']}_ncbi_j2"
             rows.append({
                 "case": c,
                 "mode_label": r["mode_label"],
@@ -241,7 +435,7 @@ def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, flo
 
 
 def main() -> int:
-    base = Path("/home/kawato/losat-baselines")
+    base = Path(os.environ.get("LOSAT_BASELINES_DIR", Path.home() / "losat-baselines"))
     ap = argparse.ArgumentParser()
     ap.add_argument("--j2-dir", type=Path, default=base / "release-v020-20261025/work/j-speed/results2")
     ap.add_argument("--ext-dir", type=Path, default=base / "release-v020-20261025/work/bench-v020-ext/results")
@@ -252,32 +446,18 @@ def main() -> int:
     ap.add_argument("--losat-commit", default="93ca2f652617acac09d416c28c293cc8a1a501d1",
                     help="full SHA of the LOSAT build measured in --j2-dir and --ext-dir")
     ap.add_argument("--losat-version", default="0.2.0")
-    ap.add_argument("--static-only", action="store_true", help="Only build downstream_tools (and webassembly if complete).")
+    ap.add_argument("--wasm-paired", action="store_true",
+                    help="mark WebAssembly measurements as direct paired runs (sets wasm_derived=false in metadata.json)")
+    ap.add_argument("--wasm-derived-from", default="6a0a8719",
+                    help="source LOSAT build recorded as wasm_derived_from when --wasm-paired is not set")
     args = ap.parse_args()
 
-    os.makedirs(args.out, exist_ok=True)
-    dt_rows, dt_sources = build_downstream_tools(args.toolmt, args.dt_dir)
-    write_tsv(
-        args.out / "downstream_tools.tsv",
-        ["program", "tool", "threads_label", "threads_num", "cases_count",
-         "ncbi_mt_s", "losat_mt_s", "mt_speedup", "ncbi_n1_s", "losat_n1_s",
-         "n1_speedup", "same_output", "note"],
-        dt_rows,
-    )
+    wasm_derived_from = args.wasm_derived_from.strip()
+    if not args.wasm_paired and not wasm_derived_from:
+        sys.exit("--wasm-derived-from must be non-empty unless --wasm-paired is set")
 
-    if args.static_only:
-        wasm_rows = build_webassembly(args.wasm_csv, None)
-        write_tsv(
-            args.out / "webassembly.tsv",
-            ["case", "mode_label", "threads", "commit", "native_s", "wasm_s", "ncbi_s",
-             "native_speedup", "wasm_speedup", "wasm_overhead", "native_mib", "wasm_mib",
-             "ncbi_mib", "note"],
-            wasm_rows,
-        )
-        print("static snapshot written:", args.out)
-        return 0
-
-    # 1. Load J2 n1 and n16
+    # 1. Resolve all input paths, check existence, and validate input_checksums before any write
+    dt_source_paths = [args.toolmt, *(args.dt_dir / f"{tag}.tsv" for tag in DT_TAGS)]
     j_n16_path = args.j2_dir / "n16/runs.tsv"
     j_n1_paths = sorted((args.j2_dir / "n1").glob("perfstat_*.tsv"))
     j_inputs_path = args.j2_dir / "inputs.tsv"
@@ -285,20 +465,51 @@ def main() -> int:
     ext_n1_path = args.ext_dir / "n1.tsv"
     ext_inputs_path = args.ext_dir / "inputs_ext.tsv"
     ext_bp_path = args.ext_dir / "bp_db_parity.tsv"
+    dt_sha_paths = [args.dt_dir / f"{tag}_sha.txt" for tag in DT_TAGS]
 
-    for req in (j_n16_path, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path):
-        if not req.is_file() or not j_n1_paths:
+    for req in (
+        j_n16_path,
+        j_inputs_path,
+        ext_n0_path,
+        ext_n1_path,
+        ext_inputs_path,
+        ext_bp_path,
+        *dt_source_paths,
+        *dt_sha_paths,
+        args.wasm_csv,
+    ):
+        if not req.is_file():
             sys.exit(f"missing completed input file: {req}")
+    if not j_n1_paths:
+        sys.exit(f"missing completed input files: {args.j2_dir / 'n1'}/perfstat_*.tsv")
 
-    j_n16: dict[tuple[str, str], list[tuple[float, float, str, int]]] = defaultdict(list)
+    input_files = [
+        j_n16_path,
+        *j_n1_paths,
+        j_inputs_path,
+        ext_n0_path,
+        ext_n1_path,
+        ext_inputs_path,
+        ext_bp_path,
+        args.wasm_csv,
+        *dt_source_paths,
+        *dt_sha_paths,
+    ]
+    input_checksums = collect_input_checksums(input_files, base)
+
+    dt_rows = build_downstream_tools(args.toolmt, args.dt_dir)
+
+    j_n16: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(j_n16_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"J2 n16 rc != 0: {r}")
-        j_n16[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], 0))
+        j_n16[(r["case"], r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
+        )
 
-    j_n1: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
+    j_n1: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
     j_n1_timeouts: set[tuple[str, str]] = set()
     for p in j_n1_paths:
         for r in read_tsv(p):
@@ -307,23 +518,29 @@ def main() -> int:
                 continue
             if int(r["rc"]) != 0:
                 sys.exit(f"J2 n1 rc != 0: {r}")
-            j_n1[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+            j_n1[(r["case"], r["arm"])].append(
+                (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
+            )
 
-    ext_n0: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
+    ext_n0: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(ext_n0_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"ext n0 rc != 0: {r}")
-        ext_n0[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+        ext_n0[(r["case"], int(r["threads"]), r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
+        )
 
-    ext_n1: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
+    ext_n1: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(ext_n1_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"ext n1 rc != 0: {r}")
-        ext_n1[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+        ext_n1[(r["case"], int(r["threads"]), r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, row_sha16(r), parse_rss_anon_mib(r))
+        )
 
     # 2. standard_workloads.tsv (12 modes x 2 thread counts x {losat, ncbi})
     std_rows = []
@@ -340,67 +557,60 @@ def main() -> int:
                 nc_list = src.get((cid, th, "ncbi"), [])
                 v0_list = []
 
-            lo_w = statistics.median(x[0] for x in lo_list)
-            lo_w_min = min(x[0] for x in lo_list)
-            lo_w_max = max(x[0] for x in lo_list)
-            lo_m = statistics.median(x[1] for x in lo_list)
-            lo_sha = {x[2] for x in lo_list}
-            if len(lo_sha) != 1:
-                sys.exit(f"LOSAT sha differs across rounds for {cid} t={th}: {lo_sha}")
+            ncbi_n1_sha = (
+                {x[2] for x in ext_n0[(cid, 1, "ncbi")]}
+                if cid in ("rps", "rpstbn") and th == 16
+                else None
+            )
+            std_rows.append(
+                make_standard_row(
+                    group=group,
+                    cid=cid,
+                    prog=prog,
+                    task=task,
+                    label=label,
+                    th=th,
+                    qdesc=qdesc,
+                    sdesc=sdesc,
+                    target=target,
+                    opts=opts,
+                    lo_list=lo_list,
+                    nc_list=nc_list,
+                    v0_list=v0_list,
+                    is_ncbi_timeout=(cid, "ncbi") in j_n1_timeouts,
+                    subject_vs_db=cid in ("bp", "bpff"),
+                    ncbi_n1_sha=ncbi_n1_sha,
+                )
+            )
 
-            nc_w = statistics.median(x[0] for x in nc_list) if nc_list else None
-            nc_m = statistics.median(x[1] for x in nc_list) if nc_list else None
-            nc_sha = {x[2] for x in nc_list}
-            v0_w = statistics.median(x[0] for x in v0_list) if v0_list else ""
-            v0_m = round(statistics.median(x[1] for x in v0_list), 2) if v0_list else ""
+            # Optional paired `-db` vs `-db` arm
+            if not is_ext and target == "-subject":
+                db_cid = f"{cid}_db"
+                db_lo = (j_n1 if th == 1 else j_n16).get((db_cid, "cp"), [])
+                db_nc = (j_n1 if th == 1 else j_n16).get((db_cid, "ncbi"), [])
+                if db_lo and db_nc:
+                    std_rows.append(
+                        make_standard_row(
+                            group=group,
+                            cid=db_cid,
+                            prog=prog,
+                            task=task,
+                            label=f"{label} (-db)",
+                            th=th,
+                            qdesc=qdesc,
+                            sdesc=sdesc,
+                            target="-db",
+                            opts=opts,
+                            lo_list=db_lo,
+                            nc_list=db_nc,
+                            v0_list=[],
+                        )
+                    )
 
-            parity = "same"
-            ncbi_runs = len(nc_list)
-            if not nc_list and th == 1 and (cid, "ncbi") in j_n1_timeouts:
-                parity = "ncbi_timeout_6000s"
-                ncbi_runs = 1
-            elif cid in ("bp", "bpff"):
-                parity = "subject_vs_db"
-            elif cid in ("rps", "rpstbn") and th == 16 and next(iter(lo_sha)) != next(iter(nc_sha)):
-                # Check against NCBI n1 SHA
-                ncbi1_sha = {x[2] for x in ext_n0[(cid, 1, "ncbi")]}
-                parity = "same_as_ncbi_n1" if lo_sha == ncbi1_sha else "diff"
-            elif lo_sha != nc_sha:
-                parity = "diff"
-
-            std_rows.append({
-                "group": group,
-                "case": cid,
-                "program": prog,
-                "task": task,
-                "label": label,
-                "threads": th,
-                "losat_wall_s": round(lo_w, 3),
-                "losat_wall_min_s": round(lo_w_min, 3),
-                "losat_wall_max_s": round(lo_w_max, 3),
-                "losat_rss_mib": round(lo_m, 2),
-                "ncbi_wall_s": round(nc_w, 3) if nc_w is not None else "",
-                "ncbi_rss_mib": round(nc_m, 2) if nc_m is not None else "",
-                "v010_wall_s": round(v0_w, 3) if v0_w != "" else "",
-                "v010_rss_mib": v0_m,
-                "speedup": round(nc_w / lo_w, 4) if nc_w else "",
-                "mem_reduction": round(nc_m / lo_m, 4) if nc_m else "",
-                "losat_runs": len(lo_list),
-                "ncbi_runs": ncbi_runs,
-                "losat_sha16": next(iter(lo_sha)),
-                "ncbi_sha16": ",".join(sorted(nc_sha)),
-                "parity": parity,
-                "query_desc": qdesc,
-                "subject_desc": sdesc,
-                "target": target,
-                "options": opts,
-            })
-
-    write_tsv(
-        args.out / "standard_workloads.tsv",
-        list(std_rows[0].keys()),
-        std_rows,
-    )
+    std_fields = list(std_rows[0].keys())
+    for opt_col in ("losat_rss_anon_mib", "ncbi_rss_anon_mib"):
+        if any(opt_col in row for row in std_rows) and opt_col not in std_fields:
+            std_fields.append(opt_col)
 
     # 3. utilities.tsv (makeblastdb + rpsbproc)
     util_rows = []
@@ -409,12 +619,14 @@ def main() -> int:
                        ("rpsbproc", "rpsbproc (4,300 E. coli proteins XML, CDD v3.22)")):
         lo = ext_n0[(cid, 1, "cp")]
         nc = ext_n0[(cid, 1, "ncbi")]
+        if not lo or not nc:
+            sys.exit(f"missing utility runs for {cid} t=1")
         lo_w = statistics.median(x[0] for x in lo)
         nc_w = statistics.median(x[0] for x in nc)
         lo_m = statistics.median(x[1] for x in lo)
         nc_m = statistics.median(x[1] for x in nc)
-        lo_sha = {x[2] for x in lo}
-        nc_sha = {x[2] for x in nc}
+        lo_sha16 = require_single_sha16([x[2] for x in lo], f"utility {cid} LOSAT t=1")
+        nc_sha16 = require_single_sha16([x[2] for x in nc], f"utility {cid} NCBI t=1")
         util_rows.append({
             "case": cid,
             "label": label,
@@ -425,11 +637,10 @@ def main() -> int:
             "losat_rss_mib": round(lo_m, 2),
             "ncbi_rss_mib": round(nc_m, 2),
             "mem_reduction": round(nc_m / lo_m, 4),
-            "losat_sha16": next(iter(lo_sha)),
-            "ncbi_sha16": next(iter(nc_sha)),
+            "losat_sha16": lo_sha16,
+            "ncbi_sha16": nc_sha16,
             "runs": len(lo),
         })
-    write_tsv(args.out / "utilities.tsv", list(util_rows[0].keys()), util_rows)
 
     # 4. scaling.tsv (2a thread scaling, 2b query size, 2c/2d database size)
     sc_rows = []
@@ -445,6 +656,8 @@ def main() -> int:
             else:
                 lo = ext_n1[(cid, th, "cp")]
                 nc = ext_n1[(cid, th, "ncbi")]
+            if not lo or not nc:
+                sys.exit(f"missing scaling runs for {cid} t={th}")
             lo_w = statistics.median(x[0] for x in lo)
             nc_w = statistics.median(x[0] for x in nc)
             lo_m = statistics.median(x[1] for x in lo)
@@ -466,6 +679,8 @@ def main() -> int:
     for cid, qn in (("m2_1e4", 10000), ("m2_1e5", 100000), ("m2_1e6", 1000000)):
         lo = ext_n1[(cid, 16, "cp")]
         nc = ext_n1[(cid, 16, "ncbi")]
+        if not lo or not nc:
+            sys.exit(f"missing query-scaling runs for {cid} t=16")
         lo_w = statistics.median(x[0] for x in lo)
         nc_w = statistics.median(x[0] for x in nc)
         lo_m = statistics.median(x[1] for x in lo)
@@ -489,7 +704,9 @@ def main() -> int:
     for cid, inp_key, cache in (("m3_abr", "m3_abr", "warm"), ("m3_16s", "m3_16s", "warm"), ("m3_rpr", "m3_rpr", "warm")):
         lo = ext_n1[(cid, 16, "cp")]
         nc = ext_n1[(cid, 16, "ncbi")]
-        db_bytes = int(inputs_ext[inp_key]["disk_bytes"])
+        if not lo or not nc:
+            sys.exit(f"missing db-scaling runs for {cid} t=16")
+        db_bytes = parse_disk_bytes(inputs_ext, inp_key)
         lo_w = statistics.median(x[0] for x in lo)
         nc_w = statistics.median(x[0] for x in nc)
         lo_m = statistics.median(x[1] for x in lo)
@@ -507,8 +724,10 @@ def main() -> int:
             "ncbi_rss_mib": round(nc_m, 2),
         })
     for tm_key, inp_key, cache in (("M3_rprc", "m3_rpr", "cold"), ("M3_cnt", "m3_cnt", "warm"), ("M3_cntc", "m3_cnt", "cold")):
+        if tm_key not in tm:
+            sys.exit(f"missing toolmt entry for {tm_key}")
+        db_bytes = parse_disk_bytes(inputs_ext, inp_key)
         r = tm[tm_key]
-        db_bytes = int(inputs_ext[inp_key]["disk_bytes"])
         sc_rows.append({
             "panel": "2cd_db_size",
             "case": tm_key.lower(),
@@ -522,50 +741,76 @@ def main() -> int:
             "ncbi_rss_mib": round(float(r["ncbi_rss_mib"]), 2),
         })
 
-    write_tsv(args.out / "scaling.tsv", list(sc_rows[0].keys()), sc_rows)
+    # 5. webassembly.tsv (provenance recorded via wasm_derived / wasm_derived_from; tblastx BLAST+ left unmeasured)
+    wasm_rows = build_webassembly(args.wasm_csv)
 
-    # 5. webassembly.tsv (strictly paired 7f7db49c runs; tblastx BLAST+ left unmeasured)
-    wasm_rows = build_webassembly(args.wasm_csv, None)
-    write_tsv(
-        args.out / "webassembly.tsv",
-        list(wasm_rows[0].keys()),
-        wasm_rows,
-    )
-
-    # 6. Copy combined inputs & bp_db parity metadata
+    # 6. Combine inputs & bp_db parity metadata
     in_rows = []
     for r in read_tsv(j_inputs_path):
         in_rows.append({"source": "j2", **r})
     for r in read_tsv(ext_inputs_path):
         in_rows.append({"source": "bench_v020_ext", **r})
-    write_tsv(args.out / "inputs.tsv", ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"],
-              [{k: r.get(k, "") for k in ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"]} for r in in_rows])
 
-    bp_par = read_tsv(ext_bp_path) if ext_bp_path.is_file() else []
+    bp_par = validate_bp_db_parity(read_tsv(ext_bp_path), ext_bp_path)
     toolmt_builds = sorted({str(r.get("build", "")) for r in json.loads(args.toolmt.read_text(encoding="utf-8"))} - {""})
     wasm_commits = sorted({str(r["commit"]) for r in wasm_rows})
     dt_builds = {}
-    for tag in ("dt1", "dt13", "dt15"):
-        sp = args.dt_dir / f"{tag}_sha.txt"
-        dt_builds[tag] = sp.read_text(encoding="utf-8").strip() if sp.is_file() else ""
-    meta = {
+    for tag, sp in zip(DT_TAGS, dt_sha_paths):
+        commit = sp.read_text(encoding="utf-8").strip()
+        if not commit:
+            sys.exit(f"empty commit in provenance file: {sp}")
+        dt_builds[tag] = commit
+    meta: dict[str, object] = {
         "losat_version": args.losat_version,
         "losat_commit": args.losat_commit,
         "ncbi_version": "2.17.0",
         "rpsbproc_version": "0.5.1",
         "wasm_commit": ",".join(wasm_commits),
+        "wasm_derived": not args.wasm_paired,
+    }
+    if not args.wasm_paired:
+        meta["wasm_derived_from"] = wasm_derived_from
+    meta.update({
         "toolmt_commit": ",".join(toolmt_builds),
         "dt_commits": dt_builds,
         "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
         "bp_db_parity": bp_par,
-        "input_checksums": {
-            str(p): sha256_file(p)
-            for p in [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
-                      args.wasm_csv, *map(Path, dt_sources)]
-            + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
-            if p.is_file()
-        },
-    }
+        "input_checksums": input_checksums,
+    })
+
+    for name, rows in (
+        ("downstream_tools", dt_rows),
+        ("standard_workloads", std_rows),
+        ("utilities", util_rows),
+        ("scaling", sc_rows),
+        ("webassembly", wasm_rows),
+    ):
+        if not rows:
+            sys.exit(f"no rows for {name}.tsv")
+
+    # Write all snapshot outputs only after every input and row check has passed
+    os.makedirs(args.out, exist_ok=True)
+    write_tsv(
+        args.out / "downstream_tools.tsv",
+        ["program", "tool", "threads_label", "threads_num", "cases_count",
+         "ncbi_mt_s", "losat_mt_s", "mt_speedup", "ncbi_n1_s", "losat_n1_s",
+         "n1_speedup", "same_output", "note"],
+        dt_rows,
+    )
+    write_tsv(
+        args.out / "standard_workloads.tsv",
+        std_fields,
+        std_rows,
+    )
+    write_tsv(args.out / "utilities.tsv", list(util_rows[0].keys()), util_rows)
+    write_tsv(args.out / "scaling.tsv", list(sc_rows[0].keys()), sc_rows)
+    write_tsv(
+        args.out / "webassembly.tsv",
+        list(wasm_rows[0].keys()),
+        wasm_rows,
+    )
+    write_tsv(args.out / "inputs.tsv", ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"],
+              [{k: r.get(k, "") for k in ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"]} for r in in_rows])
     (args.out / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print("full snapshot written:", args.out)
     return 0

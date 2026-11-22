@@ -15,3 +15,40 @@ gzip -9 -n pn1.asn
 ```
 
 `ps6c_other_iupacaa.asn.gz`: NCBI BLAST+ 2.17.0's `-out_pssm` of `psiblast -in_msa tests/fixtures/msa/ps6b_fa_mol_other.aln -db tests/db_search/paja` (a query whose Seq-inst molecule is `other`, `iupacaa` letters), gzipped; the PSSM query of row `db.ps.inpssm.other.0` (line PS, PS6c).
+
+`ps9_<name>.asnb` (26 files; `ps9_<name>.asnb.gz`, `gzip -9 -n`, when the BER passes 20 KB: `tk_paja tkxbz_paja tk_ratios tk_zr
+ts1_tslice ts4_tslice tf1_hba idq`): the binary (BER) twins of the text PSSMs of the rows `db.ps.inpssm.*` and
+`db.tbn.inpssm.*`, the queries of the rows `db.ps.inpssm.bin.*` and `db.tbn.inpssm.bin.*` (each is the text row of the same
+name without `.bin`, with the twin as its `-in_pssm` file; line RG, D3c-3a). Each was written by `datatool` 2.24.0 of the
+bioconda BLAST 2.17.0 package (`datatool -m all_pssm.asn -v x.asn -e x.asnb`; `all_pssm.asn` is NCBI's ASN.1 modules from
+`general` to `blastdb` with `scoremat.asn` of the NCBI C++ Toolkit 2.17.0, kept at
+`remaining-gaps-20261112/D/d3/c3a/twins/all_pssm.asn`), so every length is indefinite. The generator is
+`remaining-gaps-20261112/D/d3/c3a/tools/make_twins.py`; it also checks for each file that datatool's text print of the binary
+equals its text print of the source. The sources, all text files of this tree: `tk_paja tkxbz_paja rnd26 two rnd_scaled
+rnd_notprot rnd_noscores rnd_idO rnd_localidO rnd_noungap rnd_byrow rnd_gi rnd_ctrl tk_ratios tk_zr` from `ps4_<name>.asn.gz`
+(`two` is the twins of that file's two objects one after the other); `rnd` from
+`../db_search/db.ps.asn.rnd.6.asn` and `tkrnd` from `../db_search/db.ps.asn.tkrnd.6.asn`; `rnd_ident_utf8` from
+`ps5_rnd_ident_utf8.asn.gz`; `rnd_kungneg` from `ps5c_rnd_kungneg.asn.gz`; `bad_iupacaa` and `lower_iupacaa` from
+`ps_bad_iupacaa.asn.gz` and `ps_lower_iupacaa.asn.gz`; `ts1_tslice ts4_tslice tf1_hba idq one` from `ps7_<name>.asn.gz`.
+`ps5_descr_empty.asn.gz` has no twin: datatool refuses that text. datatool's text reader replaces a byte outside 0x20 to 0x7E
+by `#`, so for three twins, `ps9_rnd_ctrl.asnb`, `ps9_rnd_ident_utf8.asnb` and `ps9_bad_iupacaa.asnb`, the generator put the
+source's raw bytes back after the conversion (same lengths; the title and identifier bytes `C3 A9` and the iupacaa byte `E9`).
+The NCBI answers of the rows were frozen with the official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`.
+
+`ps9_ber_<case>.asnb` (107 files): hand-made BER inputs for the rows `db.ber.ps.<case>` (psiblast, 107 rows, `-comp_based_stats 0
+-evalue 1000`, database `tests/db_search/paja`) and `db.ber.tbn.<case>` (tblastn, 8 rows: `base def title_utf8tag title_ff
+real_pinf cut_title after_broken len89`, database `tests/db_search/tslice`), in `tests/db_search_manifest/psiblast.ber.tsv` and
+`tblastn.ber.tsv`. `ps9_ber_base.asnb` (2,907 bytes) is `ps9_rnd.asnb` without the Pssm member `intermediateData` (its 840
+frequency ratios); most cases are that file with a few bytes changed. The cases with the frequency ratios (`def_full`,
+`real_list_15x`, `real_list_pinf`) start from the whole `ps9_rnd.asnb` (it is also the second object of `after_twice`), and
+`store_ff` and `store_ctrl` from `ps9_bad_iupacaa.asnb`. They were made by byte surgery with `remaining-gaps-20261112/D/d3/c3a/tools/gen_defects.py` (it writes
+the files here and a table of case, size and change to `D/d3/c3a/logs/gen_defects.tsv`; `ber.py` in the same folder
+reads and writes the BER tree): definite lengths and long length forms (81 to 89, 80 on a primitive value), tags, members
+out of order or missing, INTEGER, ENUMERATED, Uint4 and BOOLEAN of other sizes and values, REAL texts and binary forms,
+strings with bytes outside the visible range, lengths past the end, truncations and bytes after the object. Two Uint4 cases,
+`uint_ff` and `uint5_hi`, end psiblast by a signal (no row is possible) and are not kept here. The NCBI answers were frozen with
+the official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`, and eleven rows were repeated with the bioconda 2.17.0 build with
+the same bytes. The probes of `makeblastdb` on the same inputs are in `remaining-gaps-20261112/D/d3/c3a/probe/ber/SUMMARY.tsv`.
+The six `block_*` cases (the query's ncbistdaa OCTET STRING with a length past the end, or as a BIT STRING) are the inputs of
+the review of D3c-3a (`remaining-gaps-20261112/D/d3/c3a/review_probe/`), frozen with the official build under an address limit
+of 8 GiB.

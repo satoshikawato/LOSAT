@@ -1288,6 +1288,16 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4b/`: rows `db.x4b.dbfail.*`, `db.x4b.excl.*`, `db.x4b.cut0.db.*`, `db.x4b.sp.db.*`, `db.x4b.sp.two.db.*` and
+`db.x4b.pssm.none.db.*` (line RG, item X4b-1 fix rounds 1 and 2: tblastn `-use_sw_tback`). `x4b/make_x4b.py` (its
+docstring has the usage and the records) writes with NCBI BLAST+ 2.17.0 makeblastdb (version 5) `x4b/fail`
+(`-parse_seqids`: X4's sok1 in frame +1 and sfail in frame -1, on which tks_W's Smith-Waterman redo fails), `x4b/excl`
+(the same and, at OID 2, a weaker copy of sfail's first half whose only line has a ti) and `x4b/polycg`
+(`tests/fasta/x4b/polycg.fna`, no hit for a PSSM). `x4b/neg.txt` lists an id that no database holds: as a
+`-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its fetch and
+sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), which clears the failure of the match on sfail before it
+(exit 0 where `fail` ends with `Traceback failed`).
+
 `x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
 the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
 has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
@@ -1310,6 +1320,21 @@ do not. `p_miss`, `p_missl`, `n_miss` and `n_missl` name the absolute path of a 
 prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and `p_dir` the directory `/`. The rows are
 `db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
 `olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
+
+`x4b2/`: rows `db.x4b2.fail.w.db.*`, `db.x4b2.dbsize1.w.db.*`, `db.x4b2.rej.crash.db.*`, `db.x4b2.ctx.*.db.*`,
+`db.x4b2.rej.ungapped.ac.b1.db.*`, `db.x4b2.excl.*` and `db.x4b2.past.excl.nolist.*` (line RG, item X4b-2: blastx
+`-use_sw_tback`).
+`x4b2/make_x4b2.py` (its docstring has the usage and the records) writes the queries `tests/fasta/x4b2/*.fna` (X4's
+crafted proteins back-translated with one codon per letter, and cuts of `bslice_q.fna`; the `*_pad.fna` files are
+query files whose batches are followed by queries without a hit, NCBI's runs of which are the expectations of the rows
+`db.x4b2.past.*` and `db.x4b2.bh.false.6`, approved exception 23 of PD-LOSAT-NCBI-DEFECTS; `bh3_pad.fna` pads dev's
+`tests/fasta/outfmt0/bh3_q.fna`), the subjects
+`tests/fasta/x4b2/ok_fail.faa`, and with NCBI BLAST+ 2.17.0 makeblastdb (version 5, `-parse_seqids`) the protein
+databases `x4b2/fail` (sok1 and sfail, on which tks_W's Smith-Waterman redo fails) and `x4b2/excl` (the same and, at
+OID 2, a weaker copy of sfail's first half whose only line has a ti). `x4b2/neg.txt` lists an id that no database
+holds: as a `-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its
+fetch and sets the batch's status back to 0, which clears the failure of the match on sfail before it. The databases
+carry their creation date: the committed files, not a new run of the script, are the inputs of the frozen outputs.
 
 ## Alias files with OID_MASK_TYPE (line RG, series D, D1b-2)
 
@@ -2431,6 +2456,9 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
   an X against an `MTT` codon (I or L) and an A and an X against `NNN`. TBLASTN's search reads the ambiguous codons as
   X, its reports as B, Z and J (`NNN` stays X in both): the identities and positives of the reports differ from the
   Seq-aligns'.
+- `tn_ac_q.faa` (rows `db.tn.rej.ungapped.sw.ac.b1.*` and `db.tn.ungapped.ac.b1.nosw.7`, line O4c): a protein of W, C
+  and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
+  context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
 ## Where some inputs come from (provenance)
 

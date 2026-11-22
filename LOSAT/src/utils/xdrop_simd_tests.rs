@@ -589,9 +589,10 @@ fn rows_that_do_not_fit_go_to_the_next_chunk() {
     X_TEST_SHIFT.with(|c| c.set(None));
     assert!(t.x_walk_start().is_none());
     let row = |t: &mut XTrace, n: usize, cells: usize, v: u8| {
-        let p = t.x_row(n);
+        // `x_row` returns null only for `n == 0` (an empty `XTrace`); these rows ask `n >= 1`.
+        let p = std::ptr::NonNull::new(t.x_row(n)).expect("x_row gave a row");
         // SAFETY: `x_row` gave room for `n >= cells` bytes at `p`.
-        unsafe { std::ptr::write_bytes(p, v, cells) };
+        unsafe { std::ptr::write_bytes(p.as_ptr(), v, cells) };
         t.x_row_done(false, v as usize, cells)
     };
     let r1 = row(&mut t, 300, 200, 1);
@@ -662,9 +663,9 @@ fn rows_that_do_not_fit_go_to_the_next_chunk() {
     row(&mut t, 300, 300, 6);
     assert_eq!(t.x_test_layout(false), vec![(0, 0, 6, 300)]);
     // a step of 255 or more forward takes the long form too
-    let p = t.x_row(10);
+    let p = std::ptr::NonNull::new(t.x_row(10)).expect("x_row gave a row");
     // SAFETY: `x_row` gave room for 10 bytes at `p`.
-    unsafe { std::ptr::write_bytes(p, 7, 10) };
+    unsafe { std::ptr::write_bytes(p.as_ptr(), 7, 10) };
     t.x_row_done(false, 306, 10);
     assert_eq!(
         t.x_test_layout(false),

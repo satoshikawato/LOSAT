@@ -234,7 +234,7 @@ def test_a_query_record_that_the_reader_refuses_ends_the_search_in_its_batch(
     with pytest.raises(SearchError) as written:
         search.run_to_file(*inputs, outfmt="6", path=tmp_path / "library.tsv")
     assert (tmp_path / "library.tsv").read_bytes() == rows
-    assert written.value.message_bytes + b"\n" == stderr
+    assert written.value.message_bytes == stderr
     found = []
     with pytest.raises(SearchError) as batches:
         for batch in search.batches(*inputs):
@@ -256,4 +256,4 @@ def test_a_query_of_comment_lines_only_fails_as_the_command_line(losat_fails, tm
     assert b"Empty CBlastQueryVector" in stderr
     with pytest.raises(SearchError) as caught:
         Search("blastp").run(Sequences.from_fasta(query), Sequences.from_fasta(subject), outfmt="6")
-    assert caught.value.message_bytes + b"\n" == stderr
+    assert caught.value.message_bytes == stderr

@@ -1636,18 +1636,16 @@ fn a_side_file_write_error_gives_one_answer_in_every_program() {
                 }
                 chain => {
                     let n = &rest[..digits];
-                    assert_eq!(
-                        chain,
-                        format!(
-                            ": stack is empty: cannot close output stream\n\
-                             Error: (CIOException::eFlush) [{program}] COStreamBuffer::Flush: failed\n\
-                             Error: (CSerialException::eIoError) [{program}] byte {n}: cannot close \
-                             output stream\n\
-                             Error: (802.4) [{program}] Cannot close serializing output stream \
-                             (CSerialException::eIoError) byte {n}: cannot close output stream\n"
-                        ),
-                        "{what}"
+                    // NCBI's chain of the failed close, in LOSAT's words (`wording::losat_text`).
+                    let ncbi = format!(
+                        ": stack is empty: cannot close output stream\n\
+                         Error: (CIOException::eFlush) [{program}] COStreamBuffer::Flush: failed\n\
+                         Error: (CSerialException::eIoError) [{program}] byte {n}: cannot close \
+                         output stream\n\
+                         Error: (802.4) [{program}] Cannot close serializing output stream \
+                         (CSerialException::eIoError) byte {n}: cannot close output stream\n"
                     );
+                    assert_eq!(chain, losat::wording::losat_text(&ncbi), "{what}");
                     assert!(!fs::read(&out).unwrap().is_empty(), "{what}: the master");
                 }
             }

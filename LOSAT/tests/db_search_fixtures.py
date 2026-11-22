@@ -977,6 +977,9 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
         landed = b""
     elif mode is not None and mode.startswith("fsize="):
         limit = int(mode.removeprefix("fsize=")) + growth
+        # The limit holds for every file of the process: LOSAT_X_REACH's record (clean_env) would be cut too, and
+        # LOSAT would say so on standard error, so a limited run records no switch paths.
+        env = {k: v for k, v in env.items() if k != "LOSAT_X_REACH"}
 
         def limited() -> None:
             if preexec is not None:

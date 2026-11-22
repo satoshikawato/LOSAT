@@ -306,16 +306,20 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
 }
 
 /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run
-/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text.
+/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text. The end lets
+/// the posts go (each run ends once).
 #[test]
 fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
-    let (export, _) = export(None);
     let queries = [BioseqInput {
         title: b"q caf\xe9",
         defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
         ..protein("Query_1", b"MWCHWCMWCHWC")
     }];
-    export.write_request(0..1, &request(&queries, &[])).unwrap();
+    let written = || {
+        let (export, _) = export(None);
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export
+    };
     let native = || -> Result<()> {
         Err(crate::cli::NativeError {
             exit: 3,
@@ -324,16 +328,23 @@ fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
         .into())
     };
     for result in [Ok(()), native()] {
+        let export = written();
         let error = end_run(Some(&export), result).unwrap_err();
         assert!(
             error.to_string().starts_with("LOSAT internal error"),
             "{error}"
         );
+        assert!(export.take_all_posts().is_empty());
     }
-    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
-    assert_eq!(refusal.to_string(), "not supported");
+    let export = written();
     assert!(!export.take_all_posts().is_empty());
     end_run(Some(&export), Ok(())).unwrap();
+    let export = written();
+    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
+    assert_eq!(refusal.to_string(), "not supported");
+    assert!(export.take_all_posts().is_empty());
+    let export = written();
+    export.take_all_posts();
     let error = end_run(Some(&export), native()).unwrap_err();
     assert!(error.is::<crate::cli::NativeError>());
     end_run(None, Ok(())).unwrap();
@@ -666,6 +677,8 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     let made = export(open("out/s.asn").unwrap());
     assert!(!made.holds_report());
     assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
+    // The run's end lets the posts of its requests go, which hold the export (their marks).
+    end_run(Some(&made), Ok(())).unwrap();
     let kept = made.clone();
     drop(made);
     assert!(
@@ -689,6 +702,18 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     assert!(end_run(Some(&cut), Err(native)).is_err());
     drop(cut);
     assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // A run that ends with the posts of a request not taken (an error between the request and its
+    // batch's start) still gives the file at its end.
+    received.0.lock().unwrap().clear();
+    let early = export(open("s.asn").unwrap());
+    assert!(early.write_request(0..1, &request(&queries, &[])).unwrap());
+    let refusal = anyhow::anyhow!("a refusal of LOSAT's");
+    assert!(end_run(Some(&early), Err(refusal)).is_err());
+    drop(early);
+    assert_eq!(
+        received.files(),
+        [(b"s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
 }
 
 /// The names that LOSAT Web reads otherwise than as a file of the run (`RunFiles::strategy_target`):

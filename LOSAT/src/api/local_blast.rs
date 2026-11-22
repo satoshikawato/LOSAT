@@ -757,7 +757,7 @@ impl ReportOutputs<'_> {
                 formats: held
                     .iter_mut()
                     .map(|(outfmt, sink, refusal)| FormatOutput {
-                        outfmt: *outfmt,
+                        outfmt,
                         sink: match sink {
                             Held::Writer(writer, None) => OutputSink::Writer(&mut **writer),
                             Held::Writer(writer, Some(side)) => {

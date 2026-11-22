@@ -188,10 +188,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
                 num_descriptions: args.num_descriptions,
                 num_alignments: args.num_alignments,
             };
-            args.strategy = export(
-                crate::algorithm::tblastx::archive::option_inputs(args),
-                counts,
-            );
+            args.strategy = export(crate::algorithm::tblastx::option_inputs(args), counts);
         }
         Commands::Blastx(args) => {
             let counts = HitlistArgs {
@@ -199,10 +196,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
                 num_descriptions: args.num_descriptions,
                 num_alignments: args.num_alignments,
             };
-            args.strategy = export(
-                crate::algorithm::blastx::archive::option_inputs(args),
-                counts,
-            );
+            args.strategy = export(crate::algorithm::blastx::option_inputs(args), counts);
         }
         _ => {}
     }

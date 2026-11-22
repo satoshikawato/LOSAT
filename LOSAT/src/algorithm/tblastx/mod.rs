@@ -7,7 +7,10 @@
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 mod anchored;
-pub(crate) mod archive;
+mod archive;
+// The options of a run's requests, which LOSAT Web's search strategy file takes (line RG item F1w;
+// `web_adapter::give_strategy`).
+pub(crate) use archive::option_inputs;
 pub mod args;
 pub mod blast_aascan;
 pub mod blast_engine;

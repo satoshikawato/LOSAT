@@ -949,11 +949,22 @@ impl StrategyExport {
 /// a post still waiting is LOSAT's internal error instead of output that silently lacks it.
 /// LOSAT's refusals (any other error) keep their own text. Each program calls this once, where
 /// its run's result is known (`blastn`, `blastp` for psiblast and rpsblast too, `blastx` for
-/// rpstblastn too, `tblastn`, `tblastx`).
+/// rpstblastn too, `tblastn`, `tblastx`; LOSAT Web's records searches, `ReportOutputs::run_records`).
+/// The posts still waiting go then: each holds the export (its request's mark), so that the export
+/// would outlive the run, and a sink that ends with the export (LOSAT Web's file of the run,
+/// `ReceivedFile`) would never reach its receiver.
 pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<()> {
     let Some(strategy) = strategy else {
         return result;
     };
+    let ended = end_export(strategy, result);
+    let waiting = strategy.with_state(|state| std::mem::take(&mut state.pending));
+    drop(waiting);
+    ended
+}
+
+/// `end_run` of a run with the export `strategy`, before its waiting posts go.
+fn end_export(strategy: &StrategyExport, result: Result<()>) -> Result<()> {
     let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
     // The report stream's held bytes (`hold_report`): where the run ends before NCBI's first
     // request they are NCBI's, written before its error (or its success); LOSAT's refusal has

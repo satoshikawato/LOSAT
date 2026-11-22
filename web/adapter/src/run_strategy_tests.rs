@@ -239,7 +239,7 @@ fn the_names_the_run_has_no_file_for() {
         );
         let (result, streams) = run_files_of(&words, query, subject);
         assert_eq!(result.unwrap_err(), message, "{name:?}");
-        assert_eq!(files(&streams), [], "{name:?}");
+        assert!(files(&streams).is_empty(), "{name:?}");
     }
     for (name, refusal) in [
         ("-", "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name"),
@@ -251,7 +251,7 @@ fn the_names_the_run_has_no_file_for() {
         validate(&words).unwrap();
         let (result, streams) = run_files_of(&words, query, subject);
         assert_eq!(result.unwrap_err(), refusal, "{name}");
-        assert_eq!(files(&streams), [], "{name}");
+        assert!(files(&streams).is_empty(), "{name}");
         for stream in [0, 6, 7] {
             assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{name} {stream}");
         }
@@ -259,12 +259,12 @@ fn the_names_the_run_has_no_file_for() {
     let words = row_argv(row, "/dev/null");
     let (result, streams) = run_files_of(&words, query, subject);
     result.unwrap();
-    assert_eq!(files(&streams), [], "/dev/null");
+    assert!(files(&streams).is_empty(), "/dev/null");
     assert!(!streams[&6].is_empty());
     let words = row_argv(row, "-");
     let (result, streams) = run_files_of(&words, "outfmt11/arch_bp_empty.faa", subject);
     result.unwrap();
-    assert_eq!(files(&streams), []);
+    assert!(files(&streams).is_empty());
     assert_eq!(
         String::from_utf8_lossy(&streams[&STREAM_DIAGNOSTICS]),
         "Warning: [blastp] Query is Empty!\n"

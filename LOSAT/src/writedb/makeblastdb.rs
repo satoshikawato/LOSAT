@@ -105,14 +105,20 @@ pub struct MakedbArgs {
     #[arg(long, value_name = "oid_masks",
           value_parser = crate::blastinput::value_parsers::ncbi_integer)]
     pub oid_masks: Option<i32>,
+    /// Copy the sequences of -input_type blastdb in a random order, seeded by the clock's second
+    // NCBI's argument is hidden (`fHidden`, makeblastdb.cpp:253-254): its help lists it with
+    // `-help-full` only. LOSAT's help (its own texts, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    // exception 1) lists it in neither.
+    #[arg(long, hide = true)]
+    pub randomize: bool,
 }
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
 /// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
-/// `-mask_desc`, `-metadata_output_prefix` and `-oid_masks` are read. `-gi_mask` and
-/// `-gi_mask_name` write GI-indexed mask files (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 3] = ["randomize", "gi_mask", "gi_mask_name"];
+/// `-mask_desc`, `-metadata_output_prefix`, `-oid_masks` and `-randomize` are read. `-gi_mask`
+/// and `-gi_mask_name` write GI-indexed mask files (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 2] = ["gi_mask", "gi_mask_name"];
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
@@ -405,15 +411,9 @@ pub fn check_registry_settings(
     }
 }
 
-/// The checks of the arguments that LOSAT makes first: what LOSAT does not
-/// support, and the format version.
+/// The checks of the arguments that NCBI's parser makes, first: the format version and the
+/// dependencies between options.
 fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
-    if args.input_type != "fasta" && args.input_type != "blastdb" {
-        return Err(unsupported(format!(
-            "-input_type {} is not supported; only fasta and blastdb input are",
-            args.input_type
-        )));
-    }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1218-1219
     // The parser allows 4 and 5 only (`CArgAllow_Integers(eBDB_Version4, eBDB_Version5)`).
     let Some(version) = DbVersion::from_number(args.blastdb_version) else {
@@ -716,6 +716,19 @@ fn build_database_with_log(
              name, please provide a (different) database name using -out",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1156-1159
+    if args.randomize && !blastdb_input {
+        return Err(options_error(
+            "Option randomize is only applicable to blastdb input type",
+        ));
+    }
+    // The input types LOSAT does not read are refused after NCBI's checks of the input type.
+    if args.input_type != "fasta" && !blastdb_input {
+        return Err(unsupported(format!(
+            "-input_type {} is not supported; only fasta and blastdb input are",
+            args.input_type
+        )));
+    }
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
     // `NStr::Split(dbname, " ", input_files)` runs with no flag
     // (ncbistr.hpp:2551-2555): adjacent delimiters are not merged and none is
@@ -799,12 +812,19 @@ fn build_database_with_log(
     }
     let user_path = metadata_user_path(args.metadata_output_prefix.as_deref());
     if blastdb_input {
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
+        // The seed of `-randomize` is `time(nullptr)`, which `mt19937` takes modulo 2^32. NCBI
+        // reads the clock again when the copy starts, after the input's headers are read; LOSAT
+        // reads it once for the build (`now`), so that a build whose clock is fixed (the tests)
+        // has one instant. Under a clock that runs, the two may take different seconds.
+        let randomize = args.randomize.then_some(now.unix_seconds as u32);
         let result = copy_input_databases(
             &mut db,
             &names,
             &user_path,
             is_protein,
             registry_blastdb,
+            randomize,
             err,
         );
         *end_messages = destructor_messages(&db, result.as_ref().err());
@@ -879,7 +899,7 @@ fn seq_type(is_protein: bool) -> SeqType {
 // open, and `build_database_with_log` closes it after the messages, as makeblastdb's
 // destructors do. LOSAT's refusals and its own errors end the build and remove its files.
 /// `x_ProcessInputData` for `-input_type blastdb`, then `EndBuild` and the metadata file
-/// (`open_new_database`).
+/// (`open_new_database`); `randomize` is the seed of `-randomize`.
 #[allow(clippy::too_many_arguments)]
 fn copy_input_databases(
     db: &mut BuildDatabase<'_>,
@@ -887,6 +907,7 @@ fn copy_input_databases(
     user_path: &str,
     is_protein: bool,
     registry_blastdb: Option<&str>,
+    randomize: Option<u32>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let seqtype = seq_type(is_protein);
@@ -910,7 +931,7 @@ fn copy_input_databases(
     }
     let input = SeqDb::open_in(&combine_and_quote(names), seqtype, &search).map_err(input_error)?;
     db.set_leaf_tax_ids(scan_leaf_tax_ids(&input).map_err(raw_copy_error)?);
-    let mut source = RawSeqDbSource::new(&input, db).map_err(raw_copy_error)?;
+    let mut source = RawSeqDbSource::new(&input, db, randomize).map_err(raw_copy_error)?;
     let copied = {
         let mut warn = warn_to(err);
         db.add_raw_sequences(&mut source, &mut warn)

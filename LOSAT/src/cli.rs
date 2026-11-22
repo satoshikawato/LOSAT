@@ -456,9 +456,9 @@ where
         // file). `--help` is LOSAT's spelling of `-help` (clap's) and stops the reader too.
         // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the arguments defined `fHidden`
         // (`ShowAllArguments`). Of NCBI's programs only makeblastdb has one, `-randomize`, which
-        // LOSAT refuses; LOSAT's help lists the arguments LOSAT runs (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-        // exception 1), so its text is `-help`'s, as NCBI's other programs write the bytes of
-        // `-help` (in every place: line RG, `E/SURVEY_E2.md`).
+        // LOSAT's help (its own texts, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1) does not
+        // list, so the text is `-help`'s, as NCBI's other programs write the bytes of `-help` (in
+        // every place: line RG, `E/SURVEY_E2.md`).
         let stops_at_help = !std::ptr::eq(scope, &command);
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (cited at
         // `ncbi_xmlhelp`)

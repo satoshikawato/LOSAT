@@ -137,8 +137,12 @@ authoritative, current guidance for agent behavior in LOSAT.
      are explicit rejections. So are the results of a database with parsed
      Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10 lists, such as a reported sequence
      that NCBI's lookup by id finds as another sequence and following hits whose
-     ids NCBI takes for one sequence. A sequence that a seqid list keeps without a
-     definition line is reproduced, not rejected: NCBI drops its hits at the
+     ids NCBI takes for one sequence. One NCBI failure without a checkable valid result is an
+     approved exception all the same, by the Owner's decision of 2026-11-21: TBLASTX's linking of a
+     query batch whose average query length is 0 against one subject, where NCBI's `Int4` sums
+     overflow and it crashes, adds them in 64 bits (PD-LOSAT-NCBI-DEFECTS exception 20, version
+     1.68). A sequence that a seqid list keeps without a definition line is
+     reproduced, not rejected: NCBI drops its hits at the
      Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
      fetches the subject again (a negative list, 1.34). Approved
      difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's

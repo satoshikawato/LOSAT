@@ -73,8 +73,11 @@
 // native CLI in another folder of the same files with the standard input at the null device; the exit status
 // (stream 2, `status`), the standard output (stream 11), the standard error (stream 3) and every file the run wrote
 // (the frames of stream 12, abi_v2.md §5, by name) are compared with the CLI's, and the folder of the CLI's run has no
-// file besides those that the frames name. `"validate"` calls `losat_web2_validate` on the argv: valid -> 0 and nothing
-// emitted, else -1 and the CLI's standard error then the file of -logfile without the last line end (abi_v2.md §4).
+// file besides those that the frames name; a run of `"expect": "refusal"` is LOSAT's refusal of an output name that LOSAT
+// Web does not write (exit status 1, the refusal on stream 3, no output, no file), which the CLI writes. `"validate"`
+// calls `losat_web2_validate` on the argv: valid -> 0 and nothing emitted, else -1 and the CLI's standard error then the
+// file of -logfile without the last line end (abi_v2.md §4); `"expect": "late_failure"` is an argv that the CLI's run
+// refuses after it opened a file, which validate accepts (its checks stop before the files, D-WW3-10).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -92,6 +95,7 @@ const { WASI } = require("node:wasi");
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
+const { directoryReads } = require(path.join(ROOT, "LOSAT/tests/wasi_files"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
 // The stream of the output of the argv's -outfmt.
@@ -384,12 +388,16 @@ function registerTaxidCounts(reactor, counts, search) {
 // The serial reactor; `directory`, the run's working directory that it preopens as `/work` (a search of -db).
 async function openSerial(wasmPath, directory) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {}, ...(directory === undefined ? {} : { preopens: { "/work": directory } }) });
-  let reactor;
+  let reactor, memory;
+  // A folder of the run's directory opened for reading fails its reads with EISDIR, as on Linux and in the browser
+  // host (directoryReads, LOSAT/tests/wasi_files.js).
+  const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
   const imports = {
-    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
+    wasi_snapshot_preview1: directoryReads(unsignedWasiImports(wasi.wasiImport), guestMemory, directory ?? "/"),
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);
+  memory = instance.exports.memory;
   wasi.initialize(instance);
   reactor = new Reactor(instance.exports, () => instance.exports.memory);
   return { reactor, close: async () => {} };
@@ -1239,26 +1247,46 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
 }
 
 // The frames of stream 12 (abi_v2.md §5): `chunks`, the run's emits, as the files they write in the order of their
-// numbers: [{ name, bytes: [frames of bytes], ended }]. Each frame is one emit of at most 1 MiB: 8 bytes (the file's
-// number from 0, in the order the run opens its files, and the kind, each a u32 LE) and a payload; a file's frames come
-// as beginning (0, its name), bytes (1) and end (2), and every file that the run opened ends when the run does.
+// numbers: [{ name, bytes, writes, ended }], `bytes` the file as the frames leave it and `writes` the number of its
+// frames of bytes. Each frame is one emit of at most 1 MiB: 8 bytes (the file's number from 0, in the order the run
+// opens its files, and the kind, each a u32 LE) and a payload; a file's frames come as beginning (0, its name), bytes
+// (1, at a u64 LE offset, written there with zero bytes before them past the end), truncation (3, a u64 LE length) and
+// end (2), and every file that the run opened ends when the run does, in the order of their numbers.
 function toolFiles(chunks) {
   const files = [];
+  let ends = 0;
   for (const chunk of chunks) {
     assert.ok(chunk.length >= 8 && chunk.length <= 1 << 20, `a frame of ${chunk.length} bytes`);
     const [number, kind] = [chunk.readUInt32LE(0), chunk.readUInt32LE(4)];
     const payload = chunk.subarray(8);
     if (kind === 0) {
       assert.equal(number, files.length, "files are numbered from 0 in the order they open");
-      files.push({ name: payload.toString("utf8"), bytes: [], ended: false });
-    } else {
-      assert.ok(number < files.length && !files[number].ended, `frame of kind ${kind} of file ${number}: it is open`);
-      if (kind === 1) files[number].bytes.push(payload);
-      else {
-        assert.equal(kind, 2, `the kind of a frame (${kind})`);
-        assert.equal(payload.length, 0, "the end of a file has no payload");
-        files[number].ended = true;
+      assert.equal(ends, 0, "no file opens after the first end (the ends come when the run ends)");
+      files.push({ name: payload.toString("utf8"), bytes: Buffer.alloc(0), writes: 0, ended: false });
+      continue;
+    }
+    assert.ok(number < files.length && !files[number].ended, `frame of kind ${kind} of file ${number}: it is open`);
+    const file = files[number];
+    if (kind === 1 || kind === 3) {
+      assert.ok(payload.length >= 8 && (kind === 1 || payload.length === 8), `frame of kind ${kind} of ${payload.length} bytes`);
+      const at = Number(payload.readBigUInt64LE(0));
+      assert.ok(Number.isSafeInteger(at) && at < 1 << 30, `an offset or length of ${payload.readBigUInt64LE(0)}`);
+      if (kind === 1) {
+        const bytes = payload.subarray(8);
+        assert.ok(bytes.length > 0, "a frame of bytes has bytes");
+        const end = at + bytes.length;
+        if (end > file.bytes.length) file.bytes = Buffer.concat([file.bytes, Buffer.alloc(end - file.bytes.length)]);
+        bytes.copy(file.bytes, at);
+        file.writes++;
+      } else {
+        file.bytes = at <= file.bytes.length ? file.bytes.subarray(0, at) : Buffer.concat([file.bytes, Buffer.alloc(at - file.bytes.length)]);
       }
+    } else {
+      assert.equal(kind, 2, `the kind of a frame (${kind})`);
+      assert.equal(payload.length, 0, "the end of a file has no payload");
+      assert.equal(number, ends, "the files end in the order of their numbers");
+      file.ended = true;
+      ends++;
     }
   }
   for (const [number, file] of files.entries()) assert.ok(file.ended, `file ${number} (${file.name}) ends with the run`);
@@ -1297,7 +1325,12 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
   if (search.tool === "validate") {
     const validated = reactor.call("losat_web2_validate", words.join("\0"));
     assert.equal(reactor.chunks.size, 0, `${label}: validate emits nothing`);
-    if (search.expect !== "failure") {
+    if (search.expect === "late_failure") {
+      // The command line's run fails after it opened a file, where validation stops (abi_v2.md §4).
+      assert.notEqual(cli.status, 0, `${label}: the CLI's run fails`);
+      assert.equal(validated.status, 0, `${label}: validate accepts what the command line checks before its files: ${validated.error}`);
+      assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
+    } else if (search.expect !== "failure") {
       assert.equal(cli.status, 0, `${label}: the CLI's run of a valid argv (${cli.stderr})`);
       assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);
       assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
@@ -1319,6 +1352,19 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
     if (instance.waitForWorkers) await instance.waitForWorkers();
     assert.equal(run.status, 0, `${label}: ${run.error}`);
     const status = JSON.parse(run.streams.get(2).toString()).status;
+    if (search.expect === "refusal") {
+      // LOSAT's refusal of an output name that LOSAT Web does not write (abi_v2.md §4), where the command line writes
+      // the file: exit status 1, the refusal on stream 3, no output and no file.
+      const named = search.argv[search.argv.indexOf("-out") + 1];
+      assert.equal(status, 1, `${label}: the refusal's exit status`);
+      assert.match((run.streams.get(3) || "").toString(), /^Error: an output file '.*' .* is not supported by LOSAT's WINDOWMASKER\n$/, `${label}: the refusal`);
+      assert.ok((run.streams.get(3) || "").toString().includes(`'${named}'`), `${label}: the refusal names ${named}`);
+      assert.ok(!run.streams.has(11) && toolFiles(frames).length === 0, `${label}: no output and no file`);
+      assert.deepEqual(filesIn(directory).map((file) => path.relative(directory, file)).sort(), [...before].sort(), `${label}: the run's folder`);
+      console.log(`ok ${label}`);
+      return { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
+               tool: "run", status, files: [] };
+    }
     assert.equal(status, cli.status, `${label}: the exit status (${run.streams.get(3) || ""})`);
     assert.equal(status !== 0, search.expect === "failure", `${label}: the run ${status !== 0 ? "fails" : "completes"} (exit ${status})`);
     assert.equal(sha256(run.streams.get(11) || Buffer.alloc(0)), sha256(cli.stdout), `${label}: stream 11 is the CLI's standard output`);
@@ -1328,14 +1374,14 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
     assert.deepEqual(files.map((file) => file.name).sort(), created.map(([name]) => name), `${label}: the files of the run`);
     for (const file of files) {
       const want = created.find(([name]) => name === file.name)[1];
-      assert.equal(sha256(Buffer.concat(file.bytes)), sha256(want), `${label}: the bytes of ${file.name} (${want.length} bytes)`);
+      assert.equal(sha256(file.bytes), sha256(want), `${label}: the bytes of ${file.name} (${want.length} bytes)`);
     }
     const logfile = search.argv.indexOf("-logfile");
     if (logfile >= 0 && files.length > 0) assert.equal(files[0].name, search.argv[logfile + 1], `${label}: the file of -logfile opens first`);
-    const largest = Math.max(0, ...files.map((file) => file.bytes.length));
+    const largest = Math.max(0, ...files.map((file) => file.writes));
     if (search.frames !== undefined) assert.ok(largest >= search.frames, `${label}: ${largest} frames of bytes, at least ${search.frames}`);
     row = { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
-            tool: "run", status, files: files.map((file) => [file.name, Buffer.concat(file.bytes).length, file.bytes.length]) };
+            tool: "run", status, files: files.map((file) => [file.name, file.bytes.length, file.writes]) };
   }
   // The engine does not write to the run's directory.
   assert.deepEqual(filesIn(directory).map((file) => path.relative(directory, file)).sort(), [...before].sort(), `${label}: the run's folder`);

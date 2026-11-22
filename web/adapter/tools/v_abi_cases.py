@@ -874,8 +874,10 @@ def tool() -> list[dict]:
     D-WW3-6, D-WW3-7, D-WW3-8): the modes `-mk_counts` (each `-sformat`, to the standard output and to a file),
     `-convert` and `-ustat` (each `-outfmt`), their options, the help and version words, and the errors that the
     command line has before and after it opens a file. `"expect"` is `"failure"` for a run whose exit status is
-    not 0 (a check of v_abi.js against the native run); `"frames"` is the least number of frames of bytes that the
-    largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
+    not 0 (a check of v_abi.js against the native run), `"late_failure"` for an argv that `validate` accepts though
+    the command line's run fails after it opens a file (the checks stop there, D-WW3-10), and `"refusal"` for LOSAT's
+    refusal of an output name that LOSAT Web does not write (the command line would write it; exit status 1, no
+    file); `"frames"` is the least number of frames of bytes that the largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
     options, the files by their published names)."""
     tests = REPO / "LOSAT/tests"
     directory = REPO / "LOSAT/target/v_abi_tool"
@@ -885,6 +887,9 @@ def tool() -> list[dict]:
     # (a fixed generator: the same bytes in every run), which a masked output of more than 1 MiB follows.
     (directory / "falist.txt").write_text("fa/dm2L_3k.fa\n\nfa/multi.fa\n")
     files["falist.txt"] = str(directory / "falist.txt")
+    # A registry file of the run's directory (`-conffile wm.ini`), which the run and its validation read.
+    (directory / "wm.ini").write_text("[WINDOW_MASKER]\n")
+    files["wm.ini"] = str(directory / "wm.ini")
     state, lines = 12345, [">big generated record\n"]
     letters = []
     for _ in range(TOOL_BIG_LETTERS):
@@ -896,12 +901,12 @@ def tool() -> list[dict]:
     big = {**files, "big.fa": str(directory / "big.fa")}
     rows: list[dict] = []
 
-    def add(case_id: str, words: str, failure: bool = False, kind: str = "run", frames: int | None = None,
+    def add(case_id: str, words: str, failure: bool | str = False, kind: str = "run", frames: int | None = None,
             published: dict | None = None) -> None:
         row = {"program": "windowmasker", "tool": kind, "argv": shlex.split(words), "cwd": str(tests),
                "files": published or files, "cases": [f"tool.{case_id}"], "frozen": {}}
         if failure:
-            row["expect"] = "failure"
+            row["expect"] = failure if isinstance(failure, str) else "failure"
         if frames is not None:
             row["frames"] = frames
         rows.append(row)
@@ -1003,6 +1008,32 @@ def tool() -> list[dict]:
     add("error.out_directory", f"{mask} -in fa/dm2L_3k.fa -out fa", failure=True)
     add("error.unit_0", "-mk_counts -in fa/dm2L_3k.fa -unit 0", failure=True)
     add("ustat.ids_missing", f"{mask} -in fa/multi.fa -ids nonexistent.txt")
+    add("error.mk.ids_and_exclude_ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -exclude_ids ids/b.txt -unit 5",
+        failure=True)
+    add("error.mk.seqids", "-mk_counts -infmt seqids -in ids/a.txt -unit 5", failure=True)
+    add("error.convert.stdin", "-convert -in - -sformat ascii", failure=True)
+    add("error.convert.stdin.out_dash", "-convert -in - -out -", failure=True)
+    add("error.conffile_missing", "-conffile none.ini -mk_counts -in fa/dm2L_3k.fa -unit 5", failure=True)
+    # A folder named as an input opens, and its read fails (EISDIR), as on Linux.
+    add("error.in_directory", f"{mask} -in fa", failure=True)
+    add("error.in_directory.mk", "-mk_counts -in fa -unit 5", failure=True)
+    add("error.counts_directory", "-ustat fa -in fa/dm2L_3k.fa", failure=True)
+    # One file that the run opens twice (`-out X -logfile X`, two spellings of one path): one file, as the system
+    # shares it (D-WW3-9).
+    add("mk.shared.logfile", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out out.counts -logfile out.counts")
+    add("mk.shared.dot", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts")
+    add("mk.shared.ascii", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -sformat ascii -out out.counts -logfile out.counts")
+    add("convert.shared.logfile", "-convert -in counts/u4.obinary -sformat oascii -out out.counts -logfile out.counts")
+    add("ustat.shared.logfile", f"{mask} -in fa/dm2L_3k.fa -outfmt fasta -out out.fa -logfile out.fa")
+    add("error.counts_garbage.shared", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -out out.res -logfile out.res",
+        failure=True)
+    # The registry file of -conffile, and the output names of the system's devices.
+    add("mk.conffile", "-conffile wm.ini -mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary")
+    add("ustat.dev_stdout", f"{mask} -in fa/dm2L_3k.fa -out /dev/stdout")
+    add("mk.dev_stdout", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary -out /dev/stdout")
+    add("ustat.dev_null", f"{mask} -in fa/dm2L_3k.fa -out /dev/null")
+    add("refusal.out_existing", f"{mask} -in fa/dm2L_3k.fa -out fa/short.fa", failure="refusal")
+    add("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", failure="refusal")
     # The help and the version words.
     for word in ("-h", "-help", "-xmlhelp", "-version", "-version-full", "-version-full-xml", "-version-full-json"):
         add(f"print{word}", word)
@@ -1021,7 +1052,18 @@ def tool() -> list[dict]:
             ("duplicate_option", f"{mask} -window 20 -window 30", True), ("window_abc", f"{mask} -window abc", True),
             ("unit_17", "-mk_counts -unit 17", True), ("mk_and_ustat", f"-mk_counts {mask}", True),
             ("no_mode.logfile", "-in fa/dm2L_3k.fa -logfile run.log", True),
-            ("unknown_option.logfile", f"{mask} -nosuchopt -logfile run.log", True)):
+            ("unknown_option.logfile", f"{mask} -nosuchopt -logfile run.log", True),
+            # The registry file of the run's directory, which validation reads (D-WW3-10).
+            ("conffile", "-conffile wm.ini -mk_counts -in fa/dm2L_3k.fa -out out.counts", False),
+            ("conffile_missing", "-conffile none.ini -mk_counts -in fa/dm2L_3k.fa -out out.counts", True),
+            # The command line's refusals before it opens a file, and one after (D-WW3-10).
+            ("mk.ids_and_exclude_ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -exclude_ids ids/b.txt", True),
+            ("mk.seqids", "-mk_counts -infmt seqids -in ids/a.txt", True),
+            ("convert.stdin", "-convert -in - -sformat ascii", True),
+            ("convert.stdin.out_dash", "-convert -in - -out -", True),
+            ("ustat.ids_and_exclude_ids", f"{mask} -in fa/dm2L_3k.fa -ids ids/a.txt -exclude_ids ids/b.txt",
+             "late_failure"),
+            ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False)):
         add(f"validate.{case_id}", words, failure, kind="validate")
     return rows
 

@@ -319,4 +319,72 @@ function sharedFileImports(table, memory, local, directory) {
   return imports;
 }
 
-module.exports = { sharedFileTable, sharedFileImports, sharedFileViews };
+// A folder that the guest opens for reading opens, and its reads fail with EISDIR, as on Linux, where a
+// command line's read of a folder named as its input (`windowmasker -in <folder>`) fails with "Is a directory".
+// uvwasi opens a folder too, but gives its descriptor no right to read or seek, so the read failed with ENOTCAPABLE
+// ("Capabilities insufficient", line NP WW3a's review, 2026-11-23). As the browser host does
+// (web/packages/losat/src/infra/reactor/run-directory.ts), a folder's descriptor seeks and tells a position of its
+// own (its end is 0), as Linux's lseek of a directory succeeds. `imports` are a thread's uvwasi imports, whose
+// descriptor PREOPEN_ROOT_FD is the preopen of the host's folder `root`; a folder's descriptor is that thread's own, as
+// uvwasi's descriptors are. Returns the imports with path_open, fd_read, fd_pread, fd_seek, fd_tell, fd_close and
+// fd_renumber wrapped.
+function directoryReads(imports, memory, root) {
+  const folders = new Map(); // a folder's descriptor -> its position
+  const view = (pointer, length) => {
+    if (pointer + length > memory.buffer.byteLength) memory.grow(0);
+    return new DataView(memory.buffer, pointer, length);
+  };
+  const { path_open: open, fd_read: read, fd_pread: pread, fd_seek: seek, fd_tell: tell, fd_close: close, fd_renumber: renumber } = imports;
+  const folder = fd => folders.has(fd >>> 0);
+  return {
+    ...imports,
+    path_open: (...args) => {
+      const errno = open(...args);
+      if (errno !== 0) return errno;
+      const [dirfd, dirflags, path, pathLength] = args.slice(0, 4).map(arg => arg >>> 0);
+      const opened = view(args[8] >>> 0, 4).getUint32(0, true);
+      folders.delete(opened);
+      if (dirfd === PREOPEN_ROOT_FD && (BigInt.asUintN(64, args[5]) & RIGHT_FD_WRITE) === 0n) {
+        const guest = new Uint8Array(view(path, pathLength).buffer, path, pathLength);
+        const host = Buffer.concat([Buffer.from(`${root.replace(/\/+$/, "")}/`), Buffer.from(guest)]);
+        const stat = (dirflags & LOOKUP_SYMLINK_FOLLOW ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
+        if (stat && stat.isDirectory()) folders.set(opened, 0n);
+      }
+      return 0;
+    },
+    fd_read: (fd, ...args) => (folder(fd) ? WASI_ERRNO.EISDIR : read(fd, ...args)),
+    fd_pread: (fd, ...args) => (folder(fd) ? WASI_ERRNO.EISDIR : pread(fd, ...args)),
+    fd_seek: (fd, offset, whence, result) => {
+      if (!folder(fd)) return seek(fd, offset, whence, result);
+      const base = [0n, folders.get(fd >>> 0), 0n][whence >>> 0];
+      if (base === undefined) return WASI_EINVAL;
+      const position = base + BigInt.asIntN(64, BigInt(offset));
+      if (position < 0n) return WASI_EINVAL;
+      folders.set(fd >>> 0, position);
+      view(result >>> 0, 8).setBigUint64(0, position, true);
+      return 0;
+    },
+    fd_tell: (fd, result) => {
+      if (!folder(fd)) return tell(fd, result);
+      view(result >>> 0, 8).setBigUint64(0, folders.get(fd >>> 0), true);
+      return 0;
+    },
+    fd_close: fd => {
+      const errno = close(fd);
+      if (errno === 0) folders.delete(fd >>> 0);
+      return errno;
+    },
+    fd_renumber: (from, to) => {
+      const errno = renumber(from, to);
+      if (errno === 0) {
+        const position = folders.get(from >>> 0);
+        folders.delete(from >>> 0);
+        folders.delete(to >>> 0);
+        if (position !== undefined) folders.set(to >>> 0, position);
+      }
+      return errno;
+    },
+  };
+}
+
+module.exports = { sharedFileTable, sharedFileImports, sharedFileViews, directoryReads };

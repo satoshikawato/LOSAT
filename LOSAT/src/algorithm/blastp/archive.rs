@@ -161,6 +161,8 @@ pub(crate) struct ArchiveCall<'a> {
     pub handle: &'a ArchiveHandle,
     /// `!args.ungapped`: the archive's Seq-aligns are those of outfmt 8 (`write_blastp_seqalign`).
     pub gapped: bool,
+    /// The search is rpsblast's (`RunRecord::rps`).
+    pub rps: bool,
     pub batches: CallBatches<'a>,
     pub query_lengths: &'a [usize],
     /// The subject names of the Seq-aligns.
@@ -324,6 +326,7 @@ pub(crate) fn write_blastp_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: call.rps,
         db_title: call.subjects.db_title(),
         // An ungapped search's Seq-aligns are Dense-diags, as in outfmt 8 (`seqalign.rs`).
         gapped: call.gapped,

@@ -765,15 +765,13 @@ fn run_inner(
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
     // reader error there stops the run at this batch, with no epilog.
-    // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
+    // A refusal found while a batch is reported drops what the run holds
+    // (`blast_xml::drops_held_document`: a title, the database counts, a reported sequence with
+    // parsed Seq-ids such as RPSTBLASTN's profile with a query's generated id, PS15a-2).
     let refused = |error: anyhow::Error| -> anyhow::Error {
         let error = report_error(error);
-        if error.is::<super::blast_xml::XmlRefusal>()
-            || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
-        {
-            if let Some(held) = &held {
-                held.discard();
-            }
+        if let (true, Some(held)) = (super::blast_xml::drops_held_document(&error), &held) {
+            held.discard();
         }
         error
     };

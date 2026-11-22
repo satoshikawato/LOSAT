@@ -129,7 +129,7 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): per context, in context order, the
 /// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
 /// empty one and the whole interval), with the context's frame, which counts from the ends of the
-/// searched letters (`-query_loc`).
+/// searched letters (`-query_loc`); none for a batch that NCBI did not search.
 pub(super) fn query_masks(
     batch: &BatchResults,
     qidx: usize,
@@ -137,6 +137,12 @@ pub(super) fn query_masks(
 ) -> Vec<QueryMask> {
     let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
+    // The result of a batch that NCBI did not search has no masks (RPSTBLASTN's merge of several
+    // volumes takes volume 0's, rpsblast_local.cpp:174-175).
+    if batch.search_skipped {
+        return masks;
+    }
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
         for &(from, to) in &context.dna_masks {
             let Some((from, to)) =
@@ -1318,27 +1324,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // (`lcl|Query_N`) of a query of the batch that reports it is that query for NCBI's scope: its
     // Seq-align conversion raises an exception after half a document. Refused before the reports
     // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
-    // (`common::database::refuse_generated_query_id`).
-    let generated_scopes = match shown {
-        ShownSubjects::Database { .. } if options.rpstblastn.is_some() => {
-            let ids: Vec<(
-                &str,
-                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
-            )> = queries
-                .iter()
-                .map(|query| (query.internal_id.as_str(), query.believed()))
-                .collect();
-            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
-                &ids,
-                batches
-                    .iter()
-                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
-                    .collect(),
-            );
-            scopes.generated().then_some(scopes)
-        }
-        _ => None,
-    };
+    // (`report::rps_generated_scopes`, `common::database::refuse_generated_query_id`).
+    let generated_scopes = super::report::rps_generated_scopes(options, queries, shown, batches);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
     // Every document writes the lists of each query that the cut to the hit list size keeps
@@ -1351,24 +1338,16 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 break;
             }
             let lists = batch.shown_lists(qidx, options);
-            if let (
-                Some(scopes),
-                ShownSubjects::Database {
-                    reported: names, ..
-                },
-            ) = (&generated_scopes, shown)
-            {
-                for list in lists.iter().filter(|list| reported(list, options.gapped)) {
-                    if let Some(subject) = names.parsed_subject(list.oid) {
-                        crate::algorithm::common::database::refuse_generated_query_id(
-                            subject,
-                            names.oid(list.oid),
-                            scopes.of_query(batch.query_ordinal + qidx),
-                            options.program().upper,
-                            crate::algorithm::common::database::XML_EFFECT,
-                        )?;
-                    }
-                }
+            if let Some(scopes) = &generated_scopes {
+                super::report::refuse_rps_generated_ids(
+                    scopes,
+                    shown,
+                    lists,
+                    batch.query_ordinal + qidx,
+                    options,
+                    |_, _| true,
+                    crate::algorithm::common::database::XML_EFFECT,
+                )?;
             }
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
@@ -1442,8 +1421,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
-                // Read by XML2 and JSON alone: the query of a batch NCBI did not search.
-                searched: !batch.search_skipped,
+                // Read by XML2 and JSON alone: a query without NCBI's alignment set
+                // (`BatchResults::has_alignment_set`).
+                searched: batch.has_alignment_set(options),
                 masks: &masks,
             };
             // The texts of the subjects that the query's report reads one by one, written where

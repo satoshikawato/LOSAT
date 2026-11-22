@@ -1,0 +1,9 @@
+qseqid,sseqid,staxid,ssciname,scomname,sblastname,sskingdom,staxids,sscinames,scomnames,sblastnames,sskingdoms
+oj_tk,gnl|CDD|101,7777,"N/A","N/A",N/A,N/A,7777,"N/A","N/A","N/A",N/A
+oj_tk,gnl|CDD|102,9606,"N/A","N/A",N/A,N/A,9606,"N/A","N/A","N/A",N/A
+oj_tk,gnl|CDD|102,9606,"N/A","N/A",N/A,N/A,9606,"N/A","N/A","N/A",N/A
+oj_tk,gnl|CDD|102,9606,"N/A","N/A",N/A,N/A,9606,"N/A","N/A","N/A",N/A
+oj_tk,gnl|CDD|103,N/A,N/A,N/A,N/A,N/A,0,"N/A","N/A","N/A",N/A
+rr_part,gnl|CDD|102,9606,"N/A","N/A",N/A,N/A,9606,"N/A","N/A","N/A",N/A
+rr_part,gnl|CDD|101,7777,"N/A","N/A",N/A,N/A,7777,"N/A","N/A","N/A",N/A
+rr_part,gnl|CDD|103,N/A,N/A,N/A,N/A,N/A,0,"N/A","N/A","N/A",N/A

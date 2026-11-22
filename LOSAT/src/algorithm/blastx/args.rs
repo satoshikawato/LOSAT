@@ -390,9 +390,6 @@ impl ResolvedOptions {
     /// reports (outfmt 7 counts their hits before it, as rpsblast's `psiblast_hits_found`) and
     /// the Seq-annots (8, 9, 12), `TrimSeqAlign` before BLAST XML, XML2 and JSON (5, 13 to 16);
     /// the archive (11) and the organism report (18) take every list. All of them otherwise.
-    /// RPSTBLASTN writes only the pairwise and tabular reports until item PS15a
-    /// (`rpsblast::args::check_rps_outfmt` refuses the rest), so the cut of the structured
-    /// reports is the writers' rule for when it does.
     pub(crate) fn shown_lists(&self) -> usize {
         if self.merged_volumes() {
             usize::try_from(self.hitlist_size).unwrap_or(0)

@@ -346,6 +346,7 @@ pub(super) fn write_tblastx_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
+        rps: false,
         db_title: match data.subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
@@ -359,6 +360,7 @@ pub(super) fn write_tblastx_archives(
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
+                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
             },

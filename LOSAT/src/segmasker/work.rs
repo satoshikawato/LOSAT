@@ -320,9 +320,17 @@ impl Source<'_> {
                     iupacaa: record.letters,
                 }))
             }
+            // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:228-232
+            // An OID whose `GetBioseq` gives no Bioseq (no letters, or every definition line erased
+            // by the alias files' `OID_MASK_TYPE`) is an empty Seq-entry, which the loop skips.
             Source::Database(reader) => {
-                let Some(record) = reader.next_record().map_err(database_failure)? else {
-                    return Ok(None);
+                let record = loop {
+                    let Some(record) = reader.next_record().map_err(database_failure)? else {
+                        return Ok(None);
+                    };
+                    if !record.residues.is_empty() {
+                        break record;
+                    }
                 };
                 if let Some(&code) = record.residues.iter().find(|&&code| code >= 128) {
                     return Err(Failure::Refused(unsupported(&format!(

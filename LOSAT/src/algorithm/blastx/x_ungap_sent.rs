@@ -38,12 +38,12 @@
 //! is the loop of the word size 3 before this item. `W` appears in four places of the extension,
 //! and in none of them does the argument above or its arguments for the sentinel stop depend on
 //! its value:
-//! * The reference's word loop (aa_ungapped.c:1106-1118, `for (i = 0; i < word_size; i++)`) is
-//!   `W` steps from 0 without a stop, with `score > left_score` for its best (the first of equal
-//!   scores): the walk's keys give that on `W` steps (`key > best`; a tie keeps the earlier step
-//!   for any `W < 2^32`, as for the walks), and its `right_d` is the best's length, 0 when no
-//!   step scores above 0. The word is inside both sequences by the reference wrapper's early
-//!   return (`q_right_off + W > qlen`, the same test).
+//! * The reference's word loop (aa_ungapped.c:1106-1118, a loop of `i` from 0 while it is below
+//!   `word_size`) is `W` steps from 0 without a stop, with a new best only for a score above
+//!   `left_score` (the first of equal scores): the walk's keys give that on `W` steps
+//!   (`key > best`; a tie keeps the earlier step for any `W < 2^32`, as for the walks), and its
+//!   `right_d` is the best's length, 0 when no step scores above 0. The word is inside both
+//!   sequences by the reference wrapper's early return (`q_right_off + W > qlen`, the same test).
 //! * The right walk starts in the buffer. With the subject and the query ending in the sentinel
 //!   that the reference keeps (`TAIL` 1), the word may end on it, and then the right walk starts
 //!   at `q_right_off + right_d`, which must not pass it. The word's last letter being a sentinel,

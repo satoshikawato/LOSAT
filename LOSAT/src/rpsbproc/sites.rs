@@ -33,7 +33,8 @@ pub(crate) struct MotifState {
 /// Why a motif check does not give 0, 1 or 2.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum MotifError {
-    /// `THROW_SIMPLE("Motif string parse error -- Motif = " << m_strMotif << ", error position: " << errPos)`.
+    /// `THROW_SIMPLE` of the text "Motif string parse error -- Motif = ", the motif (`m_strMotif`), the
+    /// text ", error position: " and the position (`errPos`).
     Parse { motif: Vec<u8>, position: usize },
     /// `GetMinimalXMap` (or the `push_back` of the text) throws, or holds what the host decides
     /// (`ProSite::minimal_map`).
@@ -48,11 +49,11 @@ impl MotifState {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:669-740
     // `GetMotifResPos` (basedata.cpp:605-625) lists the positions of the site's ranges.
     //
-    // Owner's rule, DECISIONS 25 Q2 = A (2026-11-11): `st_motif_pos[mtfIdx]` is read past the
-    // end of the list when the motif's minimal map is longer than the first motif site's
-    // positions (`mtfIdx >= st_motif_pos.size()`, the compare at :704 reads heap bytes: C++
-    // undefined behavior). LOSAT treats the check as failed (returns 1), as the loop does when
-    // the mapped residues are exhausted. PD-LOSAT-NCBI-DEFECTS exception 10 (version 1.14).
+    // Owner's rule, DECISIONS 25 Q2 = A (2026-11-11): `st_motif_pos[mtfIdx]` is read past the end
+    // of the list when the motif's minimal map is longer than the first motif site's positions
+    // (`mtfIdx` at or past the size of `st_motif_pos`, the compare at :704 reads heap bytes: C++
+    // undefined behavior). LOSAT treats the check as failed (returns 1), as the loop does when the
+    // mapped residues are exhausted. PD-LOSAT-NCBI-DEFECTS exception 10 (version 1.14).
     pub(crate) fn motif_check(
         &mut self,
         data: &CddData,
@@ -66,7 +67,7 @@ impl MotifState {
         }
         if self.positions.is_empty() {
             for seg in data.site_segs(site) {
-                // `for (SeqPos_t c = v->from; c <= v->to; ++c)`
+                // A loop of `c` (a `SeqPos_t`) from `v->from` up to and including `v->to`.
                 let mut c = i64::from(seg[0]);
                 while c <= i64::from(seg[1]) {
                     self.positions.push(c as i32);

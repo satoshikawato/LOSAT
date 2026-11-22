@@ -71,7 +71,7 @@ impl RpsDiagTable {
         }
     }
 
-    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the unit's length. The
+    /// `BlastExtendWordNew` for `concat_length`: a zeroed table of the unit's length. The
     /// table is allocated zeroed and not written (NCBI's `calloc`): only the pages of the
     /// diagonals that the queries hit become resident, whatever the window.
     ///
@@ -91,7 +91,7 @@ impl RpsDiagTable {
     /// table from volume to volume), else a zeroed one (`reset_for`). The entries an earlier
     /// volume's queries wrote read as "no hit on this diagonal yet", as those of an earlier query
     /// of the same volume do (the offset rule of `exit`, which keeps NCBI's clear at
-    /// `INT4_MAX / 4`): a query's hits do not depend on what the table held.
+    /// a quarter of `INT4_MAX`): a query's hits do not depend on what the table held.
     pub(crate) fn prepare_for(&mut self, length: i32, window: i32) {
         if self.array.len() != length as usize || self.window != window {
             self.reset_for(length, window);
@@ -190,7 +190,7 @@ impl RpsWordScratch {
     }
 
     /// The table of a search of the concatenated length `concat_length` (`Lc`,
-    /// `RpsRun::concat_length`: `BlastExtendWordNew(concat_db.length, ...)`) whose queries (frames)
+    /// `RpsRun::concat_length`: `BlastExtendWordNew` for `concat_db.length`) whose queries (frames)
     /// have at most `longest` letters (`diag_table_length`) and the buckets of a volume of
     /// `num_rows` concatenated rows (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what
     /// the scratch kept stays.

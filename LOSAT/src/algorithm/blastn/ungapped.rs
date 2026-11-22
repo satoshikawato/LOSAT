@@ -23,14 +23,14 @@ pub struct ReevaluatedUngapped {
     pub s_end: usize,
 }
 
-/// `Blast_HSPReevaluateWithAmbiguitiesUngapped` for a nucleotide HSP (`translated = FALSE`, so the
+/// `Blast_HSPReevaluateWithAmbiguitiesUngapped` for a nucleotide HSP (`translated` false, so the
 /// query letters are masked with 0x0f), with `s_UpdateReevaluatedHSPUngapped`. `query` starts at the
 /// first letter of the HSP's context (NCBI's `query_start`); `subject` is the subject in BLASTNA.
 /// Returns `None` when the HSP is to be deleted (its best score is below `cutoff_score`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:676-735
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:440-484 (`s_UpdateReevaluatedHSP`
-/// with `gapped = FALSE`)
+/// with `gapped` false)
 pub fn reevaluate_with_ambiguities_ungapped(
     query: &[u8],
     subject: &[u8],
@@ -89,7 +89,7 @@ pub fn reevaluate_with_ambiguities_ungapped(
 /// match), over `query.end - query.offset` letters. `query` is the unmasked query of the context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-790
-/// (`s_Blast_HSPGetNumIdentitiesAndPositives`, the `!hsp->gap_info` branch)
+/// (`s_Blast_HSPGetNumIdentitiesAndPositives`, the branch without `hsp->gap_info`)
 pub fn count_identities_ungapped(
     query: &[u8],
     subject: &[u8],
@@ -106,12 +106,14 @@ pub fn count_identities_ungapped(
 
 /// A limit of the word cutoff's arithmetic that LOSAT refuses instead of reproducing NCBI's
 /// overflow (memory "no NCBI UB / overflow"): `2 * query_length` must fit NCBI's `Int4`, and
-/// `MIN(subject, 2 * query) * subject` must fit the signed 64 bits that NCBI's `Uint8` is cast to.
+/// the product of `subject` and the smaller of `subject` and twice `query` must fit the signed 64
+/// bits that NCBI's `Uint8` is cast to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CutoffLimit {
     /// `2 * context length` does not fit an `Int4`.
     QueryLength,
-    /// The search space `MIN(subject, 2 * query) * subject` does not fit an `Int8`.
+    /// The search space, `subject` times the smaller of `subject` and twice `query`, does not fit
+    /// an `Int8`.
     SearchSpace,
 }
 
@@ -162,7 +164,7 @@ pub fn word_cutoff_score(
     ))
 }
 
-/// The average subject length of a `-subject` set: `(Uint4)(total / count)`.
+/// The average subject length of a `-subject` set: the total over the count, as a `Uint4`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
 pub fn average_subject_length_subject_set(total_length: u64, num_seqs: u64) -> u64 {

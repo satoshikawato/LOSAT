@@ -8,10 +8,11 @@ letter changed), with an EMPTY title and the Seq-ids `gb|AB60000<n>.1|` and `pdb
 with NO chain-id.
 
 Why: NCBI's `CDeflineGenerator::x_SetTitleFromPDB` (c++/src/objmgr/util/create_defline.cpp:1842-1843)
-makes the title of a `pdb` Seq-id without a chain-id from `isprint ((unsigned char) m_PDBChain)` and
-`string chain(1, (char) m_PDBChain)`: the low byte of the chain INTEGER. So chain 321 (0x141) and -191
-(0xFF41) give `Chain A`, 383 (0x17F) is not printable and gives no PDB title, 65 gives `Chain A`, and an
-absent chain (the ASN.1 DEFAULT 32, which is not "set") gives no PDB title either.
+makes the title of a `pdb` Seq-id without a chain-id from `isprint` of `m_PDBChain` cast to
+`unsigned char` and a one-character string of `m_PDBChain` cast to `char`: the low byte of the chain
+INTEGER. So chain 321 (0x141) and -191 (0xFF41) give `Chain A`, 383 (0x17F) is not printable and
+gives no PDB title, 65 gives `Chain A`, and an absent chain (the ASN.1 DEFAULT 32, which is not
+"set") gives no PDB title either.
 
 makeblastdb cannot write such a chain: it writes `chain` = the letter and `chain-id` = the letter
 (`pdb|1AB1|A`), so the database is made by makeblastdb with `-parse_seqids -blastdb_version 4` from the
@@ -27,8 +28,9 @@ chain 321): outfmt 0 then prints `Unknown` and `no longer exists in database...a
 the tabular formats fail on the subject accession, so that no title is made at all.
 
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
-that ends a pdb key is the low byte of the stored chain (`char(GetChain())`, as `CPDB_seq_id` forms the
-chain of a Seq-id without a chain-id), lower case, the keys the search looks each hit's sequence up by.
+that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
+`CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
+each hit's sequence up by.
 The key lines have the same length, so `.psi` (the first key of each page) does not change.
 
 Python 3 standard library only; makeblastdb and blastdbcmd are NCBI's (the comparison oracle builds the

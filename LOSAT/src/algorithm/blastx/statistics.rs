@@ -94,7 +94,7 @@ pub fn evaluate_gapped(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-669
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
     let cutoff = options.evalue
         * if options.composition > 1 && !options.old_fsc {
             5.0

@@ -9,8 +9,9 @@
 //! The walks count the letters of the whole query batch, so they read the NULLB between two frames
 //! (BLAST_SCORE_MIN) and go on into the next frame while the X-drop allows it. Where they score
 //! higher there, NCBI keeps the HSP in the seed's frame with query offsets outside it
-//! (`s_AdjustInitialHSPOffsets`, blast_gapalign.c:2384-2392, whose `ASSERT(q_start >= 0)` is not in
-//! release builds). The inputs (`tests/fasta/outfmt0/x2c_*`, written by line RG's `gen_x2c.py`):
+//! (`s_AdjustInitialHSPOffsets`, blast_gapalign.c:2384-2392, whose `ASSERT` that `q_start` is at
+//! least 0 is not in release builds). The inputs (`tests/fasta/outfmt0/x2c_*`, written by line RG's
+//! `gen_x2c.py`):
 //! - `d7k` (`-matrix PAM250 -threshold 999 -seg no -xdrop_ungap 20000 -evalue 1e-20`): frame 1 of
 //!   the query ends with 7,000 letters of F, I and L, frame 2 starts with 40 letters of W, C and H
 //!   (P); the subject's frame 1 holds the 7,000 letters mapped to Y, V and M, a G and P. P's seed

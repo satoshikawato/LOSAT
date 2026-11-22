@@ -112,14 +112,14 @@ impl<'a> Blob<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:169-207
-    /// `ReadString(eSizeVar)`: a variable-length size, then that many bytes. The size is
+    /// `ReadString` with `eSizeVar`: a variable-length size, then that many bytes. The size is
     /// truncated to an `int` as NCBI does.
     pub(super) fn read_string_var(&mut self) -> Result<&'a [u8], String> {
         let size = self.read_varint()? as i32;
         self.read_raw(i64::from(size))
     }
 
-    /// `ReadString(eNUL)`: the bytes up to the next NUL, which is consumed.
+    /// `ReadString` with `eNUL`: the bytes up to the next NUL, which is consumed.
     pub(super) fn read_string_nul(&mut self) -> Result<&'a [u8], String> {
         let from = usize::try_from(self.offset).unwrap_or(usize::MAX);
         let nul = self
@@ -239,7 +239,8 @@ impl Column {
     /// `x_ReadFields`. Returns `m_MetaDataStart`.
     fn read_fields(&mut self) -> Result<i32, SeqDbError> {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:206-271
-        // Reading 32 bytes of a shorter file fails `SEQDB_FILE_ASSERT(m_Length >= end)`.
+        // Reading 32 bytes of a shorter file fails the check `SEQDB_FILE_ASSERT` that `m_Length` is
+        // at least `end`.
         if self.index.len() < FIXED_FIELD_BYTES {
             return Err(self.integrity_error(format!(
                 "the column index file has {} bytes, fewer than its 32 fixed bytes",
@@ -291,8 +292,8 @@ impl Column {
                 self.offset_array_start
             )));
         }
-        // Reading the range 0..meta_data_start fails `SEQDB_FILE_ASSERT(start < end)` when it
-        // is empty.
+        // Reading the range 0..meta_data_start fails the check `SEQDB_FILE_ASSERT` that `start` is
+        // below `end` when it is empty.
         if meta_data_start == 0 {
             return Err(self.integrity_error("the column index file states a metadata start of 0"));
         }
@@ -322,8 +323,8 @@ impl Column {
     /// `x_ReadMetaData`.
     fn read_metadata(&mut self, meta_data_start: i32) -> Result<(), SeqDbError> {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:273-320
-        // Reading the range `begin..end` fails `SEQDB_FILE_ASSERT(start < end)` when it is
-        // empty.
+        // Reading the range `begin..end` fails the check `SEQDB_FILE_ASSERT` that `start` is below
+        // `end` when it is empty.
         if self.offset_array_start <= meta_data_start {
             return Err(self.integrity_error("the column index file has no metadata"));
         }
@@ -370,7 +371,8 @@ impl Column {
 
     /// The end of the sequences of `first..end` (volume-relative) whose two entries of the offset
     /// array can be read: those of the column whose entries the index file holds (`GetBlob`'s
-    /// `SEQDB_FILE_ASSERT(m_Length >= end)` of the index file); `first` when there are none.
+    /// check `SEQDB_FILE_ASSERT` that the index file's `m_Length` is at least `end`); `first` when
+    /// there are none.
     fn entries_end(&self, first: u32, end: u32) -> u32 {
         let in_file = (self.index.len() as i64 - i64::from(self.offset_array_start) - 4) / 4;
         let in_file = u32::try_from(in_file.max(0)).unwrap_or(u32::MAX);
@@ -428,8 +430,9 @@ impl Column {
                 "the data range of sequence {oid} starts at {dstart}"
             )))
         } else {
-            // A range past the end of the data file fails `SEQDB_FILE_ASSERT(m_Length >= end)`:
-            // the checks of `DbFile::read_range` before its buffer is sized, as an integrity error.
+            // A range past the end of the data file fails the check `SEQDB_FILE_ASSERT` that
+            // `m_Length` is at least `end`: the checks of `DbFile::read_range` before its buffer is
+            // sized, as an integrity error.
             self.data
                 .x_check_range(dstart as u64, dend as u64)
                 .map_err(|error| match error {
@@ -559,7 +562,7 @@ pub(super) fn open_all(
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3345-3358
-        // `ptr[0] == 0x11` is a little-endian host.
+        // `ptr[0]` being 0x11 is a little-endian host.
         let data_path = if cfg!(target_endian = "little") && small {
             small_path
         } else {
@@ -669,9 +672,9 @@ impl super::SeqDb {
         Ok(all.into_iter().collect())
     }
 
-    /// `GetColumnMetaData(GetColumnId(title))`: the metadata of the columns titled `title` of
-    /// all the volumes, a key with the value of the first volume (in the order of the volumes)
-    /// that has it.
+    /// `GetColumnMetaData` of the id (`GetColumnId`) of `title`: the metadata of the columns titled
+    /// `title` of all the volumes, a key with the value of the first volume (in the order of the
+    /// volumes) that has it.
     pub fn column_meta_data(&self, title: &[u8]) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SeqDbError> {
         let mut merged = BTreeMap::new();
         for volume in self.volumes() {

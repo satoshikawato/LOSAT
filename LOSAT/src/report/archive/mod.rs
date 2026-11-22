@@ -656,8 +656,9 @@ impl ArchiveHandle {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
 /// Posts error 803.7 of each byte that NCBI's stream replaced in an archive of the run of the
-/// application `application` (`encoder::ReplacedChar`, with its prefix: `SetDiagPostPrefix(
-/// "blastn")`, `ArchiveRequest::application`) on `diagnostics`, without saving them as messages of the run's archive `archive`:
+/// application `application` (`encoder::ReplacedChar`, with its prefix: `SetDiagPostPrefix`
+/// of the application name, such as "blastn"; `ArchiveRequest::application`) on `diagnostics`,
+/// without saving them as messages of the run's archive `archive`:
 /// NCBI's `ResetMessages` after the archive drops them (`ArchiveHandle::write_unsaved`). The
 /// search strategy's posts are saved (`strategy::StrategyExport::take_posts`).
 pub(crate) fn post_replaced(
@@ -773,7 +774,7 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         return None;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (cited in
-    // `report::diag_log`: `mess.Write(m)` of each post)
+    // `report::diag_log`: `Write` of `mess` for each post)
     // In a failed stream every post writes its header only (`ncbi_exception::post_line`) and saves
     // that text: `CATCH_ALL`'s posts, which have no header, save empty messages, one per line
     // feed that `cli::catch_all_text` writes (NCBI BLAST+ 2.17.0 tblastn -outfmt 11 of line RG

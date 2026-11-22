@@ -9,9 +9,9 @@
 //! all six contexts of every query; with `-strand plus` or `minus` the contexts of the other strand
 //! have no letters. So a 1,200-nt query with 300 queries of 3 nt on one strand, or with 1,300 on
 //! both, averages 0. Its expected length is then 0, and when the database's length divided by 3 is
-//! the subject's, the big-gap cutoff of the linking is `INT_MIN + 1`, and its `Int4` sums with
-//! `cutoff[1]` overflow. LOSAT computes the same cutoff and adds those sums in 64 bits. With
-//! a subject of up to 60,002 bases the linking keeps big gaps only, so each pass takes the chain of
+//! the subject's, the big-gap cutoff of the linking is one more than `INT_MIN`, and its `Int4` sums
+//! with `cutoff[1]` overflow. LOSAT computes the same cutoff and adds those sums in 64 bits. With a
+//! subject of up to 60,002 bases the linking keeps big gaps only, so each pass takes the chain of
 //! the most HSPs and, among those, of the highest score; with a longer one (`long_subject_minus`)
 //! each pass chooses between that chain and the small-gap chain by their e-values, as NCBI does.
 //! NCBI has no output to compare with: the expected files in

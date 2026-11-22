@@ -191,7 +191,8 @@ impl GeneticCode {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
         // The path below ports this nested loop, for codons with an ambiguous base. When all three
         // bases are unambiguous, only one (i, j, k) passes the `&` tests, so the loop would end
-        // with `aa = codes[i*16+j*4+k]` and the table is read once instead.
+        // with `aa` taken from `codes` at index 16 times `i`, plus 4 times `j`, plus `k`, and the table
+        // is read once instead.
         if let Some(aa) = self.x_get_unambiguous(codon) {
             return aa;
         }
@@ -247,7 +248,7 @@ impl GeneticCode {
 }
 
 // Position of a base in NCBI's
-// `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
+// four-entry `mapping` array of 8, 2, 1, 4 (T, C, A, G) when `base_mask` has exactly that
 // one bit, 4 otherwise.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,395-396
 // The table holds i (0..3) for T/U, C, A, G in either case. Any other byte, including

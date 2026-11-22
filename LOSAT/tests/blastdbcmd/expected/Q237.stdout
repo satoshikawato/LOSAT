@@ -1,0 +1,62 @@
+Bioseq ::= {
+  id {
+    other {
+      accession "XP_800001",
+      version 2
+    }
+  },
+  descr {
+    title "dup one b",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A09647570206F6E6520620000A1803080A9803080A1801A095850
+5F3830303030310000A38002010200000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 40,
+    seq-data ncbistdaa '0E0F0B10090C160D0906110F060C16140E080D120A0C040F111011
+13120811160C110F0906010108'H
+  }
+}
+Bioseq ::= {
+  id {
+    other {
+      accession "XP_800001",
+      version 1
+    }
+  },
+  descr {
+    title "dup one a",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A09647570206F6E6520610000A1803080A9803080A1801A095850
+5F3830303030310000A38002010100000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 40,
+    seq-data ncbistdaa '07011004070A11140806140405110904110E111403060904040F0D
+0405080F160A090C050A140A12'H
+  }
+}

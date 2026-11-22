@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.72
+- Version: 1.73
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -327,23 +327,31 @@
   refusal of 1.31 no longer covers outfmt 0 to 4, but in a call of LOSAT's library that writes
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07)
-  1.72 2026-11-22 (BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
-  of order: searched as NCBI searches them, rule 4, also the seed that NCBI's two-hit scan saves
-  from the one word of a part between overlapping masks shorter than the word; the explicit
-  rejections, rule 3, of a sequence whose overlapping masks make NCBI's word hits reach the table of
-  diagonals of the sequences searched before it (not for the first searched sequence) or after it
-  (not for the last) (`StaleDiagonals`), of such a part whose seed's alignment NCBI's interval tree
-  splits without end (`short_chunk_tree_refusal`), of a part between masks shorter than the word
-  whose one word NCBI reads past the sequence's end, only for a BLASTP query that holds residue 0,
-  which no query read from FASTA does (`WordPastEnd`), of a mask that runs to the end after the part from the start with masks stored
-  after it (`TailMaskWithLaterMasks`, within exception 21's class) and of a mask that ends before it
-  starts (`Inverted`); not yet ported, as the range longer than 5,000,000 letters: masks out of order
-  whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and such a short part whose
-  alignments meet another part's in that merge (`short_chunk_merge_refusal`), line NP item M4b-3d;
-  TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the Owner's decision of 2026-11-21
-  (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07, for the rejections; numbered after 1.71)
+  2026-09-29, restated 2026-10-07);
+  1.72 2026-11-22 (`losat windowmasker`, line NP items M5a and M5b: NCBI's defined results of
+  `-mk_counts`, `-convert` and `-checkdup` reproduced, rule 2, and the explicit rejections, rule 3,
+  of the masking and counts inputs whose result NCBI leaves undefined, takes from the C runtime or
+  the host's memory, or fetches from NCBI's servers; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
+  of dev that brought line NP items O2b's 1.68 and M4b-3's 1.69, then line RG item D1b-2's 1.70 and line
+  DBID item pfoff-3's 1.71)
+  1.73 2026-11-22 (BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
+  of order: searched as NCBI searches them, rule 4, also the seed that NCBI's two-hit scan saves from
+  the one word of a part between overlapping masks shorter than the word; the explicit rejections,
+  rule 3, of a sequence whose overlapping masks make NCBI's word hits reach the table of diagonals of
+  the sequences searched before it (not for the first searched sequence) or after it (not for the
+  last) (`StaleDiagonals`), of such a part whose seed's alignment NCBI's interval tree splits without
+  end (`short_chunk_tree_refusal`), of a part between masks shorter than the word whose one word NCBI
+  reads past the sequence's end, only for a BLASTP query that holds residue 0, which no query read
+  from FASTA does (`WordPastEnd`), of a mask that runs to the end after the part from the start with
+  masks stored after it (`TailMaskWithLaterMasks`, within exception 21's class) and of a mask that
+  ends before it starts (`Inverted`); not yet ported, as the range longer than 5,000,000 letters:
+  masks out of order whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and such a short
+  part whose alignments meet another part's in that merge (`short_chunk_merge_refusal`), line NP item
+  M4b-3d; TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the Owner's decision of 2026-11-21
+  (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07, for the rejections; numbered after 1.72; first 1.72, then 1.73 at the merge of dev that
+  brought line NP items M5a and M5b's 1.72)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1140,8 +1148,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     before a tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13)
     stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do a mask that ends
     past its sequence and in BLASTP and BLASTX a range longer than 5,000,000 letters. Masks out of
-    order and overlapping masks stayed refused in this version; from version 1.72 BLASTP and BLASTX
-    search them (rule 4) except the rejections of 1.72 (the end of the Explicit rejections list),
+    order and overlapping masks stayed refused in this version; from version 1.73 BLASTP and BLASTX
+    search them (rule 4) except the rejections of 1.73 (the end of the Explicit rejections list),
     and TBLASTN and TBLASTX still refuse them. `blastinput::db_mask::HardScan`,
     `HardMaskShape::of_scan`, `algorithm::common::translated_chunks::translated_db_mask_chunks`,
     `algorithm::blastp::blast_engine::db_masked::hard_chunks`.
@@ -1473,6 +1481,29 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
   conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
+
+- `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
+  item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
+  but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):
+  - `-smem` passes through `atoi` into a `Uint2` (`seq_masker_ostat_factory.cpp:63-72`): 65536 is
+    0 megabytes, which gives the insufficient-memory error (exit status 3) after an empty output
+    file; 70000 is 4464; -1 is 65535.
+  - The `-t_*_pct` options apply only when `-out` names a file (`win_mask_gen_counts.cpp:216-219`).
+  - Binary counts written to the standard output start with an extra 0 word
+    (`seq_masker_ostat_bin.cpp:62-67`), which NCBI's own reader then rejects (`wrong length`).
+  - An `-out` that cannot be opened gives exit status 0, no file and no message (NCBI's writer
+    writes to a failed `ofstream`).
+  - Counts above 511 in the optimized formats run into the check bits (`Uint2` counts, 9-bit
+    fields, `seq_masker_ostat_opt.cpp:82-99, 311-325`); counts above 65,535 keep their low 16 bits.
+  - `-t_high_pct 0` gives `t_high` 0 and every count 0 (the ascii file then fails to load, the
+    obinary one masks nothing); `-t_high_pct 100` and `-t_low_pct 100` keep the counts NCBI keeps.
+  - A negative `-genome_size` wraps as a `Uint8` and gives units of 16 letters.
+  - The FASTA reader's warnings are written once per read of the input, so their number follows
+    `-mem` (one read per prefix and pass).
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `ascii`
+    or `binary`; a `##pct:` line whose value is missing, or whose word does not start a number,
+    reads as 0, as NCBI's `istringstream` stores it.
+  - A `-checkdup` interval whose start falls below 0 is printed as NCBI's `size_t` wrap.
 
 ## Explicit rejections (rule 3)
 
@@ -2409,8 +2440,42 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
     negative ones too, end and are reproduced.
 
+- `losat windowmasker` (version 1.72, 2026-11-22, line NP items M5a and M5b, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). LOSAT refuses each (exit status 1, the
+  manual's `refusals.md`) where NCBI meets it:
+  - `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or an empty input
+    with `-unit`): NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on
+    x86-64 Linux), a text that depends on the runtime.
+  - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers, as masking with
+    `-infmt seqids` is refused.
+  - `-mk_counts` or `-convert` to `oascii` or `obinary` with units of 1 to 3 letters and an
+    `-smem` whose low 16 bits are 0: NCBI's `Uint1` key size wraps below 0 to 253
+    (`seq_masker_ostat_opt.cpp:222-242`), and NCBI then allocates 8 GiB and shifts by 253 bits
+    (undefined behaviour in C++). Units of 4 letters or more give NCBI's insufficient-memory
+    error, which LOSAT writes.
+  - `-mk_counts` whose counters (4^suffix `Uint4`) or cache bit array (4^unit/32 words) cannot be
+    allocated on the host: NCBI's result then depends on the memory of the computer
+    (`std::bad_alloc`, or a file without the cache bit array after a warning).
+  - `-convert` of an ascii counts file with units of 17 letters or more: the converter's reverse
+    complement shifts the 32-bit unit past its width (undefined behaviour), as masking with such a
+    file is refused.
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `oascii`
+    or `obinary`: NCBI's search for the size of its hash table never ends
+    (`seq_masker_ostat_opt.cpp:217-223`).
+  - A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`,
+    `nan`, a hexadecimal number, a number with letters after it, a number past the range of a
+    double), with `-convert` or a `-t_*_pct` option; and a `binary` or `obinary` file whose
+    `##pct:` line names 4294967295 or more as its largest count, where NCBI's table has no room for
+    it and its loop reads past the table.
+  - An `-ids` or `-exclude_ids` file matched as text with an empty id: NCBI indexes its id sets at
+    -1 and crashes (SIGSEGV after its own `bad id` post).
+  - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
+    checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
+    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
+    positions NCBI counts in 32 bits.
+
 - BLASTP and BLASTX `-db_hard_mask` on a database whose masks overlap, nest or are stored out of
-  order (version 1.72, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction
+  order (version 1.73, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07). Such a database is searched as NCBI searches it (rule 4): NCBI
   cuts each sequence into parts at the complement of its masks in the order stored, a part
   between overlapping masks "ends before it starts" and holds no letters, and its table of
@@ -2612,7 +2677,9 @@ accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, a
     (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
     its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
     probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
-    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    BLASTP and PSIBLAST 11 where 536870886 gives 10; line O6a-3's probe: BLASTX 85 where 536870886
+    gives 72, TBLASTN 62 where 536870886 gives 49, TBLASTX 252 where 1073741823 gives 214; each a
+    superset). LOSAT computes that count in
     64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
     gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
     contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT

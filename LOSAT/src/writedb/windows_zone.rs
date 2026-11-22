@@ -163,9 +163,9 @@ fn ucrt_zone_from_tz(tz: &[u16], space_above_latin1: &dyn Fn(u16) -> bool) -> Uc
 }
 
 // Microsoft.Windows.SDK.CRTSource 10.0.22621.3 (MIT): ucrt/inc/corecrt_internal_strtox.h:248-345
-/// `wcstol(s, &end, 10)` of UCRT (`ucrt/convert/strtox.cpp:237-243`): leading white space, an
-/// optional sign, then decimal digits; a value outside `long` (32 bits) is `LONG_MIN` or
-/// `LONG_MAX` by its sign; no digit is 0.
+/// `wcstol` of `s`, an end pointer and base 10, of UCRT (`ucrt/convert/strtox.cpp:237-243`):
+/// leading white space, an optional sign, then decimal digits; a value outside `long` (32 bits) is
+/// `LONG_MIN` or `LONG_MAX` by its sign; no digit is 0.
 fn ucrt_wcstol(s: &[u16], space_above_latin1: &dyn Fn(u16) -> bool) -> i32 {
     let at = |i: usize| s.get(i).copied().unwrap_or(0);
     let mut i = 0;
@@ -226,7 +226,7 @@ fn ucrt_wide_digit(c: u16) -> Option<u32> {
 // Microsoft.Windows.SDK.CRTSource 10.0.22621.3 (MIT): ucrt/convert/iswctype.cpp:42-54
 // Microsoft.Windows.SDK.CRTSource 10.0.22621.3 (MIT): ucrt/locale/ctype.cpp:53-57, 76, 177, 204
 // (`_wctype`, the entries with `_SPACE`)
-/// `iswspace(c)` of UCRT (`is_space` of `wcstol`, `corecrt_internal_strtox.h:185-188`):
+/// `iswspace` of `c`, of UCRT (`is_space` of `wcstol`, `corecrt_internal_strtox.h:185-188`):
 /// UCRT's table up to U+00FF, `space_above_latin1` (the system's character type) above it,
 /// and never `WEOF` (U+FFFF).
 fn ucrt_iswspace(c: u16, space_above_latin1: &dyn Fn(u16) -> bool) -> bool {

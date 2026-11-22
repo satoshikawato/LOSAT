@@ -69,7 +69,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     }
     let left_disp = n - best_k;
     // The walk read the context's first letter, or the subject's, without a break. NCBI's
-    // `n = MIN(s_off, q_off)` counts the batch's letters before the walk (aa_ungapped.c:897): where
+    // `n`, the smaller of `s_off` and `q_off`, counts the batch's letters before the walk (aa_ungapped.c:897): where
     // the subject has letters left, the walk goes on before the context (query_batch.rs).
     let again = qb.left_at_bound(sc, s_seq, q_off, s_off, score, max_score, x_drop);
 
@@ -229,7 +229,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
 ) -> (i32, usize, usize, Option<i32>) {
     let q_limit = q_seq.len();
 
-    // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` (c++/src/algo/blast/core/aa_ungapped.c:841), on the
+    // NCBI's `n`, the smaller of `subject->length` less `s_off` and `query->length` less `q_off` (c++/src/algo/blast/core/aa_ungapped.c:841), on the
     // context's letters: one test a step. None where the walk starts past them
     // (`extend_hit_one_hit`).
     let q_rest = q_seq.get(q_start..).unwrap_or_default();
@@ -258,8 +258,8 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
         j += 1;
     }
     // The walk read the context's last letter, or the subject's, without a break; where the
-    // subject has letters left, it read the context's. NCBI's `n = MIN(subject->length - s_off,
-    // query->length - q_off)` counts the batch's letters after the walk (aa_ungapped.c:841): the
+    // subject has letters left, it read the context's. NCBI's `n`, the smaller of `subject->length` less `s_off` and
+    // `query->length` less `q_off`, counts the batch's letters after the walk (aa_ungapped.c:841): the
     // walk goes on after the context (query_batch.rs), and its count is NCBI's `i` there
     // (`*s_last_off = s_off + i`). The one-hit extension can start the walk one past the
     // context's end (`extend_hit_one_hit`): NCBI's walk starts on the next context's first letter

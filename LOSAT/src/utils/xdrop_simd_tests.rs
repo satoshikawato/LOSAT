@@ -769,7 +769,7 @@ fn trace_chunks_keep_every_result() {
 
 // No NCBI counterpart: a BLASTNA-like problem for the 32-bit lanes' tests: row letters 0..3
 // (the packed subject of `s_BlastAlignPackedNucl`), column letters 0..3 with some N (14) and,
-// in some problems, a gap letter (15), whose row and column hold `INT4_MIN / 2` as NCBI's
+// in some problems, a gap letter (15), whose row and column hold half of `INT4_MIN` as NCBI's
 // matrix does (`blast_stat.c` `BlastScoreBlkNuclMatrixCreate`); `scale` multiplies the scores.
 pub(super) fn nucleotide_problem(rng: &mut Rng, scale: i32, len: usize) -> Problem {
     let n = 16;
@@ -1267,7 +1267,7 @@ fn large_x_drop_takes_the_wide_lanes() {
 }
 
 // The decline for a -32768 table entry (`x32_amb_of`) is what keeps such a call exact: with a
-// gap opening of 40,000 and an X-drop of 1e6, a BLASTNA gap letter (`INT4_MIN / 2`, -32768 in
+// gap opening of 40,000 and an X-drop of 1e6, a BLASTNA gap letter (half of `INT4_MIN`, -32768 in
 // the 16-bit tables) third in the columns gives the diagonal `H - 2^30` in the scalar loops, so
 // the cell takes a gap (`H - 40,001`) and the 37 matches after it (+37,000) do not reach the
 // best again, while with -32768 in its place they would (the scalar loops on the clamped

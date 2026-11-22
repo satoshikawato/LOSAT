@@ -590,7 +590,7 @@ fn another_matrix_s_seed_stage_gives_the_reference_hits() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-606 (as above), with the
-// word length of the search's lookup table (`wordsize = lookup->word_length`).
+// word length of the search's lookup table (`wordsize` is `lookup->word_length`).
 // No NCBI counterpart (speed only): the seed stage of the word sizes other than 3 and 5 (item SC9)
 // scans the tables the search builds (`Lookup::x_new_for` with `x_narrow_cutoff`: for 2 and 4
 // the lookup table, of 16-bit hits where the fused loop takes it, and for 6 and 7 the

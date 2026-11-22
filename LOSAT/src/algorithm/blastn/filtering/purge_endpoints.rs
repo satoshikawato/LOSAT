@@ -324,7 +324,7 @@ pub fn purge_hsps_with_common_endpoints(hits: Vec<BlastnHsp>) -> Vec<BlastnHsp> 
 type HspHandle = Option<NonZeroUsize>;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2482-2487
-// hsp_array[i] && hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context
+// Both slots in `hsp_array` must be live and belong to the same query `context`.
 #[inline]
 fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Option<&BlastnHsp> {
     handle.map(|index| {

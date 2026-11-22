@@ -640,6 +640,11 @@ class UnbacktickedCodeTest(unittest.TestCase):
             "// NCBI: E = MAX(E, kSmallFloat)\n",
             '// NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");\n',
             "// if (CheckInternalData() != 0) each result in this batch\n",
+            "// struct { Uint4 q_off; Uint4 s_off; } qs_offsets;\n",
+            "// if (!(b0|b1|b2)) { H2=H2_helper->ptr; H_hsp_xsum=H2->hsp_link.xsum[index]; }\n",
+            "// NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )\n",
+            "// hsp_array[i] && hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context\n",
+            "// where query_start = query_info->contexts[context].query_offset\n",
             "let x = 1; // if (a == b) { ++c; }\n",
         ):
             self.assert_flagged(line, 1, line)
@@ -705,6 +710,10 @@ class UnbacktickedCodeTest(unittest.TestCase):
             "// " + "x[0]" * (n // 4) + "\n",
             "// " + "Int4 " + "*" * n + "\n",
             "// " + "; " * (n // 2) + "}\n",
+            "// return" + " " * n + "x\n",
+            "// " + "Stream" * (n // 6) + "\n",
+            "// x" + "[0]" * (n // 3) + "\n",
+            "// a" + " " * n + "x\n",
             "/* " + "*" * n + " */\n",
         )
         total_start = time.perf_counter()

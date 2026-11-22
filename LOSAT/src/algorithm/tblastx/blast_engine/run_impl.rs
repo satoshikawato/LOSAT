@@ -4619,12 +4619,12 @@ fn search_query_batch<S: TbxScore>(
     // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
     //   "Gapped search is not allowed for tblastx"
     //
-    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
-    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    // For bit score and E-value calculation, NCBI uses the ungapped `kbp` table on `sbp`:
+    //   blast_hits.c line 1833 selects `kbp_gap` when gapped or `kbp` when ungapped;
+    //   blast_hits.c line 1918 follows the same selection in `Blast_HSPListGetBitScores`.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:768
-    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // For tblastx, `gapped_calculation` is false, so `kbp_ptr` points to the ungapped `kbp` table on `sbp`.
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
     // (the contexts' blocks, `QueryContext::karlin_params`).

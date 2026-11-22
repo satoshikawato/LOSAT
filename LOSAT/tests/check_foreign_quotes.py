@@ -872,7 +872,8 @@ SEMI_BRACE_END_RE = re.compile(
 )
 UNBACKTICKED_STMT_RE = re.compile(
     r"(?:^|[;{}]\s*)(?:break|continue)\s*;"
-    r"|(?:^|[;{}]\s*)return(?:\s+[^;.]*)?;\s*(?:$|/\*|//|\})"
+    r"|(?:^|[;{}]\s*)return\s*;\s*(?:$|/\*|//|\})"
+    r"|(?:^|[;{}]\s*)return\s+[^\s;.][^;.]*;\s*(?:$|/\*|//|\})"
     r"|(?:^|[;{}]\s*)(?:\+\+|--)[A-Za-z_]\w*\s*;"
     r"|(?:^|[;{}]\s*)[A-Za-z_]\w*(?:\[[^\[\]]*\])*(?<!\b[Cc])(?:\+\+|--)\s*;"
 )
@@ -893,14 +894,27 @@ ASSIGN_HEAD_RE = re.compile(
     r"(?:^|[;{}]\s*)(?:\*?[A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*|\[[^\[\]]*\])*|\(\s*\*?[A-Za-z_]\w*\s*\))"
     r"\s*(?:[-+*/%&|^]|<<|>>)?=(?![=>])\s*(?P<rhs>\S.*)$"
 )
+UNBACKTICKED_RUST_RE = re.compile(
+    r"^(?:let|mod|use|pub|fn|impl|enum|type|match|loop|unsafe|#\[)\b"
+    r"|^struct\s+[A-Z]\w*(?:\s*[({<;]|\s*$)"
+    r"|=>|::<|&mut\b|\bas (?:[iuf]\d+|usize|isize)\b"
+    r"|\bSome\(|\bOk\(|\bErr\(|\bself\b|\bSelf\b"
+    r"|\.(?:unwrap|expect)\(|\w!\(|\w!\[|\w\.\.=?\w|\.\.=\w|\bfn\b"
+    r"|\b(?:Vec|Option|Result|Box)<|&\[|\b[iuf](?:8|16|32|64|128|size)\b"
+    r"|\.(?:len|is_empty|iter|into_iter|map|collect|as_ref|as_slice|to_vec|to_string|clone"
+    r"|saturating_\w+|wrapping_\w+|checked_\w+)\(|'_\b|[<&]'[a-z]\w*\b|\b(?:Fn|FnMut|FnOnce)\("
+    r"|\b(?:impl|dyn)\s|\b(?:core|std|alloc)::[a-z_]+::"
+)
 UNBACKTICKED_EXPR_RE = re.compile(
     # pointer member in assignment / comparison / inc / dec / call without space
-    r"(?<!\w)[A-Za-z_]\w+->[A-Za-z_]\w+(?:\[[^\[\]]*\])*\s*(?:[-+*/%&|^]?=|==|!=|<=|>=|\+\+|--)"
-    r"|(?<!\w)[A-Za-z_]\w+->[A-Za-z_]\w+\([^)\s][^)]*\)"
+    r"(?<!\w)[A-Za-z_]\w*(?:\[[^\[\]]*\])*->[A-Za-z_]\w+(?:\[[^\[\]]*\])*\s*(?:[-+*/%&|^]?=|==|!=|<=|>=|\+\+|--)"
+    r"|(?<!\w)[A-Za-z_]\w*(?:\[[^\[\]]*\])*->[A-Za-z_]\w+\([^)\s][^)]*\)"
+    # assignment whose right-hand side reads through a C pointer `->`
+    r"|(?:\w|\])\s*(?:[-+*/%&|^]|<<|>>)?=(?![=>])\s*\*?[A-Za-z_]\w*(?:\[[^\[\]]*\])*->[A-Za-z_]\w+"
     # m_* member in expression (observed `(m_Pos = <n>)` / `'x' to T (m_Pos = 0)` are filtered)
     r"|(?<![\w.])m_[A-Za-z]\w*(?:\[[^\[\]]*\]|\.[A-Za-z_]\w*\([^)]*\)|\s*(?:[-+*/%&|^]?=|==|!=|<=|>=|<<|\+\+|--))"
     # C++ stream insertion `<<`
-    r"|\b(?:m_[A-Za-z]\w*|cout|cerr|ostr|os|out|\w*[Ss]tream\w*)\s*<<\s*(?:\"\"|'|[A-Za-z_])"
+    r"|\b(?:m_[A-Za-z]\w*|cout|cerr|ostr|os|out|(?:o|i|io|f|of|if|string|ostring|istring|out_|err_|log_)?[Ss]tream[A-Za-z0-9_]*)\s*<<\s*(?:\"\"|'|[A-Za-z_])"
     r"|<<\s*(?:\"\"|\b(?:endl|NcbiEndl|Warning|Error|Info|Fatal|Critical)\b)"
     # C++ namespace::Call(args) or C++ STL method calls (no space before `(`)
     r"|\b(?:NStr|C[A-Z][a-z]\w*|std)::[A-Za-z_]\w*(?:<[^<>]*>)?\([^)\s][^)]*\)"
@@ -1015,10 +1029,12 @@ def unbackticked_c_code(
         body = body[pref.end() :].strip()
     if not body:
         return False
-    if RUST_MARK_RE.search(body) or RUST_STATEMENT_RE.search(body):
-        return False
     clean = DOUBLE_QUOTED_RE.sub('""', body) if '"' in body else body
     if OBSERVED_MPOS_MSG_RE.search(clean):
+        return False
+    if UNBACKTICKED_STRUCT_RE.search(clean):
+        return True
+    if UNBACKTICKED_RUST_RE.search(body):
         return False
     if _has_c_control_statement(clean):
         return True

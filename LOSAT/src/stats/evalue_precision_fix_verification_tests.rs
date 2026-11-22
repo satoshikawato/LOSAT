@@ -4,9 +4,9 @@
 
 use crate::stats::sum_statistics::{ncbi_large_gap_sum_e, small_gap_sum_e};
 
-/// Test that weight_divisor handling matches NCBI's behavior
-/// NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
-/// This means: divide first, then check if result > INT4_MAX
+/// Test that weight_divisor handling matches NCBI's behavior.
+/// Clamps to `INT4_MAX` when `weight_divisor` is zero or the divided `sum_e` exceeds `INT4_MAX`:
+/// divide first, then compare the quotient against `INT4_MAX`.
 #[test]
 fn test_weight_divisor_handling() {
     // Test case 1: weight_divisor == 0.0

@@ -220,7 +220,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 
         // NCBI: s_AdjustInitialHSPOffsets (c++/src/algo/blast/core/blast_gapalign.c:2384-2392)
         // Convert absolute coordinates to context-relative coordinates
-        // where query_start = query_info->contexts[context].query_offset
+        // by subtracting the `query_offset` of the context in `query_info`.
         let q_start_relative =
             adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);

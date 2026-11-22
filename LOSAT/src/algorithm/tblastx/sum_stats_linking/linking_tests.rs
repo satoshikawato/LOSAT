@@ -714,7 +714,7 @@ fn large_gap_scan_preserves_initial_state_and_zero_one_jumps() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-859
-// if (!(b0|b1|b2)) { H2=H2_helper->ptr; H_hsp_xsum=H2->hsp_link.xsum[index]; }
+// When none of the three exclusion flags (`b0`, `b1`, `b2`) is set, read `xsum` from `H2_helper`'s HSP link at `index`.
 // Strict ties retain the first visited HSP, using the helper's mapped index.
 #[test]
 fn large_gap_scan_preserves_strict_ties_mapping_and_xsum_bits() {

@@ -186,7 +186,7 @@ def run_benchmark(args, out):
         common = ['-query', str(q), '-subject', str(s), '-outfmt', '6', *extra, '-out', '{output}']; common_args[name] = common
         oracle_args = common
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        #     (program == eTblastn || program == eTblastx)) { opt.SetDbGeneticCode(...); }
+        # Applies `SetDbGeneticCode` for `eTblastn` and `eTblastx`.
         # Retain the existing database oracle for the approved local-subject exception.
         if program == 'tblastx' and '-db_gencode' in extra and extra[extra.index('-db_gencode') + 1] != '1':
             db = out/'oracle-db'/name; db.parent.mkdir(exist_ok=True)

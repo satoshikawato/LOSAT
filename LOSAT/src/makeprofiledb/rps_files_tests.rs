@@ -88,3 +88,37 @@ fn freq_ratio_matrix_is_stored_row_by_row() {
         Err(RpsError::Refused(_))
     ));
 }
+
+// A query length past `INT_MAX` that `numColumns` matches (rows RL02-RL05): -1 leaves no row, so
+// by position the scores are short and by row they are too many; below -1 the array size is
+// negative (the handler's unknown exception); by row without scores NCBI writes before its
+// matrix, which LOSAT refuses.
+#[test]
+fn a_negative_query_length_stops_as_ncbi_s_matrix_does() {
+    assert!(matches!(
+        negative_length_error(-1, false, &[1, 2]),
+        RpsError::Blast("PSSM was truncated early")
+    ));
+    assert!(matches!(
+        negative_length_error(-1, false, &[]),
+        RpsError::Blast("PSSM was truncated early")
+    ));
+    assert!(matches!(
+        negative_length_error(-1, true, &[1]),
+        RpsError::Blast("PSSM too large for this sequence")
+    ));
+    assert!(matches!(
+        negative_length_error(-1, true, &[]),
+        RpsError::Refused(_)
+    ));
+    for by_row in [false, true] {
+        assert!(matches!(
+            negative_length_error(-3, by_row, &[]),
+            RpsError::Unknown
+        ));
+        assert!(matches!(
+            negative_length_error(i32::MIN, by_row, &[1]),
+            RpsError::Unknown
+        ));
+    }
+}

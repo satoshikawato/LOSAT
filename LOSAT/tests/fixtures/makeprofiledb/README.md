@@ -14,8 +14,16 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   first 22/18/20 columns (scale 100, word thresholds); `fc.smp`, `fe.smp` are frequency-ratio-only forms of the
   psiblast PSSMs (the IMPALA path); `t_source.smp`, `t_orgnotax.smp` are `pc.smp` with a `source` taxid and an
   organism without a taxid; `e_trunc.smp` and `e_unknownfield.smp` are `pc.smp` cut in its frequency ratios and with
-  an unknown member, `e_notpssm.smp` a `Seq-entry`, `e_empty.smp` empty (the reader's errors). Lists (`*.lst`) name the PSSMs relative to the working directory.
-- Then `freeze_fixtures.py` (same place) kept the 45 rows of `cases.tsv` and, per row, NCBI's standard output,
+  an unknown member, `e_notpssm.smp` a `Seq-entry`, `e_empty.smp` empty (the reader's errors). Added on
+  2026-11-22 (the rows `R*`, run the same way that day): `nv00.smp`-`nv03.smp`, generated score PSSMs of 3-11
+  columns (scale 100), and their variants written by `PR/ps10/scripts/fix_inputs.py` (same place): `z_bh0`,
+  `z_bh1`, `z_bh2`, `z_bhorg`, `z_bhnoid` carry binary definition lines (a `user` object `ASN1_BlastDefLine`: an
+  empty set, one line, two lines whose first has no Seq-id, beside an organism, on a query without Seq-ids);
+  `z_noid_d`, `z_noid_n` have no Seq-id (with and without descriptors); `z_l2p31`, `z_lneg1`, `z_lneg3`,
+  `z_lneg1r`, `z_lneg1f` give the query a length past `int` (2^31; 2^32-1 and 2^32-3 with a matching negative
+  `numColumns`, by row, with frequency ratios only). Lists (`*.lst`) name the PSSMs relative to the working
+  directory; `nope.smp` is a file that does not exist.
+- Then `freeze_fixtures.py` (same place) kept the 65 rows of `cases.tsv` and, per row, NCBI's standard output,
   standard error and exit status as written (`ncbi/<row>.{out,err,rc}`; the test maps NCBI's words to LOSAT's with
   `losat::wording`) and `ncbi/<row>.files`: for each file the run wrote (outside `in/`), its path, size and FNV-1a 64
   digest; in a `.pin` or `.pal` the build's date (its 4-byte length and padding in a `.pin`) is replaced by `<DATE>`
@@ -24,5 +32,5 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   `-query q3.faa -db db/db -outfmt 6|0` on NCBI's databases of rows `O00` (score PSSMs) and `S_f2`
   (frequency-ratio-only PSSMs).
 
-The whole oracle (206 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 545 KB).
+The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
+repository (about 625 KB).

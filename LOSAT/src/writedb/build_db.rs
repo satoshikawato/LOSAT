@@ -994,9 +994,11 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         if let Some(error) = error {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
             messages.push(match error {
-                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
                 }
                 other => other.message(),
@@ -1106,7 +1108,7 @@ impl<'a> BuildDatabase<'a> {
             return Err(refusal);
         }
         if close_error.is_some() {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
         }
         // `NCBI_RETHROW(*close_exception, CWriteDBException, eArgErr, close_exception->GetMsg())`:
         // an exception of the close becomes a creation error with its message only (no report).

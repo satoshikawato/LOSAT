@@ -1,4 +1,4 @@
-# name<TAB>arguments (bash words; run in a directory holding in/). NCBI BLAST+ 2.17.0 makeprofiledb (bioconda build), frozen 2026-11-21 by the PS10 survey oracle (row PS10a; clock frozen at 2026-11-21 05:07:00 UTC, TZ=UTC); written by freeze_fixtures.py (README.md).
+# name<TAB>arguments (bash words; run in a directory holding in/). NCBI BLAST+ 2.17.0 makeprofiledb (bioconda build), frozen 2026-11-21 by the PS10 survey oracle (rows R*: 2026-11-22; row PS10a; clock frozen at 2026-11-21 05:07:00 UTC, TZ=UTC); written by freeze_fixtures.py (README.md).
 O00	-in in/l_p3.lst -out db
 O00c	-in in/l_c3.lst -out db
 O00c4	-blastdb_version 4 -in in/l_c3.lst -out db
@@ -44,3 +44,23 @@ S_notpssm	-in in/l_e_notpssm.lst -out db
 S_empty	-in in/l_e_empty.lst -out db
 S_trunc	-in in/l_e_trunc.lst -out db
 S_unknownfield	-in in/l_e_unknownfield.lst -out db
+RZ03	-out '' -in in/l_zone.lst
+RZ04	-out '' -in in/l_zmiss.lst
+RZ09	-out '' -blastdb_version 4 -in in/l_zlater.lst
+RZ10	-out '' -max_smp_vol 1 -in in/l_zsmall.lst
+RZ11	-out '' -blastdb_version 4 -in in/l_zsmall.lst
+RZ12	-out '' -max_smp_vol 2 -in in/l_zsmall.lst
+RB02	-in in/l_bh2.lst -out db
+RB03v4	-blastdb_version 4 -in in/l_bh0.lst -out db
+RB05	-in in/l_bhorg.lst -out db
+RB06x	-index false -in in/l_bhnoid.lst -out db
+RB07	-in in/l_bh1.lst -out db
+RB07x	-index false -in in/l_bh1.lst -out db
+RI01	-in in/l_noid_d.lst -out db
+RI02	-blastdb_version 4 -in in/l_noid_n.lst -out db
+RL01	-in in/l_l2p31.lst -out db
+RL02	-in in/l_lneg1.lst -out db
+RL03	-in in/l_lneg3.lst -out db
+RL04	-in in/l_lneg1r.lst -out db
+RL06	-in in/l_lneg1f.lst -out db
+RL07	-in in/l_lneg_later.lst -out db

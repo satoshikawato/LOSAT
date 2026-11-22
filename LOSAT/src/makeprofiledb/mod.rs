@@ -16,6 +16,10 @@ use std::io::{Read, Write};
 use crate::ncbi_app::args::{flag, key, mandatory_key, Constraint, Dep, Desc, Kind};
 use crate::ncbi_app::Tool;
 
+/// makeprofiledb's name in LOSAT's refusals (`<what> is not supported by LOSAT's
+/// MAKEPROFILEDB`, `crate::seqmasks_io::run::unsupported`).
+const PROGRAM: &str = "MAKEPROFILEDB";
+
 /// The text of `makeprofiledb -help` (NCBI 2.17.0's, frozen). Its part before `REQUIRED
 /// ARGUMENTS` is the usage that `-h` and the argument errors print.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:379-484
@@ -73,7 +77,7 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 /// `Init` reads its parameters (`work::dry_run` with `-dryrun`).
 static TOOL: Tool = Tool {
     program: "makeprofiledb",
-    refusal_name: "MAKEPROFILEDB",
+    refusal_name: PROGRAM,
     help: HELP,
     descs: DESCS,
     dependencies,

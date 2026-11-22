@@ -265,30 +265,55 @@ pub(crate) fn deflines_of_bioseq(
 }
 
 /// Why `CWriteDB::ExtractBioseqDeflines` makes no definition lines of a Bioseq.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BioseqDeflinesError {
-    /// The Bioseq has no ids: NCBI's `CWriteDBException` "Error: No deflines provided.".
+    /// No binary definition lines and no ids: NCBI's `CWriteDBException` "Error: No deflines
+    /// provided.".
     NoDeflines,
-    /// A user object `ASN1_BlastDefLine` holds the binary definition lines
-    /// (`x_GetBioseqBinaryHeader`), which NCBI decodes from ASN.1 binary (BER): LOSAT does not
-    /// read them yet.
-    BinaryHeader,
+    /// Binary definition lines (`x_GetBioseqBinaryHeader`) that the decoder of the database
+    /// headers does not read as NCBI's reader does (the reason): BER that it does not decode
+    /// (NCBI's serial error is not reproduced), or a string with bytes that NCBI's reader
+    /// replaces by '#', reporting each.
+    BinaryHeader(String),
+}
+
+/// The definition lines of a Bioseq (`ExtractBioseqDeflines`), and whether they are its binary
+/// ones, which NCBI does not encode again there.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BioseqDeflines {
+    pub(crate) set: DeflineSet,
+    pub(crate) binary: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:777-836
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:722-733,877-880
 // With `scan_bioseq_4_cfastareader_usrobj` false `x_GetFastaReaderDeflines` finds no definition
-// line, so the definition lines are the binary ones of the descriptors or
-// `x_BuildDeflinesFromBioseq`'s.
+// line, so the definition lines are the binary ones of the descriptors (decoded by
+// `x_SetDeflinesFromBinary`; its `s_CheckEmptyLists` is `WriteDb::set_deflines`'s), or else
+// `x_BuildDeflinesFromBioseq`'s. The binary ones replace the Bioseq's ids and title.
 /// `CWriteDB::ExtractBioseqDeflines(bioseq, parse_ids, long_ids = false, scan = false)` of a
 /// Bioseq with descriptors (`descr`) and the ids `ids`, without the serialization (the writer
-/// posts its diagnostics: `WriteDb::post_extracted_deflines`).
+/// posts its diagnostics: `WriteDb::post_extracted_deflines`, for the lines that are not binary).
 pub(crate) fn bioseq_deflines(
     ids: &[ParsedSeqId],
     descr: &[Seqdesc],
-) -> Result<DeflineSet, BioseqDeflinesError> {
-    if has_binary_header(descr) {
-        return Err(BioseqDeflinesError::BinaryHeader);
+) -> Result<BioseqDeflines, BioseqDeflinesError> {
+    if let Some(header) = binary_header(descr) {
+        // The one decoder of `Blast-def-line-set` records (a volume's `.phr`).
+        let set = crate::seqid::ber::decode_full_set(header)
+            .map_err(|error| BioseqDeflinesError::BinaryHeader(error.to_string()))?;
+        if set
+            .deflines
+            .iter()
+            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+        {
+            return Err(BioseqDeflinesError::BinaryHeader(
+                "a string with bytes that NCBI's reader replaces by '#', reporting each"
+                    .to_string(),
+            ));
+        }
+        return Ok(BioseqDeflines { set, binary: true });
     }
     let title = descr
         .iter()
@@ -298,8 +323,9 @@ pub(crate) fn bioseq_deflines(
             Seqdesc::Other(_) => None,
         })
         .unwrap_or_default();
-    deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
-        .ok_or(BioseqDeflinesError::NoDeflines)
+    let set = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
+        .ok_or(BioseqDeflinesError::NoDeflines)?;
+    Ok(BioseqDeflines { set, binary: false })
 }
 
 /// The variant `name` of the `Seqdesc` CHOICE `descriptor`, when it is that variant.
@@ -388,10 +414,10 @@ pub(crate) fn first_org_taxid(descr: &[Seqdesc]) -> Option<i32> {
 const ASN_DEFLINE_OBJ_LABEL: &[u8] = b"ASN1_BlastDefLine";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:441-489
-/// Whether `x_GetBioseqBinaryHeader` finds binary definition lines in `descr`: the first user
-/// object of type `ASN1_BlastDefLine` whose first field has that label and octet strings
-/// (`oss`), the first of which is not empty.
-fn has_binary_header(descr: &[Seqdesc]) -> bool {
+/// `x_GetBioseqBinaryHeader`: the binary definition lines of `descr`, the first octet string of
+/// the first user object of type `ASN1_BlastDefLine` whose first field has that label and octet
+/// strings (`oss`); `None` when that string is missing or empty.
+fn binary_header(descr: &[Seqdesc]) -> Option<&[u8]> {
     let field_data = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
     let oss = member_index(field_data, "oss");
     for descriptor in descr {
@@ -418,15 +444,16 @@ fn has_binary_header(descr: &[Seqdesc]) -> bool {
         {
             if usize::from(*index) == oss {
                 return match data.as_ref() {
-                    Value::List(strings) => {
-                        matches!(strings.first(), Some(Value::Octets(bytes)) if !bytes.is_empty())
-                    }
-                    _ => false,
+                    Value::List(strings) => match strings.first() {
+                        Some(Value::Octets(bytes)) if !bytes.is_empty() => Some(bytes),
+                        _ => None,
+                    },
+                    _ => None,
                 };
             }
         }
     }
-    false
+    None
 }
 
 #[cfg(test)]

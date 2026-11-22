@@ -84,6 +84,19 @@ pub enum WriteDbError {
     /// `Creation` whose text holds bytes that are not UTF-8 (a Seq-id label of the
     /// duplicate check), which makeblastdb prints as they are.
     CreationBytes(Vec<u8>),
+    /// LOSAT's refusal of a version 5 database with parsed Seq-ids in which the sequence of OID
+    /// `oid` (first id `name`, its FASTA label) has GIs only and lies between sequences with
+    /// other ids: NCBI's writer aborts at its close (`writer::gi_only_between_keys_error`).
+    /// makeblastdb reports it as a creation error.
+    GiOnlyBetweenKeys { oid: u32, name: Vec<u8> },
+    /// NCBI's `std::invalid_argument` with its `what()`: `BuildLMDBFileName` of an empty
+    /// database name (`writer::build_lmdb_file_name`).
+    InvalidArgument(&'static str),
+    /// LOSAT's refusal of given definition lines whose first line has no Seq-id in a database
+    /// without parsed Seq-ids: NCBI's writer puts the `gnl|BL_ORD_ID` id past the end of the
+    /// empty list (undefined behaviour). makeprofiledb gives such lines (a query without ids);
+    /// makeblastdb's lines always have an id.
+    OrdinalIdWithoutIds,
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
@@ -149,6 +162,16 @@ impl WriteDbError {
         match self {
             WriteDbError::Creation(message) => losat(DATABASE_CREATION_ERROR, message.as_bytes()),
             WriteDbError::CreationBytes(message) => losat(DATABASE_CREATION_ERROR, message),
+            WriteDbError::GiOnlyBetweenKeys { oid, name } => losat(
+                DATABASE_CREATION_ERROR,
+                &writer::gi_only_between_keys_message(*oid, name),
+            ),
+            WriteDbError::InvalidArgument(what) => text("Error: ", what.as_bytes()),
+            WriteDbError::OrdinalIdWithoutIds => text(
+                "losat makeblastdb: ",
+                b"a first definition line without a Seq-id, whose gnl|BL_ORD_ID id NCBI's writer \
+                  puts past the end of the empty list",
+            ),
             WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
             WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends

@@ -499,6 +499,28 @@ impl WriteDb {
         if self.version == DbVersion::V5 && self.lmdb.is_none() {
             self.open_lmdb_files()?;
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:831-837
+        // Definition lines given as an empty set (makeprofiledb: binary definition lines that
+        // hold none) stop the publication before the header is made.
+        if self
+            .pending_deflines
+            .as_ref()
+            .is_some_and(|set| set.deflines.is_empty())
+        {
+            return Err(WriteDbError::Creation(
+                "Error: No deflines provided.".to_string(),
+            ));
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:865-874
+        if !self.indices.full
+            && self
+                .pending_deflines
+                .as_ref()
+                .and_then(|set| set.deflines.first())
+                .is_some_and(|defline| defline.ids.is_empty())
+        {
+            return Err(WriteDbError::OrdinalIdWithoutIds);
+        }
         let title: &[u8] = match &pending {
             Pending::Bioseq(bioseq) => &bioseq.title,
             Pending::Raw(_) => &[],
@@ -671,7 +693,7 @@ impl WriteDb {
     /// Creates the LMDB files of a version 5 database (`<db>.pdb` and
     /// `<db>.ptf`, or `.ndb` and `.ntf`) at its first published sequence.
     fn open_lmdb_files(&mut self) -> Result<(), WriteDbError> {
-        let lmdb_fname_w_path = build_lmdb_file_name(&self.dbname, self.protein);
+        let lmdb_fname_w_path = build_lmdb_file_name(&self.dbname, self.protein)?;
         let map_size = lmdb_map_size_from_env()?;
         let settings = LmdbEnvSettings::from_env();
         let platform = self.platform.lmdb()?;
@@ -801,21 +823,40 @@ impl WriteDb {
     // oid"). An error of the last volume's close is LOSAT's 4 GiB stop, after the build's error.
     /// The destructors of the writer's members after a `close` that failed (`x_EndBuild` has
     /// removed the files of the build).
-    pub fn destroy_after_failed_close(&mut self) {
-        if let Some(taxdb) = self.taxdb.take() {
-            if taxdb.close().is_err() {
-                self.lmdb = None;
-                return;
-            }
-        }
-        if let Some(lmdb) = self.lmdb.take() {
-            if lmdb.close().is_err() {
-                return;
-            }
-        }
+    /// `Err` is the error of the destructor that throws, after which nothing runs.
+    pub fn destroy_after_failed_close(&mut self) -> Result<(), WriteDbError> {
+        self.destroy_lmdb_writers()?;
         if let Some(volume) = self.volumes.last_mut() {
             let _ = volume.close();
         }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:324-397
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:437-444,533-536
+    // A `Close` that found no volume leaves the LMDB writers that the publication of a first
+    // sequence created before it failed; their destructors run with the writer's, and the tax
+    // id writer's, with no OID, throws "No tax info for any oid" (makeprofiledb 2.17.0 then ends
+    // with `std::terminate`). After any other `Close` they are gone and nothing runs.
+    /// The destructors of the writer's members after a `close` that succeeded; `Err` is the error
+    /// of the destructor that throws.
+    pub fn destroy_after_close(&mut self) -> Result<(), WriteDbError> {
+        self.destroy_lmdb_writers()
+    }
+
+    /// The destructors of the tax id writer, then of the LMDB writer, when they are alive; `Err`
+    /// is the error of the one that throws (the other's work is not done).
+    fn destroy_lmdb_writers(&mut self) -> Result<(), WriteDbError> {
+        if let Some(taxdb) = self.taxdb.take() {
+            if let Err(error) = taxdb.close() {
+                self.lmdb = None;
+                return Err(error);
+            }
+        }
+        if let Some(lmdb) = self.lmdb.take() {
+            lmdb.close()?;
+        }
+        Ok(())
     }
 
     /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking algorithm of the
@@ -1031,8 +1072,9 @@ impl WriteDb {
         if self.volumes.len() > 1 {
             files.push(self.alias_name());
         }
+        // makeblastdb's names are never empty (`build_lmdb_file_name`'s error).
         if self.version == DbVersion::V5 {
-            files.push(build_lmdb_file_name(&self.dbname, self.protein));
+            files.extend(build_lmdb_file_name(&self.dbname, self.protein).ok());
         }
         files
     }
@@ -1049,7 +1091,15 @@ impl WriteDb {
 /// The refusal of a version 5 database with `-parse_seqids` in which the sequence of OID `oid`
 /// (first id `name`) has GIs only and lies between sequences with other ids.
 fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
-    let mut message = GI_ONLY_BETWEEN_KEYS.to_vec();
+    WriteDbError::GiOnlyBetweenKeys {
+        oid,
+        name: name.to_vec(),
+    }
+}
+
+/// The text of [`WriteDbError::GiOnlyBetweenKeys`] (after makeblastdb's creation error prefix).
+pub(crate) fn gi_only_between_keys_message(oid: u32, name: &[u8]) -> Vec<u8> {
+    let mut message = b"Input id list not in ascending oid order: the sequence ".to_vec();
     message.extend_from_slice(name);
     message.extend_from_slice(
         format!(
@@ -1059,26 +1109,27 @@ fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
         )
         .as_bytes(),
     );
-    WriteDbError::CreationBytes(message)
-}
-
-/// The start of `gi_only_between_keys_error`'s message.
-const GI_ONLY_BETWEEN_KEYS: &[u8] = b"Input id list not in ascending oid order: the sequence ";
-
-/// Whether `error` is LOSAT's refusal of a GI-only sequence between sequences with keys
-/// (`gi_only_between_keys_error`), which makeprofiledb reports as a refusal where NCBI's writer
-/// aborts the same way.
-pub(crate) fn is_gi_only_between_keys(error: &WriteDbError) -> bool {
-    matches!(error, WriteDbError::CreationBytes(message) if message.starts_with(GI_ONLY_BETWEEN_KEYS))
+    message
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:749-761
 // The writer calls it with the defaults `use_index = false`, `index = 0`
 // (include/objtools/blast/seqdb_reader/impl/seqdb_lmdb.hpp:118): one LMDB file for the
 // database, beside its volumes.
+// An empty name throws `std::invalid_argument` (makeprofiledb `-out ''`: its version 5 writer
+// stops at the first sequence it publishes).
 /// `BuildLMDBFileName(basename, is_protein)`: `<db>.pdb` or `<db>.ndb`.
-pub(crate) fn build_lmdb_file_name(basename: &str, is_protein: bool) -> String {
-    format!("{basename}{}", if is_protein { ".pdb" } else { ".ndb" })
+pub(crate) fn build_lmdb_file_name(
+    basename: &str,
+    is_protein: bool,
+) -> Result<String, WriteDbError> {
+    if basename.is_empty() {
+        return Err(WriteDbError::InvalidArgument("Basename is empty"));
+    }
+    Ok(format!(
+        "{basename}{}",
+        if is_protein { ".pdb" } else { ".ndb" }
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:97-125

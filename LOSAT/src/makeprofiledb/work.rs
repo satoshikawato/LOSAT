@@ -23,8 +23,8 @@ use crate::writedb::writer::WriteDb;
 use crate::writedb::{Platform, WriteDbError};
 
 use super::profile::{
-    check_input_scoremat, fill_in_rps_db_parameters, update_rps_db_info, update_statistics,
-    ProfileError, Scoremat,
+    check_input_scoremat, fill_in_rps_db_parameters, query_length, update_rps_db_info,
+    update_statistics, ProfileError, Scoremat,
 };
 use super::rps_files::{self, ProfileData, RpsError, RpsVolume, VolumeParams};
 
@@ -45,8 +45,36 @@ enum RunError {
     Exception(Vec<u8>),
     /// Any other exception: "Error: Unknown exception", 255.
     Unknown,
-    /// LOSAT's refusal (a line on the standard error stream, exit status 1).
+    /// LOSAT's refusal of `what` (a noun phrase), in the form of LOSAT's other programs
+    /// ([`unsupported`]): a line on the standard error stream, exit status 1.
     Refused(String),
+    /// A failure of LOSAT's own (a file that could not be written, a clock that could not be
+    /// read), where NCBI has no message: the text on the standard error stream, exit status 1.
+    Failed(String),
+}
+
+/// LOSAT's refusal of `what` (a noun phrase) in makeprofiledb: `<what> is not supported by
+/// LOSAT's MAKEPROFILEDB`, the form of LOSAT's other programs.
+fn unsupported(what: &str) -> String {
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
+}
+
+impl RunError {
+    /// The text that the report of this error writes after "Error: " (NCBI's prefix and message,
+    /// LOSAT's refusal), for a refusal that names it.
+    fn text(&self) -> String {
+        let bytes =
+            |prefix: &str, message: &[u8]| format!("{prefix}{}", String::from_utf8_lossy(message));
+        match self {
+            RunError::Input(message) => bytes("INPUT ERROR: ", message),
+            RunError::SeqDb(message) | RunError::Blast(message) | RunError::Exception(message) => {
+                bytes("ERROR: ", message)
+            }
+            RunError::Unknown => "Unknown exception".to_string(),
+            RunError::Refused(what) => unsupported(what),
+            RunError::Failed(text) => text.clone(),
+        }
+    }
 }
 
 impl From<RpsError> for RunError {
@@ -56,9 +84,8 @@ impl From<RpsError> for RunError {
             RpsError::Blast(message) => RunError::Blast(message.into()),
             RpsError::Unknown => RunError::Unknown,
             RpsError::Refused(reason) => RunError::Refused(reason),
-            RpsError::Io(error) => RunError::Refused(format!(
-                "a file of the RPS database could not be written ({error}); NCBI makeprofiledb \
-                 does not test its writes and leaves the file short"
+            RpsError::Io(error) => RunError::Failed(format!(
+                "writing a file of the RPS database failed: {error}"
             )),
         }
     }
@@ -80,28 +107,37 @@ impl From<ProfileError> for RunError {
 /// The writer's errors as makeprofiledb's handler reports them: its exceptions are
 /// `CException`s ("ERROR: " and the message, 255), those of LMDB's environment
 /// `CSeqDBException`s (2).
+// A `std::exception` (`std::invalid_argument` of an empty name's LMDB file, `std::bad_alloc`) is
+// the handler's unknown exception.
 impl From<WriteDbError> for RunError {
     fn from(error: WriteDbError) -> Self {
-        // A GI-only query between queries with other ids in a version 5 database: NCBI's writer
-        // aborts at its close (survey I01g, I01x), as makeblastdb's does; LOSAT's refusal is
-        // makeblastdb's (makedb-v5 DECISIONS 10).
-        let gi_only = crate::writedb::writer::is_gi_only_between_keys(&error);
         match error {
-            WriteDbError::CreationBytes(message) if gi_only => {
-                RunError::Refused(String::from_utf8_lossy(&message).into_owned())
-            }
+            // A GI-only query between queries with other ids in a version 5 database: NCBI's
+            // writer aborts at its close (survey I01g, I01x), as makeblastdb's does, which
+            // LOSAT refuses (makedb-v5 DECISIONS 10).
+            WriteDbError::GiOnlyBetweenKeys { oid, name } => RunError::Refused(format!(
+                "a version 5 database with -index true in which the query {} (OID {oid}) has \
+                 only GI ids and lies between queries with other ids (NCBI's makeprofiledb \
+                 aborts there; -blastdb_version 4 builds it)",
+                String::from_utf8_lossy(&name)
+            )),
             WriteDbError::Creation(message) | WriteDbError::Options(message) => {
                 RunError::Exception(message.into_bytes())
             }
             WriteDbError::CreationBytes(message) => RunError::Exception(message),
             WriteDbError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
             WriteDbError::Database(message) => RunError::SeqDb(message.into_bytes()),
-            WriteDbError::OutOfMemory => RunError::Unknown,
+            WriteDbError::OutOfMemory | WriteDbError::InvalidArgument(_) => RunError::Unknown,
+            WriteDbError::OrdinalIdWithoutIds => RunError::Refused(
+                "a query whose first definition line has no Seq-id, with -index false (NCBI's \
+                 makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"
+                    .to_string(),
+            ),
             WriteDbError::Other(message) | WriteDbError::Unsupported(message) => {
-                RunError::Refused(message)
+                RunError::Refused(format!("the database error '{message}'"))
             }
             WriteDbError::Io { path, source } => {
-                RunError::Refused(format!("{}: {source}", path.display()))
+                RunError::Failed(format!("{}: {source}", path.display()))
             }
         }
     }
@@ -158,10 +194,10 @@ fn init<'a>(
     // fail (a directory) never reaches its end, and NCBI's loop does not end.
     let mut in_list = Vec::new();
     if let Err(error) = in_file.read_to_end(&mut in_list) {
-        return Err(diag.refuse(&format!(
-            "makeprofiledb: the list of profiles `{in_name}' cannot be read ({error}); NCBI \
-             makeprofiledb 2.17.0 reads such a stream without end"
-        )));
+        return Err(diag.refuse(&unsupported(&format!(
+            "an -in list that cannot be read (`{in_name}': {error}; NCBI's makeprofiledb reads \
+             it without end)"
+        ))));
     }
     drop(in_file);
     let in_string = in_name.to_string();
@@ -211,10 +247,10 @@ fn init<'a>(
                 return Err(2);
             }
             Err(TaxIdMapError::BlankLine(line)) => {
-                return Err(diag.refuse(&format!(
-                    "makeprofiledb: line {line} of -taxid_map `{name}' holds white space only, \
-                     on which NCBI makeprofiledb 2.17.0 crashes"
-                )))
+                return Err(diag.refuse(&unsupported(&format!(
+                    "a -taxid_map line of white space only (line {line} of `{name}'; NCBI's \
+                     makeprofiledb crashes on it)"
+                ))))
             }
         }
         (taxids, true)
@@ -269,8 +305,8 @@ pub(super) fn run(
         Ok(params) => params,
         Err(status) => return status,
     };
-    if let Some(reason) = refusal(args, &params) {
-        return diag.refuse(&reason);
+    if let Some(what) = refusal(args) {
+        return diag.refuse(&unsupported(&what));
     }
     let mut built = Built {
         vol_names: Vec::new(),
@@ -304,34 +340,17 @@ pub(super) fn dry_run(
     }
 }
 
-/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: the binary profiles of
-/// `-binary` (their reader, row PS10b), the database types other than `rps` (row PS14), and an
-/// empty database name.
-fn refusal(args: &Args, params: &Params<'_>) -> Option<String> {
+/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads, each a noun phrase: the
+/// binary profiles of `-binary` (their reader, row PS10b) and the database types other than
+/// `rps` (row PS14).
+fn refusal(args: &Args) -> Option<String> {
     if args.flag("binary") {
-        return Some(
-            "makeprofiledb -binary (profiles in ASN.1 binary) is not supported by LOSAT's \
-             makeprofiledb yet; give the profiles in ASN.1 text"
-                .to_string(),
-        );
+        return Some("-binary (PSSM files in ASN.1 binary)".to_string());
     }
     match args.value("dbtype") {
-        Some("rps") | None => {}
-        Some(dbtype) => {
-            return Some(format!(
-                "makeprofiledb -dbtype {dbtype} is not supported by LOSAT's makeprofiledb yet; \
-                 it builds -dbtype rps"
-            ))
-        }
+        Some("rps") | None => None,
+        Some(dbtype) => Some(format!("-dbtype {dbtype} (only -dbtype rps is built)")),
     }
-    if params.out_db_name.is_empty() {
-        return Some(
-            "makeprofiledb with an empty database name, with which NCBI makeprofiledb 2.17.0 \
-             stops with an unknown exception or aborts"
-                .to_string(),
-        );
-    }
-    None
 }
 
 /// The report of `Run`'s handler; the exit status.
@@ -360,7 +379,8 @@ fn report(error: RunError, diag: &mut Diag) -> i32 {
             diag.err_post("Error: Unknown exception");
             255
         }
-        RunError::Refused(reason) => diag.refuse(&format!("makeprofiledb: {reason}")),
+        RunError::Refused(what) => diag.refuse(&unsupported(&what)),
+        RunError::Failed(text) => diag.refuse(&text),
     }
 }
 
@@ -444,8 +464,7 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
     let max = params.max_smp_files_per_vol;
     let undefined = || {
         RunError::Refused(format!(
-            "-max_smp_vol {max} for {num_smps} profiles, with which NCBI makeprofiledb 2.17.0 \
-             divides by zero"
+            "-max_smp_vol {max} for {num_smps} profiles (NCBI's makeprofiledb divides by zero)"
         ))
     };
     if max == 0 {
@@ -493,7 +512,7 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
 /// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line.
 fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Result<(), RunError> {
     let now = LocalTime::now().ok_or_else(|| {
-        RunError::Refused("the clock cannot be read for the alias file's date".to_string())
+        RunError::Failed("the clock cannot be read for the alias file's date".to_string())
     })?;
     let fname = format!("{}.pal", params.out_db_name);
     let mut text = format!("#\n# Alias file created {}\n#\n", now.log_time()).into_bytes();
@@ -583,7 +602,7 @@ fn read_profile(
         Err(PssmReadError::Refused(what))
         | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
             Err(RunError::Refused(format!(
-                "a profile that LOSAT's reader does not read ({}: {what})",
+                "a profile that LOSAT's PSSM reader does not read ({}: {what})",
                 String::from_utf8_lossy(filename)
             )))
         }
@@ -619,8 +638,8 @@ fn make_vol(
         matrix: params.matrix.as_bytes().to_vec(),
         scale_factor: rps_files::int4_of(params.pssm_scale_factor.ceil()).ok_or_else(|| {
             RunError::Refused(format!(
-                "-scale {}, whose ceiling NCBI makeprofiledb converts to a 32-bit integer \
-                 without a defined result",
+                "-scale {} (NCBI's conversion of its ceiling to a 32-bit integer has no defined \
+                 result)",
                 params.pssm_scale_factor
             ))
         })?,
@@ -628,7 +647,7 @@ fn make_vol(
     let mut rps = rps_files::open_volume(&db_name, smps.len(), volume_params)?;
     built.vol_names.push(db_name.clone());
     let now = LocalTime::now().ok_or_else(|| {
-        RunError::Refused("the clock cannot be read for the database's date".to_string())
+        RunError::Failed("the clock cannot be read for the database's date".to_string())
     })?;
     let indices = if params.create_index_file {
         Indices {
@@ -652,38 +671,74 @@ fn make_vol(
     output_db.set_max_file_size(MAX_FILE_SIZE);
     let result = add_profiles(params, diag, &mut rps, &mut output_db, smps);
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
-    // error (`~CWriteDB_Impl` closes it).
+    // error (`~CWriteDB_Impl` closes it), then the destructors of the writer's members.
     let closed = output_db.close();
-    post_writer(diag, &mut output_db);
-    if let Err(close_error) = closed {
-        // A `Close` that threw: the destructor's `Close` returns at once and the writer's members
-        // close (the last volume under its numbered name, the LMDB files).
-        output_db.destroy_after_failed_close();
-        post_writer(diag, &mut output_db);
-        let Err(error) = result else {
-            return Err(close_error.into());
-        };
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
-        // In the unwinding the destructor posts a `CWriteDBException` and the first error goes
-        // on; any other exception leaves the destructor and ends NCBI's process
-        // (`std::terminate`), which LOSAT refuses.
-        let creation = matches!(
-            close_error,
-            WriteDbError::Creation(_) | WriteDbError::CreationBytes(_)
-        ) && !crate::writedb::writer::is_gi_only_between_keys(&close_error);
-        if !creation {
-            let close = RunError::from(close_error);
-            return Err(RunError::Refused(format!(
-                "the error {error:?} left a database whose close fails ({close:?}), where NCBI \
-                 makeprofiledb 2.17.0 aborts"
-            )));
-        }
-        diag.err_post_bytes(&close_error.message());
-        return Err(error);
+    if let Err(RunError::Refused(_)) = result {
+        // LOSAT's refusal: NCBI's run has no defined result there, and nothing after it is
+        // reported.
+        drop(output_db.take_diagnostics());
+        return result;
     }
-    result?;
+    post_writer(diag, &mut output_db);
+    match (result, closed) {
+        (Ok(()), Ok(())) => {}
+        // The `Close` after the loop threw: its error leaves `x_MakeVol`, the destructor's
+        // `Close` returns at once and the members close (the last volume under its numbered
+        // name, the LMDB files).
+        (Ok(()), Err(close_error)) => {
+            let destroyed = output_db.destroy_after_failed_close();
+            post_writer(diag, &mut output_db);
+            let error = RunError::from(close_error);
+            return Err(match destroyed {
+                Ok(()) => error,
+                Err(destructor) => aborts(error, &destructor),
+            });
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
+        // In the unwinding the destructor posts a `CWriteDBException` of its `Close` and the first
+        // error goes on; any other exception leaves the destructor and ends NCBI's process
+        // (`std::terminate`), which LOSAT refuses.
+        (Err(error), Err(close_error)) => {
+            if !matches!(
+                close_error,
+                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_)
+            ) {
+                return Err(aborts(error, &close_error));
+            }
+            diag.err_post_bytes(&close_error.message());
+            let destroyed = output_db.destroy_after_failed_close();
+            post_writer(diag, &mut output_db);
+            return Err(match destroyed {
+                Ok(()) => error,
+                Err(destructor) => aborts(error, &destructor),
+            });
+        }
+        (Err(error), Ok(())) => {
+            let destroyed = output_db.destroy_after_close();
+            post_writer(diag, &mut output_db);
+            return Err(match destroyed {
+                Ok(()) => error,
+                Err(destructor) => aborts(error, &destructor),
+            });
+        }
+    }
     rps.close()?;
     Ok(())
+}
+
+/// LOSAT's refusal where the writer, closed or destroyed after the error `first`, throws
+/// `then` out of a destructor, where NCBI's process ends (`std::terminate`, SIGABRT); `first`
+/// itself when it is LOSAT's refusal (NCBI's run left its defined behaviour there).
+fn aborts(first: RunError, then: &WriteDbError) -> RunError {
+    if let RunError::Refused(_) = first {
+        return first;
+    }
+    RunError::Refused(format!(
+        "an error ({}) after which the database's writer stops with another ({}; NCBI's \
+         makeprofiledb aborts there)",
+        first.text(),
+        String::from_utf8_lossy(&then.message())
+    ))
 }
 
 /// The profiles of a volume added to its writer and its RPS files (the loop of `x_MakeVol`).
@@ -701,7 +756,8 @@ fn add_profiles(
         }
         let mut pssm_w_parameters = read_profile(&path, filename, diag)?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
-        let seq_size = pssm_w_parameters.pssm.num_columns as usize;
+        // `int seq_size = pssm.GetQueryLength()`: negative past `INT_MAX` (`query_length`).
+        let seq_size = query_length(&pssm_w_parameters);
         add_to_database(params, diag, output_db, &pssm_w_parameters)?;
         if !rps.has_lookup() {
             update_rps_db_info(&mut rps.params, &pssm_w_parameters);
@@ -744,6 +800,12 @@ fn add_profiles(
         }
         let pssm = &pssm_w_parameters.pssm;
         let final_data = pssm.final_data.as_ref().expect("final data");
+        let by_row = pssm.by_row.unwrap_or(false);
+        let Ok(seq_size) = usize::try_from(seq_size) else {
+            return Err(
+                rps_files::negative_length_error(seq_size, by_row, &final_data.scores).into(),
+            );
+        };
         let freq_ratios = pssm
             .intermediate_data
             .as_ref()
@@ -751,7 +813,7 @@ fn add_profiles(
         rps.add_profile(&ProfileData {
             seq_size,
             num_rows: pssm.num_rows as usize,
-            by_row: pssm.by_row.unwrap_or(false),
+            by_row,
             scores: &final_data.scores,
             freq_ratios,
             kappa: final_data.kappa,
@@ -760,13 +822,16 @@ fn add_profiles(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1395-1430
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1210-1226
-// Without `-taxid` and `-taxid_map` the taxid of the query's first `org` descriptor maps its
-// first id (`AddTaxId`), and `FixTaxId` then gives each definition line the map's taxid of its
-// ids (0 for none). With `-index false` the writer puts `gnl|BL_ORD_ID|<oid>` in place of the
-// first id of the first definition line, which NCBI does past an empty list of ids; LOSAT
-// refuses a query without ids in both modes.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1310-1317,1406-1437
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:865-874
+// A query with descriptors gets the definition lines of `ExtractBioseqDeflines` (its binary
+// ones, else one line of its ids and title: none without ids, "No deflines provided."), one
+// without them a line of its ids. Without `-taxid` and `-taxid_map` the taxid of the query's
+// first `org` descriptor maps its first id (`AddTaxId`; a query without ids maps none), and
+// `FixTaxId` then gives each definition line the map's taxid of its ids (0 for none). With
+// `-index false` the writer puts `gnl|BL_ORD_ID|<oid>` in place of the first id of the first
+// definition line: NCBI writes it past the end of an empty list (undefined behaviour), which
+// LOSAT refuses. With `-index true` a sequence without ids stops at the writer's duplicate check.
 /// The profile's query added to the database: its definition lines (the query's descriptors,
 /// else one line of its ids), their taxids, the sequence.
 fn add_to_database(
@@ -778,28 +843,23 @@ fn add_to_database(
     let Some(SeqEntry::Seq(query)) = &pssm_w_parameters.pssm.query else {
         unreachable!("check_input_scoremat found the query's Bioseq");
     };
-    if query.ids.is_empty() {
-        return Err(RunError::Refused(
-            "a profile whose query has no Seq-id, whose definition line NCBI makeprofiledb \
-             writes past an empty list"
-                .to_string(),
-        ));
-    }
     let mut deflines = match &query.descr {
         Some(descr) => {
-            let deflines = bioseq_deflines(&query.ids, descr).map_err(|error| match error {
+            let extracted = bioseq_deflines(&query.ids, descr).map_err(|error| match error {
                 BioseqDeflinesError::NoDeflines => {
                     RunError::Exception(b"Error: No deflines provided.".to_vec())
                 }
-                BioseqDeflinesError::BinaryHeader => RunError::Refused(
-                    "a profile whose query holds binary definition lines (a user object \
-                     ASN1_BlastDefLine), which LOSAT does not read yet"
-                        .to_string(),
-                ),
+                BioseqDeflinesError::BinaryHeader(reason) => RunError::Refused(format!(
+                    "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
+                     reader of database headers does not read ({reason})"
+                )),
             })?;
-            output_db.post_extracted_deflines(&deflines);
-            post_writer(diag, output_db);
-            deflines
+            // The binary definition lines are not encoded again here (`bin_hdr` is kept).
+            if !extracted.binary {
+                output_db.post_extracted_deflines(&extracted.set);
+                post_writer(diag, output_db);
+            }
+            extracted.set
         }
         None => DeflineSet {
             deflines: vec![BlastDefline {
@@ -809,11 +869,14 @@ fn add_to_database(
         },
     };
     if !params.user_taxids {
-        if let Some(taxid) = query.descr.as_deref().and_then(first_org_taxid) {
+        let first_id = query.ids.first();
+        if let (Some(taxid), Some(first_id)) =
+            (query.descr.as_deref().and_then(first_org_taxid), first_id)
+        {
             let mut warnings = Vec::new();
             params
                 .taxids
-                .add_tax_id(&query.ids[0], taxid, &mut |warning| warnings.push(warning))
+                .add_tax_id(first_id, taxid, &mut |warning| warnings.push(warning))
                 .map_err(|exception| RunError::Exception(exception.get_msg().to_vec()))?;
             for warning in warnings {
                 post_seq_id_warning(diag, &warning);

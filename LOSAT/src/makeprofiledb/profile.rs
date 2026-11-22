@@ -42,7 +42,7 @@ impl From<RpsError> for ProfileError {
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:601-668
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:62-74
 // `GetQueryLength` is 0 for a query that is a set, or without a length. The length is compared
-// with `numColumns` as an `int`; LOSAT refuses lengths past `int` before (`query_length`).
+// with `numColumns` as an `int` ([`query_length`]).
 /// `x_CheckInputScoremat` of the profile of the file `filename` (a `-dbtype rps` build).
 pub(super) fn check_input_scoremat(
     pssm_w_parameters: &PssmWithParameters,
@@ -50,7 +50,7 @@ pub(super) fn check_input_scoremat(
 ) -> Result<Scoremat, ProfileError> {
     let input = |what: &[u8]| ProfileError::Input([filename, what].concat());
     let pssm = &pssm_w_parameters.pssm;
-    let length = query_length(pssm_w_parameters)?;
+    let length = query_length(pssm_w_parameters);
     if length == 0 {
         return Err(input(b" contains no bioseq data"));
     }
@@ -73,23 +73,19 @@ pub(super) fn check_input_scoremat(
     })
 }
 
-/// `(int) GetQueryLength()`: the length of the query when it is a Bioseq with one, else 0; a
-/// length past `int` is refused (NCBI's `int` of it is negative and the profile's loops then
-/// read nothing or past the scores).
-pub(super) fn query_length(pssm_w_parameters: &PssmWithParameters) -> Result<i32, ProfileError> {
-    let length = pssm_w_parameters
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:624,1406
+// The `size_t` of a `TSeqPos` (`Uint4`) converted to `int`, which GCC defines as the value modulo
+// 2^32: a length past `INT_MAX` is negative.
+/// `(int) GetQueryLength()`: the length of the query when it is a Bioseq with one, else 0, as an
+/// `int`.
+pub(super) fn query_length(pssm_w_parameters: &PssmWithParameters) -> i32 {
+    pssm_w_parameters
         .pssm
         .query
         .as_ref()
         .and_then(|query| query.seq())
         .and_then(|seq| seq.inst.length)
-        .unwrap_or(0);
-    i32::try_from(length).map_err(|_| {
-        ProfileError::Rps(RpsError::Refused(format!(
-            "a profile whose query has {length} letters, more than NCBI makeprofiledb counts \
-             in its 32-bit integers"
-        )))
-    })
+        .unwrap_or(0) as i32
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:786-803
@@ -159,8 +155,8 @@ fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, Pr
         .and_then(|seq| seq.inst.seq_data.as_ref());
     let refuse = |what: String| {
         ProfileError::Rps(RpsError::Refused(format!(
-            "a profile of frequency ratios whose query has {what}, which LOSAT's makeprofiledb \
-             does not convert as NCBI's sequence conversion does"
+            "a profile of frequency ratios whose query has {what} (NCBI's sequence conversion \
+             of it is not followed)"
         )))
     };
     let letters = |data: &[u8], extra: &[u8]| -> Result<Vec<u8>, ProfileError> {
@@ -201,14 +197,21 @@ fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, Pr
 pub(super) fn update_statistics(
     params: &VolumeParams,
     pssm_w_parameters: &mut PssmWithParameters,
-    seq_size: usize,
+    seq_size: i32,
 ) -> Result<(), ProfileError> {
     let query = query_ncbistdaa(pssm_w_parameters)?;
-    if query.len() != seq_size {
+    // `(Int4) query_v.size() != seq_size`: a negative length (one past `INT_MAX`) never matches
+    // a query of fewer than 2^31 letters.
+    if query.len() as i32 != seq_size {
         return Err(ProfileError::Blast(
             "Query sequence lengths mismatch".to_string(),
         ));
     }
+    let seq_size = usize::try_from(seq_size).map_err(|_| {
+        ProfileError::Rps(RpsError::Refused(
+            "a profile of frequency ratios whose query has 2^31 letters or more".to_string(),
+        ))
+    })?;
     let pssm = &pssm_w_parameters.pssm;
     let ratios = pssm
         .intermediate_data
@@ -233,7 +236,7 @@ pub(super) fn update_statistics(
     let matrix_name = String::from_utf8_lossy(&params.matrix).into_owned();
     let refuse = |what: String| ProfileError::Rps(RpsError::Refused(what));
     let (scoring, sbp) = match engine_score_block(&matrix_name, gap_open, gap_extend, &query)
-        .map_err(|error| refuse(format!("{error:#}")))?
+        .map_err(|error| refuse(format!("the scoring system of a profile ({error:#})")))?
     {
         Ok(block) => block,
         Err(message) => return Err(ProfileError::Blast(message)),
@@ -252,7 +255,7 @@ pub(super) fn update_statistics(
     let Some(kbp_psi) = query_ungapped_block(scoring, &query) else {
         return Err(refuse(
             "a profile of frequency ratios whose query has no ungapped Karlin-Altschul \
-             parameters, where NCBI's PSSM engine reads a null block (a crash)"
+             parameters (NCBI's PSSM engine reads a null block there)"
                 .to_string(),
         ));
     };
@@ -268,8 +271,8 @@ pub(super) fn update_statistics(
         crate::core::psi::pssm_from_freq_ratios_engine(&query, &rows, &sbp, kbp_psi, impala)
             .map_err(|error| match error {
                 crate::core::psi::PsiError::ScalingUndefined => refuse(
-                    "a profile of frequency ratios whose scaling by NCBI's PSSM engine leaves C's \
-             defined behaviour (a score past int, or a scale that grows without end)"
+                    "a profile of frequency ratios whose scaling leaves C's defined behaviour in \
+                     NCBI's PSSM engine (a score past int, or a scale that grows without end)"
                         .to_string(),
                 ),
                 error => ProfileError::Blast(

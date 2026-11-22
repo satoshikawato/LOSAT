@@ -45,7 +45,8 @@ pub(super) enum RpsError {
     /// NCBI's `CBlastException` (`eCoreBlastError`): exit status 1.
     Blast(&'static str),
     /// A `std::exception` that leaves NCBI's `Run` ("Unknown exception", exit status 255): the
-    /// `runtime_error` of `GetFreqRatios` for an empty list of frequency ratios.
+    /// `runtime_error` of `GetFreqRatios` for an empty list of frequency ratios, the
+    /// `bad_array_new_length` of a negative length's matrix (`negative_length_error`).
     Unknown,
     /// LOSAT's refusal of what NCBI does not do in a defined way.
     Refused(String),
@@ -110,8 +111,8 @@ pub(super) fn open_volume(
         .filter(|&count| count < i32::MAX)
         .ok_or_else(|| {
             RpsError::Refused(format!(
-                "a volume of {num_seqs} profiles, whose offsets NCBI makeprofiledb counts past \
-                 its 32-bit integers"
+                "a volume of {num_seqs} profiles (NCBI's makeprofiledb counts its offsets past \
+                 its 32-bit integers)"
             ))
         })?;
     let mut volume = RpsVolume {
@@ -231,8 +232,8 @@ impl RpsVolume {
             .and_then(|rows| self.curr_seq_offset.checked_add(rows))
             .ok_or_else(|| {
                 RpsError::Refused(
-                    "a volume whose profiles hold 2^31 positions or more, which NCBI \
-                     makeprofiledb counts past its 32-bit integers"
+                    "a volume whose profiles hold 2^31 positions or more (NCBI's makeprofiledb \
+                     counts them past its 32-bit integers)"
                         .to_string(),
                 )
             })
@@ -328,8 +329,8 @@ impl RpsVolume {
             .and_then(|bytes| (LOO_HEADER_BYTES + cells * CELL_BYTES).checked_add(bytes))
             .ok_or_else(|| {
                 RpsError::Refused(
-                    "a table of words whose size NCBI makeprofiledb counts past its 32-bit \
-                     integers"
+                    "a table of words of 2^31 bytes or more (NCBI's makeprofiledb counts its \
+                     size past its 32-bit integers)"
                         .to_string(),
                 )
             })?;
@@ -372,12 +373,40 @@ impl RpsVolume {
 fn word_threshold(threshold: f64) -> Result<i64, RpsError> {
     if threshold.is_nan() {
         return Err(RpsError::Refused(
-            "a word score threshold that is not a number after the scaling, which NCBI \
-             makeprofiledb converts to a 32-bit integer without a defined result"
+            "a word score threshold that is not a number after the scaling (NCBI's conversion \
+             of it to a 32-bit integer has no defined result)"
                 .to_string(),
         ));
     }
     Ok(threshold as i64)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1106-1167
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:144-156
+// A query length past `INT_MAX` is a negative `int`, and passes `x_CheckInputScoremat` when
+// `numColumns` is that number. `Create(seq_size + 1)` allocates `new Int4*[seq_size + 1]`: from
+// -2 down a negative array size, whose new-expression throws `std::bad_array_new_length` (the
+// handler's unknown exception); at -1 no row, so the loops over the positions do not run: by
+// position the scores are found short ("PSSM was truncated early"), by row they are found too
+// many ("PSSM too large for this sequence"), and by row without scores NCBI writes its extra row
+// at index -1, before the array (undefined behaviour), which LOSAT refuses.
+/// The error of `x_RPSUpdatePSSM` for a profile of the negative length `seq_size` whose scores
+/// `scores` are stored by row when `by_row`.
+pub(super) fn negative_length_error(seq_size: i32, by_row: bool, scores: &[i32]) -> RpsError {
+    debug_assert!(seq_size < 0);
+    if seq_size < -1 {
+        RpsError::Unknown
+    } else if !by_row {
+        RpsError::Blast("PSSM was truncated early")
+    } else if !scores.is_empty() {
+        RpsError::Blast("PSSM too large for this sequence")
+    } else {
+        RpsError::Refused(
+            "a profile by row without scores whose query length is 4294967295 (NCBI's \
+             makeprofiledb writes the row past its last position before its matrix)"
+                .to_string(),
+        )
+    }
 }
 
 /// One profile as the RPS files read it.
@@ -462,8 +491,8 @@ fn freq_rows(profile: &ProfileData<'_>, out: &mut Vec<u8>) -> Result<(), RpsErro
     let push = |value: f64, out: &mut Vec<u8>| -> Result<(), RpsError> {
         let scaled = nint_int4(value * FREQ_RATIO_SCALE).ok_or_else(|| {
             RpsError::Refused(format!(
-                "a frequency ratio of {value}, which NCBI makeprofiledb converts to an integer \
-                 without a defined result"
+                "a frequency ratio of {value} (NCBI's conversion of it to an integer has no \
+                 defined result)"
             ))
         })?;
         out.extend_from_slice(&scaled.to_le_bytes());
@@ -488,8 +517,8 @@ fn freq_rows(profile: &ProfileData<'_>, out: &mut Vec<u8>) -> Result<(), RpsErro
         let matrix = freq_ratio_matrix(profile.freq_ratios, profile.num_rows, seq_size, true)?;
         if seq_size > BLASTAA_SIZE {
             return Err(RpsError::Refused(format!(
-                "a profile by row of {seq_size} positions (more than {BLASTAA_SIZE}), whose \
-                 frequency ratios NCBI makeprofiledb reads past their matrix"
+                "a profile by row of {seq_size} positions (more than {BLASTAA_SIZE}; NCBI's \
+                 makeprofiledb reads its frequency ratios past their matrix)"
             )));
         }
         for i in 0..seq_size {
@@ -519,8 +548,8 @@ pub(super) fn freq_ratio_matrix(
     }
     if ratios.len() < num_rows * num_columns {
         return Err(RpsError::Refused(format!(
-            "a profile of {num_columns} positions and {num_rows} rows with {} frequency ratios, \
-             past whose list NCBI makeprofiledb reads",
+            "a profile of {num_columns} positions and {num_rows} rows with {} frequency ratios \
+             (NCBI's makeprofiledb reads past the list)",
             ratios.len()
         )));
     }

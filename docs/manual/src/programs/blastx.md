@@ -79,6 +79,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a database sequence whose first mask runs to its end (a masked tail, or a sequence masked entirely) is searched before its mask. NCBI BLAST+ 2.17.0 reads the masked letters there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of the query batch or of a protein subject and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-use_sw_tback` in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4), NCBI BLAST+ 2.17.0 checks each new Smith-Waterman alignment against a list of kept alignments that it picks by a number: 6 × the query's place in the batch (counted from 0) plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. It keeps one list per query, so a number that is the batch's number of queries or more lies past its lists, and NCBI crashes, fails or goes on with what it reads there. With one query in a batch (a query of 10,002 letters or more, or `BATCH_SIZE=1`) that is every hit outside frame +1. LOSAT checks such an alignment against an empty list and writes NCBI's result for the same queries followed by queries without hits, which keep NCBI inside its lists. See [Differences from NCBI BLAST+](../differences.md#blastx--use_sw_tback-in-e-value-mode).
 
@@ -93,7 +94,6 @@ LOSAT stops with an error for these `blastx` settings instead of running somethi
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
 
 ## Examples

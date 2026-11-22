@@ -15,8 +15,8 @@
 //! have no W). That the bytes equal NCBI's is the business of the fixture rows `db.x4.sw.fail.*`
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3796-3802 (the arrays of
 //! every query's heap are freed, then the first query's heap is popped:
 //! `BlastCompo_HeapPop`, compo_heap.c:444-457, reads `heapArray[1]` when its count is above 0)

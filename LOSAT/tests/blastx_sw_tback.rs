@@ -12,7 +12,7 @@
 //! the heap that a window's query context (six per query) indexes in its array of the batch's
 //! heaps (one per query): a context below the batch's query count reads another query's heap,
 //! which LOSAT reproduces (`q12.fna`: two queries with hits, ten without); at or past it NCBI
-//! reads past the array, where LOSAT tests an empty heap (approved exception 20 of
+//! reads past the array, where LOSAT tests an empty heap (approved exception 22 of
 //! PD-LOSAT-NCBI-DEFECTS): NCBI's result for the batch followed by five queries without a hit
 //! per query (`*_pad.fna`).
 //! `-ungapped -comp_based_stats 0 -use_sw_tback` crashes NCBI at the redo's set-up of every batch
@@ -174,7 +174,7 @@ fn a_failed_last_match_after_a_kept_first_query_is_refused() {
 }
 
 // A window whose query context is at or past the batch's query count, where NCBI's heap test reads
-// past its array of the batch's heaps: LOSAT tests an empty heap there (approved exception 20 of
+// past its array of the batch's heaps: LOSAT tests an empty heap there (approved exception 22 of
 // PD-LOSAT-NCBI-DEFECTS), so a batch gives the rows of the same batch followed by five queries
 // without a hit per query (`*_pad.fna`, whose NCBI runs are the rows `db.x4b2.past.*.pad.*`), at
 // every thread count.

@@ -36,7 +36,7 @@ Query files (`tests/fasta/x4b2/`):
   search), then tks_W.
 - `qok1.fna`, `qok1_rc.fna` (fix round 2): qok1 alone in frame +1 and in frame -1 (its hits against X4's subjects lie
   in other frames: contexts past the array of one heap).
-- The padded files of approved exception 20 (fix round 2, the Owner's decision Q-HEAP=B, 2026-11-21): NCBI's heap test
+- The padded files of approved exception 22 (fix round 2, the Owner's decision Q-HEAP=B, 2026-11-21): NCBI's heap test
   in e-value mode reads past its array of the batch's heaps (one per query) for a query context 6 x q + f at or above
   the batch's query count N; LOSAT tests an empty heap there. Each query batch of the as-is file followed by 5N queries
   without a hit (`pad001` on, CCCCGGGGAACC repeated) keeps every context of its queries inside NCBI's array, and the

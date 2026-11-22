@@ -951,7 +951,7 @@ where
     Ok(())
 }
 
-/// NCBI's error of a query batch whose Smith-Waterman redo (`kappa::smith_waterman::SwRedoFailed`)
+/// NCBI's error of a query batch whose Smith-Waterman redo (`smith_waterman_match::SwRedoFailed`)
 /// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
 /// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
 /// the status again), a status other than 0 at the end fails the batch's traceback, and the
@@ -1002,7 +1002,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
+/// (`smith_waterman_match::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, cited at
 /// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
@@ -1053,7 +1053,7 @@ fn fetch_excluded_reached(
 /// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
 /// is NCBI's one-thread status of the batch.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 fn query_fetch_excluded_reached(
     marks: &[super::database::FetchExcludedMatch],
     status_position: Option<usize>,
@@ -1307,7 +1307,7 @@ where
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
         *x_prelim_freed += 1;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3781
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3781
         // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).

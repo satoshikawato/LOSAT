@@ -30,14 +30,16 @@ LOSAT/tests/db_search (README.md there says how they were built).
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
 - a `ncbi` row whose `covers` cell has `ncbi-near: ROW_ID` (up to a ` | ` or the end of the cell): the expectation
   is the frozen bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same
-  search with the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
-  (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
-  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
-  start whose window reads past the end of a database volume's last memory page, where NCBI faults; exception 19: a
-  hit list size whose preliminary size passes NCBI's Int4, with the near size 1073741798; exception 20: BLASTX
-  `-use_sw_tback`'s heap test in e-value mode past NCBI's array of a batch's heaps, with the near input that follows
-  each query batch by queries without a hit, where they add no byte: outfmt 6, or a batch that fails and writes
-  nothing). The row has no
+  search with the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases after which every reading frame
+  keeps a letter after its part; for exception 21 the freed letters stored as `X`, or `N`, so that they stay masked
+  in the alignments and the statistics), where NCBI's own run of the row reaches an approved NCBI defect
+  (PD-LOSAT-NCBI-DEFECTS exceptions 13 and 21: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
+  2.17.0 crashes, adds rows from the masked letters, drops seeds of the next subject or writes an HSP many times;
+  exception 3: a one-hit gapped start whose window reads past the end of a database volume's last memory page, where
+  NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
+  1073741798; exception 22: BLASTX `-use_sw_tback`'s heap test in e-value mode past NCBI's
+  array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
+  they add no byte: outfmt 6, or a batch that fails and writes nothing). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind

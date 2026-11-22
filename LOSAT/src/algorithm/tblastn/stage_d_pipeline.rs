@@ -1473,8 +1473,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498 (cited at
     // `match_redo`): the Smith-Waterman redo runs without composition-based statistics too.
     if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
-        // NCBI blast_traceback.c:1567-1577 (cited at `blastp::blast_engine::database::
-        // exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577 (cited at
+        // `blastp::blast_engine::database::exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
         // the negative seqid list keeps without a line; its lists leave here, after the trim of
         // `ADAPTIVE_CBS` (tblastn is gapped: `-ungapped` is refused).
         if let Some(excluded) = profile.fetch_excluded {
@@ -1482,9 +1482,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 .retain(&mut preliminary_lists, list_ordinal)
                 .map_err(fetch_refusal)?;
         }
-        // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
-        // 1644-1707,1763-1776: the control path performs ordinary
-        // traceback and posttraceback statistics, then result post-pipes.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1707
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776
+        // The control path performs ordinary traceback and posttraceback statistics, then result
+        // post-pipes.
         return finish_local_mode0_no_sum_stats(
             queries,
             subjects,
@@ -1588,7 +1590,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
             )?,
         )?
     };
-    // NCBI blast_kappa.c:3100-3108: `localScalingFactor`, the redo parameters' (32 with
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3108
+    // `localScalingFactor`, the redo parameters' (32 with
     // composition-based statistics, 1 without them, where only the Smith-Waterman redo runs).
     let scale = redo_params.score_divisor;
     let scaled = KarlinParams {

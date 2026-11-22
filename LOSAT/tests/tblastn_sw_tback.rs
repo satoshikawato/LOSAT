@@ -8,10 +8,11 @@
 //! `qpre20` (the first 20 letters of X4's qok1) has one window of one HSP against `sok1_nt` (X4's
 //! sok1 in frame +1), whose redo succeeds; `qpre40` (its first 40 letters) also fails against
 //! `sfail_rc`. NCBI's one-thread redo keeps the status of the batch's last redone match: a failed
-//! last one fails the batch's traceback (`LOSAT engine error: Traceback failed`, exit status 3)
-//! after the reports of the batches before, unless the batch's first query holds a redone match:
+//! last one fails the batch's traceback (NCBI's `BLAST engine error: Traceback failed`, LOSAT's
+//! `LOSAT engine error: Traceback failed`, exit status 3) after the reports of the batches before,
+//! unless the batch's first query holds a redone match:
 //! NCBI's clean-up then reads that query's freed heap and crashes, and LOSAT refuses the batch
-//! after the same reports (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.68). That the bytes equal NCBI's
+//! after the same reports (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.70). That the bytes equal NCBI's
 //! is the business of the fixture rows `db.x4b.*`; these tests pin LOSAT's decisions and their
 //! independence of `-num_threads`.
 //!

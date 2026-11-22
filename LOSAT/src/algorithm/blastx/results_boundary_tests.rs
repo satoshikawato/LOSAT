@@ -80,7 +80,7 @@ fn pinned_c_heap_threshold_cutoff_tie_and_empty_pop() {
 
 // `-use_sw_tback` in e-value mode (line RG item X4b-2): a window's query context indexes the batch's
 // heaps, one per query. Inside the array the heap's own answer: a full heap turns away a window that
-// is no better than its worst entry. Past the array an empty heap (approved exception 20 of
+// is no better than its worst entry. Past the array an empty heap (approved exception 22 of
 // PD-LOSAT-NCBI-DEFECTS), which takes every window, whatever the heaps of the batch hold.
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
 #[test]

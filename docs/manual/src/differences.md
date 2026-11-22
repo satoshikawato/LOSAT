@@ -33,6 +33,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI turns the overflow into a cutoff of 1 through a C conversion that is undefined. LOSAT keeps the mathematically equal finite cutoff.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `tblastx` with very many short queries against one subject
+
+- **What you see.** LOSAT writes linked hits. NCBI BLAST+ 2.17.0 crashes (exit status 139) and writes nothing.
+- **When.** `tblastx` against a single subject sequence (`-subject` with one sequence, or a database of one; other subjects of fewer than 3 bases in all count as none), when one query batch holds so many very short queries that the batch's average translated length rounds down to 0: for example a 1,200-nt query with 1,300 queries of 3 nt, or with `-strand plus` or `minus` only 300 of them. When the other subjects add at least one codon, LOSAT and NCBI give the same results (apart from the version line, which names LOSAT).
+- **Why.** NCBI's statistics for linking hits then give a cutoff of minus infinity, and a sum with it overflows a 32-bit integer. LOSAT links the hits by NCBI's rules with the sums in 64-bit integers. No run that NCBI completes can check these rows: NCBI's nearest one, with a second subject that has no hits, links the hits differently.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### One-hit gapped starts past the end of a sequence
 
 - **What you see.** The same output as NCBI (apart from the version line, which names LOSAT) where NCBI does not crash, and a result where NCBI sometimes crashes.
@@ -40,11 +47,11 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI reads memory outside its buffer there. LOSAT reads the letters past the end as the end marker. Under valgrind, NCBI's output is LOSAT's output in all the cases of the test.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
-### `blastn -db_hard_mask` when a sequence's first mask runs to its end
+### `-db_hard_mask` when a sequence's first mask runs to its end
 
-- **What you see.** LOSAT searches such a sequence before its mask, as NCBI searches every other piece. NCBI scans the masked letters past that piece and can report an extra alignment, lose the alignments of the next sequence, or crash.
-- **When.** `-db_hard_mask` with a word size of 11 or more (megablast, blastn, dc-megablast), on a sequence whose first mask with letters runs to its end with nothing before it but one piece (a sequence masked entirely, or a masked poly-A tail). With `-task blastn-short` LOSAT refuses such a database (see [What LOSAT refuses](refusals.md)).
-- **Why.** NCBI uses two lengths for one subject there. LOSAT gives NCBI's result wherever its scan past the piece finds nothing more.
+- **What you see.** LOSAT searches such a sequence before its mask, as NCBI searches every other piece. NCBI scans the masked letters past that piece and can report an extra alignment or a different one, lose the alignments of the next sequence, write one alignment many times (`tblastx`), or crash.
+- **When.** `-db_hard_mask` on a sequence whose first mask with letters runs to its end with nothing before it but one piece (a sequence masked entirely, or a masked tail such as a poly-A tail): `blastn` with a word size of 11 or more (megablast, blastn, dc-megablast), and `blastp` and `blastx` at every word size. `tblastn` and `tblastx` read this in each reading frame: a frame whose first piece, from its first letter, ends at a mask with no other piece of the frame after it (masks at or near either end of a sequence). With `blastn -task blastn-short` LOSAT refuses such a database (see [What LOSAT refuses](refusals.md)).
+- **Why.** NCBI uses two lengths for one subject there. In `blastn` LOSAT gives NCBI's result wherever its scan past the piece finds nothing more. In the other programs LOSAT searches the piece as NCBI searches it in the same database with the mask shortened until a letter follows the piece (one letter in `blastp` and `blastx`, a few bases in `tblastn` and `tblastx`). The masked letters stay masked in the alignments and the statistics, so LOSAT's result is NCBI's result for that database with the freed letters masked (`X`, or `N` in nucleotides). Where no such shorter mask exists (a mask of one or two bases at the end of a very short sequence), LOSAT's result is NCBI's own.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### Titles made only of punctuation
@@ -212,7 +219,7 @@ These are error paths: when the output can be written, the output matches NCBI's
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end; NCBI's `makeblastdb` stops after the first and drops the rest silently. A single-stream file builds the same files as NCBI.
 - An `-out` path with a space or a double quote, or an existing database that has to be replaced, is handled as one database. NCBI treats the path as a list of names and can keep volume files of the old database.
-- Database files are compared with NCBI's `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform; those files have not been compared with NCBI's builds there.
+- Database files are compared with NCBI's `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform; those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
 Records: [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) and [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 

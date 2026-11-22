@@ -115,8 +115,8 @@ fn render(params: &[crate::report::archive::options::Param]) -> String {
         .join(" ")
 }
 
-/// The recorded inputs of a command line. The options that LOSAT's TBLASTN does not accept
-/// (they stop at the command line) are applied to the inputs by hand.
+/// The recorded inputs of a command line, as LOSAT's TBLASTN parses it (`-parse_deflines`, which
+/// the archive does not record, left out).
 fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
     let parsed: Vec<&str> = extra
         .iter()

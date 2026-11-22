@@ -1,6 +1,6 @@
 use super::*;
 use crate::algorithm::blastp::hsp::BlastpHspList;
-use crate::algorithm::blastp::kappa::smith_waterman::SwRedoFailed;
+use crate::core::composition_adjustment::smith_waterman_match::SwRedoFailed;
 
 /// A batch status, failed (`failed`, a failed Smith-Waterman redo before) or not.
 fn status(failed: bool) -> SwBatchStatus {

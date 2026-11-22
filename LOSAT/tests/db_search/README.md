@@ -1327,7 +1327,7 @@ prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and
 `x4b2/make_x4b2.py` (its docstring has the usage and the records) writes the queries `tests/fasta/x4b2/*.fna` (X4's
 crafted proteins back-translated with one codon per letter, and cuts of `bslice_q.fna`; the `*_pad.fna` files are
 query files whose batches are followed by queries without a hit, NCBI's runs of which are the expectations of the rows
-`db.x4b2.past.*` and `db.x4b2.bh.false.6`, approved exception 22 of PD-LOSAT-NCBI-DEFECTS; `bh3_pad.fna` pads dev's
+`db.x4b2.past.*` and `db.x4b2.bh.false.6`, approved exception 23 of PD-LOSAT-NCBI-DEFECTS; `bh3_pad.fna` pads dev's
 `tests/fasta/outfmt0/bh3_q.fna`), the subjects
 `tests/fasta/x4b2/ok_fail.faa`, and with NCBI BLAST+ 2.17.0 makeblastdb (version 5, `-parse_seqids`) the protein
 databases `x4b2/fail` (sok1 and sfail, on which tks_W's Smith-Waterman redo fails) and `x4b2/excl` (the same and, at

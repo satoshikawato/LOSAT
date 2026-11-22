@@ -755,7 +755,7 @@ impl CompoHeap {
     /// `heaps`, which holds one heap per query. Below the batch's query count that is the heap of
     /// the batch's query number `context` (the window's own query only for context 0), whose
     /// answer this is. At or past it NCBI reads its other memory; LOSAT tests an empty heap there,
-    /// which takes the window (approved exception 22 of PD-LOSAT-NCBI-DEFECTS, the Owner's
+    /// which takes the window (approved exception 23 of PD-LOSAT-NCBI-DEFECTS, the Owner's
     /// decision Q-HEAP=B of 2026-11-21). NCBI's run of the batch followed by five queries without
     /// a hit per query, whose heaps are empty and inside the array, gives the same result where it
     /// searches the batch as the input as is: no heap of the batch fills to its cutoff (the early

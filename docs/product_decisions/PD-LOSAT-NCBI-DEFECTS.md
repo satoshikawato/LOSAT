@@ -305,9 +305,11 @@
   near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
   M4b-3; numbered after 1.68);
   1.71 2026-11-22 (psiblast and tblastn `-in_pssm` of a PSSM in ASN.1 binary, line RG item D3c-3a:
-  the explicit rejections, rule 3, of a binary PSSM's string whose length passes the end of the
-  file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are missing or
-  whose number is not its Seq-inst's `length`, on which NCBI crashes; and a refusal that is not a
+  the explicit rejections, rule 3, of a binary PSSM's string or byte block whose length passes the
+  end of the file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are
+  missing or whose number is not its Seq-inst's `length`, on which NCBI crashes or writes past its
+  buffer for most lengths and which it answers for one less than the letters, an answer LOSAT does
+  not yet give; and a refusal that is not a
   rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
   yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.70, line RG item D1b-2)
@@ -2024,19 +2026,31 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   Since version 1.71 (line RG item D3c-3a, Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07) LOSAT also reads a PSSM in ASN.1 binary as NCBI's reader does
   (`CObjectIStreamAsnBinary`, through the same type table and frames as the text), and refuses
-  (exit 1) two more cases there. A string whose length passes the end of the file and is 1 GiB to
-  2^47 bytes: NCBI's reader reserves the length before it reads the bytes
-  (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`), which succeeds or fails by the
+  (exit 1) two more cases there. A string or a byte block (OCTET STRING or BIT STRING) whose length
+  passes the end of the file and is 1 GiB to 2^47 bytes: NCBI's reader reserves the length before
+  it reads the bytes (a string's in `CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`,
+  when the bytes are not in its buffer; a byte block's, whose length the binary stream knows, in
+  its `vector<char>` reader, `serial/stdtypes.cpp:1538-1548`), which succeeds or fails by the
   host's memory and overcommit (NCBI's probe host: `Unrecognized format for PSSM`, exit status 1);
   below 1 GiB LOSAT writes NCBI's end-of-file answer, from 2^47 bytes `BLAST ran out of memory`
-  (exit status 4), the bounds of 1.52. A query whose letters are missing or whose number is not
-  the `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than
-  its Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form
-  before): NCBI 2.17.0's psiblast ends by a signal on a binary PSSM whose query of 30 letters
-  states the length 255 (SIGSEGV) or 4,294,967,295 (SIGABRT). Not a rule-3 item but a refusal:
-  with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps in a
-  delay buffer and reads again only while it writes them, where that read posts a message or
-  fails (NCBI reports it in the middle of the file it writes; not ported). Also not a rule-3 item
+  (exit status 4), the bounds of 1.52, and over 2^63 - 1 bytes NCBI's `std::length_error`
+  (`Error: basic_string::_M_create` or `Error: vector::reserve`, exit status 255); a byte block's
+  reserve that throws is posted first (`Error: (803.4) [psiblast] unended byte block`), as in
+  NCBI (rows `db.ber.ps.block_*`). A query whose letters are missing or whose number is not the
+  `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than its
+  Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
+  for a query of 30 letters NCBI 2.17.0's psiblast ends by a signal with the lengths 31, 60 and
+  255 (SIGSEGV), 0, 1, 2, 10 and 4,294,967,295 (SIGABRT), and writes past its buffer with 28
+  (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
+  (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
+  the PSSM, and its E-values are those of a query of 29 letters. LOSAT does not yet give that
+  answer (the PSSM of 30 columns over a query of 29 letters belongs to line PS: hand-off
+  `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md` of line RG), so it is refused too. Not a rule-3 item but
+  a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
+  in a delay buffer and reads again only while it writes them, where that read posts a message or
+  fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
+  UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
+  the file, so the second read posts nothing and the names are written. Also not a rule-3 item
   but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
   `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
   whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,

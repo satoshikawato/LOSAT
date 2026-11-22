@@ -289,6 +289,20 @@ fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
         .find_map(|volume| volume.open_sequence_file().err())
 }
 
+/// The error of the first read of the sequences of `db` in the preliminary search of a query batch
+/// with a valid context, through `CLocalBlast` (a FASTA query of blastp, blastx, blastn,
+/// tblastn and tblastx), after the batch's set-up checks: a sequence file that cannot be opened
+/// (`unopenable_sequence_file`, the open of a volume's sequence file that the search's first read
+/// of the volume makes, `seqdb::Volume::open_sequence_file`), as the search's read reports it
+/// (`search_read_error`: `PreliminaryReadError`, NCBI's `Database memory map file error`; LOSAT's
+/// refusal of an error that is not NCBI's). The set-up of a query batch that LOSAT refuses asks it
+/// where the search would read (`query_batch::refused_batch_error`; line WQA D10 round 6,
+/// 2026-11-20, review 4 M2: `-db` of a database without its `.psq` or `.nsq` file, NCBI BLAST+
+/// 2.17.0 exits 3 with that error, and at outfmt 11 writes its archive first).
+pub(crate) fn sequence_file_read_error(db: &SeqDb, program: &str) -> Option<anyhow::Error> {
+    unopenable_sequence_file(db).map(|error| search_read_error(error, program))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
 // search's preliminary stage has not)
@@ -2781,6 +2795,10 @@ fn joined_apart(
     }
 }
 
+/// The refusal of a description id that NCBI's cut of the description line leaves no room for
+/// (`check_shown_parsed_subject`).
+const LONG_DESCRIPTION_ID: &str = "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)";
+
 /// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
 /// parsed Seq-ids `subject` (`oid` gives its OID, which a refusal names; `protein` for a protein
 /// database)
@@ -2821,11 +2839,7 @@ pub(crate) fn check_shown_parsed_subject(
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
     if subject.description_start().len() > 65 {
-        return Err(parsed_refusal(
-            oid(),
-            "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
-            program,
-        ));
+        return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     if subject.pairwise_title_reads_source(protein, taxdb_found) {
         subject
@@ -2834,6 +2848,27 @@ pub(crate) fn check_shown_parsed_subject(
     }
     if let Err(reason) = subject.source().name() {
         return Err(parsed_refusal(oid(), &format!("has {reason}"), program));
+    }
+    Ok(())
+}
+
+/// [`check_shown_parsed_subject`] of a subject whose load in the pairwise reports is `load`
+/// (`HitLoads::load`): the description line of one whose load throws shows its Seq-align id and
+/// `Unknown` (`ParsedSubject::thrown_description`), with no heading, so that only that id's
+/// length is refused there.
+pub(crate) fn check_pairwise_parsed(
+    subject: &crate::report::db_subject::ParsedSubject,
+    load: crate::report::db_subject::HitLoad,
+    protein: bool,
+    taxdb_found: bool,
+    oid: impl Fn() -> crate::seqdb::Oid,
+    program: &str,
+) -> Result<()> {
+    if load != crate::report::db_subject::HitLoad::Throws {
+        return check_shown_parsed_subject(subject, protein, taxdb_found, oid, program);
+    }
+    if subject.thrown_description().0.len() > 65 {
+        return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     Ok(())
 }
@@ -2952,7 +2987,14 @@ pub(crate) fn check_reported_parsed(
         check_prefetched_parsed(db, subject, ordinal, program)?;
     }
     if shown.pairwise {
-        check_shown_parsed_subject(subject, protein, taxdb_found, || db.oid(ordinal), program)?;
+        check_pairwise_parsed(
+            subject,
+            load,
+            protein,
+            taxdb_found,
+            || db.oid(ordinal),
+            program,
+        )?;
     }
     if shown.tabular {
         subject

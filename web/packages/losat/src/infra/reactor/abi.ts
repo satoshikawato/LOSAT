@@ -158,6 +158,12 @@ export class EngineStoppedError extends Error {
 export interface RegisteredInput {
   readonly handle: number;
   readonly records: readonly RecordKey[];
+  /**
+   * The reader's error that ends a query's records (*register* `reader_error`, the CLI's text): a run
+   * of the handle reads the records before it and ends with it in its query batch (line WQA's D10,
+   * 2026-11-19).
+   */
+  readonly readerError?: string;
 }
 
 /**
@@ -171,7 +177,20 @@ export interface RegisteredInputs {
   readonly shownIds: ShownIds;
 }
 
-type RecordsResponse = { handle: number; records: Array<{ id: string; length: number; shown_id?: string }> };
+type RecordsResponse = {
+  handle: number;
+  records: Array<{ id: string; length: number; shown_id?: string | null }>;
+  reader_error?: string;
+};
+
+/** A registered input of a *register* or *inputs* response. */
+function registeredInput(input: RecordsResponse): RegisteredInput {
+  return {
+    handle: input.handle,
+    records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
+    ...(typeof input.reader_error === 'string' ? { readerError: input.reader_error } : {}),
+  };
+}
 
 /**
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
@@ -315,8 +334,7 @@ export class ReactorAbi {
   register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
     const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
     try {
-      const response = this.response() as { handle: number; records: Array<{ id: string; length: number }> };
-      return { handle, records: Object.freeze(response.records.map(({ id, length }) => ({ id, length }))) };
+      return { ...registeredInput(this.response() as RecordsResponse), handle };
     } catch (error) {
       // A handle whose response cannot be read is not used: give its copy of the input back.
       if (this.stopped === undefined) this.release(handle);
@@ -336,21 +354,20 @@ export class ReactorAbi {
     const response = this.response() as { query: RecordsResponse; subject: RecordsResponse | null };
     const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
     try {
-      const read = (input: RecordsResponse) => ({
-        handle: input.handle,
-        records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
-      });
+      // A record past the reader's error that ends the query's records has no shown ID (`null`): no
+      // run reads it, and its name is its ID (line WQA's D10, 2026-11-19).
       const shown = (input: RecordsResponse) =>
         Object.freeze(
-          input.records.map(({ shown_id }) => {
+          input.records.map(({ id, shown_id }) => {
+            if (shown_id === null && input.reader_error !== undefined) return id;
             if (typeof shown_id !== 'string') throw new Error('a record of register_inputs has no shown_id');
             return shown_id;
           }),
         );
       const subjects = response.subject;
       return {
-        query: read(response.query),
-        subject: subjects === null ? undefined : read(subjects),
+        query: registeredInput(response.query),
+        subject: subjects === null ? undefined : registeredInput(subjects),
         shownIds: Object.freeze({ query: shown(response.query), subject: subjects === null ? Object.freeze([]) : shown(subjects) }),
       };
     } catch (error) {

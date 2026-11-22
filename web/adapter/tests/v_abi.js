@@ -593,6 +593,11 @@ function checkFailure(run, expected, search, label) {
   if (dropped.length > 0) assert.deepEqual(dropped, others, `${label}: the outputs that the failed run drops (stream 9)`);
   for (const format of others) assert.ok(!run.streams.has(format), `${label}: nothing of the dropped outfmt ${format}`);
   assert.ok(!run.streams.has(1), `${label}: no HSP records`);
+  // `"sends"`: the formats whose report of the batches before the failure is over the adapter's chunk (1 MiB), which the
+  // run sends before it fails (review L3, 2026-11-20).
+  for (const format of search.sends || []) {
+    assert.ok((run.streams.get(format) || Buffer.alloc(0)).length > 0, `${label}: outfmt ${format} sent before the failure`);
+  }
   if (search.prolog === false) {
     assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
   } else {

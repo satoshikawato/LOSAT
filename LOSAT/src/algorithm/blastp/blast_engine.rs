@@ -36,6 +36,7 @@ use crate::algorithm::tblastx::lookup::{
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
+use crate::api::QueryEnd;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
@@ -4822,6 +4823,7 @@ fn search_cli(
 pub fn run_local(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     query_label: &str,
     subject_label: &str,
@@ -4850,11 +4852,12 @@ pub fn run_local(
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && !pssm_query(&args);
+            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
                     args,
                     query_records,
+                    query_end,
                     subject_records,
                     query_label,
                     subject_label,
@@ -4867,6 +4870,7 @@ pub fn run_local(
     run_local_formats(
         args,
         query_records,
+        query_end,
         subject_records,
         query_label,
         subject_label,
@@ -5066,6 +5070,7 @@ fn pssm_check_scope(args: &BlastpArgs) -> crate::algorithm::psiblast::pssm::Pssm
 fn run_local_formats(
     args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     _query_label: &str,
     subject_label: &str,
@@ -5141,7 +5146,7 @@ fn run_local_formats(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         &subjects,
         None,
         subject_label,
@@ -5160,6 +5165,7 @@ fn run_local_formats(
 pub fn run_local_database(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -5180,13 +5186,13 @@ pub fn run_local_database(
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
-            let no_query = query_records.is_empty() && !pssm_query(&args);
+            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, settings, view)
+                search_database(args, query_records, query_end, settings, view)
             });
             outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, settings, outputs),
+        None => search_database(args, query_records, query_end, settings, outputs),
     }
 }
 
@@ -5194,6 +5200,7 @@ pub fn run_local_database(
 fn search_database(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -5238,7 +5245,7 @@ fn search_database(
     search(
         resolved,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         &no_subjects,
         Some(&database),
         "",
@@ -5282,6 +5289,26 @@ fn check_shown_subject_titles(
         }
     }
     Ok(())
+}
+
+/// The titles that a pairwise report shows, checked where the subjects are a database's
+/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
+/// or a FASTA set's (`check_shown_subject_titles`).
+fn check_pairwise_shown_titles(
+    listed_titles: Option<&database::ListedTitles<'_>>,
+    database: Option<&database::BlastpDatabase>,
+    shown: &std::collections::BTreeSet<usize>,
+    subject_records: &[FastaRecord],
+    loads: &crate::report::db_subject::HitLoads,
+) -> Result<()> {
+    match listed_titles {
+        Some(titles) => titles.check_shown_titles(
+            database.expect("listed titles are a database's"),
+            shown,
+            loads,
+        ),
+        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+    }
 }
 
 /// The subjects of a search as it searches them (each cut to its `-subject_loc` interval)
@@ -5619,7 +5646,126 @@ fn psiblast_stop_at_invalid_query(
     // LOSAT's writes none.
     batches.stop_batch = error.is::<crate::cli::NativeError>().then_some(span);
     batches.stop = Some((warnings, error));
+    // The stop of a batch before LOSAT's refusal of a later batch's two queries with one id
+    // replaces it (`QueryBatches::scope_refusal`): NCBI 2.17.0 stops at the query without
+    // Karlin-Altschul parameters (line WQA D10 round 4, 2026-11-20, `r3-psiblast-probe`).
+    batches.scope_refusal = false;
     batches
+}
+
+/// The stop of the query batch of LOSAT's refusal of two queries of one scope with one id
+/// (`QueryBatches::scope_refusal`), in the one form of every program
+/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+/// `-export_search_strategy` the refusal (no request of the batch is written: `stop_batch` stays
+/// `None`), else NCBI's error of the set-up of the batch's records that are first in the scope
+/// (`refused_batch_setup_error`), else the refusal. NCBI's errors of the batches before come
+/// first: their searches fail before the stop is acted on.
+fn refused_batch_stop(
+    args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
+    subject_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &seq_range::QueryInput,
+    mut batches: crate::blastinput::query_batch::QueryBatches,
+) -> crate::blastinput::query_batch::QueryBatches {
+    if !batches.scope_refusal {
+        return batches;
+    }
+    let Some((warnings, refusal)) = batches.stop.take() else {
+        return batches;
+    };
+    let (input_done, searched_done) = (batches.input_done, batches.searched_done);
+    let error = crate::blastinput::query_batch::refused_batch_error(
+        refusal,
+        args.strategy.is_some(),
+        |first| {
+            // psiblast's batch holds the repeated query alone; rpsblast's set-up reads its
+            // database's files first (`rps_hooks::RpsEngineError`): both refuse.
+            if args.app != BlastpApp::Blastp {
+                return None;
+            }
+            let batch: Vec<usize> = (searched_done..searched.len())
+                .take_while(|&query| input.ordinal(query) < input_done + first.len())
+                .collect();
+            let lengths: Vec<usize> = batch
+                .iter()
+                .map(|&query| searched[query].seq().len())
+                .collect();
+            let queries: Vec<FastaRecord> = batch
+                .iter()
+                .filter(|&&query| first[input.ordinal(query) - input_done])
+                .map(|&query| searched[query].clone())
+                .collect();
+            refused_batch_setup_error(args, database, subject_records, &lengths, &queries)
+        },
+    );
+    batches.scope_refusal = !error.is::<crate::cli::NativeError>();
+    batches.stop = Some((warnings, error));
+    batches
+}
+
+/// BLASTP's set-up of the query records `queries` of a batch whose searched queries have the
+/// lengths `batch_lengths` (`refused_batch_stop`): NCBI's error where a context of theirs is valid
+/// and the set-up fails for the subjects, as `run_call` fails the first searched batch (a database
+/// without sequences, `Database memory map file error`; the average subject length against
+/// `-searchsp` or `OLD_FSC`), or where the search's first read of the database then fails (a
+/// sequence file that cannot be opened, `BlastpDatabase::sequence_file_read_error`: `Database
+/// memory map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes, where no
+/// context is valid, and for a batch that NCBI splits into chunks (each chunk is set up apart,
+/// `search_split_query_batches`), which is refused.
+fn refused_batch_setup_error(
+    args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
+    subject_records: &[FastaRecord],
+    batch_lengths: &[usize],
+    queries: &[FastaRecord],
+) -> Option<anyhow::Error> {
+    let split = protein_query_split_sizes(10000).map_or(true, |sizes| {
+        crate::algorithm::blastp::protein_query_split::split_protein_batch(batch_lengths, sizes)
+            .is_some()
+    });
+    if split {
+        return None;
+    }
+    // `call_setup::call_lookup`'s validity: a context without letters is invalid.
+    let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, queries));
+    if !contexts
+        .iter()
+        .any(|context| context.is_valid && context.aa_len > 0)
+    {
+        return None;
+    }
+    if database.is_some_and(database::BlastpDatabase::first_oid_read_fails) {
+        return Some(crate::blastinput::app::engine_error(
+            "Database memory map file error",
+        ));
+    }
+    let encoded: Vec<EncodedProtein> = match database {
+        Some(_) => Vec::new(),
+        None => subject_records
+            .iter()
+            .map(|record| encode_protein_sequence(record.seq()))
+            .collect(),
+    };
+    let extent = call_setup::db_extent(args, database, &encoded).ok()?;
+    if crate::stats::setup::setup_subject_length(
+        extent.total_db_len,
+        extent.num_subjects,
+        (!args.old_fsc).then_some((extent.cutoff_subject_length, false)),
+    )
+    .is_none()
+    {
+        return Some(crate::blastinput::app::engine_error(
+            "The average subject length is too short",
+        ));
+    }
+    let read_error = database?.sequence_file_read_error("BLASTP")?;
+    Some(
+        match read_error.downcast::<database::PreliminaryReadError>() {
+            Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
+            Err(error) => error,
+        },
+    )
 }
 
 /// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters
@@ -5693,7 +5839,7 @@ fn psiblast_stop_at_pssm_query(
             batches.stop_batch = None;
             // The query's ids never join the scope (`PsiSearch::joins_scope`): no refusal of
             // another record with one of them (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 d01-d06).
-            batches.query_refusal = None;
+            batches.scope_refusal = false;
             return batches;
         }
     }
@@ -5718,6 +5864,7 @@ fn psiblast_stop_at_pssm_query(
     batches.searched_done = 0;
     batches.stop = Some((warnings, stop.error()));
     batches.stop_batch = request;
+    batches.scope_refusal = false;
     batches
 }
 
@@ -5890,7 +6037,8 @@ fn search(
                 outputs.formats.iter().map(|format| format.outfmt),
             ),
         args.app.name(),
-    );
+    )
+    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
     let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
@@ -5923,16 +6071,25 @@ fn search(
     // the PSSM, or the search strategy's request without a database, stops the run at its query
     // (`psiblast_stop_at_pssm_query`); a query that never joins NCBI's scope meets no other record
     // there.
-    let mut batches = psiblast_stop_at_pssm_query(&args, database, batches);
-    // LOSAT's refusal of two queries of one scope with one id comes before any report.
-    if let Some(refusal) = batches.query_refusal.take() {
-        return Err(refusal);
-    }
+    // LOSAT's refusal of two queries of one scope with one id is the stop of their batch
+    // (`QueryBatches::scope_refusal`): the run writes the reports of the batches before, unless
+    // NCBI stops at one of them first (line WQA D10 round 4, 2026-11-20).
+    let batches = psiblast_stop_at_pssm_query(&args, database, batches);
+    // The batch of LOSAT's refusal stops with NCBI's error of its set-up where NCBI's set-up of the
+    // batch fails for the subjects (`refused_batch_stop`; line WQA D10 round 5, 2026-11-20).
+    let batches = refused_batch_stop(
+        &args,
+        database,
+        &subjects.records,
+        &searched_queries,
+        &query_input,
+        batches,
+    );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
     // LOSAT's refusal of a strategy file on a report stream comes where NCBI writes its first
     // request: once its first batch is read, before it is searched (`first_request_end`; this
     // search writes the requests where its call ends, after the searches, which would hold the
-    // reports).
+    // reports). A batch that stops with LOSAT's refusal of an id is read first too.
     if batches.first_request_end().is_some() {
         crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
@@ -6180,6 +6337,7 @@ fn search(
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
+            other_outfmts,
             formats,
             diagnostics,
             later_warnings,
@@ -6376,6 +6534,7 @@ fn search(
                         first_query: block.start,
                     });
                     let mut block_outputs = ReportOutputs {
+                        other_outfmts,
                         formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
@@ -7510,6 +7669,7 @@ fn write_reports_without_queries(
                     true,
                     true,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )?;
             }
             OutputFormat::TabularWithComments => {
@@ -10512,13 +10672,13 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = match listed_titles.as_ref() {
-                    Some(titles) => titles.check_shown_titles(
-                        database.expect("listed titles are a database's"),
-                        &shown,
-                    ),
-                    None => check_shown_subject_titles(shown.iter().copied(), subject_records),
-                };
+                let checked = check_pairwise_shown_titles(
+                    listed_titles.as_ref(),
+                    database,
+                    &shown,
+                    subject_records,
+                    &prefetched.hit_loads,
+                );
                 if !format.refusal.check(checked)? {
                     continue;
                 }

@@ -21,7 +21,7 @@ import {
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import DESCRIBE from './describe.json';
-import { fakeRecordKeys } from './fake-fasta';
+import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -132,6 +132,10 @@ export class FakeEngine implements EngineGateway {
       const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
+    // A reader's error ends the run, as the engine's run does after the query batches before it
+    // (line WQA's D10, 2026-11-19): the fake writes nothing first.
+    const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
+    if (readerError !== undefined) throw new Error(readerError);
   }
 
   /**

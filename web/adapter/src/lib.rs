@@ -74,19 +74,21 @@ fn words(argv: &str) -> Vec<&str> {
 /// The version of ABI v2 (docs/web/abi_v2.md §10): 12 since a run of `-db`, which takes no subject
 /// handle and reads the database from the run's working directory, which the host preopens as
 /// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
-/// merged first; 11 is taken by another open branch); 10 since a run prints the text that the
-/// command line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream
-/// 11, and the *start* field `prints` (line WQA's D14, 2026-11-20); 8 since the index scan and
-/// `register` read as the engine's reader with the run's data loaders (`scan_begin` and `register`
-/// take the program, the role and the setting, which *validation* gives on stream 2; a `>?` gap
-/// line and the lines that NCBI's line reader joins are indexed, and the reader's refusals come in
-/// its words; line WQA's D13 and D16, 2026-11-20); 7 since a run that fails keeps the output of the
-/// argv up to its error and drops the other outputs with the signal of stream 9 (line WQA's sweep,
-/// D15, 2026-11-20; versions 5 and 6 are taken by other open branches); 4 since
-/// `losat_web2_register_inputs`, which reads the inputs of a run with `-parse_deflines`, and the
-/// signal of stream 9 for every output stream that failed (line WQA's sweep, D7, 2026-11-19); 3
-/// since the signal of stream 9, which makes the host discard a stream that failed alone after a
-/// chunk of it was sent (line RG item T7-W).
+/// merged first, then 12 after D10's 11); 11 since a query is read as the command line's query
+/// batches read it: the records before the reader's error, with the error (`reader_error` of
+/// *register*, *inputs* and *scan*), which a run meets in the record's batch (line WQA's D10,
+/// 2026-11-19); 10 since a run prints the text that the command line prints in place of a run (its
+/// help, the XML of `-xmlhelp`, its versions) on stream 11, and the *start* field `prints` (line
+/// WQA's D14, 2026-11-20); 8 since the index scan and `register` read as the engine's reader with
+/// the run's data loaders (`scan_begin` and `register` take the program, the role and the setting,
+/// which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line reader joins
+/// are indexed, and the reader's refusals come in its words; line WQA's D13 and D16, 2026-11-20); 7
+/// since a run that fails keeps the output of the argv up to its error and drops the other outputs
+/// with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 are taken by
+/// other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs of a run with
+/// `-parse_deflines`, and the signal of stream 9 for every output stream that failed (line WQA's
+/// sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard a stream
+/// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
     12
@@ -339,10 +341,10 @@ pub extern "C" fn losat_web2_scan_end(scanner: u32) -> i32 {
             .1
             .remove(&scanner)
             .ok_or_else(|| format!("unknown scanner {scanner}"))?;
-        let records = state
+        let scanned = state
             .finish()
             .map_err(|error| error.message().to_string())?;
-        emit(STREAM_RESPONSE, scan::to_json(&records).as_bytes());
+        emit(STREAM_RESPONSE, scan::to_json(&scanned).as_bytes());
         Ok(0)
     })
 }
@@ -446,7 +448,7 @@ pub unsafe extern "C" fn losat_web2_run(
         // A run that prints a text in place of a search reads no input, as the command line reads
         // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
         if run::prints(&argv).is_some() {
-            run::run(&argv, &[], &[])?;
+            run::run(&argv, &[], &losat::api::QueryEnd::Input, &[])?;
             return Ok(0);
         }
         store::with_inputs(
@@ -455,7 +457,7 @@ pub unsafe extern "C" fn losat_web2_run(
             subject_handle,
             &argv,
             run::data_loaders(&argv).ok(),
-            |queries, subjects| run::run(&argv, queries, subjects),
+            |queries, end, subjects| run::run(&argv, queries, end, subjects),
         )??;
         Ok(0)
     })

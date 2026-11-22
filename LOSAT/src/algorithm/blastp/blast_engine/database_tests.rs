@@ -1537,7 +1537,11 @@ fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
         b"p01 first protein [Test organism]"
     );
     titles
-        .check_shown_titles(&database, &[0usize, 1, 2, 3].into_iter().collect())
+        .check_shown_titles(
+            &database,
+            &[0usize, 1, 2, 3].into_iter().collect(),
+            &HitLoads::default(),
+        )
         .unwrap();
     titles.check_reported_titles(&hit_lists).unwrap();
 }
@@ -1592,8 +1596,12 @@ fn lean_titles_are_the_records_titles_and_letters() {
         lean.tabular_subject_ids(&hit_lists, true).unwrap(),
         records.tabular_subject_ids(&hit_lists, true).unwrap()
     );
-    lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
-        .unwrap();
+    lean.check_shown_titles(
+        &database,
+        &[0usize, 1].into_iter().collect(),
+        &HitLoads::default(),
+    )
+    .unwrap();
     lean.check_reported_titles(&hit_lists).unwrap();
     assert_eq!(lean.stitles(), records.stitles());
     // Titles, flags and every letter against the stored residues.

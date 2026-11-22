@@ -123,7 +123,7 @@ pub(super) fn refuse_anchored_reports(
                     let rows = rows_of_query(q_idx)?;
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(sort),
-                        false,
+                        None,
                         report.num_descriptions,
                         q_idx,
                         &rows,

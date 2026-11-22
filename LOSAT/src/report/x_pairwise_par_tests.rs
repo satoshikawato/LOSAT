@@ -53,6 +53,10 @@ impl QuerySections for Marks {
         self.joined == Some((previous, s_idx))
     }
 
+    fn sort(&self) -> (crate::report::hit_sort::ReportSort, bool) {
+        (crate::report::hit_sort::ReportSort::default(), false)
+    }
+
     fn head<W: Write>(
         &self,
         writer: &mut W,
@@ -92,8 +96,15 @@ impl QuerySections for Marks {
         Ok(())
     }
 
-    fn merges_alignments(&self) -> bool {
-        self.merged
+    fn view(&self) -> crate::report::pairwise::PairwiseView {
+        if self.merged {
+            crate::report::pairwise::PairwiseView::QueryAnchored {
+                identity: true,
+                anchored: true,
+            }
+        } else {
+            crate::report::pairwise::PairwiseView::Pairwise
+        }
     }
 
     fn alignments<W: Write>(
@@ -432,34 +443,21 @@ fn a_joined_subject_s_hits_are_those_of_the_subject_before_it() {
     assert_eq!((group.subject_hits[&5].len(), group.own_hsps(5)), (8, 3));
 }
 
-// Review 3 of line RG T3a, D1: the subjects whose description lines a report shows, each of
-// which NCBI looks up again by its display id (`pairwise::blastp_described_subjects`): the
-// first `-num_descriptions` subjects of the group, or in psiblast's two-part table the
-// subjects of its first `-num_descriptions` HSPs, at least the first (`first_hsps`,
-// blast_format.cpp:541-554); a subject shown in another's hit is that one's.
+// Review 3 of line RG T3a, D1; review 2 of line DBID pfoff-3, M1, and review 1's H1: the
+// subjects whose description lines a report shows, which NCBI looks up (by their display ids,
+// and where the batch's prefetch is off by their Seq-align ids): the first
+// `-num_descriptions` subjects of the group, or in psiblast's later round the subjects of the
+// lines of its two-part table, made of its first `-num_descriptions` HSPs (at least one) put
+// in the part of the subjects found before and the part of the new ones, that order
+// (`two_part_lines`, blast_format.cpp:541-554); a subject shown in another's hit is that
+// one's.
 #[test]
 fn the_described_subjects_are_the_first_subjects_or_those_of_the_first_hsps() {
     let hits = report_hits();
-    let by_query = by_query(&hits);
-    let titles = titles();
-    let group = QueryGroup::new(&by_query[0], &titles, |_, _| false).unwrap();
-    let first = |count| -> Vec<u32> {
-        group
-            .first_hsps(count)
-            .map(|(shown, hit)| {
-                assert_eq!(shown, hit.hit.s_idx);
-                shown
-            })
-            .collect()
-    };
-    assert_eq!(first(0), [5]);
-    assert_eq!(first(1), [5]);
-    assert_eq!(first(4), [5, 5, 5, 2]);
-    assert_eq!(first(100).len(), 8);
-    let described = |q_idx, two_part, count, joins: fn(u32, u32) -> bool| {
+    let described = |q_idx, found_before: Option<&[bool]>, count, joins: fn(u32, u32) -> bool| {
         crate::report::pairwise::blastp_described_subjects(
             Default::default(),
-            two_part,
+            found_before,
             count,
             q_idx,
             &hits,
@@ -467,18 +465,125 @@ fn the_described_subjects_are_the_first_subjects_or_those_of_the_first_hsps() {
         )
     };
     let none: fn(u32, u32) -> bool = |_, _| false;
-    assert!(described(0, false, 0, none).is_empty());
-    assert_eq!(described(0, false, 2, none), [5, 2]);
-    assert_eq!(described(0, false, 500, none), [5, 2, 7]);
-    assert_eq!(described(0, true, 0, none), [5]);
-    assert_eq!(described(0, true, 4, none), [5, 2]);
-    assert_eq!(described(0, true, 5, none), [5, 2, 7]);
+    // Query 0 shows subject 5 with 3 HSPs, 2 with 1 and 7 with 4.
+    assert!(described(0, None, 0, none).is_empty());
+    assert_eq!(described(0, None, 2, none), [5, 2]);
+    assert_eq!(described(0, None, 500, none), [5, 2, 7]);
+    // The two-part table counts HSPs: 2 HSPs are both subject 5's, where 2 hits are 5 and 2.
+    let new = [false; 8];
+    assert_eq!(described(0, Some(&new), 0, none), [5]);
+    assert_eq!(described(0, Some(&new), 2, none), [5]);
+    assert_eq!(described(0, Some(&new), 3, none), [5]);
+    assert_eq!(described(0, Some(&new), 4, none), [5, 2]);
+    assert_eq!(described(0, Some(&new), 5, none), [5, 2, 7]);
+    // A subject found before comes first, its part before that of the new ones.
+    let mut found = new;
+    found[2] = true;
+    assert_eq!(described(0, Some(&found), 4, none), [2, 5]);
+    assert_eq!(described(0, Some(&found), 3, none), [5]);
+    found[7] = true;
+    assert_eq!(described(0, Some(&found), 500, none), [2, 7, 5]);
     assert_eq!(
-        described(0, false, 2, |previous, s_idx| (previous, s_idx) == (5, 2)),
+        described(0, None, 2, |previous, s_idx| (previous, s_idx) == (5, 2)),
         [5, 7]
     );
-    assert!(described(1, false, 500, none).is_empty());
-    assert_eq!(described(2, true, 6, none), [1]);
+    assert!(described(1, None, 500, none).is_empty());
+    assert_eq!(described(2, Some(&new), 6, none), [1]);
+    assert_eq!(described(2, Some(&new), 7, none), [1, 5]);
+}
+
+// Review 2 of line DBID pfoff-3, L5: the model of what a pairwise report reads, made before
+// the rows exist (`QueryGroup::read_order`, which each program's `pairwise_read_order` feeds
+// with its HSPs), is the writer's own answer on its rows (`writer_reads`: the group, each hit's
+// subjects, the description lines, the alignments), whatever the sorts, the counts, the
+// copies joined in a hit and psiblast's previous set; then a description line or an alignment
+// that the writer reads is never one that the loads leave unread, nor the reverse.
+#[test]
+fn the_model_of_the_reads_is_the_writers_group() {
+    // Subjects 5 (3 HSPs), 2, 7 (2), 3 and its copy 4 (joined after 3): values that each sort
+    // orders differently from the rows.
+    let values = [
+        (5, 40.0, 1e-8, 30, 9),
+        (5, 70.0, 1e-12, 10, 1),
+        (5, 30.0, 1e-6, 50, 30),
+        (2, 90.0, 1e-20, 12, 40),
+        (7, 20.0, 1e-3, 80, 3),
+        (7, 60.0, 1e-10, 5, 22),
+        (3, 50.0, 1e-9, 25, 15),
+        (4, 55.0, 1e-9, 25, 2),
+    ];
+    let rows: Vec<PairwiseHit> = values
+        .iter()
+        .map(|&(s_idx, bits, e_value, ident, from)| {
+            let mut row = hit(0, s_idx, 100);
+            row.hit.bit_score = bits;
+            row.hit.e_value = e_value;
+            row.seqalign_num_ident = ident;
+            (row.hit.q_start, row.hit.s_start) = (from, from + 3);
+            row
+        })
+        .collect();
+    let joins = |previous: u32, s_idx: u32| (previous, s_idx) == (3, 4);
+    let mut found = [false; 8];
+    found[7] = true;
+    found[4] = true;
+    for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+        for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+            for (descriptions, alignments) in [(0, 0), (1, 0), (2, 1), (3, 5), (500, 2)] {
+                for found_before in [None, Some(&found[..])] {
+                    for tblastx in [false, true] {
+                        let reading = crate::report::pairwise::PairwiseReading {
+                            sort: super::super::hit_sort::ReportSort { hits, hsps },
+                            shown: crate::report::db_subject::Shown {
+                                descriptions,
+                                alignments,
+                            },
+                        };
+                        let model = QueryGroup::read_order(
+                            rows.iter().map(|row| (row.hit.s_idx, row)),
+                            |row| super::super::hit_sort::HspScores::of(row),
+                            joins,
+                            reading,
+                            tblastx,
+                            found_before,
+                        );
+                        let writer = writer_reads(&rows, joins, reading, tblastx, found_before);
+                        assert_eq!(model, writer, "{reading:?} {found_before:?} {tblastx}");
+                        // The subjects that the reads load are those the writer shows.
+                        let mut shown: Vec<usize> = writer
+                            .described
+                            .iter()
+                            .copied()
+                            .chain(0..writer.aligned)
+                            .flat_map(|hit| writer.hits[hit].clone())
+                            .collect();
+                        shown.sort_unstable();
+                        shown.dedup();
+                        let mut read = model.subjects();
+                        read.sort_unstable();
+                        assert_eq!(read, shown);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
+// Each HSP goes to the part of its subject (found before or new) until `-num_descriptions` HSPs
+// (at least one) are put; an HSP of the subject of the part's last line joins that line.
+#[test]
+fn the_two_part_lines_split_the_first_hsps_by_their_subjects() {
+    let hsps = [(5, 5), (5, 6), (2, 2), (5, 5), (7, 7)];
+    let found = |own: &u32| *own == 6 || *own == 7;
+    let [repeated, new] = two_part_lines(hsps, 4, found);
+    assert_eq!(repeated, [(5, vec![6])]);
+    assert_eq!(new, [(5, vec![5]), (2, vec![2]), (5, vec![5])]);
+    let [repeated, new] = two_part_lines(hsps, 0, found);
+    assert!(repeated.is_empty());
+    assert_eq!(new, [(5, vec![5])]);
+    let [repeated, _] = two_part_lines(hsps, 500, found);
+    assert_eq!(repeated, [(5, vec![6]), (7, vec![7])]);
 }
 
 #[test]
@@ -651,5 +756,37 @@ fn the_estimate_at_the_default_line_length_is_400_plus_4_per_column() {
     assert_eq!(
         query_estimate_of([10, 11], 7),
         QUERY_BYTES + 2 * DESCRIPTION_BYTES + 800 + 3 * 21 + 60 * 21 / 7
+    );
+}
+
+// DBID pfoff-3 (DECISIONS 62 (13)): the writers end the run before the load of the aligned
+// subject whose lookup throws where the report's writer ends there (`aligned_end`): outfmt 0
+// at its first alignment only, outfmt 1 to 4 at any; the error carries NCBI's exception
+// (`NativeError::of_writer`: the application's report of the database error, exit status 2).
+#[test]
+fn the_writers_end_the_run_at_an_aligned_subject_whose_load_throws() {
+    use crate::report::db_subject::AfterThrow;
+    let exception =
+        crate::report::db_subject::LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO)
+            .exception()
+            .unwrap();
+    // 7 throws; 9 throws with a local Seq-align id.
+    let thrown = |s_idx: u32| match s_idx {
+        7 => Some((&exception, false)),
+        9 => Some((&exception, true)),
+        _ => None,
+    };
+    let end = |after, aligned: &[u32]| aligned_end(after, aligned, thrown).map(|(at, _)| at);
+    assert_eq!(end(AfterThrow::SkipsAlignment, &[7, 1]), Some(0));
+    assert_eq!(end(AfterThrow::SkipsAlignment, &[1, 7]), None);
+    assert_eq!(end(AfterThrow::SkipsAlignment, &[9, 7]), None);
+    assert_eq!(end(AfterThrow::EndsAtAlignment, &[1, 9, 7]), Some(1));
+    let at = aligned_end(AfterThrow::EndsAtAlignment, &[1, 7], thrown);
+    assert!(end_here(at, 0).is_ok());
+    let error = end_here(at, 1).unwrap_err();
+    let carried = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+    assert_eq!(
+        carried.get_msg(),
+        crate::seqdb::tax_files::NO_ACCESSION_INFO.as_bytes()
     );
 }

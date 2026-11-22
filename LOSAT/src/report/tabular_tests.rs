@@ -937,8 +937,8 @@ fn a_rows_fields_say_what_its_throw_does() {
     assert_eq!(
         spec("qseqid nident").format_throw(Program::Blastx),
         FormatThrow::Writes(RunThrow {
-            after: AfterThrow::EndsRun,
             rows: SubjectFetch::WithIdentities,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
         })
     );
     // `slen` and a field of the alignment block read the subject at every row.

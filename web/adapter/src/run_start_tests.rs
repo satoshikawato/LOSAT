@@ -61,7 +61,7 @@ fn run_on(
         subject,
         words,
         Some(true),
-        |queries, subjects| run(words, queries, subjects),
+        |queries, end, subjects| run(words, queries, end, subjects),
     );
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
@@ -768,7 +768,7 @@ fn the_engines_list_of_web_programs_is_the_adapters() {
 /// none (`losat_web2_run` passes it none).
 fn printing_run(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-    let result = run(words, &[], &[]);
+    let result = run(words, &[], &losat::api::QueryEnd::Input, &[]);
     let mut streams = BTreeMap::new();
     crate::emit::EMITTED.with(|emitted| {
         for (stream, bytes) in emitted.borrow().iter() {

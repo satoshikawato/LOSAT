@@ -1,0 +1,62 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+           1 sequences; 340 total letters
+
+
+
+Query= amb_q
+
+Length=112
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+amb_s                                                                 174     6e-63
+
+
+> amb_s
+Length=340
+
+ Score = 174 bits (440),  Expect = 6e-63, Method: Compositional matrix adjust.
+ Identities = 105/112 (94%), Positives = 106/112 (95%), Gaps = 0/112 (0%)
+ Frame = +3
+
+Query  1    MFPCDVENWCTHCDQQDIDVxcweiwcwwpwicVFLQFVEBLVGEWWHNEVDWCYHSVQM  60
+            MFPCDVENWCTHCDQQDIDV CWEIWCWWP ICVFLQFVEBLVGEWWHNEVDWCYHSVQM
+Sbjct  3    MFPCDVENWCTHCDQQDIDVBCWEIWCWWP*ICVFLQFVEBLVGEWWHNEVDWCYHSVQM  182
+
+Query  61   ZWRNLIGIDWDTSMRLYDETWKCYHIFMRQWLNDCEHJPWTCFXKMHAWXYC  112
+            ZWRNLIGIDW+TSMRLYDETWKCYH FMRQW NDCEHJPWTCF KMH WXYC
+Sbjct  183  ZWRNLIGIDWBTSMRLYDETWKCYHJFMRQWJNDCEHJPWTCFJKMHXWXYC  338
+
+
+
+Lambda      K        H        a         alpha
+   0.331    0.142    0.595    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 10100
+
+
+  Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 340
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

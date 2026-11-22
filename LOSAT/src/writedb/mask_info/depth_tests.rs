@@ -1,4 +1,4 @@
-//! Tests of mask files whose Seq-locs nest to any depth (PD-LOSAT-NCBI-DEFECTS exception 24).
+//! Tests of mask files whose Seq-locs nest to any depth (PD-LOSAT-NCBI-DEFECTS exception 25).
 //!
 //! NCBI's makeblastdb reads a `mix` or `equiv` by recursion and, with its default stack of 8 MiB,
 //! crashes on nests of some thousands of levels; with a stack large enough it reads every depth.

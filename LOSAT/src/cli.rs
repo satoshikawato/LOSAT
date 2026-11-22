@@ -1054,7 +1054,6 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
-    ("tblastn", "ungapped", "an ungapped search"),
     (
         "rpstblastn",
         "ungapped",
@@ -1506,7 +1505,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "negative_ipglist",
     "import_search_strategy",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_blastx_arg(name: &str) -> bool {
@@ -1586,6 +1584,17 @@ impl NativeError {
         NativeError {
             exit: 255,
             message: format!("Error: {what}\n").into(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
+    /// `CATCH_ALL`'s report of a `std::bad_alloc` (a string or byte block of a PSSM file in ASN.1
+    /// binary whose length passes every allocation, `report::serial::asn_input::reserve`): exit
+    /// status 4 (`BLAST_OUT_OF_MEMORY`).
+    pub(crate) fn out_of_memory() -> NativeError {
+        NativeError {
+            exit: 4,
+            message: [crate::wording::OUT_OF_MEMORY.as_bytes(), b"\n"].concat(),
         }
     }
 

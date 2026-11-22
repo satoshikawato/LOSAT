@@ -8,7 +8,7 @@
 //!
 //! [`MaskFileReader`] reads such a file as `makeblastdb` does: the format is guessed
 //! once per file (`reader.rs`, `guess.rs`), then the objects follow one another in ASN.1 text
-//! (`text.rs`) or binary (`ber.rs`); `schema.rs` has the types.
+//! or binary (the primitives of `report::serial::asn_input`); `schema.rs` has the types.
 //!
 //! What a mask names. Every Seq-id of a file is a [`ParsedSeqId`] of any alternative of the
 //! `Seq-id` CHOICE (`local`, `gibbsq`, `gibbmt`, `giim`, `genbank`, `embl`, `pir`, `swissprot`,
@@ -40,7 +40,7 @@
 //! its default stack of 8 MiB a nest of about 6,500 levels overflows it, which crashes makeblastdb;
 //! with a stack large enough it reads every depth. The reader keeps the frames of such a nest on
 //! the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and reads every depth as far as memory allows,
-//! writing what makeblastdb writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 24).
+//! writing what makeblastdb writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 25).
 //!
 //! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a string
 //! whose length passes the end of the file by an amount that makeblastdb may or may not be able to
@@ -51,7 +51,6 @@
 //! makeblastdb dereferences it (`process`), after the masks before it and after any error of the
 //! reader in the rest of its object.
 
-mod ber;
 #[cfg(test)]
 mod depth_tests;
 mod guess;
@@ -61,7 +60,6 @@ mod schema;
 mod seq_id_tests;
 #[cfg(test)]
 mod tests;
-mod text;
 
 pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader, MaskPost};
 

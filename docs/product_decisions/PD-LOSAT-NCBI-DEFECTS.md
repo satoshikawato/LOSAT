@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.71
+- Version: 1.72
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -328,6 +328,10 @@
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07)
+  1.72 2026-11-22 (TBLASTN `-ungapped` runs: the explicit rejection of 1.46 extended to the ungapped
+  re-evaluation of an alignment on a subject of fewer than 12 bases, which reads the same
+  translation that NCBI never makes, rule 3; line NP item O4c, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1160,7 +1164,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     the tail mask (NCBI's own run, LOSAT the same) but 1-60 with the near input's mask of one letter.
     TBLASTN with `-window_size 0` on `th2`'s tail (`db.tmask.tn.hard.th2.13.w0.6`): NCBI's own
     bytes, the same as its run of the near input (with `-ungapped -comp_based_stats 0` too, 4,951
-    bytes, no row repeated; LOSAT refuses TBLASTN `-ungapped` for every database, so no row);
+    bytes, no row repeated; LOSAT's the same since TBLASTN `-ungapped` runs, line NP item O4c,
+    row `db.tmask.tn.hard.th2.13.ung.6`);
     BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
     input's. Unit tests `protein_shapes_of_the_hard_masks` and
     `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`
@@ -2113,8 +2118,8 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (`:1234-1235`), and every caller reads from that address on next: the traceback's gapped start
   and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
   redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
-  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
-  `-ungapped`; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
+  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; TBLASTN with `-ungapped`,
+  refused there since version 1.72; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
   with SIGSEGV in every such run of ours (ws and the local
   official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a

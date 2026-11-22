@@ -2183,11 +2183,13 @@ fn search(
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans).filter(|(span, _)| {
-                failed
-                    .as_ref()
-                    .is_none_or(|(range, _)| span.start < range.start)
-            })
+            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
+                |(span, _)| {
+                    failed
+                        .as_ref()
+                        .is_none_or(|(range, _)| span.start < range.start)
+                },
+            )
         } else {
             None
         };
@@ -2326,6 +2328,7 @@ fn search(
                     outputs.other_outfmts,
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
+                    resolved.gapped,
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.

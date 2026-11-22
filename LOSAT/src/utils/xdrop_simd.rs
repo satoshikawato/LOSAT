@@ -4673,6 +4673,11 @@ fn x_extra_switches() -> u8 {
                 if x_avx2::emask_on() {
                     on |= 16;
                 }
+                // EXPERIMENT (LOSAT_X_FNGRID, on unless `=0`, probe only): the block grid of the
+                // 8-bit `EM` instances (`x_xdrop_avx2.rs`, `align8` with `G`)
+                if std::env::var_os("LOSAT_X_FNGRID").is_none_or(|v| v != "0") {
+                    on |= 32;
+                }
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -4774,6 +4779,7 @@ fn x_extra_dispatch(
                     tb,
                     check_fence,
                     on & 16 != 0,
+                    on & 32 != 0,
                     sc,
                 )
             };

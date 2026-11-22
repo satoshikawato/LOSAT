@@ -17,6 +17,8 @@ enum Kern {
     V256,
     /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
     V256Z,
+    /// EXPERIMENT (LOSAT_X_FNGRID): the default instances with the block grid (`G`)
+    V256G,
     W128,
 }
 
@@ -54,33 +56,43 @@ unsafe fn run(
         }
         (Kern::V256, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256, false, Some(m)) => {
-            align8::<false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
-        (Kern::V256 | Kern::V256Z, true, None) => {
+        (Kern::V256 | Kern::V256Z | Kern::V256G, true, None) => {
             if sc.x_nib {
                 align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             } else {
                 align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
-        (Kern::V256 | Kern::V256Z, false, None) => {
+        (Kern::V256 | Kern::V256Z | Kern::V256G, false, None) => {
             align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::V256Z, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256Z, false, Some(m)) => {
-            align8::<false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+        }
+        (Kern::V256G, true, Some(m)) => {
+            if sc.x_nib {
+                align8::<true, true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            } else {
+                align8::<true, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+        }
+        (Kern::V256G, false, Some(m)) => {
+            align8::<false, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::W128, true, Some(m)) => {
             w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -223,6 +235,9 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         XdropScratch::new(),
         XdropScratch::new(),
     );
+    let mut sc256g = XdropScratch::new();
+    // calls of the grid instances whose rows were moved, and whose anchor lay below `first`
+    let mut moved_g = 0usize;
     // [width 8 / 16][tb][reverse]
     let mut handled = [[[0usize; 2]; 2]; 2];
     let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
@@ -234,9 +249,11 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         sc128.x_test_rows(lanes);
         sc256.x_test_rows(lanes);
         sc256z.x_test_rows(lanes);
+        sc256g.x_test_rows(lanes);
         // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
         let nib = case % 2 == 0;
         (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
+        sc256g.x_nib = nib;
         let n = if rng.below(2) == 0 { 16 } else { 28 };
         let scale = if rng.below(3) == 0 { 32 } else { 1 };
         let long = rng.below(6) == 0;
@@ -425,6 +442,31 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
                         }
                     };
                     assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
+                    if wide8 {
+                        // SAFETY: AVX2 detected above.
+                        let r256g = unsafe {
+                            run(
+                                Kern::V256G,
+                                m,
+                                tb,
+                                &rows,
+                                &cols,
+                                &scores,
+                                len1,
+                                len2,
+                                go,
+                                ge,
+                                x,
+                                tb,
+                                &mut sc256g,
+                            )
+                        };
+                        assert_eq!(r256, r256g, "{tag}: 256 vs 256 with the block grid");
+                        if r256.is_some() {
+                            assert_eq!(sc256.ops, sc256g.ops, "{tag}: 256 vs 256g ops");
+                        }
+                        moved_g += usize::from(sc256g.x_sh > 0);
+                    }
                     if wide8 && r256.is_some() {
                         assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
                     }
@@ -486,6 +528,7 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
             moved.iter().flatten().all(|&n| n > 0),
             "moved rows {moved:?}"
         );
+        assert!(moved_g > 0, "grid: no moved rows");
     }
 }
 
@@ -791,7 +834,7 @@ fn replay_captured_problems() {
                         let sc = match k {
                             Kern::V128 => &mut sa,
                             Kern::W128 => &mut sw,
-                            Kern::V256 | Kern::V256Z => &mut sb,
+                            Kern::V256 | Kern::V256Z | Kern::V256G => &mut sb,
                         };
                         let total = if warm {
                             let mut ns = 0f64;

@@ -136,10 +136,25 @@ pub(super) unsafe fn align(
     tb: bool,
     check_fence: bool,
     em: bool,
+    grid: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if em {
-        dispatch::<true>(
+    if em && grid {
+        dispatch::<true, true>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    } else if em {
+        dispatch::<true, false>(
             q,
             s,
             scores,
@@ -153,7 +168,7 @@ pub(super) unsafe fn align(
             sc,
         )
     } else {
-        dispatch::<false>(
+        dispatch::<false, false>(
             q,
             s,
             scores,
@@ -174,7 +189,7 @@ pub(super) unsafe fn align(
 /// # Safety
 /// `available()` must be true.
 #[inline(always)]
-unsafe fn dispatch<const EM: bool>(
+unsafe fn dispatch<const EM: bool, const G: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -189,7 +204,7 @@ unsafe fn dispatch<const EM: bool>(
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) if sc.x_nib => align8::<true, EM, true>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true, G>(
             q,
             s,
             scores,
@@ -202,7 +217,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, Some(m)) => align8::<true, EM, false>(
+        (true, Some(m)) => align8::<true, EM, false, G>(
             q,
             s,
             scores,
@@ -215,7 +230,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false, EM, false>(
+        (false, Some(m)) => align8::<false, EM, false, G>(
             q,
             s,
             scores,
@@ -333,6 +348,12 @@ unsafe fn last16(v: W, kb7: W) -> W {
 #[inline(always)]
 unsafe fn up1_8(v: W) -> W {
     _mm256_alignr_epi8::<15>(v, _mm256_permute2x128_si256::<0x08>(v, v))
+}
+/// EXPERIMENT (LOSAT_X_FNGRID): 8-bit lanes moved up by one across the whole vector, lane 0 from
+/// lane 31 of `prev`.
+#[inline(always)]
+unsafe fn up1_8c(v: W, prev: W) -> W {
+    _mm256_alignr_epi8::<15>(v, _mm256_permute2x128_si256::<0x21>(prev, v))
 }
 /// Inclusive prefix maximum (unsigned 8-bit) over the 32 lanes.
 #[inline(always)]
@@ -979,15 +1000,13 @@ struct C8 {
 unsafe fn block8<const TB: bool, const EM: bool>(
     c: &C8,
     rs: &mut Row,
-    hr: *const u8,
+    hp: W,
     hw: *mut u8,
     e: *mut u8,
     b: usize,
     s: W,
     lane_mask: Option<W>,
-    hpm: W,
 ) -> (W, W) {
-    let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
     let ep = ld(e.add(b));
     let d = _mm256_adds_epi8(hp, s);
     let h0 = _mm256_max_epi8(d, ep);
@@ -1054,20 +1073,18 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
     rs: &mut RowX,
     rec_b: &mut usize,
     slow: &mut bool,
-    hr: *const u8,
+    hp: X,
     hw: *mut u8,
     e: *mut u8,
     b: usize,
     s: X,
     lane_mask: Option<X>,
-    hpm: X,
 ) -> (X, X) {
     let goe = _mm256_castsi256_si128(c.goe);
     let ge1 = _mm256_castsi256_si128(c.ge1);
     let ramp = _mm256_castsi256_si128(c.ramp);
     let xv = _mm256_castsi256_si128(c.xv);
     let k15 = _mm256_castsi256_si128(c.kb15);
-    let hp = _mm_andnot_si128(hpm, ldx(hr.add(b).sub(1)));
     let ep = ldx(e.add(b));
     let d = _mm_adds_epi8(hp, s);
     let h0 = _mm_max_epi8(d, ep);
@@ -1120,7 +1137,7 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const G: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1233,6 +1250,12 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     let mut fence_hit = false;
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
+    // EXPERIMENT (LOSAT_X_FNGRID, `G`): the blocks of a row start at the anchor `anc` (at most 15
+    // lanes below `first`, moved in steps of 16), so that a row reads its H and E vectors at the
+    // addresses and widths the row above stored them (the store is forwarded) and the addresses do
+    // not wait for `first`. Lanes from `anc` to `first` were dropped in the row above (H and E
+    // stored 0, `EM`), so they hold values below the threshold and change nothing (head of file).
+    let mut anc = 0usize;
 
     // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
@@ -1244,7 +1267,14 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
+            if G {
+                anc = if anc >= d { anc - d } else { first };
+            }
         }
+        if G && first >= anc + 16 {
+            anc = first - ((first - anc) & 15);
+        }
+        let b_start = if G { anc } else { first };
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1291,7 +1321,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
 
         if best_rel > limit_rebase {
             let dv = _mm256_set1_epi8(best_rel as u8 as i8);
-            let mut b = first;
+            let mut b = b_start;
             while b < b_size {
                 st(hr.add(b), _mm256_subs_epu8(ld(hr.add(b)), dv));
                 st(e.add(b), _mm256_subs_epu8(ld(e.add(b)), dv));
@@ -1304,7 +1334,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
 
         let tr = if TB {
             // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
-            sc.trace.x_row(bend - first + num_extra + 96)
+            sc.trace.x_row(bend - b_start + num_extra + 96)
         } else {
             core::ptr::null_mut()
         };
@@ -1319,7 +1349,8 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         };
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
-        let mut b0 = first;
+        let mut b0 = b_start;
+        let mut hprev = zero;
         // 32-lane blocks while more than 16 lanes of the band are left, then 16-lane blocks for the
         // rest of the band and the row-gap extension (stop test as in `align16`).
         while b0 + 16 < bend {
@@ -1334,12 +1365,20 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
             } else {
                 Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
             };
-            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+            let hp = if G {
+                let h = ld(hr.add(b0));
+                let hp = up1_8c(h, hprev);
+                hprev = h;
+                hp
+            } else {
+                _mm256_andnot_si256(hpm, ld(hr.add(b0).sub(1)))
+            };
+            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hp, hw, e, b0, sv, mask);
             hpm = zero;
             if TB && NIB {
-                stx(tr.add((b0 - first) >> 1), nibs32(r0));
+                stx(tr.add((b0 - b_start) >> 1), nibs32(r0));
             } else if TB {
-                st(tr.add(b0 - first), r0);
+                st(tr.add(b0 - b_start), r0);
             }
             let live = !(_mm256_movemask_epi8(d0) as u32);
             if live != 0 {
@@ -1358,6 +1397,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         let (mut rec_b, mut slow) = (rs.rec_b, rs.slow);
         let t0x = _mm256_castsi256_si128(t0);
         let t1x = _mm256_castsi256_si128(t1);
+        let mut hprevx = _mm256_extracti128_si256::<1>(hprev);
         loop {
             if b0 >= bend {
                 if b0 >= limit {
@@ -1378,24 +1418,21 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
             } else {
                 Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
             };
-            let (d0, r0) = block8x::<TB, EM>(
-                &c,
-                &mut rx,
-                &mut rec_b,
-                &mut slow,
-                hr,
-                hw,
-                e,
-                b0,
-                sv,
-                mask,
-                _mm256_castsi256_si128(hpm),
-            );
+            let hp = if G {
+                let h = ldx(hr.add(b0));
+                let hp = _mm_alignr_epi8::<15>(h, hprevx);
+                hprevx = h;
+                hp
+            } else {
+                _mm_andnot_si128(_mm256_castsi256_si128(hpm), ldx(hr.add(b0).sub(1)))
+            };
+            let (d0, r0) =
+                block8x::<TB, EM>(&c, &mut rx, &mut rec_b, &mut slow, hp, hw, e, b0, sv, mask);
             hpm = zero;
             if TB && NIB {
-                stl(tr.add((b0 - first) >> 1), nibs16(r0));
+                stl(tr.add((b0 - b_start) >> 1), nibs16(r0));
             } else if TB {
-                stx(tr.add(b0 - first), r0);
+                stx(tr.add(b0 - b_start), r0);
             }
             let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
             if live != 0 {
@@ -1422,7 +1459,8 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         wend[wi] = proc_end;
         cur = wi;
         let rec = if TB {
-            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+            sc.trace
+                .x_row_done(NIB, b_start + sc.x_sh, proc_end - b_start)
         } else {
             core::ptr::null()
         };

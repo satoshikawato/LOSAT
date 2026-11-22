@@ -17,9 +17,9 @@ mod temp_support;
 use temp_support::TempPath;
 
 use losat::api::{
-    describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
-    run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
-    Outcome, Program, Role, Strand, ValueKind, API_OWNED,
+    describe, read_fasta, read_input_file, read_inputs, run, run_batches, run_blastdbcmd,
+    run_collect, run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord,
+    HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -125,16 +125,15 @@ fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
-/// A command of this crate's binaries without the environment that changes LOSAT's behavior
-/// (`LOSAT_BLASTX_WORKER_LOG`, which the `blastx-worker-probe` feature requires, stays).
+/// A command of this crate's binaries without LOSAT's own variables, which change LOSAT's behavior
+/// (`LOSAT_BLASTX_WORKER_LOG`, which the `blastx-worker-probe` feature requires, stays). NCBI's
+/// variables (`NCBI_*`, `BLASTDB`, ...) stay: the library's calls in this process read them at
+/// their start, as the command line does, so that both see the same environment.
 fn command(binary: &str) -> Command {
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text == "LOSAT_BLASTX_WORKER_LOG" {
-            continue;
-        }
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLASTDB") {
+        if text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(&name);
         }
     }
@@ -3159,4 +3158,505 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
             "{program:?}"
         );
     }
+}
+
+// Line LIB E1 (2026-11-21): the message of each producer of `Error` against the command line's
+// standard error for the same failure, run in the same test and compared byte for byte by the
+// rules of `Error` (NCBI's message with its newlines; LOSAT's refusal without `Error: ` and the
+// newline; the parser's text; a reader's or a tool's text without its last newlines).
+
+/// The small records of `tests/fasta/outfmt11` that a program searches in the tests of failures.
+fn small_inputs(program: Program) -> (PathBuf, PathBuf) {
+    let (query, subject) = match program {
+        Program::Blastp | Program::Psiblast => ("arch_bp_q.faa", "arch_bp_s.faa"),
+        Program::Blastx => ("arch_bx_q.fna", "arch_bx_s.faa"),
+        Program::Tblastn => ("arch_tbn_q.faa", "arch_tbn_s.fna"),
+        _ => ("arch_tbx_q.fna", "arch_tbx_s.fna"),
+    };
+    (
+        fixture(&format!("outfmt11/{query}")),
+        fixture(&format!("outfmt11/{subject}")),
+    )
+}
+
+/// `losat <program> <words>` (`command`'s environment).
+fn cli_output(program: &str, words: &[&str]) -> std::process::Output {
+    command(env!("CARGO_BIN_EXE_losat"))
+        .arg(program)
+        .args(words)
+        .output()
+        .expect("run the command line")
+}
+
+/// The rule of `Error` by which the command line's standard error `stderr` is the library's
+/// `diagnostics` (what the search wrote before the failure) and then the message of `error`:
+/// NCBI's message as it is (`"ncbi"`), or LOSAT's refusal after `Error: ` and before a newline
+/// (`"losat"`); `None` when neither gives it.
+fn failure_rule(stderr: &[u8], diagnostics: &[u8], error: &Error) -> Option<&'static str> {
+    let tail = stderr.strip_prefix(diagnostics)?;
+    if tail == error.message() {
+        Some("ncbi")
+    } else if tail == [b"Error: ", error.message(), b"\n"].concat() {
+        Some("losat")
+    } else {
+        None
+    }
+}
+
+/// `bytes` without its last newlines (the command line's text of a reader's or a tool's error).
+fn without_last_newlines(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .rposition(|&byte| byte != b'\n')
+        .map_or(0, |at| at + 1);
+    &bytes[..end]
+}
+
+/// The library's search of the files `query` and `subject` with `options`, as
+/// `examples/library_command_line` makes it (`read_input_file`, `read_inputs`, `run`): the result,
+/// the report of `outfmt` and the diagnostics.
+fn search_of_files(
+    program: Program,
+    options: &[&str],
+    query: &Path,
+    subject: &Path,
+    outfmt: &str,
+) -> (Result<(), Error>, Vec<u8>, Vec<u8>) {
+    let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+    let (query_name, subject_name) = (query.to_str().unwrap(), subject.to_str().unwrap());
+    let result = validate(program, options).and_then(|search| {
+        let query_bytes = read_input_file(Role::Query, query)?;
+        let subject_bytes = read_input_file(Role::Subject, subject)?;
+        let (queries, subjects) = read_inputs(&search, &query_bytes, &subject_bytes)?;
+        let inputs = Inputs::new(&queries, &subjects).named(query_name, subject_name);
+        run(
+            &search,
+            inputs,
+            &mut [(outfmt, &mut report)],
+            &mut diagnostics,
+        )
+    });
+    (result, report, diagnostics)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+/// `run_to_file` to a file whose writes fail (`/dev/full`, through a link in a directory of the
+/// test, where outfmt 13 and 14 write their side files) ends as the command line's `-out` (line
+/// LIB E1, fix 1), in every program and every outfmt: where the report's stream throws (the outfmt
+/// 0 to 4 formatter's, the organism report's), NCBI's `BLAST failed to write output` and its
+/// newline (exit status 6), elsewhere the write's error as the command line writes it. The warning
+/// of `-max_target_seqs 1`, which the command line writes before the failure, is in the
+/// diagnostics and not in the message.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_report_that_cannot_be_written_fails_as_the_command_lines_out() {
+    if !Path::new("/dev/full").exists() {
+        return;
+    }
+    let directory = TempPath::new(temp_path("full"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let full = directory.join("full");
+    std::os::unix::fs::symlink("/dev/full", &full).unwrap();
+    let full_name = full.to_str().unwrap();
+    for program in Program::ALL {
+        let (query, subject) = small_inputs(program);
+        let (query_name, subject_name) = (query.to_str().unwrap(), subject.to_str().unwrap());
+        let search = validate(program, &["-max_target_seqs", "1"]).unwrap();
+        let query_bytes = std::fs::read(&query).unwrap();
+        let subject_bytes = std::fs::read(&subject).unwrap();
+        let (queries, subjects) = read_inputs(&search, &query_bytes, &subject_bytes).unwrap();
+        for number in 0..=18 {
+            let outfmt = number.to_string();
+            let context = format!("{program} -outfmt {outfmt}");
+            let cli = cli_output(
+                program.name(),
+                &[
+                    "-query",
+                    query_name,
+                    "-subject",
+                    subject_name,
+                    "-max_target_seqs",
+                    "1",
+                    "-outfmt",
+                    outfmt.as_str(),
+                    "-out",
+                    full_name,
+                ],
+            );
+            let mut diagnostics = Vec::new();
+            let inputs = Inputs::new(&queries, &subjects).named(query_name, subject_name);
+            let result = run_to_file(&search, inputs, &outfmt, &full, &mut diagnostics);
+            let stderr = String::from_utf8_lossy(&cli.stderr);
+            let error = match result {
+                Ok(()) => {
+                    assert_eq!(cli.status.code(), Some(0), "{context}: {stderr}");
+                    assert_eq!(diagnostics, cli.stderr, "{context}");
+                    continue;
+                }
+                Err(error) => error,
+            };
+            assert_ne!(cli.status.code(), Some(0), "{context}: {error:?}");
+            assert!(
+                failure_rule(&cli.stderr, &diagnostics, &error).is_some(),
+                "{context}: the command line's {:?} {stderr:?}, the library's {:?} and {error:?}",
+                cli.status.code(),
+                String::from_utf8_lossy(&diagnostics),
+            );
+            if number == 0 {
+                assert!(
+                    String::from_utf8_lossy(&diagnostics)
+                        .contains("Examining 5 or more matches is recommended"),
+                    "{context}: {stderr}"
+                );
+                assert_eq!(cli.status.code(), Some(6), "{context}: {stderr}");
+                assert_eq!(
+                    error.message(),
+                    b"BLAST failed to write output\n",
+                    "{context}: {error:?}"
+                );
+            }
+            if cli.status.code() == Some(6) {
+                assert_eq!(
+                    error.message(),
+                    b"BLAST failed to write output\n",
+                    "{context}: {error:?}"
+                );
+            }
+        }
+    }
+}
+
+/// An organism report (outfmt 18) longer than the `-out` file's buffer, which writes at the
+/// insertion that reaches its 8,191st byte (`cli::NcbiReportBuffer`; here the query's title of
+/// 9,600 bytes), fails where that write fails, as the command line's `-out`: NCBI's `BLAST failed
+/// to write output` and its newline, exit status 6 there (line LIB E1, review N5). A short report,
+/// held to the end, passes on both sides
+/// (`a_report_that_cannot_be_written_fails_as_the_command_lines_out`).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out() {
+    if !Path::new("/dev/full").exists() {
+        return;
+    }
+    let directory = TempPath::new(temp_path("full18"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let full = directory.join("full");
+    std::os::unix::fs::symlink("/dev/full", &full).unwrap();
+    let (query, subject) = small_inputs(Program::Blastp);
+    let records = std::fs::read_to_string(&query).unwrap();
+    let titled = directory.join("titled.faa");
+    let title = format!(" {}\n", "abcdefg ".repeat(1200).trim_end());
+    std::fs::write(&titled, records.replacen('\n', &title, 1)).unwrap();
+    let (query_name, subject_name) = (titled.to_str().unwrap(), subject.to_str().unwrap());
+    let cli = cli_output(
+        "blastp",
+        &[
+            "-query",
+            query_name,
+            "-subject",
+            subject_name,
+            "-outfmt",
+            "18",
+            "-out",
+            full.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(cli.status.code(), Some(6), "{cli:?}");
+    assert!(
+        cli.stderr.ends_with(b"BLAST failed to write output\n"),
+        "{cli:?}"
+    );
+    let search = validate(Program::Blastp, &[]).unwrap();
+    let query_bytes = std::fs::read(&titled).unwrap();
+    let subject_bytes = std::fs::read(&subject).unwrap();
+    let (queries, subjects) = read_inputs(&search, &query_bytes, &subject_bytes).unwrap();
+    let inputs = Inputs::new(&queries, &subjects).named(query_name, subject_name);
+    let mut diagnostics = Vec::new();
+    let error = run_to_file(&search, inputs, "18", &full, &mut diagnostics).unwrap_err();
+    assert_eq!(
+        (
+            error.message(),
+            failure_rule(&cli.stderr, &diagnostics, &error)
+        ),
+        (&b"BLAST failed to write output\n"[..], Some("ncbi")),
+        "{error:?}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
+/// A directory named as the query or the subject is read as the command line reads it (line LIB
+/// E1, fix 2): it opens and its first read fails, which ends the input, so it holds no record
+/// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); a directory
+/// named `.gz`, `.bz2` or `.zst` is refused as not of that format, as the command line refuses
+/// it. Every program, both sides, against the command line in the same test.
+#[test]
+fn a_directory_input_is_read_as_the_command_line_reads_it() {
+    let directory = TempPath::new(temp_path("directories"));
+    let names = ["records", "records.gz", "records.bz2", "records.zst"];
+    for name in names {
+        std::fs::create_dir_all(directory.join(name)).unwrap();
+    }
+    for program in Program::ALL {
+        let (query, subject) = small_inputs(program);
+        for name in names {
+            let named = directory.join(name);
+            for (query, subject) in [(&named, &subject), (&query, &named)] {
+                let (query_name, subject_name) =
+                    (query.to_str().unwrap(), subject.to_str().unwrap());
+                let context = format!("{program} -query {query_name} -subject {subject_name}");
+                let cli = cli_output(
+                    program.name(),
+                    &[
+                        "-query",
+                        query_name,
+                        "-subject",
+                        subject_name,
+                        "-outfmt",
+                        "6",
+                    ],
+                );
+                let (result, report, diagnostics) =
+                    search_of_files(program, &[], query, subject, "6");
+                let stderr = String::from_utf8_lossy(&cli.stderr);
+                match result {
+                    Ok(()) => {
+                        assert_eq!(cli.status.code(), Some(0), "{context}: {stderr}");
+                        assert_eq!(report, cli.stdout, "{context}");
+                        assert_eq!(diagnostics, cli.stderr, "{context}");
+                    }
+                    Err(error) => {
+                        assert_ne!(cli.status.code(), Some(0), "{context}: {error:?}");
+                        assert!(cli.stdout.is_empty() && report.is_empty(), "{context}");
+                        assert!(
+                            failure_rule(&cli.stderr, &diagnostics, &error).is_some(),
+                            "{context}: the command line's {stderr:?}, the library's {:?} and \
+                             {error:?}",
+                            String::from_utf8_lossy(&diagnostics),
+                        );
+                        if name != "records" {
+                            assert!(matches!(error, Error::Input(_)), "{context}: {error:?}");
+                        }
+                    }
+                }
+                if program == Program::Blastp && name == "records" && query == &named {
+                    assert_eq!(
+                        (cli.status.code(), cli.stderr.as_slice()),
+                        (Some(0), b"Warning: [blastp] Query is Empty!\n".as_slice()),
+                        "{context}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// `run_makeblastdb`'s argv that its parser refuses is a tool's error of the parser's kind (line
+/// LIB E1, fix 4): the command line's standard error goes to the diagnostics, and the message is
+/// that text without its last newlines, also where the caller's diagnostics writer fails.
+/// `examples/library_command_line` writes that text once, as the command line does (its status is
+/// 1 for every failure).
+#[test]
+fn makeblastdbs_refused_argv_is_a_tools_error() {
+    /// A diagnostics writer that takes nothing.
+    struct Failing;
+    impl std::io::Write for Failing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("closed"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let example = example_binary("library_command_line");
+    for words in [
+        &["-nosuch"][..],
+        &["-dbtype", "foo", "-in", "x"],
+        &["-in", "x"],
+    ] {
+        let mut diagnostics = Vec::new();
+        let error = run_makeblastdb(
+            words,
+            &mut std::io::empty(),
+            &mut std::io::sink(),
+            &mut diagnostics,
+        )
+        .unwrap_err();
+        let cli = cli_output("makeblastdb", words);
+        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
+        assert_eq!(diagnostics, cli.stderr, "{words:?}");
+        assert!(cli.stderr.ends_with(b"\n"), "{words:?}");
+        assert_eq!(
+            error.message(),
+            without_last_newlines(&cli.stderr),
+            "{words:?}"
+        );
+        let failing = run_makeblastdb(
+            words,
+            &mut std::io::empty(),
+            &mut std::io::sink(),
+            &mut Failing,
+        )
+        .unwrap_err();
+        assert_eq!(failing, error, "{words:?}: a failing writer");
+        let library = command(example.to_str().unwrap())
+            .arg("makeblastdb")
+            .args(words)
+            .output()
+            .expect("run the example");
+        assert_eq!(
+            (library.status.code(), library.stdout, library.stderr),
+            (Some(1), cli.stdout, cli.stderr),
+            "{words:?}: the example"
+        );
+    }
+}
+
+/// A message of NCBI's is its bytes with its newline (`Error`'s first rule): the engine's error
+/// of a `-query_loc` that ends before it starts (exit status 3), and the formatter's of an
+/// `-outfmt` out of range (an `Error::Argv`, exit status 255).
+#[test]
+fn an_ncbi_message_keeps_its_newline() {
+    let (query, subject) = small_inputs(Program::Blastp);
+    let (query_name, subject_name) = (query.to_str().unwrap(), subject.to_str().unwrap());
+    for (options, outfmt, status) in [(&["-query_loc", "5-3"][..], "6", 3), (&[], "99", 255)] {
+        let context = format!("{options:?} -outfmt {outfmt}");
+        let mut words = vec![
+            "-query",
+            query_name,
+            "-subject",
+            subject_name,
+            "-outfmt",
+            outfmt,
+        ];
+        words.extend_from_slice(options);
+        let cli = cli_output("blastp", &words);
+        let (result, _, diagnostics) =
+            search_of_files(Program::Blastp, options, &query, &subject, outfmt);
+        let error = result.unwrap_err();
+        assert_eq!(cli.status.code(), Some(status), "{context}");
+        assert!(error.message().ends_with(b"\n"), "{context}: {error:?}");
+        assert_eq!(
+            [diagnostics.as_slice(), error.message()].concat(),
+            cli.stderr,
+            "{context}"
+        );
+        let kind_is_argv = matches!(error, Error::Argv(_));
+        assert_eq!(kind_is_argv, outfmt == "99", "{context}: {error:?}");
+    }
+}
+
+/// LOSAT's own refusal is its text without the `Error: ` and the newline that the command line
+/// writes around it (`Error`'s second rule): two query records with one Seq-id under
+/// `-parse_deflines`.
+#[test]
+fn a_losat_refusal_is_its_text_without_error_and_the_newline() {
+    let records = TempPath::new(temp_path("same_ids.faa"));
+    std::fs::write(&records, ">q1 a\nMKVLAAGIVG\n>q1 b\nMKVLAAGIVG\n").unwrap();
+    let (_, subject) = small_inputs(Program::Blastp);
+    let words = [
+        "-query",
+        records.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-parse_deflines",
+        "-outfmt",
+        "6",
+    ];
+    let cli = cli_output("blastp", &words);
+    let (result, _, diagnostics) = search_of_files(
+        Program::Blastp,
+        &["-parse_deflines"],
+        &records,
+        &subject,
+        "6",
+    );
+    let error = result.unwrap_err();
+    assert_eq!(cli.status.code(), Some(1));
+    assert!(matches!(error, Error::Search(_)), "{error:?}");
+    assert!(diagnostics.is_empty());
+    assert_eq!(
+        cli.stderr,
+        [b"Error: ".as_slice(), error.message(), b"\n"].concat(),
+        "{error:?}"
+    );
+}
+
+/// The parser's message is its text (`Error`'s third rule), which the command line writes with a
+/// newline where the text has none: a value that the option refuses (the text ends with a
+/// newline) and an option that the program does not have (it does not).
+#[test]
+fn the_parsers_message_is_its_text() {
+    for (words, newline_added) in [(&["-evalue", "abc"][..], false), (&["-nosuch"], true)] {
+        let error = validate(Program::Blastp, words).unwrap_err();
+        let cli = cli_output("blastp", words);
+        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
+        let added: &[u8] = if newline_added { b"\n" } else { b"" };
+        assert_eq!(cli.stderr, [error.message(), added].concat(), "{words:?}");
+    }
+}
+
+/// A reader's error is the command line's text without its last newline (`Error`'s fourth rule):
+/// a NUL in a query record; and LOSAT's refusal of a file named `.gz` that is not gzip data is
+/// also without the command line's `Error: `.
+#[test]
+fn an_input_error_is_the_command_lines_text_without_its_last_newline() {
+    let (_, subject) = small_inputs(Program::Blastp);
+    let nul = TempPath::new(temp_path("nul.faa"));
+    std::fs::write(&nul, b">q\nMK\0V\n").unwrap();
+    let junk = TempPath::new(temp_path("junk.faa.gz"));
+    std::fs::write(
+        &junk,
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03garbagegarbagegarbage",
+    )
+    .unwrap();
+    for (query, prefix) in [(&nul, ""), (&junk, "Error: ")] {
+        let words = [
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "6",
+        ];
+        let cli = cli_output("blastp", &words);
+        let (result, _, diagnostics) = search_of_files(Program::Blastp, &[], query, &subject, "6");
+        let error = result.unwrap_err();
+        assert_eq!(cli.status.code(), Some(1), "{query:?}");
+        assert!(matches!(error, Error::Input(_)), "{query:?}: {error:?}");
+        assert!(diagnostics.is_empty(), "{query:?}");
+        assert_eq!(
+            cli.stderr,
+            [prefix.as_bytes(), error.message(), b"\n"].concat(),
+            "{query:?}: {error:?}"
+        );
+    }
+}
+
+/// NCBI's application start that ends the program (a `-conffile` that does not exist: exit status
+/// 255) is the start's text without its last newline.
+#[test]
+fn a_start_that_ends_the_program_is_its_text_without_the_last_newline() {
+    let (query, subject) = small_inputs(Program::Blastp);
+    let missing = temp_path("missing.ini");
+    let options = ["-conffile", missing.to_str().unwrap()];
+    let mut words = vec![
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    words.extend(options);
+    let cli = cli_output("blastp", &words);
+    let (result, _, diagnostics) =
+        search_of_files(Program::Blastp, &options, &query, &subject, "6");
+    let error = result.unwrap_err();
+    assert_eq!(cli.status.code(), Some(255));
+    assert!(matches!(error, Error::Search(_)), "{error:?}");
+    assert!(diagnostics.is_empty());
+    assert_eq!(cli.stderr, [error.message(), b"\n"].concat(), "{error:?}");
 }

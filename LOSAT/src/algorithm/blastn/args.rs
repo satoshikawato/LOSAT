@@ -75,7 +75,7 @@ impl QueryStrand {
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47

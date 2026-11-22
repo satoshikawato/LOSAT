@@ -36,7 +36,7 @@ pub(crate) use run_impl::TblastxReportRun;
 pub(crate) use run_impl::ErrorAfterBatchReports;
 
 // Imports used by submodules
-pub(crate) use anyhow::{Context, Result};
+pub(crate) use anyhow::Result;
 pub(crate) use indicatif::ProgressBar;
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
 #[cfg(all(

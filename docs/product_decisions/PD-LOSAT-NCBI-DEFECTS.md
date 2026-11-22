@@ -1237,7 +1237,8 @@ entries that reach another sequence)". Line NP item M4b-3b.
     table never clears inside it: from the window, a walk reaches INT4_MAX / 4 (536,870,911) only
     for a protein of more than 536 million letters or about 12 million masks at the window 40 (each
     chunk adds its length plus the window; the chunks with words are disjoint parts of the sequence),
-    and the longest walk of A. thaliana TAIR10 reaches 5,324 positions. The first sequence keeps
+    and the longest walk of A. thaliana TAIR10 reaches 5,324 positions (of the UniRef50 sample
+    below 77,483). The first sequence keeps
     NCBI's new table, every sequence without such a margin keeps NCBI's offsets, and the search
     without `-db_hard_mask` is unchanged. The kernels count every one word of a chunk past a
     sequence's end as a hit (as for a query with the gap letter), so they also move the offset for a
@@ -1275,8 +1276,19 @@ entries that reach another sequence)". Line NP item M4b-3b.
       the model of `DiagonalWalk::start` and `after`): A. thaliana TAIR10 118 of its 35,642 proteins
       with masks at the default window (each past its end), 578 with `-window_size 0` (318 below their
       start, 293 past their end), 118 with `-task blastp-short` and 116 at word 6; a UniRef50 sample
-      (its first 60,000 sequences) 242 of its 59,484 with masks, 1,436 with `-window_size 0`, 242 with
-      `-task blastp-short` and 229 at word 6. Both databases are searched.
+      (its first 60,000 sequences) 242 of its 59,484 with masks, 1,438 with `-window_size 0` (839 below
+      their start, 736 past their end; 2 more than the first draft's `StaleDiagonals`, whose criterion
+      did not count the entries of the sequences before a walk that goes back further than its margin
+      below the start), 242 with `-task blastp-short` and 229 at word 6. Both databases are searched.
+    - A. thaliana TAIR10 (48,321 proteins, segmasker's defaults, algorithm 21) for 55 queries, the
+      proteins that such a protein's entries reach or that reach below their start (BLASTX: the first
+      20, back-translated; ws, `M/m4b3b/q5b/tair`, `q5b/ws/q5b_threads.sh`): LOSAT wrote the same bytes at
+      1, 4 and 16 threads in every case; at the default window LOSAT's bytes are NCBI's (8,716 BLASTP
+      rows, 1,185 BLASTX rows); with `-window_size 0` NCBI gives the same bytes at 1 and 4 threads and
+      LOSAT 3 more BLASTP rows (AT1G47340.1 and AT1G50880.1 against AT2G17310.1 from its first letters,
+      E 0.012 and 0.001; AT2G27380.1 against itself at 750-761, E 1.1) and 1 more BLASTX row (the first
+      of these), whose one-hit seeds NCBI skips at entries of the protein searched before; no row of
+      NCBI's is missing.
     Fixture rows `db.pmask.{bp,bx}.hard.ov_lk.*` (NCBI's bytes at the default; with `ncbi-near:`
     those of NCBI's run of the near input, rows `db.pmask.{bp,bx}.hard.near.ov_lkn.*`, otherwise) and
     `db.pmask.{bp,bx}.hard.ov_atha.21.w0.6` (NCBI's bytes) of

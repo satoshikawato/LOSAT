@@ -94,6 +94,23 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def sanitize_input_key(path: Path) -> str:
+    """Strip machine-local user home prefixes when recording provenance keys."""
+    parts = path.parts
+    if "losat-baselines" in parts:
+        return "/".join(parts[parts.index("losat-baselines") :])
+    return path.name if path.is_absolute() else path.as_posix()
+
+
+def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
+    """Parse optional anonymous private RSS (MiB) from raw benchmark rows."""
+    if row.get("rss_anon_mib"):
+        return float(row["rss_anon_mib"])
+    if row.get("rss_anon_kb"):
+        return int(row["rss_anon_kb"]) / 1024.0
+    return None
+
+
 def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
     tm = json.loads(toolmt_path.read_text(encoding="utf-8"))
     by_prog_tool: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
@@ -241,7 +258,7 @@ def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, flo
 
 
 def main() -> int:
-    base = Path("/home/kawato/losat-baselines")
+    base = Path(os.environ.get("LOSAT_BASELINES_DIR", Path.home() / "losat-baselines"))
     ap = argparse.ArgumentParser()
     ap.add_argument("--j2-dir", type=Path, default=base / "release-v020-20261025/work/j-speed/results2")
     ap.add_argument("--ext-dir", type=Path, default=base / "release-v020-20261025/work/bench-v020-ext/results")
@@ -252,6 +269,8 @@ def main() -> int:
     ap.add_argument("--losat-commit", default="93ca2f652617acac09d416c28c293cc8a1a501d1",
                     help="full SHA of the LOSAT build measured in --j2-dir and --ext-dir")
     ap.add_argument("--losat-version", default="0.2.0")
+    ap.add_argument("--wasm-paired", action="store_true",
+                    help="mark WebAssembly measurements as direct paired runs (sets wasm_derived=false in metadata.json)")
     ap.add_argument("--static-only", action="store_true", help="Only build downstream_tools (and webassembly if complete).")
     args = ap.parse_args()
 
@@ -290,6 +309,7 @@ def main() -> int:
         if not req.is_file() or not j_n1_paths:
             sys.exit(f"missing completed input file: {req}")
 
+    rss_anon: dict[tuple[str, int, str], list[float]] = defaultdict(list)
     j_n16: dict[tuple[str, str], list[tuple[float, float, str, int]]] = defaultdict(list)
     for r in read_tsv(j_n16_path):
         if r["round"] == "0":
@@ -297,6 +317,8 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"J2 n16 rc != 0: {r}")
         j_n16[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], 0))
+        if (anon := parse_rss_anon_mib(r)) is not None:
+            rss_anon[(r["case"], 16, r["arm"])].append(anon)
 
     j_n1: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
     j_n1_timeouts: set[tuple[str, str]] = set()
@@ -308,6 +330,8 @@ def main() -> int:
             if int(r["rc"]) != 0:
                 sys.exit(f"J2 n1 rc != 0: {r}")
             j_n1[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+            if (anon := parse_rss_anon_mib(r)) is not None:
+                rss_anon[(r["case"], 1, r["arm"])].append(anon)
 
     ext_n0: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
     for r in read_tsv(ext_n0_path):
@@ -316,6 +340,8 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"ext n0 rc != 0: {r}")
         ext_n0[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+        if (anon := parse_rss_anon_mib(r)) is not None:
+            rss_anon[(r["case"], int(r["threads"]), r["arm"])].append(anon)
 
     ext_n1: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
     for r in read_tsv(ext_n1_path):
@@ -324,6 +350,8 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"ext n1 rc != 0: {r}")
         ext_n1[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
+        if (anon := parse_rss_anon_mib(r)) is not None:
+            rss_anon[(r["case"], int(r["threads"]), r["arm"])].append(anon)
 
     # 2. standard_workloads.tsv (12 modes x 2 thread counts x {losat, ncbi})
     std_rows = []
@@ -368,7 +396,7 @@ def main() -> int:
             elif lo_sha != nc_sha:
                 parity = "diff"
 
-            std_rows.append({
+            row_entry: dict[str, object] = {
                 "group": group,
                 "case": cid,
                 "program": prog,
@@ -394,11 +422,64 @@ def main() -> int:
                 "subject_desc": sdesc,
                 "target": target,
                 "options": opts,
-            })
+            }
+            if (lo_anon := rss_anon.get((cid, th, "cp"))):
+                row_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon), 2)
+            if (nc_anon := rss_anon.get((cid, th, "ncbi"))):
+                row_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon), 2)
+            std_rows.append(row_entry)
 
+            # Optional paired `-db` vs `-db` arm (C5 re-measurement, Q3=A)
+            db_cid = f"{cid}_db"
+            db_lo = (j_n1 if th == 1 else j_n16).get((db_cid, "cp"), [])
+            db_nc = (j_n1 if th == 1 else j_n16).get((db_cid, "ncbi"), [])
+            if db_lo and db_nc:
+                db_lo_w = statistics.median(x[0] for x in db_lo)
+                db_lo_m = statistics.median(x[1] for x in db_lo)
+                db_nc_w = statistics.median(x[0] for x in db_nc)
+                db_nc_m = statistics.median(x[1] for x in db_nc)
+                db_lo_sha = {x[2] for x in db_lo}
+                db_nc_sha = {x[2] for x in db_nc}
+                db_entry: dict[str, object] = {
+                    "group": group,
+                    "case": db_cid,
+                    "program": prog,
+                    "task": task,
+                    "label": f"{label} (-db)",
+                    "threads": th,
+                    "losat_wall_s": round(db_lo_w, 3),
+                    "losat_wall_min_s": round(min(x[0] for x in db_lo), 3),
+                    "losat_wall_max_s": round(max(x[0] for x in db_lo), 3),
+                    "losat_rss_mib": round(db_lo_m, 2),
+                    "ncbi_wall_s": round(db_nc_w, 3),
+                    "ncbi_rss_mib": round(db_nc_m, 2),
+                    "v010_wall_s": "",
+                    "v010_rss_mib": "",
+                    "speedup": round(db_nc_w / db_lo_w, 4),
+                    "mem_reduction": round(db_nc_m / db_lo_m, 4),
+                    "losat_runs": len(db_lo),
+                    "ncbi_runs": len(db_nc),
+                    "losat_sha16": next(iter(db_lo_sha)),
+                    "ncbi_sha16": ",".join(sorted(db_nc_sha)),
+                    "parity": "same" if db_lo_sha == db_nc_sha else "diff",
+                    "query_desc": qdesc,
+                    "subject_desc": sdesc,
+                    "target": "-db",
+                    "options": opts,
+                }
+                if (lo_anon_db := rss_anon.get((db_cid, th, "cp"))):
+                    db_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon_db), 2)
+                if (nc_anon_db := rss_anon.get((db_cid, th, "ncbi"))):
+                    db_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon_db), 2)
+                std_rows.append(db_entry)
+
+    std_fields = list(std_rows[0].keys())
+    for opt_col in ("losat_rss_anon_mib", "ncbi_rss_anon_mib"):
+        if any(opt_col in row for row in std_rows) and opt_col not in std_fields:
+            std_fields.append(opt_col)
     write_tsv(
         args.out / "standard_workloads.tsv",
-        list(std_rows[0].keys()),
+        std_fields,
         std_rows,
     )
 
@@ -554,12 +635,13 @@ def main() -> int:
         "ncbi_version": "2.17.0",
         "rpsbproc_version": "0.5.1",
         "wasm_commit": ",".join(wasm_commits),
+        "wasm_derived": not args.wasm_paired,
         "toolmt_commit": ",".join(toolmt_builds),
         "dt_commits": dt_builds,
         "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
         "bp_db_parity": bp_par,
         "input_checksums": {
-            str(p): sha256_file(p)
+            sanitize_input_key(p): sha256_file(p)
             for p in [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
                       args.wasm_csv, *map(Path, dt_sources)]
             + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]

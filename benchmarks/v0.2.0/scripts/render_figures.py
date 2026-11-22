@@ -212,7 +212,7 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     specs = [
         ("a", "Wall time, 1 thread", 1, "wall", [5, 1e6], [10, 100, 1000, 10000], ["10", "100", "1,000", "10,000"], "Wall time (s)"),
         ("b", "Wall time, 16 threads", 16, "wall", [0.3, 1e4], [1, 10, 100, 1000], ["1", "10", "100", "1,000"], "Wall time (s)"),
-        ("c", "Peak memory (max RSS), 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Max RSS (MiB)"),
+        ("c", "Peak memory (max RSS), 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Max RSS (MiB, includes DB mmap)"),
     ]
 
     for ax_i, ((prect, rrect), (let, title, th, metric, xlim, xticks, xlbls, xlabel)) in enumerate(zip(panel_rects, specs)):
@@ -296,8 +296,8 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
 
     meta = read_meta(snap)
     footer(fig, f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
-                f"{short_hw(meta)}. FASTA subjects: LOSAT -subject, BLAST+ -db made from the same FASTA. "
-                f"Numbers right of each panel: BLAST+ \u00f7 LOSAT (above 1: LOSAT faster or smaller).", theme)
+                f"{short_hw(meta)}. FASTA subjects: LOSAT -subject, BLAST+ -db (made from same FASTA); max RSS includes mmap DB pages. "
+                f"Right: BLAST+ \u00f7 LOSAT (>1: LOSAT faster/smaller).", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig1_standard_workloads{suffix}"
     save_png(fig, p, theme)
@@ -312,7 +312,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     rows = read_tsv(snap / "scaling.tsv")
     fig = plt.figure(figsize=(12.2, 6.8))
     fig.patch.set_facecolor(theme["surface"])
-    gs = fig.add_gridspec(2, 3, left=0.065, right=0.975, top=0.86, bottom=0.10, wspace=0.31, hspace=0.46)
+    gs = fig.add_gridspec(2, 3, left=0.065, right=0.975, top=0.86, bottom=0.125, wspace=0.31, hspace=0.48)
 
     handles = [
         Line2D([0], [0], marker="D", color=theme["ncbi"], markersize=5.5, linewidth=1.5, label="BLAST+ 2.17.0"),
@@ -420,7 +420,8 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             elif p_i == 0:
                 y_pos, va = yl / 1.75, "top"
             else:
-                y_pos, va = yn * 1.50, "bottom"
+                # Below LOSAT's gentler curve keeps small-DB ratios (1.7x, 1.3x) clear of BLAST+'s steep mmap rise
+                y_pos, va = yl / 1.55, "top"
             ax.text(x, y_pos, fmt_fold(ratio), ha="center", va=va, fontsize=7.6,
                     color=theme["ink"], bbox=dict(boxstyle="round,pad=0.10", facecolor=theme["surface"], edgecolor="none", alpha=0.85))
 
@@ -435,7 +436,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         if p_i == 0:
             ax.set_ylim(min(yl_w) * 0.32, max(yn_w + ([yn_c[-1]] if cold else [])) * 2.2)
         else:
-            ax.set_ylim(min(yl_w) * 0.55, max(yn_w) * 2.4)
+            ax.set_ylim(min(yl_w) * 0.35, max(yn_w) * 2.4)
 
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -456,10 +457,12 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     meta = read_meta(snap)
     note = ""
     tm = short_sha(meta.get("toolmt_commit", ""))
+    line1 = f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}. Labels: BLAST+ \u00f7 LOSAT."
     if tm and tm != short_sha(meta.get("losat_commit", "")):
-        note = f" c, d: the core_nt points and the cold-cache points are LOSAT {tm}."
-    footer(fig, f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
-                f"{short_hw(meta)}.{note} Labels: BLAST+ \u00f7 LOSAT.", theme)
+        line2 = f"c, d: core_nt and cold-cache points are LOSAT {tm}; BLAST+ max RSS includes mmap DB pages; on abr_genes (0.16 MB) BLAST+ took 0.90 s (start-up)."
+    else:
+        line2 = "c, d: BLAST+ max RSS includes mmap DB pages; on abr_genes (0.16 MB) BLAST+ took 0.90 s (start-up)."
+    footer(fig, f"{line1}\n{line2}", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig2_scaling{suffix}"
     save_png(fig, p, theme)
@@ -553,16 +556,19 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             xm = float(r["mt_speedup"]) if r["mt_speedup"] else None
             st1 = startup_dominated(r["ncbi_n1_s"], r["cases_count"])
             stm = startup_dominated(r["ncbi_mt_s"], r["cases_count"])
+            near_overlap = x1 is not None and xm is not None and abs(math.log(xm / x1)) < 0.06
+            y1 = yv + 0.14 if near_overlap else yv
+            ym = yv - 0.14 if near_overlap else yv
             if x1 is not None and xm is not None:
-                ax.plot([x1, xm], [yv, yv], color=theme["line"], linewidth=1.4, zorder=2)
+                ax.plot([x1, xm], [y1, ym], color=theme["line"], linewidth=1.4, zorder=2)
             if x1 is not None:
-                ax.scatter([x1], [yv], marker="o", s=40, facecolors=theme["surface"], edgecolors=theme["losat"], linewidths=1.5, zorder=3)
+                ax.scatter([x1], [y1], marker="o", s=40, facecolors=theme["surface"], edgecolors=theme["losat"], linewidths=1.5, zorder=3)
                 ax_r.text(0.45, yv, fmt_fold(x1) + ("*" if st1 else ""), ha="right", va="center", fontsize=7.9,
                           fontweight="bold" if x1 >= 9.95 and not st1 else "normal", color=theme["muted"] if st1 else theme["ink"])
             else:
                 ax_r.text(0.45, yv, "\u2014", ha="right", va="center", fontsize=8.0, color=theme["muted"])
             if xm is not None:
-                ax.scatter([xm], [yv], marker="o", s=44, color=theme["losat"], zorder=4)
+                ax.scatter([xm], [ym], marker="o", s=44, color=theme["losat"], zorder=4)
                 ax_r.text(0.95, yv, fmt_fold(xm) + ("*" if stm else ""), ha="right", va="center", fontsize=7.9,
                           fontweight="bold" if xm >= 9.95 and not stm else "normal", color=theme["muted"] if stm else theme["ink"])
 
@@ -598,9 +604,11 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             y -= 1.0
     ymin, ymax = y + 0.35, 0.7
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.4), sharey=True)
+    meta = read_meta(snap)
+    wasm_derived = bool(meta.get("wasm_derived", False))
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.5 if wasm_derived else 5.4), sharey=True)
     fig.patch.set_facecolor(theme["surface"])
-    fig.subplots_adjust(left=0.27, right=0.895, top=0.815, bottom=0.125, wspace=0.38)
+    fig.subplots_adjust(left=0.27, right=0.895, top=0.785 if wasm_derived else 0.815, bottom=0.155, wspace=0.38)
 
     handles = [
         Line2D([0], [0], marker="o", linestyle="none", markersize=6.5, color=theme["losat"], label="LOSAT native"),
@@ -647,9 +655,24 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
                 ax.plot([max(1.0, min(ws, 18.0)), 22.0], [yv, yv], linestyle=":", color=theme["line"], linewidth=1.4, zorder=2)
                 ax.text(10.0, yv + 0.25, f"{fmt_fold(ws)} and {fmt_fold(ns)} (off scale)", ha="center", va="bottom", fontsize=7.6, color=theme["ink"])
 
-    meta = read_meta(snap)
-    footer(fig, f"LOSAT {short_sha(meta.get('wasm_commit', ''))}, native and wasm32-wasip1-threads under Node.js, vs native NCBI BLAST+ "
-                f"{meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}. Wasm \u00f7 native: WebAssembly time over native LOSAT time.", theme)
+    if wasm_derived:
+        fig.text(
+            0.975,
+            0.942,
+            "Pre-C5 derived estimate (to be replaced by paired C5 run)",
+            ha="right",
+            va="top",
+            fontsize=8.0,
+            style="italic",
+            color=theme["muted"],
+        )
+    line1 = (
+        f"LOSAT {short_sha(meta.get('wasm_commit', ''))}, native and wasm32-wasip1-threads (Node.js), "
+        f"vs native NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}."
+    )
+    derived_note = " Pre-C5 derived from 6a0a8719 scaled to build above." if wasm_derived else ""
+    line2 = f"Wasm \u00f7 native: WebAssembly time over native LOSAT time.{derived_note}"
+    footer(fig, f"{line1}\n{line2}", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig4_webassembly{suffix}"
     save_png(fig, p, theme)

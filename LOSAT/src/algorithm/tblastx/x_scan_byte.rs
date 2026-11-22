@@ -821,7 +821,67 @@ unsafe fn candidates_avx2(
         k += 1;
     }
     // SAFETY: every index was masked with `X_MASK` (the vector loop's `mask`, the tail's `&`).
+    if X_FX_LIST == 2 {
+        return list4p(&index[..words], presence, cand);
+    }
     list(&index[..words], presence, cand)
+}
+
+/// PROBE (exp/fx-cellbf, line FX s2): the form of [`candidates_avx2`]'s list, fixed at build time
+/// (LOSAT_FXLIST_BUILD, a digit; 2 = [`list4p`], else [`list`]).
+const X_FX_LIST: u8 = match option_env!("LOSAT_FXLIST_BUILD") {
+    Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
+    None => 0,
+};
+
+/// PROBE (exp/fx-cellbf): [`list`] four words per step with the entry kept as a pointer that moves
+/// on by each word's presence byte (as `list`), so that every store has a base-only address (the
+/// count form `start.add(n)` of line FX s1's probe gave base + index stores).
+///
+/// # Safety
+/// As [`list`].
+#[inline(always)]
+unsafe fn list4p(
+    index: &[u16],
+    presence: &[u8; X_MASK + 1],
+    cand: &mut [MaybeUninit<u16>; X_BLOCK],
+) -> usize {
+    let start = cand.as_mut_ptr().cast::<u16>();
+    let mut out = start;
+    let p = presence.as_ptr();
+    let (fours, rest) = index.as_chunks::<4>();
+    let mut k = 0u16;
+    for w in fours {
+        // SAFETY: (caller) every index is at most `X_MASK`; `out` stays inside `cand` (as `list`).
+        unsafe {
+            let b = [
+                *p.add(w[0] as usize) as usize,
+                *p.add(w[1] as usize) as usize,
+                *p.add(w[2] as usize) as usize,
+                *p.add(w[3] as usize) as usize,
+            ];
+            out.write(k);
+            out = out.add(b[0]);
+            out.write(k + 1);
+            out = out.add(b[1]);
+            out.write(k + 2);
+            out = out.add(b[2]);
+            out.write(k + 3);
+            out = out.add(b[3]);
+        }
+        k += 4;
+    }
+    for &ix in rest {
+        // SAFETY: as above.
+        unsafe {
+            let bit = *p.add(ix as usize) as usize;
+            out.write(k);
+            out = out.add(bit);
+        }
+        k += 1;
+    }
+    // SAFETY: `out` was moved on from `start` inside `cand`, never back.
+    unsafe { out.offset_from_unsigned(start) }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:96,100

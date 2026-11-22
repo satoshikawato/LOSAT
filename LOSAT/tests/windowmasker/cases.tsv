@@ -403,3 +403,7 @@ t_wm_tx_ids	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx 
 t_wm_tx_ids_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt
 t_wm_tx_excl_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -exclude_ids in/ids_tx.txt
 t_wm_tx_ids_taxdb_sl	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt -outfmt seqloc_asn1_text
+# OID_MASK_TYPE (line RG, series D, D1b-2, 2026-11-21): the alias files of ../db_search/oidmask (make_oidmask.sh). With bit 0 of the key the definition lines with a predicted RefSeq id are erased; NCBI's reader gives no Bioseq for a sequence left without a line, and the masking step skips it. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-21, ad-RG-D-27.
+db_oidmask_ntall	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/ntall
+db_oidmask_ntall_fasta	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/ntall -outfmt fasta
+db_oidmask_omnx	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/omnx

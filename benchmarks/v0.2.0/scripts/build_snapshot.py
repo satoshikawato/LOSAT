@@ -108,6 +108,19 @@ def sanitize_input_key(path: Path, base: Path) -> str:
     return f"losat-baselines/{rel.as_posix()}"
 
 
+def collect_input_checksums(paths: list[Path], base: Path) -> dict[str, str]:
+    """Validate input paths against base, reject duplicate keys, and hash existing files."""
+    checksums: dict[str, str] = {}
+    for p in paths:
+        if not p.is_file():
+            continue
+        key = sanitize_input_key(p, base)
+        if key in checksums:
+            sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
+        checksums[key] = sha256_file(p)
+    return checksums
+
+
 def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
     """Parse optional anonymous private RSS (MiB) from raw benchmark rows."""
     if row.get("rss_anon_mib"):
@@ -361,21 +374,29 @@ def main() -> int:
     ap.add_argument("--losat-version", default="0.2.0")
     ap.add_argument("--wasm-paired", action="store_true",
                     help="mark WebAssembly measurements as direct paired runs (sets wasm_derived=false in metadata.json)")
+    ap.add_argument("--wasm-derived-from", default="6a0a8719",
+                    help="source LOSAT build recorded as wasm_derived_from when --wasm-paired is not set")
     ap.add_argument("--static-only", action="store_true", help="Only build downstream_tools (and webassembly if complete).")
     args = ap.parse_args()
 
-    os.makedirs(args.out, exist_ok=True)
-    dt_rows, dt_sources = build_downstream_tools(args.toolmt, args.dt_dir)
-    write_tsv(
-        args.out / "downstream_tools.tsv",
-        ["program", "tool", "threads_label", "threads_num", "cases_count",
-         "ncbi_mt_s", "losat_mt_s", "mt_speedup", "ncbi_n1_s", "losat_n1_s",
-         "n1_speedup", "same_output", "note"],
-        dt_rows,
-    )
+    dt_source_paths = [args.toolmt, args.dt_dir / "dt1.tsv", args.dt_dir / "dt13.tsv", args.dt_dir / "dt15.tsv"]
+    static_required = [*dt_source_paths, args.wasm_csv]
 
     if args.static_only:
+        for req in static_required:
+            if not req.is_file():
+                sys.exit(f"missing completed input file: {req}")
+        collect_input_checksums(static_required, base)
+        dt_rows, _dt_sources = build_downstream_tools(args.toolmt, args.dt_dir)
         wasm_rows = build_webassembly(args.wasm_csv, None)
+        os.makedirs(args.out, exist_ok=True)
+        write_tsv(
+            args.out / "downstream_tools.tsv",
+            ["program", "tool", "threads_label", "threads_num", "cases_count",
+             "ncbi_mt_s", "losat_mt_s", "mt_speedup", "ncbi_n1_s", "losat_n1_s",
+             "n1_speedup", "same_output", "note"],
+            dt_rows,
+        )
         write_tsv(
             args.out / "webassembly.tsv",
             ["case", "mode_label", "threads", "commit", "native_s", "wasm_s", "ncbi_s",
@@ -386,7 +407,11 @@ def main() -> int:
         print("static snapshot written:", args.out)
         return 0
 
-    # 1. Load J2 n1 and n16
+    wasm_derived_from = args.wasm_derived_from.strip()
+    if not args.wasm_paired and not wasm_derived_from:
+        sys.exit("--wasm-derived-from must be non-empty unless --wasm-paired is set")
+
+    # 1. Resolve all input paths, check existence, and validate input_checksums before any write
     j_n16_path = args.j2_dir / "n16/runs.tsv"
     j_n1_paths = sorted((args.j2_dir / "n1").glob("perfstat_*.tsv"))
     j_inputs_path = args.j2_dir / "inputs.tsv"
@@ -394,10 +419,29 @@ def main() -> int:
     ext_n1_path = args.ext_dir / "n1.tsv"
     ext_inputs_path = args.ext_dir / "inputs_ext.tsv"
     ext_bp_path = args.ext_dir / "bp_db_parity.tsv"
+    dt_sha_paths = [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
 
-    for req in (j_n16_path, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path):
-        if not req.is_file() or not j_n1_paths:
+    for req in (j_n16_path, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, *static_required):
+        if not req.is_file():
             sys.exit(f"missing completed input file: {req}")
+    if not j_n1_paths:
+        sys.exit(f"missing completed input files: {args.j2_dir / 'n1'}/perfstat_*.tsv")
+
+    input_files = [
+        j_n16_path,
+        *j_n1_paths,
+        j_inputs_path,
+        ext_n0_path,
+        ext_n1_path,
+        ext_inputs_path,
+        ext_bp_path,
+        args.wasm_csv,
+        *dt_source_paths,
+        *dt_sha_paths,
+    ]
+    input_checksums = collect_input_checksums(input_files, base)
+
+    dt_rows, _dt_sources = build_downstream_tools(args.toolmt, args.dt_dir)
 
     j_n16: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(j_n16_path):
@@ -511,11 +555,6 @@ def main() -> int:
     for opt_col in ("losat_rss_anon_mib", "ncbi_rss_anon_mib"):
         if any(opt_col in row for row in std_rows) and opt_col not in std_fields:
             std_fields.append(opt_col)
-    write_tsv(
-        args.out / "standard_workloads.tsv",
-        std_fields,
-        std_rows,
-    )
 
     # 3. utilities.tsv (makeblastdb + rpsbproc)
     util_rows = []
@@ -544,7 +583,6 @@ def main() -> int:
             "ncbi_sha16": next(iter(nc_sha)),
             "runs": len(lo),
         })
-    write_tsv(args.out / "utilities.tsv", list(util_rows[0].keys()), util_rows)
 
     # 4. scaling.tsv (2a thread scaling, 2b query size, 2c/2d database size)
     sc_rows = []
@@ -637,24 +675,15 @@ def main() -> int:
             "ncbi_rss_mib": round(float(r["ncbi_rss_mib"]), 2),
         })
 
-    write_tsv(args.out / "scaling.tsv", list(sc_rows[0].keys()), sc_rows)
-
     # 5. webassembly.tsv (strictly paired 7f7db49c runs; tblastx BLAST+ left unmeasured)
     wasm_rows = build_webassembly(args.wasm_csv, None)
-    write_tsv(
-        args.out / "webassembly.tsv",
-        list(wasm_rows[0].keys()),
-        wasm_rows,
-    )
 
-    # 6. Copy combined inputs & bp_db parity metadata
+    # 6. Combine inputs & bp_db parity metadata
     in_rows = []
     for r in read_tsv(j_inputs_path):
         in_rows.append({"source": "j2", **r})
     for r in read_tsv(ext_inputs_path):
         in_rows.append({"source": "bench_v020_ext", **r})
-    write_tsv(args.out / "inputs.tsv", ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"],
-              [{k: r.get(k, "") for k in ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"]} for r in in_rows])
 
     bp_par = read_tsv(ext_bp_path) if ext_bp_path.is_file() else []
     toolmt_builds = sorted({str(r.get("build", "")) for r in json.loads(args.toolmt.read_text(encoding="utf-8"))} - {""})
@@ -663,32 +692,47 @@ def main() -> int:
     for tag in ("dt1", "dt13", "dt15"):
         sp = args.dt_dir / f"{tag}_sha.txt"
         dt_builds[tag] = sp.read_text(encoding="utf-8").strip() if sp.is_file() else ""
-    input_checksums: dict[str, str] = {}
-    input_files = (
-        [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
-         args.wasm_csv, *map(Path, dt_sources)]
-        + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
-    )
-    for p in input_files:
-        if not p.is_file():
-            continue
-        key = sanitize_input_key(p, base)
-        if key in input_checksums:
-            sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
-        input_checksums[key] = sha256_file(p)
-    meta = {
+    meta: dict[str, object] = {
         "losat_version": args.losat_version,
         "losat_commit": args.losat_commit,
         "ncbi_version": "2.17.0",
         "rpsbproc_version": "0.5.1",
         "wasm_commit": ",".join(wasm_commits),
         "wasm_derived": not args.wasm_paired,
+    }
+    if not args.wasm_paired:
+        meta["wasm_derived_from"] = wasm_derived_from
+    meta.update({
         "toolmt_commit": ",".join(toolmt_builds),
         "dt_commits": dt_builds,
         "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
         "bp_db_parity": bp_par,
         "input_checksums": input_checksums,
-    }
+    })
+
+    # Write all snapshot outputs only after every input and row check has passed
+    os.makedirs(args.out, exist_ok=True)
+    write_tsv(
+        args.out / "downstream_tools.tsv",
+        ["program", "tool", "threads_label", "threads_num", "cases_count",
+         "ncbi_mt_s", "losat_mt_s", "mt_speedup", "ncbi_n1_s", "losat_n1_s",
+         "n1_speedup", "same_output", "note"],
+        dt_rows,
+    )
+    write_tsv(
+        args.out / "standard_workloads.tsv",
+        std_fields,
+        std_rows,
+    )
+    write_tsv(args.out / "utilities.tsv", list(util_rows[0].keys()), util_rows)
+    write_tsv(args.out / "scaling.tsv", list(sc_rows[0].keys()), sc_rows)
+    write_tsv(
+        args.out / "webassembly.tsv",
+        list(wasm_rows[0].keys()),
+        wasm_rows,
+    )
+    write_tsv(args.out / "inputs.tsv", ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"],
+              [{k: r.get(k, "") for k in ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"]} for r in in_rows])
     (args.out / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print("full snapshot written:", args.out)
     return 0

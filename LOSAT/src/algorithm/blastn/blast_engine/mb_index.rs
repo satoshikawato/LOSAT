@@ -57,10 +57,10 @@ pub(super) fn note_index_use(
         (None, None) => return Ok(()),
     };
     options.set_search_sets(
-        vec![crate::report::archive::options::Param {
-            name: "ForceMbIndex",
-            value: crate::report::archive::options::ParamValue::Boolean(true),
-        }],
+        vec![crate::report::archive::options::Param::new(
+            crate::report::archive::fields::FORCE_MB_INDEX,
+            crate::report::archive::options::ParamValue::Boolean(true),
+        )],
         Vec::new(),
     )
 }

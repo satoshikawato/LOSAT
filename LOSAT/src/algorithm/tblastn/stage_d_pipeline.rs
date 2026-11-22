@@ -13,10 +13,12 @@ use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
-    postredo_engine_positives, reap_contained_postredo_hsps, redo_preliminary_match,
-    ConvertedKappaHsp,
+    postredo_engine_positives, reap_contained_postredo_hsps, ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
+use super::match_redo::{
+    match_outcome, sw_batch_failed, sw_pssm_refusal, MatchRedo, SmithWatermanRedo, XDropRedo,
+};
 use super::search_gapped::{
     full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
     PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
@@ -38,20 +40,21 @@ use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
-use crate::algorithm::blastp::gapalign::GapAlignScratch;
 use crate::algorithm::blastp::protein_query_split::{
     protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     ProteinQueryChunk,
 };
+use crate::algorithm::common::database::{FetchExcluded, FetchMarks};
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::core::composition_adjustment::adjust_scores::{
-    read_aa_composition, BlastCompositionWorkspace,
+    compo_matrix_data, read_aa_composition, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
-    EMatrixAdjustRule,
+    BlastRedoAlignParams, EMatrixAdjustRule,
 };
+use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -289,6 +292,9 @@ pub(super) struct LocalStageDScoring {
     pub final_xdrop_bits: f64,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
     pub word_xdrop_bits: f64,
+    /// `-use_sw_tback`: NCBI's traceback option set to Smith-Waterman (`eSmithWatermanTbck`), the
+    /// Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
+    pub smith_waterman: bool,
 }
 
 impl Default for LocalStageDScoring {
@@ -303,6 +309,7 @@ impl Default for LocalStageDScoring {
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
+            smith_waterman: false,
         }
     }
 }
@@ -1149,7 +1156,58 @@ impl Drop for XSearchTimer {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (cited at
+// `match_redo`)
+// Dispatch point: the redo of a match is chosen once per query batch, by NCBI's `eTbackExt`
+// (`-use_sw_tback`): the Smith-Waterman redo (`match_redo::SmithWatermanRedo`) or the X-drop redo
+// of composition-based statistics (`match_redo::XDropRedo`); each is its own instance of the
+// batch's search (`run_local_search_with_redo`).
+#[allow(clippy::too_many_arguments)]
 fn run_local_search_with_pool(
+    queries: &[Vec<u8>],
+    subjects: SubjectLetters<'_>,
+    profile: LocalStageDProfile<'_>,
+    compo_adjust_mode: BlastCompoAdjustMode,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+    setup: &mut Option<LocalBatchSetup>,
+    observer: Option<&mut StageDBoundaryTrace>,
+    pool: Option<&SearchPool<'_>>,
+    setup_only: bool,
+) -> Result<Vec<KappaResultHitList>> {
+    if scoring.smith_waterman {
+        return run_local_search_with_redo(
+            queries,
+            subjects,
+            profile,
+            compo_adjust_mode,
+            do_sum_stats,
+            scoring,
+            setup,
+            observer,
+            pool,
+            setup_only,
+            &SmithWatermanRedo::new(scoring.matrix, compo_adjust_mode, profile.expect_value),
+        );
+    }
+    run_local_search_with_redo(
+        queries,
+        subjects,
+        profile,
+        compo_adjust_mode,
+        do_sum_stats,
+        scoring,
+        setup,
+        observer,
+        pool,
+        setup_only,
+        &XDropRedo,
+    )
+}
+
+/// The search of one query batch (`run_local_search_with_pool`) with the redo of a match `R`.
+#[allow(clippy::too_many_arguments)]
+fn run_local_search_with_redo<R: MatchRedo>(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
@@ -1160,6 +1218,7 @@ fn run_local_search_with_pool(
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
     setup_only: bool,
+    match_redo: &R,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
         !queries.is_empty(),
@@ -1471,26 +1530,27 @@ fn run_local_search_with_pool(
             })
         })
         .collect();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
-    // blast_traceback.c:1567-1577 (cited at `blastp::blast_engine::database::exclude_fetched`)
-    // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
-    // negative seqid list keeps without a line: its lists leave here, after the trim of
-    // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
-    // refused).
-    if let Some(excluded) = profile.fetch_excluded {
-        excluded
-            .retain(&mut preliminary_lists, |(_, oid, _)| {
-                u32::try_from(*oid).ok()
-            })
-            .map_err(|failed| {
-                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
-            })?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3346-3357
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
+    // The redo's set-up reads the frequency ratios of the matrix (`s_GetAlignParams`, its
+    // `s_MatrixInfoInit`), which IDENTITY has none of (`_PSIMatrixFrequencyRatiosNew` returns NULL
+    // past its named matrices, matrix_freq_ratios.c:1734-1736): the batch's traceback fails before
+    // the redo reads a match, whatever the batch found (`Traceback failed`; no heap holds a match).
+    // Only `-use_sw_tback` gets here with IDENTITY, which NCBI searches in mode 0
+    // (`identity_cbs_reset`), where the X-drop path runs no redo.
+    if (compo_adjust_mode.is_enabled() || R::SMITH_WATERMAN)
+        && compo_matrix_data(scoring.matrix).is_none()
+    {
+        return Err(sw_batch_failed(false));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing
     // OID, then each batch reads from the end; equal-OID query lists were
     // inserted in query order and are consumed in reverse query order.
     // Composition redo uses the score-sorted stream at lines 289-319.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:674-681 (the score sort
+    // only with composition-based statistics: the Smith-Waterman redo of `-comp_based_stats 0`
+    // reads the stream in this OID order too)
     if compo_adjust_mode.is_enabled() {
         preliminary_lists.sort_by(|(qa, oa, a), (qb, ob, b)| {
             qa.cmp(qb)
@@ -1500,10 +1560,26 @@ fn run_local_search_with_pool(
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
 
-    if !compo_adjust_mode.is_enabled() {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501,
-        // 1644-1707,1763-1776: the control path performs ordinary
-        // traceback and posttraceback statistics, then result post-pipes.
+    // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
+    let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
+    let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498 (cited at
+    // `match_redo`): the Smith-Waterman redo runs without composition-based statistics too.
+    if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577 (cited at
+        // `blastp::blast_engine::database::exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
+        // the negative seqid list keeps without a line; its lists leave here, after the trim of
+        // `ADAPTIVE_CBS` (tblastn is gapped: `-ungapped` is refused).
+        if let Some(excluded) = profile.fetch_excluded {
+            excluded
+                .retain(&mut preliminary_lists, list_ordinal)
+                .map_err(fetch_refusal)?;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1707
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776
+        // The control path performs ordinary traceback and posttraceback statistics, then result
+        // post-pipes.
         return finish_local_mode0_no_sum_stats(
             queries,
             subjects,
@@ -1520,12 +1596,32 @@ fn run_local_search_with_pool(
             pool,
         );
     }
-    // With a `-db` stream, the subjects of the lists, each read
+    // The redo's fetches (`s_MatchingSequenceInitialize`, `check_oid_exclusion`) exclude the
+    // same subjects; their lists stay in the stream as markers (`FetchMarks`): the loops below test
+    // a marker's early termination as any list's, and one that passes clears NCBI's status of the
+    // Smith-Waterman redo (`SwBatchStatus::excluded_at_fetch`) and is neither redone nor kept.
+    let excluded_at_fetch =
+        FetchMarks::of(profile.fetch_excluded, &preliminary_lists, list_ordinal)
+            .map_err(fetch_refusal)?;
+    // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
+    // its first match, the first list that the fetch keeps (the heaps are empty there, so early
+    // termination lets it go on): `match_redo::sw_pssm_refusal`.
+    if R::SMITH_WATERMAN
+        && profile.pssm.is_some()
+        && (0..preliminary_lists.len()).any(|index| !excluded_at_fetch.excluded(index))
+    {
+        return Err(sw_pssm_refusal());
+    }
+    // With a `-db` stream, the subjects of the lists that the redo fetches, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
-        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+        preliminary_lists
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !excluded_at_fetch.excluded(*index))
+            .map(|(_, (_, oid, _))| *oid),
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
@@ -1565,27 +1661,39 @@ fn run_local_search_with_pool(
     // do_link_hsps and cutoff_s follow the sum statistics of the hit-saving parameters
     // (`hitParams->do_sum_stats`: the search's linking parameters, `parameters.link`).
     let gumbel = gumbel.as_ref();
-    let redo_params = local_kappa_redo_params(
-        scoring.matrix,
-        scoring.gap_open,
-        scoring.gap_extend,
-        &gapped_by_context,
-        &valid_contexts,
-        &parameters,
-        *query_lengths.iter().max().unwrap(),
-        compo_adjust_mode,
-        false,
-        scoring.final_xdrop_bits,
-        local_extension_final_xdrop(
-            scoring.gap_xdrop_bits,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (cited at
+    // `match_redo`): the redo's `smithWaterman`.
+    let redo_params = BlastRedoAlignParams {
+        smith_waterman: R::SMITH_WATERMAN,
+        ..local_kappa_redo_params(
+            scoring.matrix,
+            scoring.gap_open,
+            scoring.gap_extend,
+            &gapped_by_context,
+            &valid_contexts,
+            &parameters,
+            *query_lengths.iter().max().unwrap(),
+            compo_adjust_mode,
+            false,
             scoring.final_xdrop_bits,
-            gapped.lambda,
-        )?,
-    )?;
+            local_extension_final_xdrop(
+                scoring.gap_xdrop_bits,
+                scoring.final_xdrop_bits,
+                gapped.lambda,
+            )?,
+        )?
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3108
+    // `localScalingFactor`, the redo parameters' (32 with
+    // composition-based statistics, 1 without them, where only the Smith-Waterman redo runs).
+    let scale = redo_params.score_divisor;
     let scaled = KarlinParams {
-        lambda: gapped.lambda / 32.0,
+        lambda: gapped.lambda / scale,
         ..gapped
     };
+    // `kbp->logK` of the redo's block (the scaling leaves K): read by the Smith-Waterman redo of
+    // e-value mode and by the normalization of each kept match.
+    let log_k = gapped.k.glibc_ln();
     let scaled_by_context = vec![scaled; queries.len()];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427;
     // core/blast_parameters.c:1245-1253: postredo link, when enabled, uses
@@ -1598,7 +1706,7 @@ fn run_local_search_with_pool(
         .map(|_| CompoHeap::new(profile.max_target_seqs, 0.002))
         .collect::<Result<_>>()?;
     let mut owned_lists = HashMap::new();
-    let mut scratch = GapAlignScratch::new();
+    let mut scratch = match_redo.scratch();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
     if scoring.matrix != ScoringMatrix::Blosum62 {
         use_matrix_workspace(&mut workspace, scoring.matrix)?;
@@ -1614,9 +1722,10 @@ fn run_local_search_with_pool(
     let redo_item = |context: usize,
                      oid: usize,
                      list: &LinkedHspList,
-                     redo_params: &crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
-                     scratch: &mut GapAlignScratch,
-                     workspace: &mut BlastCompositionWorkspace|
+                     redo_params: &BlastRedoAlignParams,
+                     scratch: &mut R::Scratch,
+                     workspace: &mut BlastCompositionWorkspace,
+                     heaps: Option<&mut [CompoHeap]>|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
         // the translations below read windows of it, as NCBI's do. A
@@ -1629,7 +1738,7 @@ fn run_local_search_with_pool(
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
         let mut matrix_state = None;
-        let mut redo = redo_preliminary_match(
+        let mut redo = match_redo.redo(
             &incoming,
             i32::try_from(context)?,
             &query_infos,
@@ -1637,7 +1746,10 @@ fn run_local_search_with_pool(
             profile.genetic_code,
             redo_params,
             scaled.lambda,
+            log_k,
             scoring.matrix,
+            oid,
+            heaps,
             scratch,
             workspace,
             &mut matrix_state,
@@ -1685,7 +1797,7 @@ fn run_local_search_with_pool(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
+        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, log_k, scale);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -1775,8 +1887,16 @@ fn run_local_search_with_pool(
     // NCBI redoes the matches in this omp loop. The matches of a batch are
     // redone on the pool by redo_item and then applied in list order (early termination is tested
     // again in order). A match depends only on its own preliminary list.
+    // NCBI's status of the last match that the Smith-Waterman redo reached (`status_code_tld`,
+    // `match_redo::match_outcome`); the X-drop redo has none.
+    let mut sw_status = SwBatchStatus::default();
+    // The Smith-Waterman redo of e-value mode reads the heaps (`match_redo::MatchRedo::
+    // reads_heaps`): its matches are redone in stream order on this thread, as NCBI's
+    // `-num_threads 1` redoes them.
     #[cfg(feature = "parallel")]
-    let parallel_redo = pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
+    let parallel_redo = pool.is_some_and(SearchPool::enabled)
+        && preliminary_lists.len() > 1
+        && !match_redo.reads_heaps(&redo_params);
     #[cfg(not(feature = "parallel"))]
     let parallel_redo = false;
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
@@ -1813,8 +1933,11 @@ fn run_local_search_with_pool(
             let states = (0..pool.threads())
                 .map(|_| {
                     let mut worker = XRedoWorker {
-                        params: make_params()?,
-                        scratch: GapAlignScratch::new(),
+                        params: BlastRedoAlignParams {
+                            smith_waterman: R::SMITH_WATERMAN,
+                            ..make_params()?
+                        },
+                        scratch: match_redo.scratch(),
                         workspace: BlastCompositionWorkspace::new_blosum62(),
                     };
                     if scoring.matrix != ScoringMatrix::Blosum62 {
@@ -1824,13 +1947,18 @@ fn run_local_search_with_pool(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let batch_size = pool.threads().saturating_mul(32).max(64);
-            for batch in preliminary_lists.chunks(batch_size) {
+            for (chunk, batch) in preliminary_lists.chunks(batch_size).enumerate() {
+                let first = chunk * batch_size;
                 // Early termination only becomes true as the heaps fill, so a match
                 // that is skipped now is also skipped at its turn; anything else is
-                // rechecked in order below.
+                // rechecked in order below. A marker (`excluded_at_fetch`) is never redone.
                 let wanted: Vec<bool> = batch
                     .iter()
-                    .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
+                    .enumerate()
+                    .map(|(at, (_, _, list))| {
+                        !excluded_at_fetch.excluded(first + at)
+                            && !compo_early_termination(list.best_evalue, &heaps)
+                    })
                     .collect();
                 let lpt = x_tbn_redo_lpt() && {
                     let acts = wanted.iter().filter(|&&wanted| wanted).count() > 1;
@@ -1848,6 +1976,7 @@ fn run_local_search_with_pool(
                             &worker.params,
                             &mut worker.scratch,
                             &mut worker.workspace,
+                            None,
                         )
                     })
                 } else {
@@ -1871,15 +2000,19 @@ fn run_local_search_with_pool(
                                     &worker.params,
                                     &mut worker.scratch,
                                     &mut worker.workspace,
+                                    None,
                                 ))
                             })
                             .collect()
                     })
                 };
-                for ((context, oid, list), result) in batch.iter().zip(computed) {
-                    if compo_early_termination(list.best_evalue, &heaps) {
-                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP).
-                        if result.is_none() {
+                for (at, ((context, oid, list), result)) in batch.iter().zip(computed).enumerate() {
+                    let excluded = excluded_at_fetch.excluded(first + at);
+                    let terminates_early = compo_early_termination(list.best_evalue, &heaps);
+                    if !sw_status.reaches_redo(terminates_early, excluded) {
+                        // A match that early termination stops: a redone match was done in
+                        // redo_item (LOSAT_X_TBNSTAGEDROP); a marker's subject is not on the stage.
+                        if terminates_early && result.is_none() && !excluded {
                             x_stage.done(*oid);
                         }
                         continue;
@@ -1892,7 +2025,7 @@ fn run_local_search_with_pool(
                         ));
                     }
                     let item = match result {
-                        Some(result) => result?,
+                        Some(result) => result,
                         None => redo_item(
                             *context,
                             *oid,
@@ -1900,8 +2033,11 @@ fn run_local_search_with_pool(
                             &redo_params,
                             &mut scratch,
                             &mut workspace,
-                        )?,
+                            None,
+                        ),
                     };
+                    let item =
+                        match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -1913,12 +2049,19 @@ fn run_local_search_with_pool(
         if x_tbn_redo_lpt() {
             crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);
         }
-        for (context, oid, list) in preliminary_lists {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
-            // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-            //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
-            if compo_early_termination(list.best_evalue, &heaps) {
-                x_stage.done(oid);
+        for (index, (context, oid, list)) in preliminary_lists.into_iter().enumerate() {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736
+            // Each list in stream order: the early termination test on its best e-value against
+            // the batch's heaps frees the list and goes on; otherwise its query's index is read.
+            let excluded = excluded_at_fetch.excluded(index);
+            let terminates_early = compo_early_termination(list.best_evalue, &heaps);
+            // NCBI's order (`SwBatchStatus::reaches_redo`): early termination, then the fetch, which
+            // excludes a marker's subject and sets the status back to 0.
+            if !sw_status.reaches_redo(terminates_early, excluded) {
+                // A marker's subject is not on the stage.
+                if terminates_early && !excluded {
+                    x_stage.done(oid);
+                }
                 continue;
             }
             if let Some(ref mut trace) = observer {
@@ -1933,9 +2076,21 @@ fn run_local_search_with_pool(
                 &redo_params,
                 &mut scratch,
                 &mut workspace,
-            )?;
+                match_redo
+                    .reads_heaps(&redo_params)
+                    .then_some(&mut heaps[..]),
+            );
+            let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
             keep_item(context, &mut heaps, item);
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at
+    // `match_redo::sw_batch_failed`)
+    // The status of the last match the Smith-Waterman redo reached fails the batch.
+    if R::SMITH_WATERMAN && sw_status.failed() {
+        return Err(sw_batch_failed(
+            heaps.first().is_some_and(|heap| heap.len() > 0),
+        ));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
@@ -2114,10 +2269,12 @@ fn x_flow_window(threads: usize) -> usize {
 // (NRrecord_tld, redo_align_params_tld, and the gap_align and matrix of the thread).
 // One pool slot's redo state.  NCBI c++/src/algo/blast/core/blast_kappa.c:3290-3340
 // allocates the same per thread (redo_align_params_tld, gap_align_tld, NRrecord_tld).
+// `S` is the redo's memory (`match_redo::MatchRedo::Scratch`: NCBI's `gap_align`, or the
+// Smith-Waterman redo's forbidden ranges and windows).
 #[cfg(feature = "parallel")]
-struct XRedoWorker {
-    params: crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
-    scratch: GapAlignScratch,
+struct XRedoWorker<S> {
+    params: BlastRedoAlignParams,
+    scratch: S,
     workspace: BlastCompositionWorkspace,
 }
 
@@ -2126,7 +2283,7 @@ struct XRedoWorker {
 // synchronous call and restores before it returns; the state is only reached
 // through its mutex, so it is never observed mid-call by another thread.
 #[cfg(feature = "parallel")]
-unsafe impl Send for XRedoWorker {}
+unsafe impl<S: Send> Send for XRedoWorker<S> {}
 
 // No NCBI counterpart: reads the LOSAT_X_TBNREDOLPT variable once; it does not change any value
 // NCBI computes.

@@ -25,11 +25,12 @@ use crate::report::tabular::SubjectFetch;
 
 /// Whether `error` may fail one batch, after the reports of the batches before, rather than the
 /// run: the errors `batch_failure` reads (a read of the database that failed, `XReadError`; a
-/// batch whose setup failed, `SetupEngineError`; or one whose search LOSAT refuses after the
-/// reports of the batches before, `ErrorAfterBatchReports`). The batches searched ahead
-/// (`stage_d_pipeline::x_search_batches`) are then searched again one at a time, so that the
-/// earliest batch that fails does in its place, after the reports of the batches before it, and
-/// nothing of it or of the batches after it is written (`batch_failure` decides).
+/// batch whose setup failed, `SetupEngineError`; or one whose search LOSAT refuses or fails after
+/// the reports of the batches before, `ErrorAfterBatchReports`: a step where NCBI's search crashes,
+/// does not finish or stops, and the failed or endless Smith-Waterman redo of `-use_sw_tback`). The
+/// batches searched ahead (`stage_d_pipeline::x_search_batches`) are then searched again one at a
+/// time, so that the earliest batch that fails does in its place, after the reports of the batches
+/// before it, and nothing of it or of the batches after it is written (`batch_failure` decides).
 fn fails_one_batch(error: &anyhow::Error) -> bool {
     error.is::<XReadError>()
         || error.is::<SetupEngineError>()
@@ -43,9 +44,10 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// subject length); and where LOSAT refuses a step at which NCBI's search of the batch crashes,
 /// does not finish or stops, after it has printed the reports of the batches before
 /// (`ErrorAfterBatchReports`: line RG item X-short-bat, and the setup's statistics count of 0,
-/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG): its refusal, as the batch's
-/// failure. Any other refusal of LOSAT's (and any other error) is returned as `Err` to stop the
-/// run before its first byte.
+/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG), or the batch's search fails
+/// after those reports (the failed or endless Smith-Waterman redo of `-use_sw_tback`,
+/// `match_redo`): that error, as the batch's failure. Any other refusal of LOSAT's (and any other
+/// error) is returned as `Err` to stop the run before its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
         return Ok(crate::blastinput::app::engine_error(text));
@@ -1911,6 +1913,9 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
+        // An error that may fail one batch while the batches were searched ahead
+        // (`fails_one_batch`): they are searched again one at a time below, so that the batch
+        // that fails does after the reports of the batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,

@@ -35,11 +35,12 @@ pub(super) fn determine_scanning_offsets(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58 (the scan moves to the next
-// range of the list, never back) and c++/src/algo/blast/core/blast_aascan.c:75-123 (the words of a
+// range of the list, never back) and c++/src/algo/blast/core/blast_aascan.c:75-127 (the words of a
 // range left to right). The first range starts the scan at its left even when it holds no word
-// (c++/src/algo/blast/core/aa_ungapped.c:497-500). The ranges of a database sequence with
+// (c++/src/algo/blast/core/aa_ungapped.c:495-500). The ranges of a database sequence with
 // `-db_soft_mask` are the complement of its masks in the order stored, unsorted
 // (c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2490-2506,
+// c++/include/objtools/blast/seqdb_reader/seqdb.hpp:276-282 and 302-306 (the layout of the ranges),
 // c++/src/algo/blast/api/seqsrc_seqdb.cpp:398-405, c++/src/algo/blast/core/blast_util.c:211-215).
 /// Where a word finder's scan of a chunk's `seq_ranges` has come, for the order check of its hits
 /// (debug builds): the range it scans and the subject offset of its last hit. The scan takes the

@@ -804,6 +804,7 @@ fn scan_chunk_plain<S: TbxScore>(
             scan_chunk_size
         },
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58 (cited at `ScanOrder`)
     // The order check (debug builds, `ScanOrder`): the chunk's hits come in the order of NCBI's
     // scan of its ranges, across the scan calls and the interiors, which cut the chunk's one range
     // without soft masks.
@@ -874,6 +875,7 @@ fn scan_chunk_plain<S: TbxScore>(
                 let pair = unsafe { &*offset_pairs_ptr.add(i) };
                 let query_offset = pair.q_off;
                 let subject_offset = pair.s_off;
+                // No NCBI counterpart: LOSAT's debug check of the hit order (`ScanOrder`).
                 debug_assert!(
                     scan_order.takes(order_ranges, wordsize, subject_offset as i32),
                     "TBLASTX scan chunks must replay seeds in the scan's order: the ranges in \

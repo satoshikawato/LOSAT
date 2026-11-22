@@ -192,8 +192,9 @@ impl NumericIsam {
             first_key: 0,
             last_key: 0,
         };
-        let (start, count) = isam.page(num_samples - 1);
-        let last = row_offset(isam.term_size(), start, count - 1);
+        // The last page's start cancels out: its last element is the row before `m_NumTerms`,
+        // also where the samples' pages would end before it or start after it.
+        let last = row_offset(isam.term_size(), 0, i64::from(num_terms) - 1);
         let data_len = isam.data.len();
         let mapped = super::file::mapped_length(data_len);
         if last.saturating_add(isam.term_size()) > mapped {

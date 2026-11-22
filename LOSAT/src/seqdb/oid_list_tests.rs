@@ -85,7 +85,7 @@ fn files_without_a_byte_of_bits_are_refused() {
         let path = dir.write("short.msk", &vec![0u8; len as usize]);
         let error = read(&path).unwrap_err();
         assert!(
-            matches!(&error, OidListError::Short(at, n) if *at == PathBuf::from(&path) && *n == len)
+            matches!(&error, OidListError::Short(at, n) if at.as_path() == std::path::Path::new(&path) && *n == len)
         );
         assert!(matches!(
             error.to_error(),
@@ -140,7 +140,7 @@ fn a_read_past_the_last_mapped_page_is_refused() {
     let error = file.volume_words(4092 * 8 + 1).unwrap_err();
     assert!(matches!(
         &error,
-        OidListError::PastPage { path: at, read: 4093, len: 5 } if *at == PathBuf::from(&path)
+        OidListError::PastPage { path: at, read: 4093, len: 5 } if at.as_path() == std::path::Path::new(&path)
     ));
     assert!(matches!(error.to_error(), SeqDbError::NcbiCrashes { .. }));
 }

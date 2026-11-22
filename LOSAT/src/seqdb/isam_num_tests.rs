@@ -192,6 +192,18 @@ fn the_bounds_are_read_in_the_mapping_of_the_data_file() {
             "{error}"
         );
     }
+    // A header with more samples than the rows fill: the last page would start past the last
+    // row, and the last key is still the row before `m_NumTerms` (review 2 of line RG D1c-1, R3).
+    let base3 = write_isam(&dir, &[(5, 0), (9, 1), (12, 2)], false, 2);
+    let mut more_samples = std::fs::read(&ni).unwrap();
+    more_samples[16..20].copy_from_slice(&3i32.to_be_bytes());
+    std::fs::write(&ni, more_samples).unwrap();
+    let Some(Opened::Ready(isam)) =
+        NumericIsam::open_for_list(&base3, SeqType::Protein, ListIsam::Gi, 3).unwrap()
+    else {
+        panic!("not ready");
+    };
+    assert_eq!((isam.first_key, isam.last_key), (5, 12));
     // An empty data file has no mapping (NCBI's null pointer): its first row is refused too.
     std::fs::write(with_extension(&base, SeqType::Protein, "nd"), []).unwrap();
     with_terms(1, 0);

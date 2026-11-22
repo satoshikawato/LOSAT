@@ -608,7 +608,7 @@ pub(super) fn render(
                 |q_idx| {
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(formatting.report_sort()),
-                        false,
+                        None,
                         report_counts.num_descriptions,
                         q_idx,
                         rows,
@@ -1521,6 +1521,8 @@ fn write_pairwise(
             .map(|links| crate::report::html_ids::HtmlReport::new(links, shown.report_oids())),
         ..PairwiseConfig::default()
     };
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
     write_tblastn_pairwise_report(
         if pssm.is_some() {
             super::in_pssm::PROGRAM
@@ -1544,7 +1546,13 @@ fn write_pairwise(
         ranges.epilog,
         anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         html_masks,
-    )?;
+        match shown {
+            ShownSubjects::Fasta { .. } => &every_loaded,
+            ShownSubjects::Database { reported, .. } => &reported.loads,
+        },
+    )
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
+    .map_err(crate::cli::NativeError::of_writer)?;
     Ok(())
 }
 

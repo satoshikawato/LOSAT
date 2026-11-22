@@ -19,9 +19,10 @@ use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
+use crate::blastinput::query_batch::BatchCount;
 use crate::blastinput::seq_range::{
-    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
-    QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
+    RangeRole, SequenceRange,
 };
 
 // EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the seed stage of a subject as units
@@ -992,21 +993,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
-    // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
+    // `cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -1264,10 +1254,8 @@ fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
@@ -1476,6 +1464,7 @@ fn search_cli(
 pub fn run_local(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1506,9 +1495,10 @@ pub fn run_local(
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local(args, query_records, subject_records, view)
+                run_local(args, query_records, query_end, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            let no_query = query_records.is_empty() && query_end.is_input();
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
     // The thread count is checked before the inputs are read, as on the command line (`run`).
@@ -1538,7 +1528,7 @@ pub fn run_local(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         query_range,
         SubjectSource::Fasta {
             records: searched_subjects,
@@ -1559,6 +1549,7 @@ pub fn run_local(
 pub fn run_local_database(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1584,11 +1575,12 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, settings, view)
+                search_database(args, query_records, query_end, settings, view)
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, settings, outputs),
+        None => search_database(args, query_records, query_end, settings, outputs),
     }
 }
 
@@ -1596,6 +1588,7 @@ pub fn run_local_database(
 fn search_database(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1614,7 +1607,7 @@ fn search_database(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         query_range,
         SubjectSource::Database(&database),
         outputs,
@@ -1974,8 +1967,8 @@ fn write_pairwise_prologs(
                         crate::wording::REPORT_VERSION,
                         tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
-                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
-                        // (Int8) (*iter)->length`).
+                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181: `m_iTotalLength` grows by
+                        // the `length` of each element, cast to `Int8`).
                         match x_stored {
                             Some((stores, _)) => {
                                 stores.iter().map(|store| store.len() as i64).sum()
@@ -2471,6 +2464,8 @@ fn write_tblastx_outputs(
                     // An exception of NCBI's merge in a query-anchored section ends the report after
                     // what it wrote before (`query_anchored::write_section`) with `CATCH_ALL`'s report
                     // (`NativeError::of_writer`), without the epilog or the later batches.
+                    // A subject set's subjects are all loaded.
+                    let every_loaded = crate::report::db_subject::HitLoads::default();
                     let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
                                      masks: Option<&[crate::report::query_anchored::HspMasks]>,
                                      range: std::ops::Range<usize>|
@@ -2491,6 +2486,8 @@ fn write_tblastx_outputs(
                                 sequences as &dyn crate::report::query_anchored::ReportSequences
                             }),
                             masks,
+                            run.database
+                                .map_or(&every_loaded, |database| &database.reported.loads),
                         )
                         .map_err(crate::cli::NativeError::of_writer)
                     };
@@ -2992,7 +2989,7 @@ fn run_in_pool(
         reads: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     let no_batch = query_runs.input_records.is_empty() && matches!(reading, QueryReading::End);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length
@@ -3028,8 +3025,16 @@ fn run_in_pool(
     // before it (`x_pipe_plan`), when the pipe may run (`x_pipe_wanted`); `None` keeps the loop's
     // own searches.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let x_plan = x_pipe_wanted(parallel_pool)
-        .then(|| x_pipe_plan(input, &reading, batch_size, query_records));
+    let x_plan = x_pipe_wanted(parallel_pool).then(|| {
+        x_pipe_plan(
+            input,
+            &reading,
+            batch_size,
+            query_records,
+            query_runs.input_records,
+            batch_count(&args, subjects, outputs),
+        )
+    });
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:193-195
     // The search of one batch, the queries `range`; with LOSAT_X_TBXPIPE its seed-stage end
     // (`seed_end`) may start the next batch (tblastx/x_batch_pipe.rs).
@@ -3065,6 +3070,7 @@ fn run_in_pool(
             parallel_pool,
             seed_end,
             x_board.as_ref(),
+            false,
         ),
         Some(scores) => search_query_batch(
             *scores,
@@ -3075,6 +3081,33 @@ fn run_in_pool(
             parallel_pool,
             seed_end,
             x_board.as_ref(),
+            false,
+        ),
+    };
+    // The set-up alone of the records of a refused batch that are first in their scope
+    // (`run_batch_loop`; line WQA D10 round 5, 2026-11-20).
+    let set_up = |records: &[FastaRecord]| match &matrix_scores {
+        None => search_query_batch(
+            Blosum62Score,
+            &args,
+            records,
+            search_subjects,
+            numbers,
+            parallel_pool,
+            None,
+            None,
+            true,
+        ),
+        Some(scores) => search_query_batch(
+            *scores,
+            &args,
+            records,
+            search_subjects,
+            numbers,
+            parallel_pool,
+            None,
+            None,
+            true,
         ),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -3114,6 +3147,7 @@ fn run_in_pool(
             &reports,
             stream,
             take,
+            &set_up,
         )
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -3166,6 +3200,24 @@ fn writes_debug_output() -> bool {
         || stage_dump::enabled()
 }
 
+/// NCBI's reader's count of the query records into the batches of a run (`BatchCount`), with
+/// the scope of `run_batch_loop`'s `QueryScopes` (`None` without `-parse_deflines`). The pipe's
+/// plan (`x_pipe_plan`) reads it.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn batch_count(
+    args: &TblastxArgs,
+    subjects: &RunSubjects<'_>,
+    outputs: &ReportOutputs<'_>,
+) -> Option<BatchCount> {
+    let subject_records = matches!(subjects.shown, ShownSubjects::Fasta { .. });
+    let xml = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    let span = crate::blastinput::query_batch::QueryScopeSpan::of(subject_records, xml);
+    args.parse_deflines
+        .then(|| BatchCount::new(span, "TBLASTX"))
+}
+
 // EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
 // its order: its batch boundaries and the checks of a batch that need no search (the reader's
 // error where the reading ends, a batch without a query, a batch whose queries all lack a codon
@@ -3178,6 +3230,8 @@ fn x_pipe_plan(
     reading: &QueryReading,
     batch_size: u32,
     query_records: &[FastaRecord],
+    input_records: &[FastaRecord],
+    mut count: Option<BatchCount>,
 ) -> Vec<std::ops::Range<usize>> {
     let mut plan = Vec::new();
     let reads_past_records = reading.reads_past_records();
@@ -3185,7 +3239,9 @@ fn x_pipe_plan(
     let mut reading_ended = false;
     let mut input_start = 0;
     while input_start < input.input_lengths.len() || (reads_past_records && !reading_ended) {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            count.as_mut(),
+            &|record| input_records[record].believed_shared(),
             &input.input_lengths,
             &input.skipped,
             input_start,
@@ -3230,6 +3286,7 @@ fn run_batch_loop(
     reports: &BatchReports<'_>,
     stream: bool,
     take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>,
+    set_up: &dyn Fn(&[FastaRecord]) -> Result<TblastxBatch>,
 ) -> Result<()> {
     let query_records = query_runs.records;
     let input = query_runs.input;
@@ -3256,6 +3313,7 @@ fn run_batch_loop(
         } else {
             scopes
         }
+        .with_refusal(args.scope_refusal.clone())
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
@@ -3306,15 +3364,22 @@ fn run_batch_loop(
         .and_then(crate::api::local_blast::FormatOutput::report_format);
     let places_reads =
         first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-    // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its `-sorthits`.
-    let pairwise = first_report
+    // The pairwise reports (outfmt 0 to 4) read the subjects that they show as their writers read
+    // them (for the loads); the first format places the texts in the order of its reads.
+    let pairwise = super::super::database::pairwise_reading(
+        &outputs.formats,
+        args.formatting.report_sort(),
+        args.report_counts,
+    );
+    let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .map(|view| view.report_sort(args.formatting.report_sort()));
+        .is_some();
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::report_loads`).
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
+        outputs.other_outfmts,
     ));
     // Whether the reports write the same where every load of a subject with a positive taxid throws
     // (`db_subject::unchanged_by_load_throws`).
@@ -3373,13 +3438,17 @@ fn run_batch_loop(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut count = BatchCount::of(query_scopes.as_ref());
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
     while input_start < input.input_lengths.len()
         || (reading.reads_past_records() && !reading_ended)
     {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            count.as_mut(),
+            &|record| query_runs.input_records[record].believed_shared(),
             &input.input_lengths,
             &input.skipped,
             input_start,
@@ -3432,6 +3501,30 @@ fn run_batch_loop(
             .into());
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:178-181
+        // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
+        // program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+        // `-export_search_strategy` before the batch's request, which NCBI writes with the earlier
+        // record's letters for the repeated id (no request of the batch is written); else after the
+        // batch's checks before its set-up (the query splitter's environment, queries without
+        // letters, the matrix name), where the set-up of the batch's records that are first in the
+        // scope gives NCBI's error of the subjects or the refusal comes, before the search. The
+        // stop is written as the Owner's decision Q-X2c of 2026-11-16 writes TBLASTX's refusals of
+        // the search: after the reports of the batches before (for the first batch, the prologs)
+        // and the messages of the batch's records. (Round 4 refused after the search, and wrote the
+        // batch's request.)
+        let mut scope_refusal = None;
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(refusal) =
+                scopes.add_batch(&query_runs.input_records[input_start..input_end], start)
+            {
+                scope_refusal = Some(refusal);
+            }
+        }
+        if let Some(refusal) = scope_refusal.take_if(|_| args.strategy.is_some()) {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            return Err(refusal);
+        }
         // The batch's search strategy request (`-export_search_strategy`): once its query factory
         // is made, before its set-up and search, so every error of the batch from here on follows
         // it (the file is apart from the reports). Its `EffectiveSearchSpace` option is the one
@@ -3521,6 +3614,34 @@ fn run_batch_loop(
             }
             .into());
         }
+        // The batch of LOSAT's refusal (`scope_refusal` above): NCBI's error of the set-up of its
+        // records that are first in the scope (`set_up`, which ends before the search; the
+        // database's kept read error where its sequences could not be read, as `take` fails such a
+        // batch below), or the refusal.
+        if let Some(refusal) = scope_refusal.take() {
+            let error =
+                crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+                    let records: Vec<FastaRecord> = (start..end)
+                        .filter(|&query| first[input.ordinal(query) - input_start])
+                        .map(|query| query_records[query].clone())
+                        .collect();
+                    match set_up(&records) {
+                        Ok(_) => None,
+                        Err(error) if error.is::<SubjectsUnreadable>() => stores_error
+                            .take()?
+                            .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
+                            .ok()
+                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0)),
+                        Err(error) => error
+                            .downcast::<ErrorAfterBatchReports>()
+                            .ok()
+                            .map(|ErrorAfterBatchReports(error)| error),
+                    }
+                });
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            return Err(error);
+        }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {
             Ok(batch) => {
@@ -3578,11 +3699,6 @@ fn run_batch_loop(
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
-        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
-        // the batch (its own errors come first), as its refusal of a title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            scopes.add_batch(&query_runs.input_records[input_start..input_end], start)?;
-        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
@@ -3714,7 +3830,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    run_loads.run(),
+                    run_loads.answer(),
                     &|hsp| {
                         super::super::database::hit_identities(
                             &reports.stores.borrow(),
@@ -3776,6 +3892,7 @@ fn run_batch_loop(
                                 &run_loads,
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
+                                pairwise,
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -3803,13 +3920,21 @@ fn run_batch_loop(
                             query_fetches.push(if shown.is_empty() {
                                 Vec::new()
                             } else if places_reads {
+                                let titles = reports.titles.borrow();
+                                let ordinals = super::super::database::read_ordinals(
+                                    &shown,
+                                    &ordered[from..to],
+                                    &titles,
+                                    pairwise.filter(|_| pairwise_first),
+                                    &loads,
+                                );
                                 let texts = super::super::database::subject_read_texts(
                                     database,
-                                    shown,
-                                    &reports.titles.borrow(),
+                                    ordinals,
+                                    &titles,
                                     plural_names,
-                                    pairwise,
                                 )?;
+                                drop(titles);
                                 let mut reads = reports.reads.borrow_mut();
                                 let index = start + query as usize;
                                 if reads.len() <= index {
@@ -4159,8 +4284,17 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::after_throw(
-                        outputs.formats.iter().map(|format| format.outfmt),
+                    (
+                        super::super::database::after_throw(
+                            outputs.formats.iter().map(|format| format.outfmt),
+                            outputs.other_outfmts,
+                        ),
+                        // The pairwise reports' reads (as `run_batch_loop`'s).
+                        super::super::database::pairwise_reading(
+                            &outputs.formats,
+                            self.args.formatting.report_sort(),
+                            self.args.report_counts,
+                        ),
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(
@@ -4432,6 +4566,10 @@ fn search_query_batch<S: TbxScore>(
     // EXPERIMENT (LOSAT_X_TBXBOARD): the search's board of units and link groups, `None` without it
     // (tblastx/x_work_board.rs).
     x_board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
+    // The set-up of the batch alone, up to its checks of the subjects (`context_cutoffs`): a batch
+    // that passes them returns unsearched. The set-up of a batch that LOSAT refuses
+    // (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+    setup_only: bool,
 ) -> Result<TblastxBatch> {
     // The search's flags, threads, genetic codes, window and word size, and the ungapped block of
     // the X-dropoffs (`batch_setup::batch_flags`).
@@ -4732,6 +4870,14 @@ fn search_query_batch<S: TbxScore>(
         debug_cutoffs_all,
         query_frames: &query_frames,
     })?;
+    if setup_only {
+        return Ok(TblastxBatch {
+            hits: Vec::new(),
+            searched: false,
+            queries: vec![TblastxQueryStats::default(); queries_raw.len()],
+            x_timing: Vec::new(),
+        });
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]

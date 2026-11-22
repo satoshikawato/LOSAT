@@ -9,7 +9,7 @@ use std::io::{self, Write};
 // NCBI reference (598d8ae6): c++/src/html/htmlhelper.cpp:58-130 (`s_HTMLEncode`): `"` -> `&quot;`,
 // `&` -> `&` + `amp;` (the default `fEncodeAll` sets no `fSkipEntities`), `<` -> `&lt;`,
 // `>` -> `&gt;`; every other byte (`'` too) is copied.
-/// `CHTMLHelper::HTMLEncode(text)` with its default flags (`fEncodeAll`), appended to `out`.
+/// `CHTMLHelper::HTMLEncode` of `text` with its default flags (`fEncodeAll`), appended to `out`.
 pub(crate) fn html_encode_into(text: &[u8], out: &mut Vec<u8>) {
     let mut last = 0;
     for (i, &c) in text.iter().enumerate() {
@@ -27,7 +27,7 @@ pub(crate) fn html_encode_into(text: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(&text[last..]);
 }
 
-/// `CHTMLHelper::HTMLEncode(text)` (`html_encode_into`).
+/// `CHTMLHelper::HTMLEncode` of `text` (`html_encode_into`).
 pub(crate) fn html_encode(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() + 16);
     html_encode_into(text, &mut out);
@@ -64,8 +64,8 @@ enum Score {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:279-294
-/// `x_WrapOutputLine(text, width, out, true)`: `text` HTML-encoded and wrapped by `NStr::Wrap`
-/// with `fWrap_HTMLPre` (`wrap_html_pre`), each line followed by `\n`.
+/// `x_WrapOutputLine` of `text` at `width` with HTML on: `text` HTML-encoded and wrapped by
+/// `NStr::Wrap` with `fWrap_HTMLPre` (`wrap_html_pre`), each line followed by `\n`.
 pub(crate) fn write_html_wrapped<W: Write + ?Sized>(
     writer: &mut W,
     text: &[u8],
@@ -88,8 +88,8 @@ pub(crate) fn write_html_wrapped<W: Write + ?Sized>(
 // The text is HTML-encoded (`x_WrapOutputLine`), so it holds no `<`: the tag and link branches
 // (:5186-5216, :5142-5146, :5306-5308) never run. A reference (`&amp;`) is one column and no
 // break point.
-/// `NStr::Wrap(encoded, width, lines, fWrap_HTMLPre)`, each line followed by `\n`, appended to
-/// `out`. `encoded` is HTML-encoded (no `<`).
+/// `NStr::Wrap` of `encoded` at `width` with the flag `fWrap_HTMLPre`, each line followed by `\n`,
+/// appended to `out`. `encoded` is HTML-encoded (no `<`).
 pub(crate) fn wrap_html_pre(encoded: &[u8], width: usize, out: &mut Vec<u8>) {
     let str = encoded;
     let len = str.len();

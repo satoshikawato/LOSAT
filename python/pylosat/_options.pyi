@@ -30,6 +30,8 @@ class BlastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -48,8 +50,7 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (an index that would be used is not supported) [default:
-    false]"""
+    """Use MegaBLAST database index [default: false]"""
     index_name: str
     """MegaBLAST database index name (deprecated; use only for old style indices)"""
     evalue: float
@@ -160,6 +161,8 @@ class BlastpOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -266,6 +269,8 @@ class BlastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -302,9 +307,14 @@ class BlastxOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit [default: 0, no culling]"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     ungapped: bool
     lcase_masking: bool
+    use_sw_tback: bool
     strand: Literal['both', 'plus', 'minus']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
@@ -363,6 +373,8 @@ class TblastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -403,6 +415,7 @@ class TblastnOptions(TypedDict, total=False):
     seg: str
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: 12 2.2 2.5]"""
     lcase_masking: bool
+    use_sw_tback: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     sum_stats: bool
@@ -434,6 +447,10 @@ class TblastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     num_threads: int
@@ -469,6 +486,8 @@ class TblastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -524,6 +543,10 @@ class TblastxOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     query_loc: str

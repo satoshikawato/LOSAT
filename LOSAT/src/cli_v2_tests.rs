@@ -787,7 +787,7 @@ fn defaults_and_task_overrides_remain_distinct() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
-// more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
+// more (`CArgAllowValuesGreaterThanOrEqual` with 0), which NCBI reads with the sign and
 // hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
 #[test]
 fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
@@ -803,7 +803,7 @@ fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
                     "{program} {key} {value}"
                 );
             }
-            // The exclusion is NCBI's `SetDependency(eExcludes)`.
+            // The exclusion is NCBI's `SetDependency` with `eExcludes`.
             let error = parse(program, &["-max_target_seqs", "5", key, "5"])
                 .err()
                 .unwrap_or_else(|| panic!("{program} -max_target_seqs with {key}"));
@@ -1774,15 +1774,9 @@ fn blastp_takes_a_database_and_its_size() {
         let text = crate::cli::render_message(&error);
         assert!(text.contains("'-db <NAME>'"), "{text}");
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // BLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted
@@ -1882,14 +1876,9 @@ fn tblastn_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // TBLASTX's `-db NAME` and `-dbsize N`, as TBLASTN's: `-db` excludes `-subject` and
@@ -1933,15 +1922,10 @@ fn tblastx_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
+        .unwrap();
 }
 
 #[test]

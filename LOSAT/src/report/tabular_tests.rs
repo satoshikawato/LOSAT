@@ -665,7 +665,7 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
     String::from_utf8(out).unwrap()
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId` of `list`):
 // NCBI BLAST+ 2.17.0 `blastn -subject` with two titles `Subject_9 bad x\x81y title`,
 // `Subject_7 other \x8dz` (probe `remaining-gaps-20261112/T/t7`, `s.bb.blastn.f6wide`), and a
 // found subject before a failed one (`s.gb`): `sseqid` Unknown, `sgi` 0, the Seq-align ids added
@@ -735,7 +735,7 @@ fn failed_lookups_write_ncbis_catch_row() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId` of `list`, then a return of -1)
 // where the load of the subject throws (`DB contains no accession info.`, a batch whose
 // prefetch is off; probe of line DBID pfoff-2, `R/pfoff/p2`, `bp.U2.*`, DECISIONS 62 (12)):
 // the row keeps the last loaded row's ids, titles and taxonomy, `sall*` add the Seq-align id
@@ -937,8 +937,8 @@ fn a_rows_fields_say_what_its_throw_does() {
     assert_eq!(
         spec("qseqid nident").format_throw(Program::Blastx),
         FormatThrow::Writes(RunThrow {
-            after: AfterThrow::EndsRun,
             rows: SubjectFetch::WithIdentities,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
         })
     );
     // `slen` and a field of the alignment block read the subject at every row.
@@ -1184,6 +1184,76 @@ fn end_gaps_are_spaces_in_the_rows_and_btop() {
     out.clear();
     write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
     assert_eq!(out, b"4K-");
+}
+
+// Review S1 of PS15a-2 (`tmp/rev15a2/col`, every field alone against NCBI with a profile whose id
+// is `lcl|Query_1`): the RPS programs refuse outfmt 18 and 20 only where NCBI's bytes differ.
+#[test]
+fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
+    use crate::blastinput::app::Program;
+    let spec = |number: i32, format: ReportFormat, fields: &str| {
+        TabularSpec::of_app(
+            format,
+            &FormatChoice {
+                number,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+            crate::report::archive::options::RequestKind::Rpsblast,
+        )
+        .unwrap()
+    };
+    let csv = |fields: &str| spec(20, ReportFormat::CommaSeparatedValuesWithHeader, fields);
+    let refuses = |fields: &str, program, ident, taxid| {
+        csv(fields).refuses_generated_id(program, ident, taxid)
+    };
+    for program in [Program::Blastp, Program::Blastx] {
+        // The profile's own ids and the scores: NCBI's bytes.
+        for fields in [
+            "qseqid sseqid sacc saccver sgi sallgi evalue",
+            "qseqid bitscore score qcovs qcovus",
+        ] {
+            assert!(!refuses(fields, program, 5, true), "{fields} {program:?}");
+        }
+        // What NCBI finds by the id beyond it: refused.
+        for fields in [
+            "qseqid sallseqid",
+            "qseqid sallacc",
+            "qseqid stitle",
+            "qseqid salltitles",
+            "qseqid staxids",
+            "qseqid slen",
+            "qseqid sseq",
+            "qseqid pident",
+            "",
+        ] {
+            assert!(refuses(fields, program, 5, false), "{fields} {program:?}");
+        }
+        // Taxonomy: only where the profile has a taxid.
+        for fields in ["qseqid staxid", "qseqid ssciname", "qseqid sskingdoms"] {
+            assert!(!refuses(fields, program, 5, false), "{fields} {program:?}");
+            assert!(refuses(fields, program, 5, true), "{fields} {program:?}");
+        }
+        // `nident` where the block opens for it (identities).
+        assert!(!refuses("qseqid nident", program, 0, false));
+        assert!(refuses("qseqid nident", program, 1, false));
+        // The organism report: only a profile with a taxid; outfmt 6, 7 and 10 are line RG X7's.
+        let report = spec(18, ReportFormat::TaxFormat, "");
+        assert!(!report.refuses_generated_id(program, 5, false));
+        assert!(report.refuses_generated_id(program, 5, true));
+        for (number, format) in [
+            (6, ReportFormat::Tabular),
+            (7, ReportFormat::TabularWithComments),
+            (10, ReportFormat::CommaSeparatedValues),
+        ] {
+            assert!(!spec(number, format, "qseqid stitle").refuses_generated_id(program, 5, true));
+        }
+    }
+    // RPSBLAST: the query's letters and the strand; RPSTBLASTN: the alignment block throws.
+    for fields in ["qseqid qseq", "qseqid sstrand", "qseqid qstart length"] {
+        assert!(!refuses(fields, Program::Blastp, 5, false), "{fields}");
+        assert!(refuses(fields, Program::Blastx, 5, false), "{fields}");
+    }
 }
 
 /// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's

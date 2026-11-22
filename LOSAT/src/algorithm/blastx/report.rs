@@ -73,6 +73,72 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
+/// RPSTBLASTN: the scopes of the batches (`AnchoredBatchScopes`) where a profile of the database
+/// can have the generated id (`lcl|Query_N`) of a query of the batch that reports it, which NCBI's
+/// scope finds as that query (PS15a-1, PS15a-2, followup `rps_lcl_query_title.md`); `None` for
+/// every other program, a subject set and queries read with `-parse_deflines`.
+pub(super) fn rps_generated_scopes(
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Option<crate::blastinput::query_batch::AnchoredBatchScopes> {
+    if options.rpstblastn.is_none() || !matches!(shown, ShownSubjects::Database { .. }) {
+        return None;
+    }
+    let ids: Vec<(
+        &str,
+        Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    )> = queries
+        .iter()
+        .map(|query| (query.internal_id.as_str(), query.believed()))
+        .collect();
+    let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+        &ids,
+        batches
+            .iter()
+            .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+            .collect(),
+    );
+    scopes.generated().then_some(scopes)
+}
+
+/// The refusal of a reported list of the query `ordinal` (`lists`, those that `reported` keeps
+/// and where the format differs for its profile, `differs`) whose profile has the generated id of
+/// a query of its batch (`rps_generated_scopes`, `common::database::refuse_generated_query_id`),
+/// with what NCBI does with it in the format asked for (`effect`).
+pub(super) fn refuse_rps_generated_ids(
+    scopes: &crate::blastinput::query_batch::AnchoredBatchScopes,
+    shown: &ShownSubjects<'_>,
+    lists: &[super::results::HspList],
+    ordinal: usize,
+    options: &ResolvedOptions,
+    differs: impl Fn(&super::results::HspList, &crate::report::db_subject::ParsedSubject) -> bool,
+    effect: &str,
+) -> Result<()> {
+    let ShownSubjects::Database {
+        reported: names, ..
+    } = shown
+    else {
+        return Ok(());
+    };
+    for list in lists.iter().filter(|list| reported(list, options.gapped)) {
+        if let Some(subject) = names
+            .parsed_subject(list.oid)
+            .filter(|subject| differs(list, subject))
+        {
+            crate::algorithm::common::database::refuse_generated_query_id(
+                subject,
+                names.oid(list.oid),
+                scopes.of_query(ordinal),
+                options.program().upper,
+                effect,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (cited at
 // `report::tabular::TabularSpec::subject_fetch`)
 /// Whether a report whose batch's prefetch is off reads the subject of the hit list `list`: one
@@ -730,6 +796,38 @@ pub(super) fn render_queries_with(
             options.outfmt
         )
     })?;
+    // RPSTBLASTN's organism report (outfmt 18) and comma-separated values with a header line
+    // (outfmt 20, item PS15a-2): a profile whose Seq-align id is the generated id of a query of
+    // its batch is that query for NCBI's formatter, whose rows then differ or stop with an
+    // exception (`TabularSpec::refuses_generated_id`). Refused before any byte, as the documents
+    // above; outfmt 6, 7 and 10 of the same rows are line RG item X7's.
+    if spec.refuses_generated_id(crate::blastinput::app::Program::Blastx, 1, true) {
+        if let Some(scopes) = rps_generated_scopes(options, queries, shown, batches) {
+            for batch in batches.iter() {
+                for qidx in 0..batch.queries.len() {
+                    refuse_rps_generated_ids(
+                        &scopes,
+                        shown,
+                        batch.shown_lists(qidx, options),
+                        batch.query_ordinal + qidx,
+                        options,
+                        |list, subject| {
+                            let taxid = subject.first_source_taxid().is_some();
+                            list.hsps.iter().any(|hsp| {
+                                has_seqalign(hsp, options.gapped)
+                                    && spec.refuses_generated_id(
+                                        crate::blastinput::app::Program::Blastx,
+                                        hsp.identity,
+                                        taxid,
+                                    )
+                            })
+                        },
+                        crate::algorithm::common::database::TABLE_EFFECT,
+                    )?;
+                }
+            }
+        }
+    }
     super::tabular::write_blastx_tabular(
         writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
     )
@@ -826,6 +924,7 @@ fn write_pairwise(
                         &crate::report::defline::UNNAMED_SOURCE,
                         parsed.shown(index),
                         true,
+                        false,
                     )
                 })
                 .collect()
@@ -893,7 +992,7 @@ fn write_pairwise(
             |q_idx| {
                 Ok(crate::report::pairwise::blastp_described_subjects(
                     view.report_sort(options.report_sort()),
-                    false,
+                    None,
                     options.num_descriptions as usize,
                     q_idx,
                     hits,
@@ -974,6 +1073,8 @@ fn write_pairwise(
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
             .with_subject_reads(&reads);
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(
         hits,
         writer,
@@ -1000,6 +1101,10 @@ fn write_pairwise(
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         pool.and_then(crate::report::x_pairwise_par::pool),
         html_masks.as_deref(),
+        match shown {
+            ShownSubjects::Fasta { .. } => &every_loaded,
+            ShownSubjects::Database { reported, .. } => reported.loads(),
+        },
     )
     .map_err(empty_rows_stop)?;
     Ok(())
@@ -1010,7 +1115,8 @@ fn write_pairwise(
 /// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
-/// first byte); a write error stays.
+/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
+/// `x_pairwise_par::alignment_end`); a write error stays.
 fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
     use crate::report::pairwise::EmptyRowsStop;
     match error
@@ -1027,7 +1133,7 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
             super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
         )
         .into(),
-        None => error.into(),
+        None => NativeError::of_writer(error),
     }
 }
 

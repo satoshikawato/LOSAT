@@ -65,6 +65,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps;
     inputs.sum_stats = args.sum_stats;
+    inputs.use_sw_tback = args.use_sw_tback;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
@@ -76,6 +77,8 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     // An archive is written only for a `-seg` that `resolve` read.
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
@@ -434,6 +437,7 @@ pub(crate) fn write_blastx_archive(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
+        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),

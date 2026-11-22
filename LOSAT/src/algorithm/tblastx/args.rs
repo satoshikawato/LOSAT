@@ -154,14 +154,15 @@ pub struct TblastxArgs {
     )]
     pub seg: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
-    // (`CFilteringArgs(!kQueryIsProtein)`, tblastx_args.cpp:78, takes this protein branch.) Read
-    // by `soft_masking`.
+    // (`CFilteringArgs` of the negation of `kQueryIsProtein`, tblastx_args.cpp:78, takes this
+    // protein branch.) Read by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
-    // (`CGenericSearchArgs( !kQueryIsProtein, false, false, true)`, tblastx_args.cpp:68, does not
-    // suppress it.) Option, not a value with a default: whether it was given is what a BLAST
-    // archive (outfmt 11) records (`SumStatistics`); the search reads `sum_stats()`.
+    // (`CGenericSearchArgs` of the negation of `kQueryIsProtein`, false, false and true,
+    // tblastx_args.cpp:68, does not suppress it.) Option, not a value with a default: whether it
+    // was given is what a BLAST archive (outfmt 11) records (`SumStatistics`); the search reads
+    // `sum_stats()`.
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
@@ -176,7 +177,7 @@ pub struct TblastxArgs {
     pub strand: String,
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214, 276-278
-    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, `!m_IsTblastx`). Read by
+    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, gated on `m_IsTblastx` being false). Read by
     // `x_drop_ungapped_bits`.
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
@@ -197,6 +198,15 @@ pub struct TblastxArgs {
     // (outfmt 11) records (`Culling`); the search uses `culling_limit()`.
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     /// Return only the best HSP for each non overlapping query region
     #[arg(long)]
@@ -226,7 +236,7 @@ pub struct TblastxArgs {
     /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::tblastx::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
@@ -250,6 +260,13 @@ pub struct TblastxArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
     /// (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
     /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
@@ -361,6 +378,16 @@ impl TblastxArgs {
     /// The culling limit the search uses: the argument, else 0 (no culling).
     pub fn culling_limit(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
     }
 
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its

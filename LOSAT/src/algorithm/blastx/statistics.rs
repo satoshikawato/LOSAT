@@ -94,7 +94,7 @@ pub fn evaluate_gapped(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-669
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
     let cutoff = options.evalue
         * if options.composition > 1 && !options.old_fsc {
             5.0
@@ -134,7 +134,7 @@ pub fn normalize_scores(list: &mut LinkedHspList, options: &ResolvedOptions) -> 
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
-    let scale = if options.composition != 0 { 32.0 } else { 1.0 };
+    let scale = super::kappa::redo_scale(options);
     list.hsps
         .iter_mut()
         .map(|h| {

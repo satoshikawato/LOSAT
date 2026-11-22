@@ -72,3 +72,71 @@ fn test_s_blast_aa_scan_subject_small_buffer_resumes_without_splitting_subject_o
 
     assert_eq!(observed_subject_offsets, vec![0, 1, 2, 3]);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58,
+// c++/src/algo/blast/core/blast_aascan.c:75-123 and c++/src/algo/blast/api/seqsrc_seqdb.cpp:398-405
+// The ranges of masks stored out of order, `[18, 21)` before `[6, 9)`: `[0, 18)`, `[21, 6)` (no
+// word) and `[9, 30)`. The scan, resumed after each word of four hits, gives the words 0 to 15 and
+// then 9 to 27: the subject offset falls, and `ScanOrder` takes every hit in that order.
+#[test]
+fn scan_order_takes_the_hits_of_ranges_out_of_order_as_the_scan_gives_them() {
+    let lookup = make_poly_a_lookup();
+    let subject = vec![ncbistdaa::A; 30];
+    let seq_ranges = [(0, 18), (21, 6), (9, 30)];
+    let mut offset_pairs = vec![OffsetPair::default(); 5];
+    let array_size = i32::try_from(offset_pairs.len())
+        .expect("NCBI BLAST offset pair array size must fit in Int4");
+    let mut scan_range = [0, seq_ranges[0].0, seq_ranges[0].1 - lookup.word_length];
+
+    let mut subject_offsets = Vec::new();
+    while scan_range[1] <= scan_range[2] {
+        let hits = s_blast_aa_scan_subject(
+            &lookup,
+            &subject,
+            &seq_ranges,
+            &mut offset_pairs,
+            array_size,
+            &mut scan_range,
+        );
+        subject_offsets.extend(offset_pairs[..hits as usize].iter().map(|pair| pair.s_off));
+    }
+
+    let words: Vec<u32> = (0..=15).chain(9..=27).collect();
+    let expected: Vec<u32> = words.iter().flat_map(|&s_off| [s_off; 4]).collect();
+    assert_eq!(subject_offsets, expected);
+    assert!(subject_offsets.windows(2).any(|pair| pair[1] < pair[0]));
+    let mut order = ScanOrder::default();
+    assert!(subject_offsets.iter().all(|&s_off| order.takes(
+        &seq_ranges,
+        lookup.word_length,
+        s_off as i32
+    )));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58 and
+// c++/src/algo/blast/core/aa_ungapped.c:497-500
+// A hit before the last one of its range, past the range's last word or in a range without a
+// word is not in the scan's order; the first range, shorter than a word, has the word at its left.
+#[test]
+fn scan_order_refuses_hits_the_scan_cannot_give_next() {
+    let ranges = [(0, 30)];
+    let mut order = ScanOrder::default();
+    assert!(order.takes(&ranges, 3, 5));
+    assert!(order.takes(&ranges, 3, 5));
+    assert!(!order.takes(&ranges, 3, 4));
+    assert!(order.takes(&ranges, 3, 27));
+    assert!(!ScanOrder::default().takes(&ranges, 3, 28));
+
+    let ranges = [(0, 18), (21, 6), (9, 30)];
+    let mut order = ScanOrder::default();
+    assert!(order.takes(&ranges, 3, 15));
+    assert!(order.takes(&ranges, 3, 9));
+    assert!(!order.takes(&ranges, 3, 8));
+    assert!(!order.takes(&ranges, 3, 5));
+    assert!(!ScanOrder::default().takes(&[(0, 3), (21, 6)], 3, 21));
+
+    let mut order = ScanOrder::default();
+    assert!(order.takes(&[(5, 6), (10, 20)], 3, 5));
+    assert!(!order.takes(&[(5, 6), (10, 20)], 3, 6));
+    assert!(order.takes(&[(5, 6), (10, 20)], 3, 10));
+}

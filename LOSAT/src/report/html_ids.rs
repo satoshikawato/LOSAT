@@ -56,8 +56,8 @@ impl HtmlReport {
     /// The link (`sdl->id_url`, empty for none) and the score link (`sdl->score_url`) of the
     /// description row of rank `rank` (from 1, NCBI's `blast_rank`) for the subject of index
     /// `s_idx`, `parsed` when it has parsed Seq-ids: the link of its Bioseq's ids (`GetIDUrl`
-    /// with the handle of the Seq-align id) with the display id's `GetLabel(eContent)` as the
-    /// accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a
+    /// with the handle of the Seq-align id) with the display id's label (`GetLabel`, `eContent`) as
+    /// the accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a
     /// `-subject` record `lcl|Subject_<s_idx + 1>`. The registry's posts, its `GETURL_DEBUG` line
     /// and its exception go to standard error at the first link of the run (`id_url`).
     pub(crate) fn description_links(
@@ -174,9 +174,9 @@ impl HtmlHeading<'_> {
     /// link of its id (`unparsed_id`: none for `gnl|BL_ORD_ID|<oid>`, the registry's `[LOCAL_ID]
     /// TOOL_URL` for `lcl|Subject_<s_idx + 1>`) and `</a>` after one, the anchor
     /// (`<a name=BL_ORD_ID:<oid>></a>`, `<a name=Subject_<s_idx + 1>></a>`; such an id has no
-    /// version, so a definition line's `GetSeqIdString(true)` and a `-subject` Bioseq's
-    /// `GetSeqIdString()` agree) and a space; neither id is shown. The registry's exception as
-    /// `line_id`'s.
+    /// version, so a definition line's `GetSeqIdString` with versions and a `-subject` Bioseq's
+    /// `GetSeqIdString` without them agree) and a space; neither id is shown. The registry's
+    /// exception as `line_id`'s.
     pub(crate) fn unparsed_start(&self, out: &mut Vec<u8>) -> io::Result<()> {
         let id = self.report.unparsed_id(self.s_idx);
         out.push(b'>');
@@ -186,8 +186,8 @@ impl HtmlHeading<'_> {
     }
 
     /// `GetSeqIdString()` of the subject without parsed Seq-ids (`BL_ORD_ID:<oid>`,
-    /// `Subject_<s_idx + 1>`): the id of NCBI's line in place of each of its alignments where the
-    /// registry throws (`skips`).
+    /// `Subject_` and the subject's number, `s_idx` plus one): the id of NCBI's line in place of
+    /// each of its alignments where the registry throws (`skips`).
     pub(crate) fn unparsed_skipped_id(&self) -> Vec<u8> {
         let mut id = Vec::new();
         label::content(&self.report.unparsed_id(self.s_idx), false, &mut id);
@@ -240,8 +240,8 @@ pub enum LinkPlace {
 /// applications fill it: no templates, no CSS information, no new window).
 #[derive(Clone, Copy, Debug)]
 pub struct SeqUrlInfo<'a> {
-    /// `accession`: `GetLabel(eContent)` of the description's display id, or
-    /// `CAlignFormatUtil::GetLabel(id, true)` of the heading's (`description_accession`,
+    /// `accession`: the label of the description's display id (`GetLabel`, `eContent`), or the
+    /// heading's (`CAlignFormatUtil::GetLabel` with versions; `description_accession`,
     /// `heading_label`).
     pub accession: &'a [u8],
     /// `blast_rank`: the subject's rank in the query's hit list, from 1.
@@ -348,13 +348,13 @@ pub fn id_url(
     links.registry.map_protocol(&url, diagnostics)
 }
 
-/// `GetLabel(eContent)` of a description row's display id (showdefline.cpp:463-464): the
-/// accession of its link and, without a GI, its score label.
+/// The label of a description row's display id (`GetLabel`, `eContent`; showdefline.cpp:463-464):
+/// the accession of its link and, without a GI, its score label.
 pub fn description_accession(display_id: &ParsedSeqId, out: &mut Vec<u8>) {
     label::content(display_id, true, out);
 }
 
-/// `CAlignFormatUtil::GetLabel(seqID, CSeq_id::eContent)` of a heading's id (showalign.cpp:2208,
+/// `CAlignFormatUtil::GetLabel` of a heading's id with `CSeq_id::eContent` (showalign.cpp:2208,
 /// 2266; `eContent` converts to `with_version` true): the accession of its link and, without a
 /// GI, the id of the "more sequence titles" block.
 pub fn heading_label(id: &ParsedSeqId, out: &mut Vec<u8>) {

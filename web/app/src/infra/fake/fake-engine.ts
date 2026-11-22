@@ -21,7 +21,7 @@ import {
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import DESCRIBE from './describe.json';
-import { fakeRecordKeys } from './fake-fasta';
+import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -57,7 +57,7 @@ export class FakeEngine implements EngineGateway {
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   }
 
   /**
@@ -93,7 +93,7 @@ export class FakeEngine implements EngineGateway {
       onPhase(phase);
       if (phase === 'preparing') this.register(request);
     }
-    if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
+    if (request.query.bytes.length === 0 || request.subject?.bytes.length === 0) {
       // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
       // then `fail`; line WQA's sweep, D3, 2026-11-19), and the output that the CLI leaves before its error, the
       // argv's own, with the others dropped (line WQA's sweep, D15, 2026-11-20): here marked lines.
@@ -127,9 +127,15 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
+      // A run of -db has no subject.
+      if (input === undefined) continue;
       const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
+    // A reader's error ends the run, as the engine's run does after the query batches before it
+    // (line WQA's D10, 2026-11-19): the fake writes nothing first.
+    const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
+    if (readerError !== undefined) throw new Error(readerError);
   }
 
   /**
@@ -143,7 +149,7 @@ export class FakeEngine implements EngineGateway {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3);
+    const subjects = fakeRecordKeys(request.subject?.bytes ?? new Uint8Array(0), programOf(request), 'subject').slice(0, 3);
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;

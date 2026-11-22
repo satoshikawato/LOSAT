@@ -151,8 +151,8 @@ fn a_used_table_gives_the_hits_of_a_fresh_one() {
     assert!(!fresh.is_empty());
     assert_eq!(run(&[&other]), fresh);
     assert_eq!(run(&[&other, &query, &other]), fresh);
-    // NCBI's clear at `INT4_MAX / 4` (`RpsDiagTable::exit`) on a kept table (D3 of PS12s): a
-    // worker's offset reaches it after about 536 M letters of frames. A table whose offset is
+    // NCBI's clear at a quarter of `INT4_MAX` (`RpsDiagTable::exit`) on a kept table (D3 of PS12s):
+    // a worker's offset reaches it after about 536 M letters of frames. A table whose offset is
     // just below it searches `other` (its entries then hold values past the limit), the offset
     // passes the limit, `query` still gets a fresh table's hits, and its exit clears the table
     // (every entry `-window`, the offset the window), after which `query` gets them again.

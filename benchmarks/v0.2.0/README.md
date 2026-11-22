@@ -10,11 +10,11 @@ How to read the numbers:
 - A ratio is BLAST+ ÷ LOSAT, from the medians. Above 1 means LOSAT took less time (or less memory).
   Tables and text round ratios to one decimal, and to whole numbers from 100; the figures round to whole
   numbers from 10.
-- Memory is the peak resident memory of the process (max RSS). NCBI BLAST+ maps database files into
-  memory, so its max RSS on a large database includes database pages that the kernel can drop and read
-  again; LOSAT's max RSS stays small on the same databases. Cache states are named where they matter:
-  "warm" means the database files were read once before the timed runs, "cold" that their pages were
-  dropped from the file cache before each run.
+- Memory is the peak resident memory of the process (`max RSS`). NCBI BLAST+ maps database files into
+  memory (`mmap`), so its `max RSS` on a large `-db` search includes file-backed database pages that the
+  kernel can drop and reload rather than heap alone; LOSAT's `max RSS` stays small on the same databases.
+  Cache states are named where they matter: "warm" means the database files were read once before the timed
+  runs, "cold" that their pages were dropped from the page cache before each run.
 - The same output means the same SHA-256 of the output file.
 
 ## Builds and machine
@@ -185,10 +185,11 @@ search speed.
 
 **Figure 4.** NCBI BLAST+ 2.17.0 (native) ÷ LOSAT for native LOSAT and the threaded WASI build
 (`wasm32-wasip1-threads`, run by Node.js), development build `7f7db49c`, on the searches of Table 1
-([`snapshot/webassembly.tsv`](snapshot/webassembly.tsv)). These values come from the project's running
-benchmark: the times of `7f7db49c` are the measured times of the previous build `6a0a8719` scaled by the
-ratio of the two builds run side by side (1 thread: CPU cycles on the same core; 16 threads: wall time,
-3 rounds). NCBI BLAST+ `tblastx` was not run in this set.
+([`snapshot/webassembly.tsv`](snapshot/webassembly.tsv)). In this snapshot (`wasm_derived: true` in
+[`snapshot/metadata.json`](snapshot/metadata.json)), the `7f7db49c` values are derived from the measured
+times of build `6a0a8719` scaled by the ratio of `7f7db49c` vs `6a0a8719` run side by side (1 thread:
+CPU cycles on the same core; 16 threads: wall time, 3 rounds) and are marked on the figure as estimates
+from `6a0a8719`. NCBI BLAST+ `tblastx` was not run in this set.
 
 - The WebAssembly build took 1.3 to 1.6 times the time of native LOSAT at 1 thread, and 1.5 to 2.4 times
   at 16 threads.
@@ -206,8 +207,10 @@ python3 -I benchmarks/v0.2.0/scripts/build_snapshot.py
 python3 -I benchmarks/v0.2.0/scripts/render_figures.py
 ```
 
-`build_snapshot.py` takes the input paths and the LOSAT commit as options (`--help`). `render_figures.py`
-needs Matplotlib; it writes `figures/` and the same files to `docs/manual/src/images/` for the user
-manual, and the same snapshot gives the same PNG files.
+`build_snapshot.py` takes the input paths (defaulting under `$LOSAT_BASELINES_DIR` / `~/losat-baselines`,
+stored in `metadata.json` without user home prefixes), `--losat-commit`, `--wasm-paired`, and
+`--wasm-derived-from` as options (`--help`). The figures were rendered with Matplotlib 3.10.3 and
+NumPy 2.2.5; the same snapshot and versions give the same PNG files, and `render_figures.py` writes
+both `figures/` and `docs/manual/src/images/` for the user manual.
 
 [All benchmark sets](../README.md)

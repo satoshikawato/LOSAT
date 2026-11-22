@@ -60,10 +60,10 @@ pub(crate) fn registry_posts(read: &RegistryRead, program: &str) -> Vec<u8> {
     posts.into_bytes()
 }
 
-/// `Get(section, name)` of the read `registry` (`None`: no file) for a caller that takes an empty
-/// value as none (`Get(...).empty()`, as `[TAX_BROWSER] BLASTFMTUTIL` is read): the last value of
-/// the entry, `None` where it is not set or empty. (A `HasEntry` of NCBI's `CNcbiRegistry` counts
-/// an empty value as set: `protocol`.)
+/// `Get` of `section` and `name` in the read `registry` (`None`: no file) for a caller that takes
+/// an empty value as none (it tests whether `Get` gives an empty string, as
+/// `[TAX_BROWSER] BLASTFMTUTIL` is read): the last value of the entry, `None` where it is not set
+/// or empty. (A `HasEntry` of NCBI's `CNcbiRegistry` counts an empty value as set: `protocol`.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-991
 pub(crate) fn value<'a>(
@@ -120,7 +120,7 @@ pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `NStr::URLEncode(text)` (`eUrlEnc_SkipMarkChars`, table `s_Encode`): letters, digits and
+/// `NStr::URLEncode` of `text` (`eUrlEnc_SkipMarkChars`, table `s_Encode`): letters, digits and
 /// `!$'()*,-._` stay, a space becomes `+`, every other byte `%XX` (upper-case hex).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5614-5619, 6066-6067 (`s_Encode`, rows of 0x20-0x3F)
@@ -381,10 +381,10 @@ impl InitConfig {
         }
     }
 
-    /// `CAlignFormatUtil::MapProtocol(url)`: `<@protocol@>` replaced by `[BLASTFMTUTIL] PROTOCOL`
-    /// of the registry (also an empty value: `HasEntry`), else `https:`. NCBI applies it to the URL
-    /// of every id (`GetIDUrlGen`), so a malformed file fails at the first id of any kind (probes
-    /// `cfg.*.{L,A,D}.h`).
+    /// `CAlignFormatUtil::MapProtocol` of `url`: `<@protocol@>` replaced by `[BLASTFMTUTIL]
+    /// PROTOCOL` of the registry (also an empty value: `HasEntry`), else `https:`. NCBI applies it
+    /// to the URL of every id (`GetIDUrlGen`), so a malformed file fails at the first id of any
+    /// kind (probes `cfg.*.{L,A,D}.h`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3661-3671
     pub(crate) fn map_protocol(
@@ -401,7 +401,7 @@ impl InitConfig {
     /// URL) with its tags filled in NCBI's order: `seq_id` (`NStr::URLEncode` of the id's
     /// `eContent` label `label`, `Subject_1` for `-subject` records too), `db_name` (that of the
     /// `-db` text `database`, empty for `-subject`), `taxid`, `cssInf` (empty), `title` (`label`),
-    /// `target` (empty), then `protocol`. `GetURLFromRegistry("LOCAL_ID")` comes first and reads
+    /// `target` (empty), then `protocol`. `GetURLFromRegistry` of `LOCAL_ID` comes first and reads
     /// `[BLASTFMTUTIL] INCLUDE_BASE_DIR`, `LOCAL_ID_HOST_PORT` and `LOCAL_ID_FORMAT` (and a file
     /// they name), whose result NCBI never uses: LOSAT reads none of them. `TOOL_URL_ALIGN` is read
     /// only with `addCssInfo`, which no NCBI application sets.

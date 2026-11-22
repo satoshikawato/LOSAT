@@ -35,8 +35,8 @@ pub(crate) struct Mt19937 {
 }
 
 impl Mt19937 {
-    /// The engine seeded with `seed` (`mt19937(seed)`; a wider seed is taken modulo 2^32, as the
-    /// standard's seeding does).
+    /// The engine seeded with `seed` (`mt19937` constructed with `seed`; a wider seed is taken
+    /// modulo 2^32, as the standard's seeding does).
     pub(crate) fn new(seed: u32) -> Self {
         let mut state = [0u32; 624];
         state[0] = seed;

@@ -1,6 +1,6 @@
 //! Command-line arguments for RPS-BLAST (`losat rpsblast`).
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -59,7 +59,7 @@ pub struct RpsblastArgs {
         help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
     )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7 and 10", "6, 7 and 10", ""))]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
     #[arg(
         long = "show_gis",
@@ -177,14 +177,9 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 }
 
 impl RpsblastArgs {
-    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
-    /// a later item.
+    /// blastp's arguments of the RPS-BLAST search, after NCBI's reading of `-outfmt`.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(
-            &self.outfmt,
-            self.out.as_deref(),
-            self.export_search_strategy.is_some(),
-        )?;
+        Self::check_outfmt(&self.outfmt, self.export_search_strategy.is_some())?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
@@ -260,6 +255,7 @@ impl RpsblastArgs {
             gap_trigger: None,
             sum_stats: false,
             first_query_ordinal: 0,
+            scope_refusal: None,
             psiblast_pssm: None,
             formatting: self.formatting,
             rps: Some(RpsSearch {
@@ -299,68 +295,25 @@ impl RpsblastArgs {
         inputs
     }
 
-    /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
-    /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a, `check_rps_outfmt`), with `-out` `out` (`strategy`: the run writes a
-    /// search strategy file).
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
-        check_rps_outfmt(outfmt, "RPSBLAST", out, strategy)
+    /// NCBI reads `-outfmt` before the option handlers, with its own errors (`check_rps_outfmt`;
+    /// `strategy`: the run writes a search strategy file).
+    pub fn check_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+        check_rps_outfmt(outfmt, strategy)
     }
 }
 
-/// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
-/// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10, and RPSTBLASTN's
-/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). A value
-/// that NCBI refuses itself later (`app::ncbi_refuses_format`: outfmt 17, a custom delimiter that
-/// the field list uses, outfmt 13 and 14 without a file name in `-out` `out`) goes on to NCBI's
-/// error at its place, after the arguments' own errors (`-query` not accessible) and before the
-/// database is opened (NCBI 2.17.0, line RG F/d36 probes rps.conf20, rps.conf20.q,
-/// rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14), and never runs the format. `strategy`: the
-/// run writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
-/// `-outfmt`.
-pub(crate) fn check_rps_outfmt(
-    outfmt: &str,
-    program: &str,
-    out: Option<&std::path::Path>,
-    strategy: bool,
-) -> Result<()> {
-    use crate::blastinput::app::{Program, ReportFormat};
-    // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
-    let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
-        .parsed()
-        .cloned()
-    else {
-        return Ok(());
-    };
-    // RPSBLAST searches with blastp's options, RPSTBLASTN with blastx's (neither writes SAM).
-    let search = if program == "RPSTBLASTN" {
-        Program::Blastx
-    } else {
-        Program::Blastp
-    };
-    if crate::blastinput::app::ncbi_refuses_format(&choice, search, out) {
-        return Ok(());
-    }
-    if let Some(format) = ReportFormat::from_number(choice.number) {
-        let query_anchored =
-            program == "RPSTBLASTN" && crate::report::pairwise::PairwiseView::of(format).is_some();
-        if !query_anchored
-            && !matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::ArchiveFormat
-                    | ReportFormat::Xml
-            )
-        {
-            bail!(
-                "output format {} is not supported by LOSAT's {program}",
-                choice.number
-            );
-        }
-    }
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+/// NCBI's early reading of `-outfmt` before the option handlers of its RPS programs (rpsblast,
+/// rpstblastn), whose errors are NCBI's (`app::early_format_choice`; `strategy`: the run writes a
+/// search strategy file, before which NCBI reads no `-outfmt`, so a value that does not parse
+/// goes on to the formatting handler's error, line RG F/d36). Every format that they run is
+/// written (items PS15a-1 and PS15a-2): RPSBLAST's through BLASTP's reports, RPSTBLASTN's through
+/// BLASTX's. A value that NCBI refuses later (outfmt 17, a custom delimiter that the field list
+/// uses, outfmt 13 and 14 without a file name in `-out`) goes on to NCBI's error at its place,
+/// after the arguments' own errors and before the database is opened (line RG F/d36 probes
+/// rps.conf20, rps.conf20.q, rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14).
+pub(crate) fn check_rps_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+    crate::blastinput::app::early_format_choice(outfmt, strategy)?;
     Ok(())
 }
 

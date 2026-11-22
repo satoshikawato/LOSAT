@@ -32,7 +32,7 @@ pub enum DiscTemplateType {
 }
 
 impl DiscTemplateType {
-    /// The template whose enumerated value is `value` (`(EDiscTemplateType) temp_int`).
+    /// The template whose enumerated value is `value` (`temp_int` cast to `EDiscTemplateType`).
     pub(crate) const fn from_value(value: i32) -> Self {
         match value {
             1 => Self::T11_16Coding,

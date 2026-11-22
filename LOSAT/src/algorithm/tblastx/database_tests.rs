@@ -235,3 +235,99 @@ fn a_database_with_parsed_seqids_is_beyond_a_bound_below_its_volumes_sequences()
     assert!(stored.db.num_seqs() > 0);
     assert!(!stored.parsed_beyond(0));
 }
+
+// Review 2 of line DBID pfoff-3, L5: TBLASTX's model of what one query's pairwise report reads
+// (`pairwise_read_order` of the query's hits in report order) is the writer's group of the
+// rows that `report::pairwise_hits` makes of those hits (`x_pairwise_par::writer_reads`), for
+// every sort and count.
+#[test]
+fn the_pairwise_reads_are_those_of_the_writers_rows() {
+    use crate::algorithm::tblastx::report::{pairwise_hits, seqalign_identities, SubjectLetters};
+    use crate::blastinput::fasta_reader::FastaRecord;
+    use crate::blastinput::seq_range::Placements;
+    use crate::utils::genetic_code::GeneticCode;
+    let hsp =
+        |s_idx: u32, raw_score: i32, e_value: f64, offset: usize, num_ident: usize| TblastxHsp {
+            hit: crate::common::Hit {
+                identity: 0.0,
+                length: 10,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end: 30,
+                s_start: 1,
+                s_end: 30,
+                e_value,
+                bit_score: raw_score as f64 / 2.0,
+                num_ident,
+                query_frame: 1,
+                query_length: 0,
+                q_idx: 0,
+                s_idx,
+                raw_score,
+                sort_query_offset: offset,
+                sort_query_end: offset + 10,
+                sort_subject_offset: offset,
+                sort_subject_end: offset + 10,
+                has_sort_offsets: true,
+                gap_info: None,
+                num_positives: 0,
+            },
+            subject_frame: 1,
+            num: 1,
+        };
+    let ordered = [
+        hsp(0, 50, 1e-9, 4, 3),
+        hsp(0, 30, 1e-6, 0, 9),
+        hsp(1, 60, 1e-12, 2, 1),
+        hsp(2, 20, 1e-3, 1, 8),
+        hsp(2, 40, 1e-7, 6, 5),
+    ];
+    // Long enough for the residues of every HSP (offsets up to 16 residues).
+    let letters = b"ATGGCTAAACTGGAAGGTCCATTTAGCCGAATGGCTAAACTGGAAGGTCCATTTAGCCGAATGGCT";
+    let queries = [FastaRecord::new("q", b"q", letters)];
+    let subjects: Vec<FastaRecord> = (0..3)
+        .map(|_| FastaRecord::new("s", b"s", letters))
+        .collect();
+    let code = GeneticCode::from_id(1);
+    let placements = Placements::default();
+    let identities = seqalign_identities(&ordered);
+    let rows = pairwise_hits(
+        &ordered,
+        Some(&identities),
+        &queries,
+        &subjects,
+        SubjectLetters::Records(&subjects),
+        &[super::super::blast_engine::TblastxQueryStats::default()],
+        &code,
+        &code,
+        &placements,
+        &placements,
+        None,
+    );
+    let titles = DatabaseTitles::new();
+    for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+        for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+            for (descriptions, alignments) in [(0, 0), (1, 2), (2, 1), (500, 500)] {
+                let reading = crate::report::pairwise::PairwiseReading {
+                    sort: crate::report::hit_sort::ReportSort { hits, hsps },
+                    shown: crate::report::db_subject::Shown {
+                        descriptions,
+                        alignments,
+                    },
+                };
+                assert_eq!(
+                    pairwise_read_order(&ordered, &titles, reading),
+                    crate::report::x_pairwise_par::writer_reads(
+                        &rows,
+                        |_, _| false,
+                        reading,
+                        true,
+                        None
+                    ),
+                    "{reading:?}"
+                );
+            }
+        }
+    }
+}

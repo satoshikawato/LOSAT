@@ -631,6 +631,7 @@ pub(super) fn rps_search(
             &mut hit_lists[batch.clone()],
             args.max_target_seqs,
             "RPSBLAST",
+            units.searches_volumes_bare(),
         ) {
             Ok(None) => {}
             Ok(Some(counts)) => {

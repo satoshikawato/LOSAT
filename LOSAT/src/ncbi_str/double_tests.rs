@@ -64,7 +64,7 @@ fn values_and_errors_are_ncbis() {
 }
 
 // `LOSAT/tests/unit/string_to_double_posix_or_local_vectors.tsv`: NCBI's own
-// `NStr::StringToDouble(text, fDecimalPosixOrLocal)` (its corelib linked to a probe), for
+// `NStr::StringToDouble` with `fDecimalPosixOrLocal` (its corelib linked to a probe), for
 // the texts that end in an exponent mark (`StringToDoublePosix` reads them past `strtod`,
 // in x87 extended precision), the edges of glibc's `strtod` that `CArg_Double` reads, and
 // the errors.
@@ -86,10 +86,10 @@ fn posix_or_local_values_are_ncbis() {
     assert_eq!(rows, 422);
 }
 
-/// The four conversions of a text as NCBI's probe prints them: `StringToDouble(text,
-/// fDecimalPosixOrLocal)`, `StringToDouble(text)`, `StringToDoublePosix(text, &end, 0)` and
-/// with `fDecimalPosixFinite`, each the bits of the double or `ERR`, the last two with
-/// `:end`.
+/// The four conversions of a text as NCBI's probe prints them: `StringToDouble` with
+/// `fDecimalPosixOrLocal`, `StringToDouble` with the default flags, `StringToDoublePosix` with an
+/// end pointer and flags 0, and the same with `fDecimalPosixFinite`, each the bits of the double or
+/// `ERR`, the last two with `:end`.
 fn four_conversions(text: &[u8]) -> [String; 4] {
     let bits = |value: f64| format!("{:016x}", value.to_bits());
     let posix = |finite| {

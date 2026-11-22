@@ -67,7 +67,12 @@ export type InputMode = 'combined' | 'separate';
 /** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
-  | { readonly state: 'ok'; readonly records: number }
+  /**
+   * `readerError`: the reader's error that ends the query's records, the command line's text; a run
+   * reads the records before it and ends with it, as the command line does, so it is a warning, not
+   * a refusal (line WQA's D10, 2026-11-19).
+   */
+  | { readonly state: 'ok'; readonly records: number; readonly readerError?: string }
   /** `record` is the index, in the record table, of the record that the message names. */
   | { readonly state: 'refused'; readonly message: string; readonly record?: number }
   /**
@@ -784,12 +789,14 @@ export class SearchDraft {
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     this.updateRole(role, (draft) => ({ ...draft, sources: draft.sources.filter((source) => source.key !== key) }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
     this.scheduleValidation();
   }
 
   setMode(role: InputRole, mode: InputMode): void {
     this.updateRole(role, (draft) => ({ ...draft, mode }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
   }
 
   /** Includes or leaves out records of a source (by their index in its record table). */
@@ -804,6 +811,7 @@ export class SearchDraft {
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
+    this.recheckReaderErrors(role, key);
     this.scheduleValidation();
   }
 
@@ -1131,13 +1139,13 @@ export class SearchDraft {
     }
     if (draft.mode === 'combined') {
       // The sources follow one another in one input, where a sequence without a defline
-      // would join the record before it (NCBI's reader): only the first can start so.
-      const late = draft.sources
-        .filter((source) => includedOf(source).length > 0)
-        .slice(1)
-        .find((source) => includedOf(source)[0]!.sequence_offset === 0);
+      // would join the record before it (NCBI's reader): only the first can start so. So can
+      // neither a source whose reader's error is on its first line, read without a defline (a
+      // byte order mark, a line of other text): the record before it would read that line
+      // (review M2, 2026-11-20).
+      const late = draft.sources.find((source) => cannotFollow(draft.sources, source));
       if (late !== undefined) {
-        const message = `${label} (${describeSource(late)}) starts with a sequence without a defline (">"), which cannot follow another input.`;
+        const message = `${label} (${describeSource(late)}) ${cannotFollowText(late)}`;
         return { message, short: message };
       }
     }
@@ -1380,6 +1388,7 @@ export class SearchDraft {
       }));
       this.noteRevision(id, base.revisionId);
       this.scheduleCheck(role, key, 0);
+      this.recheckReaderErrors(role, key);
       void this.askAgain();
     } catch (error) {
       if (!current()) return;
@@ -1447,7 +1456,9 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source?.status !== 'ready' || source.base === undefined) return;
-    if (includedOf(source).length === 0) {
+    // An input whose reading ends with the reader's error is checked whatever it includes: its run
+    // input keeps the error (line WQA's D10, 2026-11-19).
+    if (includedOf(source).length === 0 && source.base.readerError === undefined) {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
@@ -1468,6 +1479,14 @@ export class SearchDraft {
         verdict.catch(() => this.verdicts.delete(key));
       }
       check = toSourceCheck(await verdict, source);
+      // A Combined input reads the sources before this one first: the run's error names its own
+      // line, which the check of the sources together gives (review L2, 2026-11-20).
+      const before = this.sourcesBefore(role, source);
+      if (check.state === 'ok' && check.readerError !== undefined && before.length > 0) {
+        const ids = [...(await Promise.all(before.map((s) => this.revisionFor(s)))), revisionId];
+        const joined = await this.deps.data.checkInput(reader, ids).catch(() => undefined);
+        if (joined?.ok === true && joined.readerError !== undefined) check = { ...check, readerError: joined.readerError };
+      }
     } catch (error) {
       check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
@@ -1477,6 +1496,34 @@ export class SearchDraft {
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
     if (check.state !== 'error') void this.askAgain();
+  }
+
+  /**
+   * The sources that a Combined run of the query reads before `source`: every source of the run's
+   * input before it, whose bytes the run passes as they are, those without records too
+   * (`DataService.runInputBytes`; review L-a, 2026-11-20). None otherwise, and none when a source
+   * before ends the input with its reader's error, or `source` cannot follow them: a run then does
+   * not read `source` after them, and its own check stands.
+   */
+  private sourcesBefore(role: InputRole, source: DraftSource): readonly DraftSource[] {
+    const draft = this.role(role);
+    if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
+    const at = draft.sources.findIndex((s) => s.key === source.key);
+    const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
+    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
+  }
+
+  /**
+   * Checks again the query sources whose reader's error a run meets after other sources: the line
+   * that its message names follows them (`check`, review L2, 2026-11-20).
+   */
+  private recheckReaderErrors(role: InputRole, except?: string): void {
+    if (role !== 'query') return;
+    for (const source of this.role(role).sources) {
+      if (source.key !== except && source.status === 'ready' && source.base?.readerError !== undefined) {
+        this.scheduleCheck(role, source.key, 0);
+      }
+    }
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */
@@ -1755,6 +1802,58 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
 }
 
 /**
+ * The sources whose records a Combined run reads, in order: those with included records or the
+ * reader's error, up to the first with the error, which ends the run's input
+ * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
+ */
+function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+  const read: DraftSource[] = [];
+  for (const source of sources) {
+    if (source.status !== 'ready') continue;
+    const stops = source.base?.readerError !== undefined;
+    if (includedOf(source).length === 0 && !stops) continue;
+    read.push(source);
+    if (stops) break;
+  }
+  return read;
+}
+
+/** Whether what a run reads of a source starts without a defline (review M2, 2026-11-20). */
+function startsWithoutDefline(source: DraftSource): boolean {
+  const first = includedOf(source)[0];
+  return first !== undefined ? first.sequence_offset === 0 : source.base?.readerError?.defline === false;
+}
+
+/**
+ * Whether `source` starts without a defline after a source whose records a Combined input of
+ * `sources` reads: the record before it would read its first line, so no run takes it
+ * (`SearchDraft`'s readiness; review M2, 2026-11-20), and its card says only that (review L-c).
+ */
+export function cannotFollow(sources: readonly DraftSource[], source: DraftSource): boolean {
+  return combinedSources(sources).findIndex((s) => s.key === source.key) > 0 && startsWithoutDefline(source);
+}
+
+/** What a source that cannot follow another input starts with (`cannotFollow`), after its name. */
+export function cannotFollowText(source: DraftSource): string {
+  return includedOf(source).length > 0
+    ? 'starts with a sequence without a defline (">"), which cannot follow another input.'
+    : 'starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.';
+}
+
+/**
+ * The source before `source` whose reader's error ends a Combined query input, after which the run
+ * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20). A
+ * source that cannot follow another input ends no run: no run starts (review L-c, 2026-11-20).
+ */
+export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
+  for (const before of sources) {
+    if (before.key === source.key) return undefined;
+    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
+  }
+  return undefined;
+}
+
+/**
  * Why what runs take of a source that is read holds no residue, if it holds none: `none`, the input has
  * no residue at all (an empty file, white space only, deflines alone); `excluded`, it has records with
  * residues, but they are left out and the records included have none. The engine reads such an input,
@@ -1786,7 +1885,10 @@ function describeSource(source: DraftSource): string {
 
 /** The engine's verdict, with the record its message names mapped to the record table. */
 function toSourceCheck(check: InputCheck, source: DraftSource): SourceCheck {
-  if (check.ok) return { state: 'ok', records: check.records.length };
+  if (check.ok) {
+    const { readerError } = check;
+    return { state: 'ok', records: check.records.length, ...(readerError === undefined ? {} : { readerError }) };
+  }
   const match = RECORD_IN_MESSAGE.exec(check.message);
   const record = match === null ? undefined : includedOf(source)[Number(match[1]) - 1];
   return { state: 'refused', message: check.message, ...(record === undefined ? {} : { record: record.index }) };

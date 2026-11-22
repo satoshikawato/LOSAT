@@ -1180,6 +1180,41 @@ function descriptorReader(file) {
   ]);
 }
 
+// The table's descriptors belong to the table (threadWorkerOptions in wasi_thread_host.js): a thread
+// worker's exit leaves alone a descriptor that the worker opened and another thread closed, whose
+// number the process has given out again (2026-11-22: Node aborted when a worker's exit closed the
+// event loop of another worker under that number).
+test("a thread worker's exit leaves the number of a descriptor that it opened and another thread closed", async () => {
+  const { Worker } = require("node:worker_threads");
+  const { once } = require("node:events");
+  const { threadWorkerOptions } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-worker-fds-"));
+  try {
+    const first = path.join(directory, "first.txt"), second = path.join(directory, "second.txt");
+    fs.writeFileSync(first, "first");
+    fs.writeFileSync(second, "second");
+    const worker = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      parentPort.postMessage(require("node:fs").openSync(workerData, "r"));
+      parentPort.once("message", () => parentPort.close());`, { ...threadWorkerOptions(first), eval: true });
+    const [opened] = await once(worker, "message");
+    fs.closeSync(opened);
+    // The process gives out the lowest free number: open until it gives this one again.
+    const held = [];
+    while (held.length < 64 && held.at(-1) !== opened) held.push(fs.openSync(second, "r"));
+    for (const descriptor of held.slice(0, -1)) fs.closeSync(descriptor);
+    assert.equal(held.at(-1), opened, "the number came back");
+    const exited = once(worker, "exit");
+    worker.postMessage("exit");
+    await exited;
+    const read = Buffer.alloc(16);
+    assert.equal(read.toString("latin1", 0, fs.readSync(opened, read, 0, 16, 0)), "second");
+    fs.closeSync(opened);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("a descriptor that the main thread opened reads on a thread worker (-num_threads 2)", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-descriptor-"));
   try {
@@ -1313,6 +1348,35 @@ test("the table of files writes at the OS's offset until a seek or a read, then 
     write("Y");
     assert.equal(wasi.fd_close(fd), 0);
     assert.equal(fs.readFileSync(file, "utf8"), "aXYzzQd");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// A LOSAT Web reactor's run directory, preopened as "." (wasi_thread_worker.js createWasi; line WQA
+// D12a, 2026-11-20): the table opens a name in that directory, and leaves a path out of it (`..`)
+// to the thread's own uvwasi, which refuses it.
+test("the table of files opens names in the run directory of a reactor and leaves `..` to uvwasi", () => {
+  const { sharedFileTable, sharedFileImports } = require("./wasi_files");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-run-"));
+  try {
+    fs.writeFileSync(path.join(directory, "db.pin"), "pin");
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const local = Object.fromEntries(["path_open", "fd_read", "fd_close"].map(name => [name, () => 76]));
+    const wasi = sharedFileImports(sharedFileTable(), memory, local, directory), bytes = new Uint8Array(memory.buffer);
+    const open = (name) => {
+      bytes.set(Buffer.from(name), 64);
+      // path_open(3, follow, 64, len, 0, FD_READ, 0, 0, 8)
+      return wasi.path_open(3, 1, 64, name.length, 0, 1n << 1n, 0n, 0, 8);
+    };
+    assert.equal(open("db.pin"), 0);
+    const fd = new DataView(memory.buffer).getUint32(8, true);
+    new DataView(memory.buffer).setUint32(16, 512, true);
+    new DataView(memory.buffer).setUint32(20, 3, true);
+    assert.equal(wasi.fd_read(fd, 16, 1, 24), 0);
+    assert.equal(Buffer.from(bytes.subarray(512, 515)).toString(), "pin");
+    assert.equal(wasi.fd_close(fd), 0);
+    assert.equal(open(`../${path.basename(directory)}/db.pin`), 76);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

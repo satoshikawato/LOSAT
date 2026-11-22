@@ -68,7 +68,7 @@ fn every_publication_has_one_www_url() {
         Publication::IndexedMegablast,
         Publication::DeltaBlast,
     ];
-    // The publications before the sentinel, in the enum's order (`static_cast<EPublication>(i)`).
+    // The publications before the sentinel, in the enum's order (the index cast to `EPublication`).
     for (index, publication) in publications.iter().enumerate() {
         assert_eq!(*publication as usize, index);
     }
@@ -81,7 +81,7 @@ fn every_publication_has_one_www_url() {
         text.push_str(publication.pubmed_url());
         text.push_str(">Get abstract</a><br>\n");
     }
-    // `text.find(kToken, i)` from one past each match: overlapping matches count.
+    // `text.find` of `kToken` from `i`, one past each match: overlapping matches count.
     let occurrences = (0..text.len())
         .filter(|&at| text[at..].starts_with("www"))
         .count();
@@ -116,6 +116,7 @@ fn prolog_references(html: bool, program: &str, megablast: bool) -> String {
         &mut err,
         program,
         megablast,
+        false,
     )
     .unwrap();
     assert!(err.is_empty());
@@ -279,7 +280,7 @@ fn each_html_reference_reads_ncbirc_again() {
     assert!(!posts.is_empty());
     let mut out = Vec::new();
     let mut err = Vec::new();
-    write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false).unwrap();
+    write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false, false).unwrap();
     assert_eq!(err, posts.repeat(2));
     let out = String::from_utf8(out).unwrap();
     assert_eq!(
@@ -289,7 +290,7 @@ fn each_html_reference_reads_ncbirc_again() {
     // The plain references read no file.
     let mut plain = Vec::new();
     let mut err = Vec::new();
-    write_prolog_references(&mut plain, None, &mut err, "blastp", false).unwrap();
+    write_prolog_references(&mut plain, None, &mut err, "blastp", false, false).unwrap();
     assert!(err.is_empty());
     assert_eq!(
         String::from_utf8(plain).unwrap(),
@@ -312,7 +313,8 @@ fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let error =
-        write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false).unwrap_err();
+        write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false, false)
+            .unwrap_err();
     assert!(out.is_empty());
     assert!(err.is_empty());
     let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
@@ -325,7 +327,7 @@ fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
     );
     // The plain references do not read the file.
     let mut plain = Vec::new();
-    write_prolog_references(&mut plain, None, &mut err, "blastp", false).unwrap();
+    write_prolog_references(&mut plain, None, &mut err, "blastp", false, false).unwrap();
     assert!(!plain.is_empty());
     assert!(ReferenceRegistry::of("blastp", Some(b"[NCBI]\n.Inherits=g\n".to_vec())).is_err());
     assert!(ReferenceRegistry::of("blastp", None).is_ok());

@@ -19,6 +19,14 @@ export interface DatasetRevision {
   readonly records: readonly DatasetRecord[];
   /** Indices of the records that runs leave out, ascending and without duplicates. */
   readonly excluded: readonly number[];
+  /**
+   * The reader's error that ends the records (the *scan* response's `reader_error`): the bytes from
+   * `offset` on, the record that the reader fails on and what follows it, belong to no record, and
+   * a run of the source reads its records before them and ends with the error, as the command
+   * line's query batches do (line WQA's D10, 2026-11-19). `defline`: whether that record starts
+   * with a defline; one without cannot follow another input (review M2, 2026-11-20).
+   */
+  readonly readerError?: { readonly offset: number; readonly defline: boolean; readonly message: string };
 }
 
 export function includedRecords(revision: DatasetRevision): readonly DatasetRecord[] {

@@ -90,11 +90,12 @@ export function warmUp(abi: ReactorAbi, argv: readonly string[]): boolean {
     const validation = abi.validate(runArgv);
     if (!validation.ok) return false;
     const started = abi.start(runArgv);
-    if (!started.ok) return false;
+    // A run of -db searches the files of its directory, which a warm-up does not have.
+    if (!started.ok || started.start.database) return false;
     if (started.start.registerInputs) {
       // The inputs of a run that reads them together (-parse_deflines), as the search does (runtime.ts).
       const registered = abi.registerInputs(runArgv, inputs.query, inputs.subject);
-      handles.push(registered.query.handle, registered.subject.handle);
+      handles.push(registered.query.handle, registered.subject!.handle);
     } else {
       handles.push(abi.register(program, ROLE_QUERY, validation.dataLoaders, inputs.query).handle);
       handles.push(abi.register(program, ROLE_SUBJECT, validation.dataLoaders, inputs.subject).handle);

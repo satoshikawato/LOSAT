@@ -39,14 +39,14 @@
 //!   start are that range's; the last range's are those of the final counts (at the layout) less
 //!   those at its start. Summed over the stripes, a range's cells are those the serial pass counts
 //!   for it (`st.cells - cells_before` at the range's end).
-//! - layout (per stripe): the cells' starts are the counts' prefix sums from the stripe's first hit,
-//!   so the serial starts; the longest chain and the count of non-empty cells are functions of the
-//!   counts. The PV shift (`finalize`: `PV_ARRAY_BTS`, or more when at most 1 % of the cells are not
-//!   empty) is `PV_ARRAY_BTS` whatever the counts when `ilog2(backbone_size / (8 * kTargetPVBytes))`
-//!   is 0 (word size 5): then each stripe sets the PV bits of its cells, in its own words (a stripe
-//!   is 2^shift cells, shift >= `PV_ARRAY_BTS`); otherwise the PV array is made after the stripes
-//!   from the starts (a cell is not empty when its start is below the next one), by `finalize`'s
-//!   statements.
+//! - layout (per stripe): the cells' starts are the counts' prefix sums from the stripe's first
+//!   hit, so the serial starts; the longest chain and the count of non-empty cells are functions of
+//!   the counts. The PV shift (`finalize`: `PV_ARRAY_BTS`, or more when at most 1 % of the cells
+//!   are not empty) is `PV_ARRAY_BTS` whatever the counts when the base-2 logarithm (`ilog2`) of
+//!   `backbone_size` divided by the product of 8 and `kTargetPVBytes` is 0 (word size 5): then each
+//!   stripe sets the PV bits of its cells, in its own words (a stripe is 2^shift cells,
+//!   shift >= `PV_ARRAY_BTS`); otherwise the PV array is made after the stripes from the starts (a
+//!   cell is not empty when its start is below the next one), by `finalize`'s statements.
 //! - fill (per stripe): the serial fill on the stripe's cells (each append, in the serial order, at
 //!   its cell's cursor; the cursors start at the starts), then each cell of n > 5 offsets puts o_k at
 //!   `x_emission_position(k, n)`: the serial fill's statements on the same cells.

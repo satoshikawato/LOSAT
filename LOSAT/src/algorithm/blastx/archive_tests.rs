@@ -36,6 +36,12 @@ const CASES: &[(&str, &[&str], &str)] = &[
     ("lc_mask_segno", &["-lcase_masking", "-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:12 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("mts_warn", &["-max_target_seqs", "2"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:2 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("opt_besthit", &["-subject_besthit"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 UseSubjectBestHit=boolean:True WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+    // `-best_hit_overhang` / `-best_hit_score_edge`, each when given, where `-culling_limit` is
+    // (NCBI BLAST+ 2.17.0, line NP O6a-3's strategy probe `O/O6/a3/bx_ss`).
+    ("opt_bh_both", &["-best_hit_overhang", "0.2", "-best_hit_score_edge", "0.3"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 BestHitOverhang=real:0.2 BestHitScoreEdge=real:0.3 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+    ("opt_bh_of", &["-best_hit_overhang", "0.2"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 BestHitOverhang=real:0.2 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+    ("opt_bh_se", &["-best_hit_score_edge", "0.3"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 BestHitScoreEdge=real:0.3 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+    ("opt_bh_se_sbh", &["-best_hit_score_edge", "0.3", "-subject_besthit"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 BestHitScoreEdge=real:0.3 UseSubjectBestHit=boolean:True WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("opt_cull0", &["-culling_limit", "0"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 Culling=integer:0 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("opt_cull5", &["-culling_limit", "5"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 Culling=integer:5 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
     ("opt_cull_mts", &["-culling_limit", "3", "-max_target_seqs", "2"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:12 Culling=integer:3 WindowSize=integer:40 UngappedMode=boolean:False QueryGeneticCode=integer:1 HitlistSize=integer:2 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
@@ -127,54 +133,6 @@ fn parse(extra: &[&str]) -> Option<BlastxArgs> {
     }
 }
 
-/// The inputs of a command line that LOSAT's `blastx` parser refuses (`-use_sw_tback`, which it
-/// does not search with): the options model must still write the list NCBI
-/// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
-/// hand.
-fn refused_inputs(extra: &[&str]) -> OptionInputs {
-    const REFUSED: [&str; 6] = [
-        "-task",
-        "-matrix",
-        "-word_size",
-        "-gapopen",
-        "-gapextend",
-        "-comp_based_stats",
-    ];
-    let mut kept = Vec::new();
-    let mut refused: Vec<(&str, &str)> = Vec::new();
-    let mut index = 0;
-    while index < extra.len() {
-        let flag = extra[index];
-        if REFUSED.contains(&flag) {
-            refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
-            index += 2;
-        } else if flag == "-use_sw_tback" {
-            refused.push((flag, ""));
-            index += 1;
-        } else {
-            kept.push(flag);
-            index += 1;
-        }
-    }
-    let mut inputs = option_inputs(&parse(&kept).expect("the options LOSAT takes parse"));
-    for (flag, value) in refused {
-        match flag {
-            "-task" if value == "blastx-fast" => inputs.task = "blastx-fast".to_string(),
-            "-matrix" => inputs.matrix = Some(value.to_string()),
-            "-word_size" => inputs.word_size = value.parse().ok(),
-            "-gapopen" => inputs.gapopen = value.parse().ok(),
-            "-gapextend" => inputs.gapextend = value.parse().ok(),
-            "-comp_based_stats" => {
-                inputs.comp_based_stats =
-                    i32::from(crate::algorithm::blastx::args::composition_mode(value));
-            }
-            "-use_sw_tback" => inputs.use_sw_tback = true,
-            _ => {}
-        }
-    }
-    inputs
-}
-
 // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
 // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
 // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
@@ -210,26 +168,18 @@ fn a_threshold_past_int4_is_recorded_as_int_min() {
 #[test]
 fn the_option_lists_equal_those_of_ncbis_probes() {
     assert!(CASES.len() >= 70);
-    let mut refused = 0;
     for &(name, extra, expected) in CASES {
-        let inputs = match parse(extra) {
-            Some(args) => option_inputs(&args),
-            None => {
-                refused += 1;
-                refused_inputs(extra)
-            }
-        };
+        let args = parse(extra).unwrap_or_else(|| panic!("{name} {extra:?}"));
         assert_eq!(
-            render(&algorithm_options(&inputs)),
+            render(&algorithm_options(&option_inputs(&args))),
             expected,
             "{name} {extra:?}"
         );
     }
-    // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
-    // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
-    // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
-    // 2 of the 80 are refused (`-use_sw_tback`; the X-drop cases parse since line RG X1).
-    assert!(refused == 2 && CASES.len() - refused > 60, "{refused}");
+    // Every case is LOSAT's command line, the model's check of `option_inputs` (every matrix
+    // and composition mode since series SC, SC6; the word sizes LOSAT does not search with
+    // since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them; the
+    // X-drop cases since line RG X1; `-use_sw_tback` since line RG X4b-2).
 }
 
 #[test]

@@ -91,7 +91,7 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
@@ -177,7 +177,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
@@ -347,9 +347,9 @@ describe('Coordinator', () => {
 
   it('does not queue an input that the index scan cannot read', async () => {
     const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n$$$$$$\n' } })).toEqual({
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n>?2147483647\nA\n' } })).toEqual({
       ok: false,
-      message: "Query FASTA: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+      message: "Query FASTA: a query record longer than 2147483647 letters is not supported by LOSAT's BLASTN",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -963,7 +963,9 @@ describe('Coordinator', () => {
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
     const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     const result = await coordinator.enqueueAll([
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
+      // A record over 2147483647 letters, which LOSAT's reader refuses (a reader's error ends the records
+      // instead: line WQA's D10, 2026-11-19).
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '>s\nAC\n>?2147483647\nAC\n' } },
     ]);
     expect(result.ok).toBe(false);
     expect(runInputs.size).toBe(0);

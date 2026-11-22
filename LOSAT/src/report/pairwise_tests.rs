@@ -95,6 +95,7 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         Box::new(move |out: &mut Flushes| {
             let intro = BlastnIntro {
                 megablast,
+                indexed_megablast: false,
                 matrix_only: false,
             };
             write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None, None)
@@ -1112,6 +1113,7 @@ fn matrix_only_prolog_is_rmblastns() {
             "2.17.0+",
             BlastnIntro {
                 megablast,
+                indexed_megablast: false,
                 matrix_only: true,
             },
             b"User specified sequence set (Input: s1.fa)",
@@ -1207,6 +1209,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         version: "2.17.0+".to_string(),
         intro: BlastnIntro {
             megablast: true,
+            indexed_megablast: false,
             matrix_only: false,
         },
         database_name: b"subjects".to_vec(),
@@ -1269,6 +1272,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     x_pool,
                     None,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )
                 .unwrap();
                 written
@@ -1363,6 +1367,7 @@ Window for multiple hits: 40\n\
         false,
         false,
         false,
+        false,
         Some(&links),
     )
     .unwrap();
@@ -1375,6 +1380,7 @@ Window for multiple hits: 40\n\
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
+        false,
         false,
         false,
         false,
@@ -1400,6 +1406,7 @@ Window for multiple hits: 40\n\
         &mut rmblastn,
         "blastn",
         crate::wording::REPORT_VERSION,
+        false,
         false,
         true,
         true,
@@ -1430,6 +1437,7 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         false,
         false,
         false,
+        false,
         Some(&links),
     )
     .unwrap_err();
@@ -1448,6 +1456,7 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
+        false,
         false,
         false,
         false,

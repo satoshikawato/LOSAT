@@ -16,7 +16,7 @@ pub(crate) struct DbMetadata {
     pub db_version: u32,
     pub description: Vec<u8>,
     pub number_of_letters: u64,
-    /// `Int8` (blastdb.def: `number-of-sequences._type = Int8`), the count of every volume;
+    /// `Int8` (blastdb.def gives `number-of-sequences` the type `Int8`), the count of every volume;
     /// NCBI fills it from an `int` (`GetDBMetaData`), which LOSAT does not narrow.
     pub number_of_sequences: i64,
     pub last_updated: String,
@@ -36,7 +36,7 @@ pub(crate) struct DbMetadata {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7062-7080
 // makeblastdb sets the string encoding to `eEncoding_Ascii`
 // (makeblastdb.cpp:1320) and every member is a VisibleString: a byte from 0x80
-// goes through `CUtf8::AsUTF8(..., eEncoding_Ascii)`, which appends it as it is,
+// goes through `CUtf8::AsUTF8` with `eEncoding_Ascii`, which appends it as it is,
 // and a control character is written as `\u00XX` with capital hexadecimal
 // digits. The string ends at its first NUL (`*src`). makeblastdb 2.17.0 wrote the
 // title `é` (UTF-8 C3 A9) as the same two bytes, a tab as `\u0009`.
@@ -65,9 +65,9 @@ fn write_json_string<O: JsonOut>(out: &mut O, value: &[u8]) -> Result<(), O::Err
 /// serializer's buffer (`OStreamBuffer`), or the bytes alone (`JsonText`).
 pub(crate) trait JsonOut {
     type Error;
-    /// `PutChar(c)`.
+    /// `PutChar` of `c`.
     fn put_char(&mut self, c: u8) -> Result<(), Self::Error>;
-    /// `PutString(str, length)`.
+    /// `PutString` of `str` and its length.
     fn put_string(&mut self, s: &[u8]) -> Result<(), Self::Error>;
     /// `PutEol()`: a line feed and the indentation.
     fn put_eol(&mut self) -> Result<(), Self::Error>;
@@ -124,7 +124,7 @@ impl DbMetadata {
     // text; `files` is a container of strings (`BeginContainer` is `BeginArray`, each element
     // `NextElement` and `WriteValue`). `BeginValue` writes nothing here: the object has no
     // member without a tag.
-    /// `json_out->WriteObject(obj_info)`: the metadata object, through `out`'s calls.
+    /// `WriteObject` of `json_out` for `obj_info`: the metadata object, through `out`'s calls.
     pub(crate) fn write_json<O: JsonOut>(&self, out: &mut O) -> Result<(), O::Error> {
         let mut block_start = true;
         let mut key = |out: &mut O, name: &str| -> Result<(), O::Error> {
@@ -196,7 +196,7 @@ impl DbMetadata {
     }
 }
 
-/// `CDirEntry(path).GetName()`: the part after the last path separator.
+/// `GetName` of a `CDirEntry` of `path`: the part after the last path separator.
 fn file_name(path: &[u8]) -> &[u8] {
     let is_separator = |c: &u8| *c == b'/' || (cfg!(windows) && (*c == b'\\' || *c == b':'));
     match path.iter().rposition(is_separator) {
@@ -210,21 +210,21 @@ fn file_name(path: &[u8]) -> &[u8] {
 // `IsFile` follows links. Between `Exists` and `GetLength` NCBI posts an error when
 // the length cannot be read; a file whose `stat` succeeded a moment before gives its
 // length here (`None` only when it is not a regular file).
-/// `CFile(path).Exists()` and `GetLength()`: the length of the regular file `path`.
+/// `Exists` and `GetLength` of a `CFile` of `path`: the length of the regular file `path`.
 fn file_length(path: impl AsRef<Path>) -> Option<i64> {
     let meta = std::fs::metadata(path).ok()?;
     meta.is_file().then_some(meta.len() as i64)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1610-1702
-// `volumes` and `alias_files` are `FindVolumePaths(paths, alias, true)`: each path once.
-// `user_path` is the `-metadata_output_prefix` of makeblastdb and of blastdbcmd
-// (`metadata_user_path`). makeblastdb's `lmdbs` is the one LMDB file of the version 5 database
-// it wrote, `<db>.pdb`; blastdbcmd's are the LMDB files of the database's volumes
-// (`GetLMDBFileNames`, one per `CSeqDBLMDBEntry`).
-// `file.GetDir() + file.GetBase()` is the LMDB file's path without its extension. A file
-// the earlier database of the same name left (a `<db>.pjs` that the removal of a database
-// of several volumes does not take) is listed and counted as NCBI lists it.
+// `volumes` and `alias_files` are `FindVolumePaths` of `paths` and `alias` with the last argument
+// true: each path once. `user_path` is the `-metadata_output_prefix` of makeblastdb and of
+// blastdbcmd (`metadata_user_path`). makeblastdb's `lmdbs` is the one LMDB file of the version 5
+// database it wrote, `<db>.pdb`; blastdbcmd's are the LMDB files of the database's volumes
+// (`GetLMDBFileNames`, one per `CSeqDBLMDBEntry`). The `GetDir` of `file` followed by its `GetBase`
+// is the LMDB file's path without its extension. A file the earlier database of the same name left
+// (a `<db>.pjs` that the removal of a database of several volumes does not take) is listed and
+// counted as NCBI lists it.
 /// `x_GetDBFilesMetaData`: the bytes of the database's files, the bytes of its index
 /// and sequence files, and the sorted names of its files, each after `user_path`. An LMDB
 /// file's name is the bytes of the volume's header (`lmdb_file_names`), which need not be
@@ -314,7 +314,7 @@ pub(crate) struct IoException {
 }
 
 impl IoException {
-    /// `GetType() + "::" + GetErrCodeString()`.
+    /// `GetType()`, then `"::"`, then `GetErrCodeString()`.
     fn type_and_code(&self) -> &'static str {
         match self.code {
             IoErrCode::Write => "CIOException::eWrite",
@@ -341,7 +341,7 @@ pub(crate) struct OStreamBuffer<'a> {
     buffer_pos: u64,
     /// `m_Buffer` up to `m_BufferEnd`.
     buffer: Vec<u8>,
-    /// `m_CurrentPos - m_Buffer`.
+    /// `m_CurrentPos` less `m_Buffer`.
     current: usize,
 }
 
@@ -372,7 +372,7 @@ impl<'a> OStreamBuffer<'a> {
 
     // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:283-312
     // `DoSkip` (strbuffer.inl:273-281) is `DoReserve` and the same advance.
-    /// `Skip(count)`: the position of the `count` bytes taken.
+    /// `Skip` of `count`: the position of the `count` bytes taken.
     fn skip(&mut self, count: usize) -> Result<usize, IoException> {
         let pos = self.reserve(count)?;
         self.current = pos + count;
@@ -405,7 +405,7 @@ impl<'a> OStreamBuffer<'a> {
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-907
     // With no back limit, both forms write all the buffer holds. A failed write keeps it there.
-    /// `FlushBuffer(fullBuffer)`.
+    /// `FlushBuffer` with `fullBuffer`.
     fn flush_buffer(&mut self, _full_buffer: bool) -> Result<(), IoException> {
         let count = self.current;
         if count != 0 {
@@ -445,7 +445,7 @@ impl<'a> OStreamBuffer<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:843-862
-    // `m_Output` as a condition is `!fail()` of the stream.
+    // `m_Output` as a condition is true while the stream's `fail()` is false.
     /// `Close()`.
     fn close(&mut self) -> Result<(), IoException> {
         if !self.closed && !self.output.fail() {
@@ -525,7 +525,7 @@ impl ObjectOStream<'_> {
     // virtual `GetPosition` is `CObjectOStream`'s, the byte position, not the line position
     // of `CObjectOStreamJson`. makeblastdb's diagnostics are "Severity: (code.subcode)
     // [makeblastdb] text".
-    /// `SetFailFlags(flags, message)`.
+    /// `SetFailFlags` with `flags` and a message.
     fn set_fail_flags(&mut self, flags: u32, message: &str, err: &mut dyn Write) {
         let old = self.fail;
         self.fail |= flags;
@@ -553,9 +553,10 @@ impl ObjectOStream<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:522-556
-    // `RethrowError(flag, mess, exc)` is `ThrowError1(DIAG_COMPILE_INFO, flag, mess, &exc)`
+    // `RethrowError` with a flag, a message and `exc` is `ThrowError1` with `DIAG_COMPILE_INFO`,
+    // the flag, the message and the address of `exc`
     // (objostr.hpp:578-579). `DefaultFlush` is `Flush` (no `fFlagNoAutoFlush`).
-    /// `RethrowError(fWriteError, message, exc)`.
+    /// `RethrowError` with `fWriteError`, a message and `exc`.
     fn rethrow_write_error(
         &mut self,
         message: &str,

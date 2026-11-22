@@ -21,7 +21,7 @@ fn the_protocol_and_the_browser_url_read_ncbirc() {
     )
     .unwrap();
     // An empty PROTOCOL is set (`HasEntry` with `fCountCleared`); an empty browser URL is not
-    // (`Get(...).empty()`).
+    // (its caller tests whether `Get` gives an empty string).
     assert_eq!(protocol(Some(&read)), b"");
     assert_eq!(value(Some(&read), "TAX_BROWSER", "BLASTFMTUTIL"), None);
 }

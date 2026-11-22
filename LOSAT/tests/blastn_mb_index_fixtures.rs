@@ -11,14 +11,15 @@
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
 //! (`-db_hard_mask`), or reads the index in a way that leaves the search undefined or fails:
 //! LOSAT refuses it with that text, and NCBI's output is kept for the lines that take these
-//! searches. Where NCBI exits with its error in a later query batch, LOSAT first writes NCBI's
-//! output of the batches before; where NCBI crashes or never ends, LOSAT writes at most a
-//! beginning of NCBI's output; where NCBI's run succeeds, LOSAT writes nothing, or the batches
-//! before for a refusal of a later query batch or query chunk (its text names one).
+//! searches. Where NCBI exits with its error, crashes or never ends in a later query batch, LOSAT
+//! writes what NCBI wrote before (its output of the batches before) and refuses there; where
+//! NCBI's run succeeds, LOSAT writes nothing, or the batches before for a refusal of a later query
+//! batch or query chunk (its text names one).
 //!
-//! A row whose fourth field is `same as NAME` is compared with row NAME's NCBI files: NCBI's
-//! `-num_threads 1` output, which LOSAT gives at every thread count (Owner 2026-10-13), for a run
-//! whose NCBI result at more threads depends on its threads.
+//! A row whose fourth field is `same as NAME` (the setup and the words of row NAME, with another
+//! `-num_threads`) is compared with row NAME's NCBI files: NCBI's `-num_threads 1` output, which
+//! LOSAT gives at every thread count (Owner 2026-10-13), for a run whose NCBI result at more
+//! threads depends on its threads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -74,6 +75,34 @@ fn cases() -> Vec<Case> {
                 .map(|text| text.to_string()),
             ncbi: same_as.unwrap_or(fields[0]).to_string(),
         });
+    }
+    // A `same as` row runs its row's search with another thread count.
+    let without_threads = |words: &[String]| {
+        let mut kept = Vec::new();
+        let mut words = words.iter();
+        while let Some(word) = words.next() {
+            if word == "-num_threads" {
+                words.next();
+            } else {
+                kept.push(word.clone());
+            }
+        }
+        kept
+    };
+    for case in cases.iter().filter(|case| case.ncbi != case.name) {
+        let row = cases
+            .iter()
+            .find(|row| row.name == case.ncbi)
+            .unwrap_or_else(|| panic!("{}: no row {}", case.name, case.ncbi));
+        assert!(
+            row.ncbi == row.name
+                && row.setup == case.setup
+                && row.variables == case.variables
+                && without_threads(&row.words) == without_threads(&case.words),
+            "{}: not row {}'s search with another -num_threads",
+            case.name,
+            row.name
+        );
     }
     cases
 }
@@ -256,17 +285,14 @@ fn rows_that_differ() -> Vec<String> {
                     let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
                     losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
                 };
-                // NCBI's run ended by a signal or the time limit (124): what it wrote up to its
-                // crash is no result, and LOSAT may refuse before it. NCBI's run succeeded:
-                // LOSAT refuses before the search (nothing written), or a later query batch or
-                // query chunk after the batches before.
+                // NCBI's run succeeded: LOSAT refuses before the search (nothing written), or a
+                // later query batch or query chunk after the batches before. Elsewhere (NCBI's
+                // error, its crash or its time limit, 124) what NCBI wrote before.
                 let later = refusal.contains("query batch or query chunk");
-                let out_ok = if ncbi_rc == 124 || ncbi_rc >= 128 || (ncbi_rc == 0 && later) {
-                    want_out.starts_with(&output.stdout)
-                } else if ncbi_rc == 0 {
-                    output.stdout.is_empty()
-                } else {
-                    output.stdout == want_out
+                let out_ok = match ncbi_rc {
+                    0 if later => want_out.starts_with(&output.stdout),
+                    0 => output.stdout.is_empty(),
+                    _ => output.stdout == want_out,
                 };
                 output.status.code() == Some(1) && out_ok && stderr.contains(&line)
             }

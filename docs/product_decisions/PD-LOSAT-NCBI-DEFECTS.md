@@ -2419,16 +2419,16 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 - `losat blastn -use_index true` with a MegaBLAST index of only some database volumes, in a later
   query batch or query chunk that reads the results NCBI keeps (version 1.72, 2026-11-22, line RG
   item D5b-3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; the kept
-  results are reproduced, rule 2 above). LOSAT refuses (exit 1) at that batch or chunk, after the
-  output of the batches before, where:
-  - NCBI's search thread holds the empty list of the kept results as its list of initial hits, of
-    no memory. The scan of a database volume without an index then saves its first initial hit
-    with a reallocation of 0 bytes, which glibc answers with a block of one hit, and its second
-    with another, which frees the list (`blast_extend.c:325-356`); NCBI then writes to and frees
-    freed memory: `double free detected` (exit status 134, rows `m_part_two` and `m_part_c1200`),
-    a crash (139, row `m_mixed2`), or a result read from freed memory. LOSAT refuses a search whose
-    scan saves a second initial hit into such a list (`IndexSeeds::check`), at every thread count,
-    as NCBI's one thread does; one hit, or none, is searched as NCBI does (row `m_part_one`).
+  results are reproduced, rule 2 above), where NCBI's search thread holds the empty list of the
+  kept results as its list of initial hits, of no memory. The scan of a database volume without an
+  index then saves its first initial hit with a reallocation of 0 bytes, which glibc answers with a
+  block of one hit, and its second with another, which frees the list (`blast_extend.c:325-356`);
+  NCBI then writes to and frees freed memory: `double free detected` (exit status 134, rows
+  `m_part_two` and `m_part_c1200`), a crash (139, row `m_mixed2`), or a result read from freed
+  memory. LOSAT refuses (exit 1) a search whose scan saves a second initial hit into such a list,
+  at that batch or chunk after the output of the batches before (`IndexSeeds::check`), at every
+  thread count by the list of NCBI's one thread; one hit, or none, is searched as NCBI does (row
+  `m_part_one`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

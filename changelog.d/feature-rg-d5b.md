@@ -6,5 +6,6 @@
 - `blastn -use_index true` also searches with the index where NCBI does, and gives NCBI's bytes: the
   one-hit and two-hit (`-window_size`) searches, and an index of only some database volumes, whose
   other volumes are scanned (a later query batch finds no seeds in some index volumes there, as in
-  NCBI). It refuses `-db_hard_mask` with an index, and a later query batch of an index of only some
-  volumes where NCBI's search writes to freed memory.
+  NCBI's `-num_threads 1`, at every thread count). It refuses `-db_hard_mask` with an index, an
+  index that does not fit the database (where NCBI reads past the index or the sequence), and a
+  later query batch of an index of only some volumes where NCBI's search writes to freed memory.

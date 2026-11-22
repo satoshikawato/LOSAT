@@ -2623,6 +2623,8 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     );
     assert_eq!(held_first.load(1), H(Some(holder)));
     assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
+    // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
+    assert!(!held_first.loaded(1));
     let thrown_first = HitLoads::of(
         LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsRun)),

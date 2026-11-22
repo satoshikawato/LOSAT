@@ -2927,13 +2927,13 @@ impl HitLoads {
         }
     }
 
-    /// Whether a report (or a batch's prefetch) loads the subject `key` (or a sequence that
-    /// NCBI's scope gives for it, `HitLoad::Held`).
+    /// Whether a report (or a batch's prefetch) loads the subject `key` by a read of its own: not
+    /// a subject that NCBI's scope gives another sequence for without the lookup
+    /// (`HitLoad::Held`), which reads nothing new and which `ParsedSubject::fetched` refuses with
+    /// the words of that sequence (the reads of the taxonomy texts, which BLASTN and TBLASTX
+    /// make before they ask `fetched`, would refuse it with the words of its failing lookup).
     pub fn loaded(&self, key: usize) -> bool {
-        matches!(
-            self.load(key),
-            HitLoad::Loaded | HitLoad::Refused(_) | HitLoad::Held(_)
-        )
+        matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for

@@ -11,11 +11,11 @@
 //! of a round serially (no `LOSAT_X_PAIRWISEPAR` pieces).
 
 use super::{
-    database_description_label, write_alignment, write_blast_database_header,
-    write_blastp_database_header_spacing, write_blastp_pairwise_intro,
+    blastp_family_program, database_description_label, write_alignment,
+    write_blast_database_header, write_blastp_database_header_spacing,
     write_blastp_query_footer_spacing, write_blastp_query_header,
     write_database_subject_alignments_part, write_description_table, write_hsp_info,
-    write_no_hits_found, write_spaces, write_subject_alignments_part,
+    write_no_hits_found, write_prolog, write_spaces, write_subject_alignments_part,
     write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
     DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
@@ -78,7 +78,14 @@ pub(crate) fn write_psiblast_round_report(
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
     if prolog && query_range.start == 0 {
-        write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
+        write_prolog(
+            writer,
+            blastp_family_program(&config.program),
+            &report.version,
+            false,
+            false,
+            false,
+        )?;
         match database {
             Some(database) => write_blast_database_header(writer, database)?,
             None => write_blastp_database_header_spacing(

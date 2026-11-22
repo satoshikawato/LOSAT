@@ -10,6 +10,7 @@ use crate::common::GapEditOp;
 #[cfg(test)]
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::report::pairwise::PairwiseHit;
+use crate::report::query_anchored::MaskSeek;
 use crate::stats::{
     compute_karlin_params_ungapped, score_freq_profile_from_probabilities, KarlinParams,
 };
@@ -59,7 +60,7 @@ impl<'a> Rows<'a> {
             })
             .collect();
         // A subject set's lowercase is merged first; a database's masks are kept as stored
-        // (`shown_subject_masks` merges what it keeps).
+        // (`subject_mask_regions` keeps them as they are).
         let subject_masks: Option<Vec<Vec<MaskedInterval>>> = match (masks.database, masks.subject)
         {
             (Some(database), _) => Some(database.to_vec()),
@@ -191,7 +192,7 @@ pub(crate) struct Rows<'a> {
     subjects: SubjectLetters<'a>,
     /// Per query, the shown masks (`shown_query_masks`).
     query_masks: Vec<Vec<MaskedInterval>>,
-    /// Per subject, the masks that `shown_subject_masks` shows with its HSPs: of a subject set's
+    /// Per subject, the masks that `subject_mask_regions` shows with its HSPs: of a subject set's
     /// record with `-lcase_masking`, its merged lowercase (`DisplayMasks::subject`); of a reported
     /// database sequence with `-db_soft_mask`, its stored masks as stored
     /// (`DisplayMasks::database`).
@@ -223,7 +224,10 @@ impl Rows<'_> {
         let (queries, subjects) = (self.queries, self.subjects);
         let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
             let s_idx = hsp_list.hsps.first()?.s_idx as usize;
-            Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
+            Some(subject_mask_seek(subject_mask_regions(
+                &subject_masks[s_idx],
+                &hsp_list.hsps,
+            )))
         });
         for hsp in &hsp_list.hsps {
             let query = queries
@@ -250,16 +254,22 @@ impl Rows<'_> {
                 .zip(&subject_row)
                 .filter(|(query, subject)| query == subject)
                 .count();
-            lowercase_masked(
-                &mut query_row,
+            // The masks of the rows (`x_FillLocList`), whose letters the rows hold in lower
+            // case as outfmt 0 shows them (`x_OutputSeq`), and so the hit records of the library
+            // API and the Web adapter; the lists are dropped (`query_anchored::output_seq`).
+            let mut masks = crate::report::query_anchored::HspMasks::default();
+            set_query_row_masks(
+                &mut masks,
+                &query_row,
                 hsp.q_start,
-                1,
                 &self.query_masks[hsp.q_idx as usize],
             );
             if let Some(subject_masks) = &list_subject_masks {
                 let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
+                set_subject_row_masks(&mut masks, &subject_row, hsp.s_start, step, subject_masks);
             }
+            masks.lower_row(0, &mut query_row);
+            masks.lower_row(1, &mut subject_row);
             let gaps = query_row
                 .iter()
                 .chain(&subject_row)
@@ -458,17 +468,12 @@ pub(crate) fn shown_query_masks(
 // `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
 // holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
 // the closed range `[offset, end]` of an HSP in the searched letters (the end is one past the
-// HSP), in the order of `masks`, merged for `lowercase_masked`, which marks each position once
-// (the merged lowercase of a subject set's record is kept as it is). With `-subject_loc` the
+// HSP), in the order of `masks`, unmerged (the merged lowercase of a subject set's record is kept
+// as it is), which outfmt 0 and the query-anchored reports place by `x_FillLocList`
+// (`query_anchored::fill_row_loc_list`, `fill_loc_list`). With `-subject_loc` the
 // record's coordinates and the searched letters' differ by the interval's start, so a region of
 // the record is kept by where it would lie in the interval, and shown where it lies in the
 // record.
-fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
-    merged(&subject_mask_regions(masks, hsps).collect::<Vec<_>>())
-}
-
-/// The masks of `masks` that `GetSubjectMasks` gives with the HSPs `hsps` (`shown_subject_masks`
-/// before the merge), in their order.
 fn subject_mask_regions<'m>(
     masks: &'m [MaskedInterval],
     hsps: &'m [BlastnHsp],
@@ -484,7 +489,8 @@ fn subject_mask_regions<'m>(
         .cloned()
 }
 
-/// The masked positions as disjoint intervals in order, for `lowercase_masked`.
+/// The masked positions as disjoint intervals in order (`shown_query_masks`, a subject set's
+/// lowercase).
 fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
     let mut sorted = masks.to_vec();
     sorted.sort_by_key(|mask| mask.start);
@@ -498,37 +504,93 @@ fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
     merged
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
-// The row's residue positions start at `first` (1-based) and move by `step`; a residue
-// whose position lies in a mask is shown in lowercase. `masks` are disjoint and in order
-// (`merged`), so the masks that overlap the row's span are found by binary search.
-fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedInterval]) {
-    let residues = row.iter().filter(|&&residue| residue != b'-').count();
-    if masks.is_empty() || residues == 0 {
-        return;
+/// The 0-based positions `(low, high)` of the first and the last residue of the row `letters`,
+/// whose residues lie at the positions from `first` (1-based) by `step`; `None` for a row
+/// without residues.
+fn row_range(letters: &[u8], first: usize, step: isize) -> Option<(usize, usize)> {
+    let residues = letters.iter().filter(|&&residue| residue != b'-').count();
+    if residues == 0 {
+        return None;
     }
     let last = first as isize + step * (residues as isize - 1);
-    let (low, high) = (
-        (first as isize).min(last) - 1,
-        (first as isize).max(last) - 1,
-    );
-    let (low, high) = (low as usize, high as usize);
-    let candidates = &masks[masks.partition_point(|mask| mask.end <= low)
-        ..masks.partition_point(|mask| mask.start <= high)];
+    Some((
+        ((first as isize).min(last) - 1) as usize,
+        ((first as isize).max(last) - 1) as usize,
+    ))
+}
+
+/// Sets the query's row of `masks` (`HspMasks::set_row`) to the masks of `shown` that meet the
+/// row `letters`, whose residues lie at the positions from `first` (1-based) on. The query's
+/// `shown` are disjoint and in order (`merged`), so the masks that can meet the row's span are
+/// found by binary search.
+fn set_query_row_masks(
+    masks: &mut crate::report::query_anchored::HspMasks,
+    letters: &[u8],
+    first: usize,
+    shown: &[MaskedInterval],
+) {
+    if shown.is_empty() {
+        return;
+    }
+    let Some((low, high)) = row_range(letters, first, 1) else {
+        return;
+    };
+    let candidates = &shown[shown.partition_point(|mask| mask.end <= low)
+        ..shown.partition_point(|mask| mask.start <= high)];
     if candidates.is_empty() {
         return;
     }
-    let mut position = first as isize;
-    for residue in row.iter_mut().filter(|residue| **residue != b'-') {
-        let zero_based = (position - 1) as usize;
-        if candidates
-            .iter()
-            .any(|mask| mask.start <= zero_based && zero_based < mask.end)
-        {
-            residue.make_ascii_lowercase();
-        }
-        position += step;
+    masks.set_row(
+        0,
+        0,
+        letters,
+        |column| letters[column] != b'-',
+        (low as u32, high as u32),
+        true,
+        1,
+        super::anchored::shown_masks(candidates),
+    );
+}
+
+/// The subject masks `regions` shown with the HSPs of one subject (`subject_mask_regions`: in
+/// NCBI's order, not merged, each of one letter or more) arranged for the scans of its rows
+/// (`MaskSeek`, inclusive positions): `set_subject_row_masks` then reads only the masks that can
+/// meet a row, not the whole list for every HSP.
+fn subject_mask_seek(regions: impl Iterator<Item = MaskedInterval>) -> MaskSeek<usize> {
+    MaskSeek::new(regions.map(|mask| (mask.start, mask.end - 1)))
+}
+
+/// Sets the subject's row of `masks` (`HspMasks::set_row`) to the masks of `shown`
+/// (`subject_mask_seek`) that meet the row `letters`, whose residues lie at the positions from
+/// `first` (1-based) by `step`, in the order of the subject's list.
+fn set_subject_row_masks(
+    masks: &mut crate::report::query_anchored::HspMasks,
+    letters: &[u8],
+    first: usize,
+    step: isize,
+    shown: &MaskSeek<usize>,
+) {
+    let Some((low, high)) = row_range(letters, first, step) else {
+        return;
+    };
+    let mut met: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
+    shown.for_each_meeting(low, high, |from, to, index| {
+        met.push((index, (from as u32, to as u32, 0)));
+    });
+    if met.is_empty() {
+        return;
     }
+    met.sort_unstable_by_key(|&(index, _)| index);
+    masks.set_row(
+        1,
+        0,
+        letters,
+        |column| letters[column] != b'-',
+        (low as u32, high as u32),
+        step > 0,
+        1,
+        met.into_iter().map(|(_, mask)| mask),
+    );
 }
 
 /// The ungapped Karlin-Altschul block of a blastn query, from its composition; `None`

@@ -321,13 +321,31 @@ fn query_masks_convert_with_ncbis_frame_formulas() {
         .map(|(frame, ranges)| FrameMasks::new(frame, ranges))
         .collect();
     let mut plus = b"AAAAAAAAAA".to_vec();
-    lowercase_query_row(&mut plus, 1, 0, 29, &masks);
+    assert!(query_row_masks(&mut plus, 1, 0, 29, &masks).is_some());
     assert_eq!(&plus, b"AAaaaAAAAA");
     // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
     // residues 2 and 3 only.
     let mut minus = b"AAAAAAAAAA".to_vec();
-    lowercase_query_row(&mut minus, -1, 0, 29, &masks);
+    assert!(query_row_masks(&mut minus, -1, 0, 29, &masks).is_some());
     assert_eq!(&minus, b"AAaaAAAAAA");
+    // A row of another frame shows none.
+    let mut other = b"AAAAAAAAA".to_vec();
+    assert!(query_row_masks(&mut other, 2, 1, 27, &masks).is_none());
+    assert_eq!(&other, b"AAAAAAAAA");
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326 (cited at
+// `shown_query_masks`): `x_FillLocList` hands the masks to `x_OutputSeq` in the order of the
+// shown list, which a minus frame's conversion makes descending (`protein_to_dna_masks`); the
+// row's scan reads them sorted by start (`FrameMasks`) and gives them back in the list's order.
+#[test]
+fn row_masks_keep_the_order_of_the_shown_masks() {
+    let masks = [FrameMasks::new(-1, vec![(18, 23), (6, 11)])];
+    let mut row = b"AAAAAAAAAA".to_vec();
+    let row_masks = query_row_masks(&mut row, -1, 0, 29, &masks).expect("masks meet the row");
+    assert_eq!(row_masks.row(0), Some((&[(2, 3, -1), (6, 7, -1)][..], -1)));
+    assert_eq!(row_masks.row(1), None);
+    assert_eq!(&row, b"AAaaAAaaAA");
 }
 
 // The scan of all the ranges of a frame, which every row made before `LOSAT_X_TBXMASKSEEK`
@@ -359,7 +377,7 @@ fn lowercase_query_row_full_scan(
         column.clamp(0, columns - 1)
     };
     for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-        for &(from, to) in &frame_masks.ranges {
+        for &(from, to, _) in frame_masks.seek.ranges() {
             if to < low || from > high {
                 continue;
             }
@@ -378,7 +396,7 @@ fn lowercase_query_row_full_scan(
 #[test]
 fn mask_seek_lowercases_the_letters_of_the_full_scan() {
     // Ranges in any order, overlapping, empty (start after end) or outside the row, on rows
-    // of both frame signs.
+    // of both frame signs, of a residue for each codon of their range (TBLASTX's rows).
     let mut state = 0x2545_f491_4f6c_dd1du64;
     let mut next = |bound: i32| -> i32 {
         state ^= state << 13;
@@ -398,13 +416,15 @@ fn mask_seek_lowercases_the_letters_of_the_full_scan() {
             FrameMasks::new(-1, ranges),
         ];
         let low = next(55);
-        let high = low + 2 + next(58 - low);
+        let high = low + 3 * (1 + next((60 - low) / 3)) - 1;
         for frame in [1, -1] {
             let mut full = vec![b'A'; ((high - low + 1) / 3) as usize];
             let mut seek = full.clone();
             lowercase_query_row_full_scan(&mut full, frame, low, high, &masks);
-            lowercase_query_row(&mut seek, frame, low, high, &masks);
+            let masks = query_row_masks(&mut seek, frame, low, high, &masks);
             assert_eq!(seek, full, "frame {frame} low {low} high {high}");
+            // A lower-case letter has its mask (an empty range meets a row and shows none).
+            assert!(masks.is_some() || !full.iter().any(u8::is_ascii_lowercase));
         }
     }
 }

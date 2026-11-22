@@ -118,7 +118,7 @@ fn search_records(
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
             // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
-            // (`x_soft_subject::x_masked_subject_rows`), and the archive's Bioseqs.
+            // (`x_soft_subject::x_set_subject_row_masks`), and the archive's Bioseqs.
             let keep_whole =
                 archive.is_some() || (args.lcase_masking && !subject.lowercase_masks.is_empty());
             subject.cut_in_place(from, to_exclusive, keep_whole);

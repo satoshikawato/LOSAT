@@ -78,6 +78,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         subject,
         [&[], &[]],
         Default::default(),
+        None,
         &config,
     )
     .unwrap();

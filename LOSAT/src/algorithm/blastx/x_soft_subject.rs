@@ -140,61 +140,47 @@ pub(super) fn x_scan(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4302-4306 (`x_FillLocList`)
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
-/// `hits` (the outfmt 0 rows) with each subject row's masked letters in lower case. NCBI keeps the
-/// lower-case runs of the subject's record that meet one of the HSP ranges of the query and the
-/// subject (`[offset, end]`, the end one past the HSP), then each row takes the kept runs that meet
-/// its own range. A run that holds a letter of a row meets that row's HSP, so the rule is: every
-/// letter of a row that lies in a run is in lower case (a run that only touches the end one past the
-/// HSP holds no letter of the row). The runs (`FastaRecord::lowercase_masks`) are sorted and apart.
-/// Only records of `-subject` read with `-lcase_masking` have runs; the caller calls this when one
-/// has.
-///
-/// With `-subject_loc` the HSP ranges are in the searched letters and the runs in the whole record
-/// (`FastaRecord::archive_lowercase_runs`): a run is kept by where it would lie in the interval and
-/// shown where it lies in the record ([`x_shifted_subject_rows`], BLASTP's
-/// `x_soft_subject::x_masked_subject_rows`). An interval that starts at the record's start moves
-/// nothing, and the rule above holds for its clipped runs.
+/// The subject rows' masks of `hits` (the outfmt 0 rows' `HspMasks`): NCBI keeps the subject
+/// masks `kept` of the query and the subject (inclusive, in the subject's coordinates; the
+/// query-anchored reports read the same lists): the lower-case runs of the subject's record that
+/// meet one of the HSP ranges of the pair ([`x_subject_masks`], `-subject` read with
+/// `-lcase_masking`), or the stored masks of a search with `-db_soft_mask` or `-db_hard_mask`
+/// (`ReportedSubjects::shown_db_masks`). Each row places the kept masks that meet its own range
+/// at its columns (`x_FillLocList`, `query_anchored::fill_row_loc_list`), which `x_OutputSeq`
+/// puts in lower case. The rows come back so, as the hit records that the library API and LOSAT
+/// Web hand out show them (`HspMasks::lower_row`); the lists are dropped
+/// (`query_anchored::output_seq`). With `-subject_loc` the runs lie where they lie in the record,
+/// as the hits' positions.
 #[cold]
 #[inline(never)]
-pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
-    if subjects
-        .iter()
-        .any(|subject| subject.placement().offset > 0)
-    {
-        return x_shifted_subject_rows(hits, subjects);
-    }
+pub(super) fn x_set_subject_row_masks(
+    hits: &mut [PairwiseHit],
+    kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
+) {
     for hit in hits.iter_mut() {
-        let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
+        let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;
         };
-        let runs = &record.lowercase_masks;
-        let mut position = hit.hit.s_start as i32 - 1;
-        // The first run that ends at the row's first letter or after it.
-        let mut next = runs.partition_point(|&(_, to)| to < position);
-        if runs
-            .get(next)
-            .is_none_or(|&(from, _)| from > hit.hit.s_end as i32 - 1)
-        {
-            continue;
-        }
-        let Some(row) = hit.subject_seq.as_mut() else {
+        // A row without letters (an ungapped HSP of length 0) has no mask.
+        let Some(row) = hit.subject_seq.as_mut().filter(|row| !row.is_empty()) else {
             continue;
         };
-        let mut bytes = std::mem::take(row).into_bytes();
-        for (column, letter) in bytes.iter_mut().enumerate() {
-            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
-            if *letter == b'-' && !hit.subject_stored_gaps.contains(&(column as u32)) {
-                continue;
-            }
-            while runs.get(next).is_some_and(|&(_, to)| to < position) {
-                next += 1;
-            }
-            if runs.get(next).is_some_and(|&(from, _)| from <= position) {
-                letter.make_ascii_lowercase();
-            }
-            position += 1;
-        }
-        *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        let mut letters = std::mem::take(row).into_bytes();
+        let mut masks = crate::report::query_anchored::HspMasks::default();
+        // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`, in order).
+        let stored = &hit.subject_stored_gaps;
+        masks.set_row(
+            1,
+            0,
+            &letters,
+            |column| letters[column] != b'-' || stored.binary_search(&(column as u32)).is_ok(),
+            (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+            true,
+            1,
+            runs.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+        );
+        masks.lower_row(1, &mut letters);
+        *row = String::from_utf8(letters).expect("ASCII alignment row");
     }
 }
 
@@ -206,9 +192,8 @@ pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaR
 /// (the end one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
 /// start, so a run is kept by where it would lie in the interval and shown where it lies in the
 /// record (BLASTP's `x_soft_subject::x_subject_masks`). Only records of `-subject` read with
-/// `-lcase_masking` have runs. The outfmt 0 rows of shifted subjects show them
-/// ([`x_shifted_subject_rows`]), the query-anchored reports map them to their columns
-/// (`report::query_anchored`).
+/// `-lcase_masking` have runs. Outfmt 0's rows ([`x_set_subject_row_masks`]) and the
+/// query-anchored reports (`report::query_anchored`) place them at their columns.
 #[cold]
 #[inline(never)]
 pub(super) fn x_subject_masks(
@@ -250,50 +235,6 @@ pub(super) fn x_subject_masks(
             (!runs.is_empty()).then_some((key, runs))
         })
         .collect()
-}
-
-/// [`x_masked_subject_rows`] of subjects cut to a `-subject_loc` interval that starts past the
-/// record's start: each row shows the kept runs of its query and subject ([`x_subject_masks`])
-/// where they lie in the record.
-fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
-    let kept = x_subject_masks(hits, subjects);
-    x_kept_subject_rows(hits, &kept);
-}
-
-/// The rows `hits` with each subject letter in the runs `kept` of its query and subject
-/// (inclusive, in the subject's coordinates) in lower case: [`x_shifted_subject_rows`], and the
-/// stored masks of a search with `-db_soft_mask` or `-db_hard_mask`
-/// (`ReportedSubjects::shown_db_masks`).
-#[cold]
-#[inline(never)]
-pub(super) fn x_kept_subject_rows(
-    hits: &mut [PairwiseHit],
-    kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
-) {
-    for hit in hits.iter_mut() {
-        let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
-            continue;
-        };
-        let Some(row) = hit.subject_seq.as_mut() else {
-            continue;
-        };
-        let mut bytes = std::mem::take(row).into_bytes();
-        let mut position = hit.hit.s_start as i32 - 1;
-        for (column, letter) in bytes.iter_mut().enumerate() {
-            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
-            if *letter == b'-' && !hit.subject_stored_gaps.contains(&(column as u32)) {
-                continue;
-            }
-            if runs
-                .iter()
-                .any(|&(from, to)| from <= position && position <= to)
-            {
-                letter.make_ascii_lowercase();
-            }
-            position += 1;
-        }
-        *row = String::from_utf8(bytes).expect("ASCII alignment row");
-    }
 }
 
 #[cfg(test)]

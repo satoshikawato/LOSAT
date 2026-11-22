@@ -3,8 +3,8 @@
 //! that leaves the frame, and `GetFrameName`, which `CSerialException::AddFrameInfo` adds to the
 //! exception's frame stack) and of the places of the `END_OBJECT_FRAME` of NCBI's ASN.1 text
 //! reader, and the throws of the object stack itself. The table reader
-//! (`report::serial::asn_types::read`) and the reader of makeblastdb's mask files
-//! (`writedb::mask_info`) keep their stacks of these frames.
+//! (`report::serial::asn_types::read`), which reads makeblastdb's mask files too
+//! (`writedb::mask_info`), keeps its stack of these frames.
 
 use crate::ncbi_exception::ThrowSite;
 
@@ -146,11 +146,18 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
 /// The `END_OBJECT_FRAME` of the named frame that `CObjectIStream::ReadPointer`, which the text
 /// stream does not override, puts around a value of the type that `:Type` names (the frame
 /// `GetFrameName` calls by that type): the place of the line that `NCBI_RETHROW_SAME` adds to a
-/// `CException` other than a `CSerialException` passing through it. The mask reader's
-/// (`writedb::mask_info`) frame of `:Type`.
+/// `CException` other than a `CSerialException` passing through it.
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1198
 pub(crate) const READ_POINTER_FRAME_END: (&str, u32, &str) = (
     "src/serial/objistr.cpp",
     1195,
     "ncbi::CObjectIStream::ReadPointer",
+);
+
+/// [`READ_POINTER_FRAME_END`] of `CObjectIStream::SkipPointer`, the skip of a `CRef<>`.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1256-1270
+pub(crate) const SKIP_POINTER_FRAME_END: (&str, u32, &str) = (
+    "src/serial/objistr.cpp",
+    1267,
+    "ncbi::CObjectIStream::SkipPointer",
 );

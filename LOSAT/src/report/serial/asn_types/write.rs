@@ -178,7 +178,7 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
             if named {
                 enc.begin_named(info.name());
             }
-            if let Kind::List { element, set } = kind {
+            if let Kind::List { element, set, .. } = kind {
                 enc.begin_list(*set);
                 if named {
                     todo.push(Step::EndNamed);

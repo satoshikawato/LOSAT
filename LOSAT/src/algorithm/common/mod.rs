@@ -9,8 +9,8 @@
 //! - Mask helpers (`masks`)
 //! - The diagonal table's entry of the protein word finders and its two-hit test (`diag_entry`)
 //! - The walk of a protein sequence's diagonal table over its `-db_hard_mask` chunks (`hard_chunk_walk`)
-//!   and the one word of a chunk shorter than the word, with LOSAT's refusals there
-//! (`hard_chunk_scan`)
+//! - The one word of a chunk shorter than the word, with LOSAT's refusals there (`hard_chunk_scan`)
+//! - NCBI's diagonal tables of the query batches of a search of several (`query_batch_tables`)
 //! - The chunks of a translated subject frame and their scan ranges (`translated_chunks`)
 //! - The context of an offset of a concatenated query without the binary search (`x_context_table`)
 
@@ -24,6 +24,7 @@ pub mod diagnostics;
 pub(crate) mod hard_chunk_scan;
 pub(crate) mod hard_chunk_walk;
 pub(crate) mod masks;
+pub(crate) mod query_batch_tables;
 pub(crate) mod tabular;
 pub(crate) mod translated_chunks;
 pub(crate) mod unknown_matrix;

@@ -2355,7 +2355,7 @@ one-hit scan (`-window_size 0`); NCBI's rows of B depend on the thread order). L
 (PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
 NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000` and `-ungapped` expect NCBI's run of `ov_lkn`
 (`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240 `X`, which
-no query word hits, then B; at least as long as the walk's margin less the window, `spacer_length`, here the database's average
+no word of these queries hits, as they hold no `X`, then B; at least as long as the walk's margin less the window, `spacer_length`, here the database's average
 length) and `ov_lkn.asnt` (A's and B's masks, `local id` renumbered), and the alias `ov_lkn.pal` over the volume `ov_lknv` keeps
 `ov_lk`'s NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN, so that NCBI's statistics are `ov_lk`'s. At `-window_size 0` NCBI's
 one-thread search starts B 98 below 0, on the entries that no sequence wrote, as LOSAT's does (fix round 2 of M4b-3b,
@@ -2375,6 +2375,17 @@ holds B's letters 110-121 at 18. NCBI's one-thread search starts B at 5 in `ov_z
 sequence wrote, and at 100 in `ov_ztl`, where it does not; `ov_zto.pal` is an alias over `ov_zt` of its OID 2 alone (FIRST_OID 2,
 LAST_OID 2), where B is the first searched sequence. Made as the other shapes (`make_dbmaskp_ov.py`, the alias by its
 `main`).
+
+`ov_th10`, `ov_thm20`, `ov_th10f` and `ov_thm20f` (fix round 3 of M4b-3b, review 3's probe `M/m4b3b/review/probe_r3`,
+`probe5` of `make_dbmaskp_ov.py`, no draw of its own; rows `db.pmask.{bp,bx}.hard.ov_th*`): A (430 `X`, or 400 in the `thm20`
+forms; masks [10,300) [20,310)), which stores no entry and whose two-hit walk goes back, then B (`ov_zt`'s B with the query's
+letters 18-29 at 3, or in the `f` forms its letters 20-24, one run of three word hits; no masks). NCBI's one-thread search
+starts B on a new table at 10 (`thm20`: -20), within the window of the entries that no sequence wrote (below them at -20).
+The rows of `qzt.faa` / `qzt.fna` (one query) have NCBI's bytes at every thread count; `q1q.faa` / `q1q.fna` (q1, 60 letters,
+then `qzt`'s query) are two NCBI query batches at `BATCH_SIZE=50` and one by default, and q's rows differ between the two in
+NCBI's runs (BLASTP: 5 and 4 rows of q in `ov_th10`), as NCBI searches each batch alone, its queries counted from the batch's
+start: the rows `.q1q.` (and `.q1q.b50.`) check both batchings, and `LOSAT/tests/blastp_prelim_blocks.rs` runs them with
+LOSAT_X_BPQBLOCK 0 and 1 too.
 
 6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
 their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before

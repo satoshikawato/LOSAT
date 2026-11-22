@@ -1,7 +1,9 @@
 //! The diagonal table's entry of the protein word finders (NCBI's `DiagStruct`; TBLASTX, BLASTP,
 //! BLASTX and the programs built on them) and the two-hit diagonal test of one hit on it
 //! ([`x_test_hit`]), shared by BLASTP's scans and the one word of a hard chunk shorter than the
-//! word (`common::hard_chunk_scan::OneWord`, BLASTP and BLASTX).
+//! word (`common::hard_chunk_scan::OneWord`, BLASTP and BLASTX); the entry of a hit's diagonal
+//! in a search's table ([`DiagTable`]: one ring, [`DiagRing`], or NCBI's ring of each query batch,
+//! `common::query_batch_tables::QueryBatchTables`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-180
 
@@ -127,4 +129,67 @@ pub(crate) fn x_test_hit(
         return None;
     }
     Some((last_hit, diff))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518, 776-779
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
+// Each search of a query batch makes its own table, a ring of the power of two just at least the
+// batch's concatenated length plus the window, and finds a hit's entry by the hit's diagonal in
+// that batch's offsets: the query offset less the subject offset (two-hit), or the reverse
+// (one-hit), masked by the ring's length.
+/// The diagonal table of a word finder as a scan reads it: the entry of a hit's diagonal and the
+/// first offset of the hit's query batch in the concatenated query, from which NCBI's search of
+/// that batch counts its query offsets (the context test reads them,
+/// `aa_ungapped.c:566-573`). One ring for the queries of one NCBI batch ([`DiagRing`], batch start
+/// 0), or NCBI's ring of each batch where a search holds several
+/// (`common::query_batch_tables::QueryBatchTables`).
+pub(crate) trait DiagTable {
+    /// The entry of the two-hit hit at query offset `q` and subject offset `s`, and the first
+    /// offset of its query batch.
+    fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut DiagStruct, i32);
+    /// The entry of the one-hit hit at query offset `q` and subject offset `s`.
+    fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut DiagStruct;
+}
+
+/// One ring of diagonal entries (`mask`: its length less one) whose queries are one NCBI query
+/// batch from offset 0: the table of a search of one batch (BLASTX's unit, BLASTP's call where the
+/// scan shares it).
+pub(crate) struct DiagRing<'a> {
+    pub(crate) entries: &'a mut [DiagStruct],
+    pub(crate) mask: i32,
+}
+
+impl DiagTable for DiagRing<'_> {
+    #[inline(always)]
+    fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut DiagStruct, i32) {
+        (
+            &mut self.entries[(q.wrapping_sub(s) & self.mask) as usize],
+            0,
+        )
+    }
+
+    #[inline(always)]
+    fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut DiagStruct {
+        &mut self.entries[(s.wrapping_sub(q) & self.mask) as usize]
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 566-573
+// The scan's query offset is unsigned and counts from the start of the hit's query batch: the
+// context test compares the offset less the distance with the context's first offset in unsigned
+// arithmetic, so a distance past the batch's start passes it.
+/// The distance `diff` of a two-hit hit at query offset `q` as the context test of a search of all
+/// the queries reads it (`q - diff` in unsigned arithmetic below the context's first offset: a new
+/// hit), so that the test gives the result of NCBI's search of the hit's query batch, which
+/// starts at `batch_start`: where `q - diff` falls at or after 0 and before the batch's start,
+/// NCBI's offset less the distance lies below 0 and passes the test, so the distance becomes one
+/// past the query offset (the offset less it lies below 0 too). Every other distance is the same in
+/// both (a context lies at or after the start of its batch).
+#[inline(always)]
+pub(crate) fn batch_context_distance(q: i32, diff: i32, batch_start: i32) -> i32 {
+    if (q.wrapping_sub(diff) as u32) < batch_start as u32 {
+        q.wrapping_add(1)
+    } else {
+        diff
+    }
 }

@@ -26,20 +26,19 @@ use std::sync::Arc;
 
 use super::{
     blastp_adjust_hsp_offsets_and_get_query_data, blastp_advance_preliminary_hit_index,
-    blastp_context_idx_for_query_offset_with_bounds, blastp_diag_coord,
-    blastp_for_each_offset_pair, blastp_for_each_offset_pair_of,
-    blastp_get_ungapped_hsp_context_with_bounds, blastp_restricted_align_enabled,
-    blastp_save_init_hsp, blastp_timing_start, blastp_trace_init_hsp_overlaps_target,
-    build_restricted_align_array_into, chain_blastp_init_hsps, extend_preliminary_blastp_hit,
-    ncbi_qsort_init_hsps_by_score, ncbi_qsort_preliminary_hits,
-    preliminary_hits_is_sorted_by_score_ncbi, preliminary_score_compare, preliminary_tree_hsp,
-    prepare_preliminary_hits_for_kappa_in_place, rebuild_preliminary_interval_tree_from_list,
-    remove_preliminary_hits_for_query, should_retry_exact_preliminary_gapped_alignment,
-    split_preliminary_hits_by_query_into, x_bp_tree_max_cells,
-    x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined, x_soft_subject,
-    BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues, BlastpRuntimeLookup,
-    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming, InitHSP,
-    BLASTP_RESTRICTED_MULT,
+    blastp_context_idx_for_query_offset_with_bounds, blastp_for_each_offset_pair,
+    blastp_for_each_offset_pair_of, blastp_get_ungapped_hsp_context_with_bounds,
+    blastp_restricted_align_enabled, blastp_save_init_hsp, blastp_timing_start,
+    blastp_trace_init_hsp_overlaps_target, build_restricted_align_array_into,
+    chain_blastp_init_hsps, extend_preliminary_blastp_hit, ncbi_qsort_init_hsps_by_score,
+    ncbi_qsort_preliminary_hits, preliminary_hits_is_sorted_by_score_ncbi,
+    preliminary_score_compare, preliminary_tree_hsp, prepare_preliminary_hits_for_kappa_in_place,
+    rebuild_preliminary_interval_tree_from_list, remove_preliminary_hits_for_query,
+    should_retry_exact_preliminary_gapped_alignment, split_preliminary_hits_by_query_into,
+    x_bp_tree_max_cells, x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined,
+    x_soft_subject, BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues,
+    BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming,
+    InitHSP, BLASTP_RESTRICTED_MULT,
 };
 use crate::algorithm::blastn::interval_tree::TreeHsp;
 use crate::algorithm::blastp;
@@ -52,6 +51,8 @@ use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue};
 use crate::algorithm::blastp::kappa::{blastp_trace_hsp_target, blastp_trace_matches_pair};
 use crate::algorithm::blastp::x_seed_fused::XContextTable;
 use crate::algorithm::blastp::x_ungapped_sent::XSentQuery;
+use crate::algorithm::common::diag_entry::{DiagRing, DiagTable};
+use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{X_BLASTP, X_BLASTP_MATRIX};
@@ -147,6 +148,7 @@ impl BlastpPrelimKernel<'_> {
             values,
             x_soft,
             false,
+            None,
         );
     }
 
@@ -154,7 +156,11 @@ impl BlastpPrelimKernel<'_> {
     /// subject, or with `-db_soft_mask` a database sequence's; `None`: every word), and, with
     /// `chunk`, for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's
     /// HSPs are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge
-    /// of the sequence's chunks. One body for every caller (no code placement in NCBI): the
+    /// of the sequence's chunks. With `tables` (a `-db_hard_mask` sequence that `db_masked.rs`
+    /// keeps apart, `common::hard_chunk_walk::DiagonalWalk::apart`) the scan reads those tables,
+    /// NCBI's of each query batch, at their offset (the reference scan over `scan_ranges`, or the
+    /// whole subject), and their offset moves past the subject in place of the scratch's, whose
+    /// table it does not touch. One body for every caller (no code placement in NCBI): the
     /// masked kernels call it as the default path does, so that the functions it calls keep one
     /// call site each and stay inlined into it. The four macros name the method's locals (their
     /// hygiene), so they are defined after them.
@@ -169,6 +175,7 @@ impl BlastpPrelimKernel<'_> {
         values: &BlastpPrelimValues<'_>,
         scan_ranges: Option<&[(i32, i32)]>,
         chunk: bool,
+        mut tables: Option<&mut QueryBatchTables>,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -208,11 +215,17 @@ impl BlastpPrelimKernel<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
         let mut init_hsps = std::mem::take(&mut scratch.init_hsps);
         init_hsps.clear();
-        let subject_diag_offset = scratch.diag_offset;
+        let subject_diag_offset = match &tables {
+            Some(tables) => tables.offset,
+            None => scratch.diag_offset,
+        };
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // The scan ranges (`-lcase_masking`, `-db_soft_mask`).
+        // The scan ranges (`-lcase_masking`, `-db_soft_mask`), and those of a search on `tables`
+        // (the whole subject where the caller gives none).
         let x_soft = scan_ranges;
+        let x_whole = [(0, subject.aa_len as i32)];
+        let x_tables_ranges = x_soft.unwrap_or(&x_whole[..]);
         // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-505,509
         // Dispatch point: the two-hit test reads the lookup cells in place
@@ -294,19 +307,19 @@ impl BlastpPrelimKernel<'_> {
                 }
             };
         }
-        // The one-hit test of a hit (`-window_size 0`) with the extension `$extend` (and its
-        // leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the reference
-        // `extend_one_hit_of` of the search's matrix for another one (item SC2b).
+        // The one-hit test of a hit (`-window_size 0`) on the diagonal table `$table`
+        // (`common::diag_entry::DiagTable`: the scratch's ring, or `tables`) with the extension
+        // `$extend` (and its leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the
+        // reference `extend_one_hit_of` of the search's matrix for another one (item SC2b).
         macro_rules! x_one_hit_of {
-            ($extend:path $(, $lead:expr)?) => {
+            ($table:ident, $extend:path $(, $lead:expr)?) => {
                 |pair: OffsetPair| {
                     let query_offset =
                         i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
                     let subject_offset =
                         i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-778
-                    let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
-                    let diag_entry = &mut scratch.diag_array[diag_coord];
+                    let diag_entry = $table.one_hit_entry(query_offset, subject_offset);
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-782,787-800,802
                     let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
                     if diff < 0 {
@@ -354,7 +367,21 @@ impl BlastpPrelimKernel<'_> {
                 }
             };
         }
-        // The one-hit scan of the search's table with the test `$one_hit` (`x_one_hit_of!`).
+        // The one-hit scan of the search's table with the test `$one_hit` (`x_one_hit_of!`); the
+        // reference scan of `x_tables_ranges` with `tables`.
+        macro_rules! x_one_hit_ranges {
+            ($one_hit:ident, $ranges:expr) => {
+                x_soft_subject::x_for_each_hit(
+                    &lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    $ranges,
+                    &mut scratch.offset_pairs,
+                    false,
+                    &mut |pair, _| $one_hit(pair),
+                )
+            };
+        }
         macro_rules! x_one_hit_scan {
             ($one_hit:ident, $for_each_offset_pair:ident) => {
                 if let Some(ranges) = x_soft {
@@ -469,15 +496,30 @@ impl BlastpPrelimKernel<'_> {
                     blastp::x_ungapped_fast::matrix_table(args.scoring.matrix),
                 );
                 let x_candidate = x_candidate_of!(extend_two_hit_table, x_of);
-                if let Some(ranges) = x_soft {
+                if let Some(tables) = tables.as_deref_mut() {
+                    x_soft_subject::x_scan_two_hit_ranges(
+                        lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        x_tables_ranges,
+                        &mut scratch.offset_pairs,
+                        tables,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    );
+                } else if let Some(ranges) = x_soft {
                     x_soft_subject::x_scan_two_hit_ranges(
                         lookup,
                         subject_sequence,
                         subject.aa_len,
                         ranges,
                         &mut scratch.offset_pairs,
-                        &mut scratch.diag_array,
-                        diag_mask,
+                        &mut DiagRing {
+                            entries: &mut scratch.diag_array,
+                            mask: diag_mask,
+                        },
                         subject_diag_offset,
                         window,
                         word_size,
@@ -621,15 +663,30 @@ impl BlastpPrelimKernel<'_> {
                 }
                 _ => None,
             };
-            if let Some(ranges) = x_soft {
+            if let Some(tables) = tables.as_deref_mut() {
+                x_soft_subject::x_scan_two_hit_ranges(
+                    lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    x_tables_ranges,
+                    &mut scratch.offset_pairs,
+                    tables,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate,
+                );
+            } else if let Some(ranges) = x_soft {
                 x_soft_subject::x_scan_two_hit_ranges(
                     lookup,
                     subject_sequence,
                     subject.aa_len,
                     ranges,
                     &mut scratch.offset_pairs,
-                    &mut scratch.diag_array,
-                    diag_mask,
+                    &mut DiagRing {
+                        entries: &mut scratch.diag_array,
+                        mask: diag_mask,
+                    },
                     subject_diag_offset,
                     window,
                     word_size,
@@ -715,19 +772,42 @@ impl BlastpPrelimKernel<'_> {
                 }
             }
         } else if args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| {
-                let mut x_one_hit = x_one_hit_of!(extend_one_hit_of, args.scoring.matrix);
-                x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair_of);
+            x_outlined(|| match tables.as_deref_mut() {
+                Some(x_tables) => {
+                    let mut x_one_hit =
+                        x_one_hit_of!(x_tables, extend_one_hit_of, args.scoring.matrix);
+                    x_one_hit_ranges!(x_one_hit, x_tables_ranges);
+                }
+                None => {
+                    let mut x_ring = DiagRing {
+                        entries: &mut scratch.diag_array,
+                        mask: diag_mask,
+                    };
+                    let mut x_one_hit =
+                        x_one_hit_of!(x_ring, extend_one_hit_of, args.scoring.matrix);
+                    x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair_of);
+                }
             });
+        } else if let Some(x_tables) = tables.as_deref_mut() {
+            // A sequence kept apart on `tables`: the reference scan of its ranges.
+            let mut x_one_hit = x_one_hit_of!(x_tables, extend_one_hit_blosum62);
+            x_one_hit_ranges!(x_one_hit, x_tables_ranges);
         } else {
             // One-hit search (`-window_size 0`): the buffer of offset pairs, as NCBI's
             // `s_BlastAaWordFinder_OneHit`.
-            let mut x_one_hit = x_one_hit_of!(extend_one_hit_blosum62);
+            let mut x_ring = DiagRing {
+                entries: &mut scratch.diag_array,
+                mask: diag_mask,
+            };
+            let mut x_one_hit = x_one_hit_of!(x_ring, extend_one_hit_blosum62);
             x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair);
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:168-173
-        scratch.finish_subject(subject.aa_len, window);
+        match tables {
+            Some(tables) => tables.finish_chunk(subject.aa_len as i32, window),
+            None => scratch.finish_subject(subject.aa_len, window),
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
         let interval_tree = &mut scratch.preliminary_interval_tree;
         interval_tree.reset_with_bounds_cells(

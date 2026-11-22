@@ -358,7 +358,9 @@
   after a sequence: each such sequence searched on its own, the Owner's answer Q5 = B of M4b of
   2026-11-22 22:34 JST, in place of the explicit rejection `StaleDiagonals` of this version's first
   draft, at NCBI's one-thread offset on a new table where NCBI's one-thread search meets the
-  entries that no sequence wrote, decision 55 of line NP's series M, 2026-11-23, Owner-delegated;
+  entries that no sequence wrote, decision 55 of line NP's series M, 2026-11-23, Owner-delegated,
+  and in BLASTP on NCBI's table of each query batch where its hits can meet entries that its own
+  chunks did not write;
   BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
   of order: searched as NCBI searches them, rule 4, also the seed that NCBI's two-hit scan saves from
   the one word of a part between overlapping masks shorter than the word; the explicit rejections,
@@ -1275,10 +1277,30 @@ entries that reach another sequence)". Line NP item M4b-3b.
     positions (of the UniRef50 sample 77,483). The search without `-db_hard_mask` is unchanged. The
     kernels count every one word of a chunk past a sequence's end as a hit (as for a query with the
     gap letter), so they also move the offset for a word that no query read from FASTA hits, which
-    changes no row.
-    So the rows of each sequence are NCBI's one-thread rows of it in the same database with the
-    letters of every other sequence as `X` (which no query word hits; the lengths and masks, and so
-    NCBI's offsets and statistics, stay the database's), the same at every thread count: they do not
+    changes no row. A sequence without masks that starts on a new table moves the offset after it
+    past the entries that no sequence wrote as well as past its own (`DiagonalWalk::plain`), so the
+    next sequence that the thread's table searches, not always the next one in the database, meets
+    none of them (review 3 of M4b-3b, M1).
+    NCBI searches each query batch of a query file alone (`blastp_app.cpp:216, 257`; 10,000 letters
+    a batch in BLASTP, `BATCH_SIZE` overrides it): its table is the batch's own, of the power of two
+    just at least the batch's length plus the window (`blast_extend.c:46-65`), and a hit's diagonal
+    and the context test (unsigned, `aa_ungapped.c:566-573`) count the query offsets from the batch's
+    start. BLASTP searches several batches at once (all queries on one table, or the blocks of whole
+    batches of LOSAT_X_BPQBLOCK), which gives each batch NCBI's result where every entry within
+    reach of a hit was written by the same chunk's scan. A sequence whose hits can meet other
+    entries, one that starts on a new table or whose walk reads back (a chunk within reach of an
+    entry that an earlier chunk can store), is searched on NCBI's table of each query batch instead
+    (`algorithm::common::query_batch_tables::QueryBatchTables`, `DiagonalWalk::apart`: each batch's
+    ring, the diagonal and the context test in the batch's offsets, one offset for all, by the
+    reference scan), the second at the window plus its margin below its start, where no entry
+    reaches its hits; the thread's table stays as the sequence before it left it (review 3 of
+    M4b-3b, H1). The scans of the other sequences, and every search without `-db_hard_mask`, are
+    unchanged. BLASTX searches each reader batch alone, as NCBI searches it with the default batch
+    size.
+    So the rows of each sequence are NCBI's one-thread rows of it, for the same query file and
+    batches, in the same database with the letters of every other sequence replaced by letters that
+    no query word hits (the lengths and masks, and so NCBI's offsets and statistics, stay the
+    database's), the same at every thread count: they do not
     depend on the entries of other sequences or on `-num_threads`, and like NCBI's one-thread rows
     they can depend on the lengths of the sequences searched before it, through NCBI's offsets
     (`ov_zt` below: B's 7 rows after a sequence of 5 letters, 13 after one of 100, 6 as the first).
@@ -1342,6 +1364,15 @@ entries that reach another sequence)". Line NP item M4b-3b.
       NCBI starts B at 100 and writes 13 rows, and as the first sequence (`ov_zto`, an alias of OID
       2) 6; BLASTX 27, 48 and 23. LOSAT starts B of `ov_zt` and `ov_zto` on a new table at NCBI's
       offset (5, 0) and moves past the entries in `ov_ztl`: NCBI's one-thread bytes in each.
+    - `ov_th10` (review 3 of M4b-3b, probe `r3`, `M/m4b3b/review/REVIEW_M4B3B_R3.md`; A of 430 `X`
+      with masks [10,300) [20,310), whose two-hit walk goes back, then B without masks, which NCBI's
+      one-thread search starts on a new table at 10; BLASTP `-evalue 1000 -comp_based_stats 0`):
+      q alone 5 rows; queries q1 (60 letters) then q in two batches (`BATCH_SIZE=50`) the same 5 rows
+      of q, in one batch 4 (q's row 16-17/27-28, E 82, whose diagonal reads the new table's entries
+      only where q is the first query of its batch, is gone). `ov_thm20` (B at -20): 7, 7 and 5;
+      `ov_th10f` (another B): 7, 7 and 6; with A of 480 `X` (B at 60, no new table) 4, 4 and 4.
+      BLASTX: q's 8 rows in one batch and in two (`BATCH_SIZE=50`). LOSAT: NCBI's one-thread
+      bytes in each, with one table of all queries, LOSAT_X_BPQBLOCK's blocks and its default.
     - A. thaliana TAIR10 (48,321 proteins, segmasker's defaults, algorithm 21) for 55 queries, the
       proteins that such a protein's entries reach or that reach below their start (BLASTX: the first
       20, back-translated; ws, `M/m4b3b/q5b/tair`, `q5b/ws/q5b_threads.sh`): LOSAT wrote the same bytes at
@@ -1350,21 +1381,29 @@ entries that reach another sequence)". Line NP item M4b-3b.
       LOSAT 3 more BLASTP rows (AT1G47340.1 and AT1G50880.1 against AT2G17310.1 from its first letters,
       E 0.012 and 0.001; AT2G27380.1 against itself at 750-761, E 1.1) and 1 more BLASTX row (the first
       of these), whose one-hit seeds NCBI skips at entries of the protein searched before; no row of
-      NCBI's is missing. (Measured before fix round 2 of M4b-3b, whose start at NCBI's one-thread
-      offset can change only a sequence that NCBI's walk starts within reach of the entries that
-      no sequence wrote.)
+      NCBI's is missing. (Measured before fix rounds 2 and 3 of M4b-3b, whose start at NCBI's
+      one-thread offset and NCBI's tables of each query batch can change only a sequence that NCBI's
+      walk starts within reach of the entries that no sequence wrote, or, in a BLASTP search of
+      several query batches, one whose walk reads back.)
     Fixture rows `db.pmask.{bp,bx}.hard.ov_lk.*` (NCBI's bytes at the default and at
     `-window_size 0`; with `ncbi-near:` those of NCBI's run of the near input, rows
     `db.pmask.{bp,bx}.hard.near.ov_lkn.*`, otherwise), `db.pmask.{bp,bx}.hard.near.ov_lkx.21.w0.6`,
-    `db.pmask.{bp,bx}.hard.ov_zt.*`, `.ov_ztl.*` and `.ov_zto.*` (NCBI's one-thread bytes) and
+    `db.pmask.{bp,bx}.hard.ov_zt.*`, `.ov_ztl.*`, `.ov_zto.*`, `.ov_th10.*`, `.ov_thm20.*`,
+    `.ov_th10f.*` and `.ov_thm20f.*` (NCBI's one-thread bytes; the `.q1q.` rows of two queries in
+    one batch and, `BATCH_SIZE=50`, in two, also with LOSAT_X_BPQBLOCK 0 and 1 in
+    `LOSAT/tests/blastp_prelim_blocks.rs`) and
     `db.pmask.{bp,bx}.hard.ov_atha.21.w0.6` (NCBI's bytes) of
     `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`, checked at 1 and 4 threads; the
-    databases `ov_lkn`, `ov_lkx`, `ov_zt`, `ov_ztl` and the alias `ov_zto.pal` of
-    `LOSAT/tests/db_search/dbmaskp/` (`make_dbmaskp_ov.py`: `near_db`, `blank_db`, `probe4`). Unit
-    tests `each_sequence_is_searched_on_its_own`, `a_new_table_holds_entries_below_the_start`,
+    databases `ov_lkn`, `ov_lkx`, `ov_zt`, `ov_ztl`, the alias `ov_zto.pal`, `ov_th10`, `ov_thm20`,
+    `ov_th10f` and `ov_thm20f` of `LOSAT/tests/db_search/dbmaskp/` (`make_dbmaskp_ov.py`: `near_db`,
+    `blank_db`, `probe4`, `probe5`). Unit tests `each_sequence_is_searched_on_its_own`,
+    `a_new_table_holds_entries_below_the_start`,
     `ncbi_walk_names_the_sequences_that_meet_unwritten_entries`, `ncbi_walk_follows_the_clears`,
-    `hard_starts_by_ordinal` and `starts_and_ends_apply_to_the_table`
-    (`LOSAT/src/algorithm/common/hard_chunk_walk_tests.rs`), `hard_mask_starts_and_ends_move_the_table`
+    `hard_starts_by_ordinal`, `starts_and_ends_apply_to_the_table`,
+    `a_plain_sequence_on_a_new_table_ends_past_the_unwritten_entries` and
+    `sequences_whose_hits_meet_other_entries_are_kept_apart`
+    (`LOSAT/src/algorithm/common/hard_chunk_walk_tests.rs`), the tests of
+    `LOSAT/src/algorithm/common/query_batch_tables_tests.rs`, `hard_mask_starts_and_ends_move_the_table`
     (`LOSAT/src/algorithm/blastp/blast_engine_tests.rs`, `LOSAT/src/algorithm/blastx/seed_tests.rs`).
 
 ## Approved difference (`losat rpsbproc`, the order of tied hits, version 1.67)

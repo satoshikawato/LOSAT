@@ -12,7 +12,7 @@
 //!   sequence where NCBI's gapped stage of such a chunk never ends, and where its merge would
 //!   join such a chunk's HSPs with another's (not yet ported).
 
-use super::diag_entry::{x_test_hit, DiagStruct};
+use super::diag_entry::{batch_context_distance, x_test_hit, DiagRing, DiagStruct, DiagTable};
 use crate::utils::matrix::ScoreRows;
 
 /// The scores and the cutoffs of the context of a hit's query offset, which the two-hit test of
@@ -61,16 +61,9 @@ pub(crate) struct OneWord<'a> {
 }
 
 impl OneWord<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 519-606
-    // The scan's query offset is unsigned: the context test subtracts the distance to the last
-    // hit in unsigned arithmetic, so a distance past the query's start passes it. A seed whose
-    // score reaches the cutoff is saved (`BlastSaveInitHsp`) and the test goes on with the next
-    // hit; the entry is updated after every extension.
     /// NCBI's two-hit test of each hit of the word (`hits`: the query offsets of its lookup
     /// cell, at subject offset 0) on the diagonal table `entries` (its mask `mask`, the offset
-    /// `offset`), with `context` giving a query offset's context: the diagonal test, the context
-    /// test, the extension and the store of each hit. `save` takes each seed whose score reaches
-    /// the context's cutoff, with its hit's query offset, in the order of `hits`.
+    /// `offset`) of one query batch ([`OneWord::test_on`]).
     pub(crate) fn test(
         &self,
         hits: &[i32],
@@ -78,15 +71,40 @@ impl OneWord<'_> {
         mask: i32,
         offset: i32,
         context: impl Fn(i32) -> WordContext,
+        save: impl FnMut(i32, OneWordSeed),
+    ) {
+        self.test_on(&mut DiagRing { entries, mask }, hits, offset, context, save);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 519-606
+    // The scan's query offset is unsigned and counts from the start of the hit's query batch: the
+    // context test subtracts the distance to the last hit in unsigned arithmetic, so a distance
+    // past the batch's start passes it. A seed whose score reaches the cutoff is saved
+    // (`BlastSaveInitHsp`) and the test goes on with the next hit; the entry is updated after
+    // every extension.
+    /// NCBI's two-hit test of each hit of the word (`hits`: the query offsets of its lookup
+    /// cell, at subject offset 0) on the diagonal table `table` (the entry of each hit's diagonal
+    /// in its query batch, `common::diag_entry::DiagTable`) at the offset `offset`, with
+    /// `context` giving a query offset's context: the diagonal test, the context test in the
+    /// offsets of the hit's batch, the extension and the store of each hit. `save` takes each
+    /// seed whose score reaches the context's cutoff, with its hit's query offset, in the order
+    /// of `hits`.
+    pub(crate) fn test_on(
+        &self,
+        table: &mut impl DiagTable,
+        hits: &[i32],
+        offset: i32,
+        context: impl Fn(i32) -> WordContext,
         mut save: impl FnMut(i32, OneWordSeed),
     ) {
         for &q in hits {
-            let entry = &mut entries[(q & mask) as usize];
+            let (entry, batch_start) = table.two_hit_entry(q, 0);
             let Some((last_hit, diff)) = x_test_hit(entry, 0, offset, self.window, self.word)
             else {
                 continue;
             };
             let found = context(q);
+            let diff = batch_context_distance(q, diff, batch_start);
             if (q.wrapping_sub(diff) as u32) < found.start as u32 {
                 entry.set_last_hit(offset);
                 continue;

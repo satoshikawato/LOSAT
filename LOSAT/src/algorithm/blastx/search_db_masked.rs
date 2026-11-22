@@ -117,36 +117,44 @@ pub(super) fn compute_masked_subject(
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107
         // A sequence without masks on a new table at NCBI's one-thread offset (`NcbiWalk`),
-        // searched
-        // as in a search without the options on that table; by the reference scan of its whole
-        // range where the entries lie above the offset (the other scans take every entry to lie
-        // below it). Its entries end at least the window below the offset after it, so the next
-        // sequence starts as after any sequence without masks.
+        // searched as in a search without the options on that table; by the reference scan of
+        // its whole range where the entries lie above the offset (the other scans take every
+        // entry to lie below it). The entries that no sequence wrote can lie past its end (an
+        // offset below 0 after a walk that went back), where the next subject of the worker's
+        // table would meet them: its walk's end moves the offset past them and its own entries
+        // (`DiagonalWalk::plain`, `DiagonalWalk::after`), so the next sequence starts as after
+        // any sequence without masks.
         diagonals.ncbi_table(start, options.window_size);
-        if start.unwritten(options.window_size) <= start.offset {
-            return plain(diagonals);
-        }
-        let x_buffer = if batch.x_ungap_sent {
-            subjects.x_encoded_with_sentinels(oid)
+        let length = subjects.length(oid);
+        let computed = if start.unwritten(options.window_size) <= start.offset {
+            plain(diagonals)?
         } else {
-            subjects.encoded_with_sentinel(oid)
+            let x_buffer = if batch.x_ungap_sent {
+                subjects.x_encoded_with_sentinels(oid)
+            } else {
+                subjects.encoded_with_sentinel(oid)
+            };
+            let whole = [(0, length as i32)];
+            masked_piece(
+                subjects,
+                batch,
+                params,
+                options,
+                lookup,
+                diagonals,
+                xdrop,
+                oid,
+                x_containment,
+                Some(SubjectPiece {
+                    buffer: &x_buffer,
+                    ranges: Some(&whole),
+                }),
+            )?
         };
-        let whole = [(0, subjects.length(oid) as i32)];
-        return masked_piece(
-            subjects,
-            batch,
-            params,
-            options,
-            lookup,
-            diagonals,
-            xdrop,
-            oid,
-            x_containment,
-            Some(SubjectPiece {
-                buffer: &x_buffer,
-                ranges: Some(&whole),
-            }),
-        );
+        DiagonalWalk::plain(options.word_size, options.window_size, length, start)
+            .after(diagonals.offset())
+            .apply(diagonals, options.window_size)?;
+        return Ok(computed);
     }
     Masked {
         db,

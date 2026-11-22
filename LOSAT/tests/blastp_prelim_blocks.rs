@@ -723,8 +723,48 @@ fn a_database_that_cannot_be_read_fails_as_with_one_table() {
 // written in blocks of one batch each (`LOSAT_X_BPQBLOCK=1`), at one thread and four.
 #[test]
 fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
+    let rows = frozen_rows_with_blocks(
+        "blastp.tsv",
+        |row| row.starts_with("db.of18.bp.batch."),
+        &[Some("1")],
+        true,
+    );
+    assert_eq!(rows, 1);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216, 257
+// NCBI searches each query batch alone (review 3 of M4b-3b, H1): a `-db_hard_mask` sequence on a
+// new table whose entries that no sequence wrote a query's hits reach (`ov_th10`, `ov_thm20`,
+// `ov_th10f` of `db_search/dbmaskp`, queries q1 then q) has NCBI's one-thread bytes in one batch and
+// in two (BATCH_SIZE=50), with one table of all queries (`LOSAT_X_BPQBLOCK=0`), a block per batch
+// (`1`) and the switch's default, at 1 and 4 threads.
+#[test]
+fn hard_mask_rows_of_several_batches_have_ncbis_bytes_with_and_without_blocks() {
+    let rows = frozen_rows_with_blocks(
+        "blastp.pmask.tsv",
+        |row| row.starts_with("db.pmask.bp.hard.ov_th") && row.contains(".q1q."),
+        &[None, Some("0"), Some("1")],
+        false,
+    );
+    assert_eq!(rows, 4);
+}
+
+/// Runs the frozen `ncbi` rows of the manifest file `file` (in `tests/db_search_manifest`) whose ids
+/// `select` takes at 1 and 4 threads with each `LOSAT_X_BPQBLOCK` of `blocks` (`None`: unset, the
+/// switch's default), and asserts NCBI's frozen bytes, standard error and exit status; with
+/// `reach_blocks` also that the blocks ran (a row of several batches, `BATCH_SIZE`, whose report the
+/// block search does not write).
+/// Returns the number of rows.
+fn frozen_rows_with_blocks(
+    file: &str,
+    select: impl Fn(&str) -> bool,
+    blocks: &[Option<&str>],
+    reach_blocks: bool,
+) -> usize {
     let manifest = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest/blastp.tsv"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search_manifest")
+            .join(file),
     )
     .unwrap();
     let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
@@ -740,9 +780,12 @@ fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
     );
     let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search");
     let mut rows = 0;
-    for line in lines.filter(|line| line.starts_with("db.of18.bp.batch.")) {
+    for line in lines {
         let cells: Vec<&str> = line.split('\t').collect();
         let row = cells[id];
+        if !select(row) {
+            continue;
+        }
         let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
             .unwrap_or_default()
             .in_losat_words();
@@ -758,37 +801,44 @@ fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
             .map(|token| token.split_once('=').unwrap())
             .collect();
         assert!(
-            variables.iter().any(|(name, _)| *name == "BATCH_SIZE"),
+            !reach_blocks || variables.iter().any(|(name, _)| *name == "BATCH_SIZE"),
             "{row}: several batches"
         );
         let mut args = arguments.clone();
         args.extend(["-outfmt", cells[format]]);
         for threads in [1, 4] {
-            let subject = [OsStr::new("-db"), OsStr::new(cells[db])];
-            let reach = reach_support::Reach::new("bpprelim-frozen");
-            let mut vars = variables.clone();
-            vars.extend([("LOSAT_X_BPQBLOCK", "1"), reach.var()]);
-            let what = format!("{row} threads {threads}");
-            let run = blastp_args(Path::new(cells[query]), &subject, threads, &vars, &args);
-            assert_eq!(
-                run.code.map(|code| code.to_string()).as_deref(),
-                Some(cells[rc]),
-                "{what}: {}",
-                run.stderr
-            );
-            assert!(
-                run.stdout == expected_out,
-                "{what}: the bytes of NCBI differ"
-            );
-            assert_eq!(run.stderr, expected_err, "{what}: standard error differs");
-            assert!(
-                reach.sides("LOSAT_X_BPQBLOCK").0,
-                "{what}: the blocks did not run"
-            );
+            for block in blocks {
+                let subject = [OsStr::new("-db"), OsStr::new(cells[db])];
+                let reach = reach_support::Reach::new("bpprelim-frozen");
+                let mut vars = variables.clone();
+                if let Some(block) = *block {
+                    vars.push(("LOSAT_X_BPQBLOCK", block));
+                }
+                vars.push(reach.var());
+                let what = format!("{row} threads {threads} LOSAT_X_BPQBLOCK {block:?}");
+                let run = blastp_args(Path::new(cells[query]), &subject, threads, &vars, &args);
+                assert_eq!(
+                    run.code.map(|code| code.to_string()).as_deref(),
+                    Some(cells[rc]),
+                    "{what}: {}",
+                    run.stderr
+                );
+                assert!(
+                    run.stdout == expected_out,
+                    "{what}: the bytes of NCBI differ"
+                );
+                assert_eq!(run.stderr, expected_err, "{what}: standard error differs");
+                if reach_blocks {
+                    assert!(
+                        reach.sides("LOSAT_X_BPQBLOCK").0,
+                        "{what}: the blocks did not run"
+                    );
+                }
+            }
         }
         rows += 1;
     }
-    assert_eq!(rows, 1);
+    rows
 }
 
 /// `blastp` without the `-evalue 0.001` it adds (a frozen row's arguments are its own).

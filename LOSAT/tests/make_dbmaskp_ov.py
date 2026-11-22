@@ -43,11 +43,18 @@ Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order
            20261123): in the one-hit scan NCBI's one-thread search starts B at 5, and its walk meets the entries that
            no sequence wrote; `qzt.faa` / `qzt.fna` its query. `ov_ztl`: A of 100 `X` (B's walk stays above them);
            `ov_zto.pal`: an alias over ov_zt of its OID 2 alone (B is the first searched sequence).
+  ov_th10: subjects A (430 `X`, masks [10,300) [20,310): it stores no entry, and its two-hit walk goes back so that
+           NCBI's one-thread search starts B on a new table at 10, within the window of the entries that no sequence
+           wrote) then B (ov_zt's B with the query's letters 18-29 at 3, no masks) of review 3 of M4b-3b (probe_r3,
+           `M/m4b3b/review/scripts/make_r3.py`: no draw of its own). `ov_thm20`: A of 400 `X` (B at -20, below
+           those entries). `ov_th10f`, `ov_thm20f`: the same with B holding the query's letters 20-24 at 3 (one run
+           of three word hits). `q1q.faa` / `q1q.fna`: the query q1 of the review (60 letters) then qzt's query, two
+           NCBI query batches at BATCH_SIZE=50 (q1's back-translation drawn with seed 20261124).
 
     python3 make_dbmaskp_ov.py [--out DIR] [--ncbi-bin DIR]
 
 writes DIR/ov_*.faa, DIR/ov_*.asnt, DIR/qov1.faa, DIR/qov1.fna, DIR/qov2.faa, DIR/qov2.fna, DIR/qwpe.faa, DIR/qzt.faa,
-DIR/qzt.fna, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp next to this script), and with --ncbi-bin runs
+DIR/qzt.fna, DIR/q1q.faa, DIR/q1q.fna, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp next to this script), and with --ncbi-bin runs
 `makeblastdb -dbtype prot -out DIR/ov_X -title "overlapping masks X" -mask_data ov_X.asnt` (BLAST_USAGE_REPORT=false)
 and removes the .pjs files; ov_lkn as `near_db` says, ov_lkx as `blank_db` says.
 """
@@ -170,6 +177,26 @@ def probe4():
     return q, back_translate(r, q), dbs
 
 
+# Review 3's query q1 (`M/m4b3b/review/probe_r3/q1q.faa`), random without W.
+Q1 = "MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEVDYCHSVQMR"
+
+
+def probe5():
+    """Review 3 of M4b-3b, probe r3 (`ncbi-parity-20261019/M/m4b3b/review/scripts/make_r3.py`): probe 4's B and
+    query, no draw of its own. Returns ({db: [(seq, masks)]}, the query file q1q.faa's text, q1q.fna's)."""
+    q, qx, dbs4 = probe4()
+    b = dbs4["zt"][1][0]
+    seg, seg5 = q[18:30], q[20:25]
+    b2 = b[:3] + seg + b[3 + len(seg):]
+    b5 = b[:3] + seg5 + b[3 + len(seg5):]
+    dbs = {}
+    for name, la in (("th10", 430), ("thm20", 400)):
+        dbs[name] = [("X" * la, [(10, 300), (20, 310)]), (b2, [])]
+        dbs[name + "f"] = [("X" * la, [(10, 300), (20, 310)]), (b5, [])]
+    q1x = back_translate(random.Random(20261124), Q1)
+    return dbs, f">q1 query\n{Q1}\n>q query\n{q}\n", f">q1x query back-translated\n{q1x}\n>qx query back-translated\n{qx}\n"
+
+
 def walk_stores(length, masks, word, window):
     """The walk of a sequence's hard chunks in NCBI's word finder, as LOSAT's walk reads it
     (`algorithm::common::hard_chunk_walk::DiagonalWalk`, every one word taken to hit), relative to the offset before its
@@ -287,8 +314,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     q2 = probe2()[0]
     (out / "qwpe.faa").write_text(f">qd query with a gap letter\n{q2}W-W\n")
+    dbs5, q1q, q1qx = probe5()
+    (out / "q1q.faa").write_text(q1q)
+    (out / "q1q.fna").write_text(q1qx)
     for tag, (q, qx, dbs) in (("qov1", probe1()), ("qov2", probe2()), (None, (None, None, probe3())),
-                              ("qzt", probe4())):
+                              ("qzt", probe4()), (None, (None, None, dbs5))):
         if tag is not None:
             (out / f"{tag}.faa").write_text(f">q query\n{q}\n")
             (out / f"{tag}.fna").write_text(f">qx query back-translated\n{qx}\n")

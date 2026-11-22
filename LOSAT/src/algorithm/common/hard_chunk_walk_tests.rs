@@ -605,3 +605,75 @@ fn starts_and_ends_apply_to_the_table() {
     );
     assert_eq!(TableEnd::Move(i32::MAX).apply(&mut table, 40), Err(()));
 }
+
+/// A sequence without masks on a new table (`DiagonalWalk::plain`, item M1 of M/m4b3b/BRIEF_FIX3.md):
+/// its end moves the offset past the entries that no sequence wrote where they lie above its own,
+/// so that the worker's next subject meets none of them.
+#[test]
+fn a_plain_sequence_on_a_new_table_ends_past_the_unwritten_entries() {
+    let at = |offset, cleared| NcbiStart { offset, cleared };
+    // One-hit at NCBI's offset -98 (after a walk that went back): the entries lie 98 above the
+    // start, 48 past the end of 50 letters.
+    let walk = DiagonalWalk::plain(3, 0, 50, at(-98, false));
+    assert_eq!(walk.after(1000), TableEnd::Move(48));
+    // Longer than that: its own entries reach further, past which nothing remains.
+    assert_eq!(
+        DiagonalWalk::plain(3, 0, 120, at(-98, false)).after(1000),
+        TableEnd::Keep
+    );
+    // Two-hit at -60, 50 letters: the entries at 60 lie 10 past the end less the window.
+    let walk = DiagonalWalk::plain(3, 40, 50, at(-60, false));
+    assert_eq!(walk.after(1000), TableEnd::Move(10));
+    // At a positive offset the entries lie below the start: nothing to move past.
+    assert_eq!(
+        DiagonalWalk::plain(3, 40, 50, at(40, false)).after(1000),
+        TableEnd::Keep
+    );
+    assert_eq!(
+        DiagonalWalk::plain(3, 0, 50, at(0, true)).after(1000),
+        TableEnd::Keep
+    );
+    // A move that would reach INT4_MAX / 4 clears the table.
+    let walk = DiagonalWalk::plain(3, 0, 50, at(-98, false));
+    assert_eq!(walk.after(i32::MAX / 4 - 48), TableEnd::Clear);
+}
+
+/// Which sequences BLASTP's search of several query batches keeps apart, on NCBI's tables of each
+/// batch (`DiagonalWalk::apart`): one on a new table, at NCBI's start, and one whose walk reads
+/// back, at the window plus its margin below its start; any other shares the search's table.
+#[test]
+fn sequences_whose_hits_meet_other_entries_are_kept_apart() {
+    let first = NcbiStart {
+        offset: 7,
+        cleared: true,
+    };
+    let apart = hard(&[(0, 40), (100, -50), (60, 180)]);
+    assert_eq!(
+        DiagonalWalk::apart(3, 0, 240, &apart, Some(first)),
+        Some(first)
+    );
+    assert_eq!(
+        DiagonalWalk::apart(3, 0, 240, &[], Some(first)),
+        Some(first)
+    );
+    // nest, one-hit: the last chunk 10 below the start, within reach of the chunk before it.
+    assert_eq!(
+        DiagonalWalk::apart(3, 0, 240, &apart, None),
+        Some(NcbiStart {
+            offset: 10,
+            cleared: false
+        })
+    );
+    // Two-hit: the last chunk at 70 within the window of the one word's entries at 80.
+    assert_eq!(
+        DiagonalWalk::apart(3, 40, 240, &apart, None),
+        Some(NcbiStart {
+            offset: 40,
+            cleared: false
+        })
+    );
+    // Masks apart in the order of their start: no chunk reads back.
+    let forward = hard(&[(0, 40), (60, 50), (130, 110)]);
+    assert_eq!(DiagonalWalk::apart(3, 40, 240, &forward, None), None);
+    assert_eq!(DiagonalWalk::apart(3, 40, 240, &[], None), None);
+}

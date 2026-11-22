@@ -323,6 +323,20 @@ impl DiagonalWalk {
         self.unflagged = Some(i64::from(start.unwritten(self.window())) - i64::from(start.offset));
     }
 
+    /// The walk of the search of a sequence of `length` letters without masks of the algorithm on
+    /// the table of [`TableStart::New`] at `start`, as one chunk of its letters (the search's exit
+    /// moves the offset by them and the window; NCBI's chunks of a longer one move it further,
+    /// which only lowers the entries below what the walk takes): its end
+    /// ([`DiagonalWalk::after`]) moves the offset past the entries that no sequence wrote as well
+    /// as past its own, so that the next sequence that the table searches (not always the next one
+    /// in the database: a worker's next subject) meets none of them.
+    pub(crate) fn plain(word: i32, window: i32, length: usize, start: NcbiStart) -> Self {
+        let mut walk = Self::new(word, window, length, true);
+        walk.start_on_ncbi_table(start);
+        walk.chunk(0, i32::try_from(length).unwrap_or(i32::MAX));
+        walk
+    }
+
     /// The two-hit window (0: the one-hit search).
     fn window(&self) -> i32 {
         i32::try_from(self.window).unwrap_or(i32::MAX)
@@ -416,6 +430,42 @@ impl DiagonalWalk {
         // Below INT4_MAX / 4 as long as the extent is (above).
         let by = i32::try_from(before).unwrap_or(i32::MAX);
         (walk, TableStart::Move { clear, by })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216, 257
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-573, 771-782
+    // NCBI searches each query batch on a table of its own. Where every entry within reach of a
+    // hit was written by a hit of the same chunk's scan, a search of several batches on one table
+    // gives each batch's result (on each diagonal a batch's hits follow those of the batches
+    // before it, whose entries read as out of reach); an entry that no sequence wrote, or one of
+    // an earlier chunk after a walk back, reads as the batch's own hits on its diagonal and the
+    // context test of the batch's offsets decide.
+    /// Whether a search that holds several NCBI query batches on one table (BLASTP's) keeps the
+    /// sequence of `length` letters whose hard chunks are `chunks` (none: a sequence without masks)
+    /// apart, on NCBI's tables of each batch (`common::query_batch_tables::QueryBatchTables`), and
+    /// at which start of those tables: a sequence that starts on a new table (`ncbi`, from
+    /// [`NcbiWalk`]) at NCBI's one-thread offset, and one whose walk reads back (a chunk within
+    /// reach of an entry that an earlier chunk can store) at the window plus its margin below its
+    /// start, on entries of 0, which no hit reaches (every entry of another sequence out of reach,
+    /// as [`DiagonalWalk::start_after_others`] takes them; no clear falls inside it there, nor in
+    /// NCBI's one-thread search, else it is `ncbi`). `None`: every hit of the sequence reaches only
+    /// entries of its own chunk's scan, or entries out of reach, so it shares the search's table.
+    pub(crate) fn apart(
+        word: i32,
+        window: i32,
+        length: usize,
+        chunks: &[crate::core::subject_split::HardChunk],
+        ncbi: Option<NcbiStart>,
+    ) -> Option<NcbiStart> {
+        if ncbi.is_some() {
+            return ncbi;
+        }
+        let ahead = Self::ahead(word, window, length, chunks);
+        ahead.reads_back.then(|| NcbiStart {
+            offset: i32::try_from(i64::from(window) + ahead.margins().below_start)
+                .unwrap_or(i32::MAX),
+            cleared: false,
+        })
     }
 
     /// How the search moves the offset after the sequence's last chunk (`self`, the walk of its

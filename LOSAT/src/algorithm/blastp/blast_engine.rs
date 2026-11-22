@@ -1518,15 +1518,6 @@ pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518
-//
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-779
-#[inline]
-fn blastp_diag_coord(offset_delta: i32, diag_mask: i32) -> usize {
-    usize::try_from(offset_delta & diag_mask)
-        .expect("NCBI BLAST masked diagonal index must be non-negative")
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:358-372
 fn blastp_save_init_hsp(
     init_hsps: &mut Vec<InitHSP>,
@@ -9735,24 +9726,7 @@ fn run_call(
     // start the sequences that NCBI's one-thread search reaches below their start on a new table
     // (`ResolvedMask::hard_starts`, the walk that `check_losat_limits` ran).
     let db_masking =
-        database
-            .zip(args.db_mask_resolved.as_ref())
-            .and_then(|(database, resolved)| {
-                let mask = SearchMask::of(Some(resolved))?;
-                Some(db_masked::BlastpDbMasking {
-                    db: database.seqdb(),
-                    mask,
-                    starts: mask.hard().then(|| {
-                        resolved.hard_starts(
-                            database.seqdb(),
-                            args.word_size as i32,
-                            args.window_size as i32,
-                        )
-                    }),
-                    program: args.app.name(),
-                    error: std::sync::Mutex::new(None),
-                })
-            });
+        db_masked::BlastpDbMasking::of(database, &args, &query_batches, &contexts, query_chunk);
     let prelim_stage = prelim_run::PrelimRun {
         args: &args,
         query_records,

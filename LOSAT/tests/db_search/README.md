@@ -2217,6 +2217,26 @@ makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids
 blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
 python3 ../make_dbmaskp_pbh.py --ncbi-only WORK $NCBI_BIN .   # pbh.faa, edge_pbh.asnt, qbh.fna, qbh.faa, pbh
 makeblastdb -in pshort.faa -dbtype prot -out pshort -title "short pieces between masks" -mask_data edge_short.asnt
+python3 - <<'PY'   # prot_p4x.faa, prot_p5x.faa: prot.faa with p4[119], p5[399] stored as X (the near inputs' freed letters)
+def put(src, dst, name, pos):
+    recs, cur = [], None
+    for line in open(src):
+        if line.startswith('>'):
+            cur = [line, '']; recs.append(cur)
+        else:
+            cur[1] += line.strip()
+    with open(dst, 'w') as f:
+        for head, seq in recs:
+            if head[1:].split()[0] == name:
+                seq = seq[:pos] + 'X' + seq[pos + 1:]
+            f.write(head + '\n'.join(seq[i:i + 60] for i in range(0, len(seq), 60)) + '\n')
+put('prot.faa', 'prot_p4x.faa', 'p4', 119)
+put('prot.faa', 'prot_p5x.faa', 'p5', 399)
+PY
+makeblastdb -in prot_p4x.faa -dbtype prot -out ps5n -title "seg masks v5, p4 one shorter" -mask_data near_ps5.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_tailn -title "edge tail, one shorter" -mask_data edge_tailn.asnt
+makeblastdb -in prot.faa -dbtype prot -out pe_e0tail -title "edge e0tail" -mask_data edge_e0tail.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_e0tailn -title "edge e0tail, one shorter" -mask_data edge_e0tailn.asnt
 rm -f *.pjs
 ```
 
@@ -2232,9 +2252,16 @@ blastp's do (round 0: blastx s1, s2, s4, s6 and blastp s4, s6 of the six differ 
 and after the fix) it keeps the first three where those two builds differ.
 
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
-(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's
-refusal of a mask that runs to the end (the Owner's question Q1 of M4b); `ph5`, `ph4` and `phmv` are the hard-mask
-databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too.
+(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, masked whole, and `pe_tail` has a masked
+tail: with `-db_hard_mask` both are searched over the part before the mask (the Owner's answer Q1 = B of M4b,
+PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
+crashes or differs from it: `ps5n` (`near_ps5.asnt`: `ps5`'s algorithm 21 written out by `segmasker -outfmt interval`,
+with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`: [300, 399)). `pe_e0tail`
+(`edge_e0tail.asnt`: an empty mask at 0, `from 0, to 4294967295`, which makeblastdb stores as [0, 0), then [300, 400))
+is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). The near
+inputs store the letter that the shorter mask frees as `X` (`prot_p4x.faa`, `prot_p5x.faa`), so that it stays masked in
+the alignments and the composition-based statistics, as LOSAT reads the masked letters. `ph5`, `ph4` and
+`phmv` are the other hard-mask databases; `pe_unsorted` (masks out of order) is refused.
 
 `pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
 `ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for
@@ -2279,6 +2306,9 @@ makeblastdb -in nucl.fna -dbtype nucl -out th1 -title "hand masks 1" -blastdb_ve
   -mask_data hedge_mid0.asnt,hedge_mid1.asnt,hedge_mid2.asnt,hedge_adjacent.asnt,hedge_overlap.asnt,hedge_mid.asnt
 makeblastdb -in nucl.fna -dbtype nucl -out th2 -title "hand masks 2" -blastdb_version 4 \
   -mask_data hedge_unsorted.asnt,hedge_head.asnt,hedge_tail.asnt,hedge_near.asnt
+sed '164s/....$/NNNN/' nucl.fna > nucl_t4n.fna   # t4's bases 1196-1199, which hedge_tailn frees, stored as N
+makeblastdb -in nucl_t4n.fna -dbtype nucl -out th2tn -title "hand mask tail, 4 bases shorter" -blastdb_version 4 \
+  -mask_data hedge_tailn.asnt
 rm -f *.njs
 ```
 
@@ -2286,11 +2316,15 @@ rm -f *.njs
 the second dust alone, as its 11, which the alias `tal` and the list `tm5 tb5` number 12 as `tm5` does; `tmv` (three
 volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks `mid0`, `mid1`, `mid2`, `adjacent`,
 `overlap` and `mid` as 11 to 16, `th2` `unsorted`, `head`, `tail` and `near` as 11 to 14. A mask is mapped to the six
-reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` LOSAT
-refuses a sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before
-the frame's end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frame +2: the Owner's questions Q1
-and Q2 of M4b) and masks out of order (`unsorted`, `overlap`),
-as for the other programs.
+reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` a
+sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before the frame's
+end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frames +2 and +3) is searched over that part
+alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3). TBLASTX's rows of
+`tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
+(`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
+letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);
+the other rows are NCBI's own, which equal its run of the near input there. Masks out of
+order (`unsorted`, `overlap`) are refused, as for the other programs.
 
 The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read
 inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
@@ -2307,10 +2341,10 @@ PSSM query `pn1.faa` (the PSSM is `../fixtures/pssm/m4b2_pl1.asn.gz`) and the ha
 | 12 `n47` | `e2` [4, 7) | searched |
 | 13 `n1200` | `e2` [1200, 1202) | NCBI crashes (the minus frames start with an empty part), refused |
 | 14 `h01`, 15 `h12` | `e3` [0, 1), [1, 2) | NCBI crashes (the plus frames start with an empty part), refused |
-| 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1 refused |
-| 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3 refused |
+| 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1's part before the mask searched alone (no near input keeps it; NCBI's own rows) |
+| 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3: the part before the mask searched alone, as 16 |
 | 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1), refused |
-| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | frame +1 refused where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
+| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | the plus frames' parts before the mask searched alone where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
 | 36 `s01`, 37 `s1200` | `e3` [0, 1), [600, 700); `e2` [300, 400), [1200, 1202) | searched (near misses of 14 and 13) |
 
 `tl` has 11 (`long`): `l1` [3270, 3330) and [5201, 5251). The two databases were made with:

@@ -156,7 +156,8 @@ impl XHot {
             self.r_w -= a.c_w[old] as u32;
             self.num_diff -= (a.c_w[old] == 0) as u32;
 
-            // if (L == start) { ++L; rem_triplet_info(r_v, c_v, old); }
+            // When `L` is `start_`, NCBI moves `L` up by one and removes the triplet from the
+            // suffix's counts (`rem_triplet_info`).
             let at_start = (self.l == self.start) as usize;
             self.l += at_start;
             let suffix_count = a.c_v[old] - at_start as u8;
@@ -187,7 +188,7 @@ impl XHot {
             }
         }
 
-        // `++stop_`: `stop()` already counts the push.
+        // NCBI's `stop_` rises by one here; `stop()` already counts the push.
 
         if self.len >= k.max_size && self.num_diff <= 1 {
             perfect_list.clear();
@@ -220,7 +221,7 @@ fn shift_high(
         h.num_diff += 1;
     }
     add_triplet(&mut h.r_w, &mut a.c_w, triplet);
-    // `++stop_`: `stop()` already counts the push.
+    // NCBI's `stop_` rises by one here; `stop()` already counts the push.
 
     if h.num_diff <= 1 {
         perfect_list.push_front(PerfectInterval::new(h.start, h.stop() + 1, 0, 0));
@@ -242,7 +243,7 @@ struct XMerge {
     pos0: usize,
     /// `count` of the first iteration (the suffix length); iteration `i` has `count0 + i`.
     count0: usize,
-    /// `stop_ + 1`, the end of every interval this call adds.
+    /// One past `stop_`, the end of every interval this call adds.
     end: usize,
 }
 
@@ -383,7 +384,12 @@ impl DustMasker {
 
             while !done && pos < end {
                 if !perfect_list.is_empty() {
-                    self.save_masked_regions(&mut result, h.start, current_start, &mut perfect_list);
+                    self.save_masked_regions(
+                        &mut result,
+                        h.start,
+                        current_start,
+                        &mut perfect_list,
+                    );
                 }
 
                 let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], rng);

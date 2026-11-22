@@ -95,7 +95,7 @@ pub(super) fn bx_two_hit<S: BxScoring>(
     scoring: S,
     query: &[u8],
     subject: &[u8],
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -1004,15 +1004,21 @@ pub(super) fn word_finder_over<S: BxScoring>(
                 }
                 context = context_of(q);
                 let p = &parameters[context];
-                if q - diff < batch.contexts[context].offset as i32 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 566-573
+                // The scan's query offset is unsigned: the context test subtracts the distance in
+                // unsigned arithmetic, and a distance past the query's start (an entry of an
+                // earlier hard chunk of the sequence, series NP, M4b-3b) passes it.
+                if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
                     continue;
                 }
+                // The first hit's end is signed: negative where it lies before a hard chunk's
+                // start.
                 let Some(result) = bx_two_hit(
                     scoring,
                     query,
                     subject,
-                    (previous + word) as usize,
+                    previous + word,
                     s as usize,
                     q as usize,
                     p.word_xdrop,

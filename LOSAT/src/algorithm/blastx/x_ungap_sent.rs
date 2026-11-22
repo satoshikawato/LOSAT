@@ -303,7 +303,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     #[inline(always)]
     pub(crate) fn two_hit<const SHADOW: bool, const W: usize>(
         &self,
-        s_left_off: usize,
+        s_left_off: i32,
         s_right_off: usize,
         q_right_off: usize,
         dropoff: i32,
@@ -344,7 +344,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     #[inline(never)]
     fn reference<const W: usize>(
         &self,
-        s_left_off: usize,
+        s_left_off: i32,
         s_right_off: usize,
         q_right_off: usize,
         dropoff: i32,

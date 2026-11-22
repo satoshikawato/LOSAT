@@ -226,6 +226,11 @@ impl BlastpPrelimKernel<'_> {
                                    diff: i32,
                                    diag_entry: &mut DiagStruct| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510
+                    // The scan's query offset is unsigned, so the context test compares the
+                    // offset less the distance in unsigned arithmetic: a distance past the
+                    // query's start (an entry of an earlier hard chunk of the sequence, series NP,
+                    // M4b-3b) passes it.
                     let (ctx_idx, frame_base) = x_context_table
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
@@ -236,19 +241,20 @@ impl BlastpPrelimKernel<'_> {
                             );
                             (idx, contexts[idx].frame_base)
                         });
-                    if query_offset - diff < frame_base {
+                    if (query_offset.wrapping_sub(diff) as u32) < frame_base as u32 {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1109-1112
+                    // The first hit's end is signed: negative where that hit lies before the hard
+                    // chunk's start (series NP, M4b-3b).
                     let Some(ungapped_hit) = $extend(
                         $($lead,)?
                         concatenated_query.as_slice(),
                         subject_raw,
-                        usize::try_from(last_hit + word_size)
-                            .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
+                        last_hit + word_size,
                         usize::try_from(subject_offset)
                             .expect("NCBI BLAST two-hit subject offset must be non-negative"),
                         usize::try_from(query_offset)
@@ -380,7 +386,7 @@ impl BlastpPrelimKernel<'_> {
                  diff: i32,
                  diag_entry: &mut DiagStruct| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
-                    // (as in the closure above)
+                    // (as in the closure above, the unsigned test included)
                     let (ctx_idx, frame_base) = x_context_table
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
@@ -391,14 +397,13 @@ impl BlastpPrelimKernel<'_> {
                             );
                             (idx, contexts[idx].frame_base)
                         });
-                    if query_offset - diff < frame_base {
+                    if (query_offset.wrapping_sub(diff) as u32) < frame_base as u32 {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
-                    let s_left_off = usize::try_from(last_hit + word_size)
-                        .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                    let s_left_off = last_hit + word_size;
                     let s_right_off = usize::try_from(subject_offset)
                         .expect("NCBI BLAST two-hit subject offset must be non-negative");
                     let q_right_off = usize::try_from(query_offset)

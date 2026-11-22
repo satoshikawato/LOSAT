@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastOutput2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+  <report>
+    <Report>
+      <program>rpstblastn</program>
+      <version>RPSTBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>rps_mini</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.001</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>1</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_5</query-id>
+              <query-title>lower</query-title>
+              <query-len>600</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|CDD|101</id>
+                      <accession>101</accession>
+                      <title>f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190</title>
+                    </HitDescr>
+                  </description>
+                  <len>190</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>310.16</bit-score>
+                      <score>794</score>
+                      <evalue>1.52455e-113</evalue>
+                      <identity>190</identity>
+                      <positive>190</positive>
+                      <query-from>1</query-from>
+                      <query-to>570</query-to>
+                      <query-frame>1</query-frame>
+                      <hit-from>1</hit-from>
+                      <hit-to>190</hit-to>
+                      <align-len>190</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD</qseq>
+                      <hseq>MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD</hseq>
+                      <midline>MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>3</db-num>
+                  <db-len>560</db-len>
+                  <hsp-len>27</hsp-len>
+                  <eff-space>82867</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

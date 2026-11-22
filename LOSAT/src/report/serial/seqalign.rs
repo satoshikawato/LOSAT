@@ -580,19 +580,22 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
     pct
 }
 
-/// The "Blast Type" of the program: `EProgramToTaskName(ProgramNameToEnum(program name))`
+/// The "Blast Type" of the run's program: `EProgramToTaskName(ProgramNameToEnum(program name))`
 /// and the `EProgram` value. The program name of every BLASTN task is "blastn"
-/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp".
+/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp"; the
+/// RPS search of BLASTP is "rpsblast" (`eRPSBlast`), of BLASTX "rpstblastn" (`eRPSTblastn`).
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-62
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-686
-fn blast_type(program: Program) -> (&'static str, i32) {
-    match program {
-        Program::Blastn => ("blastn", 1),
-        Program::Blastp => ("blastp", 2),
-        Program::Blastx => ("blastx", 3),
-        Program::Tblastn => ("tblastn", 4),
-        Program::Tblastx => ("tblastx", 5),
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-64
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-688
+fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
+    match (run.program, run.rps) {
+        (Program::Blastp, true) => ("rpsblast", 6),
+        (Program::Blastx, true) => ("rpstblastn", 7),
+        (Program::Blastn, _) => ("blastn", 1),
+        (Program::Blastp, _) => ("blastp", 2),
+        (Program::Blastx, _) => ("blastx", 3),
+        (Program::Tblastn, _) => ("tblastn", 4),
+        (Program::Tblastx, _) => ("tblastx", 5),
     }
 }
 
@@ -669,7 +672,7 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
         b"Hist Seqalign",
         UserData::Bool(true),
     );
-    let (task, program) = blast_type(run.program);
+    let (task, program) = blast_type(run);
     enc.element();
     write_user_object(enc, b"Blast Type", task.as_bytes(), UserData::Int(program));
     enc.element();

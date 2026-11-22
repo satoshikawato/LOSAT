@@ -337,8 +337,8 @@ fn search_program_help_says_what_outfmt_writes() {
         ),
         (
             "rpsblast",
-            "Written: 0, 6, 7 and 10.",
-            "Formats 6, 7 and 10 take",
+            "Written: 0 to 16, 18 and 20.",
+            "Formats 6, 7, 10 and 20 take",
         ),
     ] {
         for flag in ["-help", "-h"] {

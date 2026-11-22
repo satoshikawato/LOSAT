@@ -169,7 +169,7 @@ These cases are about what the program prints around the search, not the search 
 ### Argument errors and help
 
 - **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs, with LOSAT's name and version in its description line.
-- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
+- **What does not change.** Errors that NCBI raises after it has read the arguments (where NCBI writes `BLAST query/options error: ...`, input errors and engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
 
 ### Wording of messages
 

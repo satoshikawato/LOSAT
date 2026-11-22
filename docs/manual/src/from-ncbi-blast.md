@@ -16,7 +16,7 @@ The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`,
 
 ## Use the NCBI names: `losat --install-shims`
 
-`losat --install-shims [DIR]` makes the 15 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
+`losat --install-shims [DIR]` makes the 16 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
 
 <!-- example: from-ncbi-blast-1 -->
 ```bash
@@ -26,7 +26,7 @@ losat --install-shims ./ncbi-names
 The command prints the path of each name it made. A few details:
 
 - **Links and copies.** On Linux and macOS each name is a symbolic link. In the folder of `losat` the link is relative, so you can move the folder. In another folder the link holds the full path of `losat`. On Windows, where links need a privilege, each name is a copy of `losat.exe`.
-- **It never overwrites a program that is not LOSAT.** If a file of one of the 15 names is already in `DIR`, for example NCBI's own `blastn`, the command stops, changes nothing and exits with status 1. It lists the files in the way.
+- **It never overwrites a program that is not LOSAT.** If a file of one of the 16 names is already in `DIR`, for example NCBI's own `blastn`, the command stops, changes nothing and exits with status 1. It lists the files in the way.
 - **It is safe to run again.** Names that already link to this `losat` are kept. Names made by an earlier LOSAT, for example after an upgrade or a move, are replaced.
 - **`-install-shims` with one dash** is accepted too, because `losat -help` shows it that way.
 

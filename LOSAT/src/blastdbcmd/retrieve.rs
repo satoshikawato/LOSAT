@@ -153,8 +153,9 @@ impl<'a> Source<'a> {
     /// `GetHdr(oid)`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
     /// stored header of no bytes ([`Source::null_set`]).
     pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
-        let Some(set) = self.db.header_set_at(self.at(oid)?)? else {
-            return self.null_set();
+        let at = self.at(oid)?;
+        let Some(set) = self.db.header_set_at(at)? else {
+            return self.null_set(at);
         };
         check_read_bytes(oid, &set)?;
         Ok(Some(set))
@@ -163,8 +164,9 @@ impl<'a> Source<'a> {
     /// `GetHdr(oid)` and the header that `GetBioseq` keeps in the Bioseq's user object
     /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
     pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
-        let Some((set, header)) = self.db.defline_set_with_header_at(self.at(oid)?)? else {
-            return self.null_set();
+        let at = self.at(oid)?;
+        let Some((set, header)) = self.db.defline_set_with_header_at(at)? else {
+            return self.null_set(at);
         };
         check_read_bytes(oid, &set)?;
         Ok(Some((set, header)))
@@ -172,14 +174,16 @@ impl<'a> Source<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1997-2003
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
-    // A database opened with a taxid list (`-taxids`, `-taxidlist` with `-target_only`) filters
-    // the set it read, also the null one (probes w1-w4 of line RG-Dbc); without a list the readers
-    // see no set: the `%` formatter writes nothing, `GetBioseq` gives no Bioseq, and its read of
-    // a target's line throws (probes z1-z9, za-zd).
-    /// The read of a sequence whose stored header has no bytes: `None`, or NCBI's null pointer
-    /// exception where the database filters its definition lines.
-    fn null_set<T>(&self) -> Result<Option<T>, Stop> {
-        if self.db.is_restricted() {
+    // A database opened with a taxid list (`-taxids`, `-taxidlist` with `-target_only`), or a
+    // volume under an alias file's `OID_MASK_TYPE`, filters the set it read, also the null one
+    // (probes w1-w4 and O1-O4 of line RG-Dbc); otherwise the readers see no set: the `%` formatter
+    // writes nothing, `GetBioseq` gives no Bioseq, and its read of a target's line throws (probes
+    // z1-z9, za-zd).
+    /// The read of the sequence at `at` whose stored header has no bytes: `None`, or NCBI's null
+    /// pointer exception where the read filters its definition lines
+    /// ([`SeqDb::filters_header_sets`]).
+    fn null_set<T>(&self, at: SeqLocation) -> Result<Option<T>, Stop> {
+        if self.db.filters_header_sets(at) {
             return Err(null_pointer());
         }
         Ok(None)

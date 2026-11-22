@@ -1557,7 +1557,7 @@ impl SeqDb {
             }
         };
         for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
-            volume.set_exclude_model(oid_mask::excludes_models(mask_type));
+            volume.set_oid_mask_type(mask_type);
         }
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
@@ -2382,6 +2382,17 @@ impl SeqDb {
     pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
         let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
         self.ordinal_set(at.volume, self.location_oid(&at), set)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
+    /// Whether NCBI's header read of the sequence at `at` filters the set it read
+    /// (`x_GetFilteredHeader`): the database is restricted by a list (`x_HaveIdFilter`, a list
+    /// attached even where it kept nothing) or the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the
+    /// third case, is refused (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header
+    /// of no bytes, no set, makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
+        self.is_restricted() || self.volumes[at.volume].has_oid_mask_type()
     }
 
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has

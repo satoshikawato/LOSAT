@@ -58,6 +58,10 @@ its read of a target's line, or of any line with `-taxids` and `-target_only`, s
 `db/lc/lc4`, `db/lc/lc5` (`Q344`-`Q383`) are makeblastdb `-parse_seqids` databases (version 4 and 5) of `db/lc/lc.fa`, four
 proteins with local ids (`lcl|myprot9`, the bare `myprot13`, `lcl|12345`) and one RefSeq id, read with `-target_only`
 in `%b`, `%d`, `%f` and `%a`.
+`db/pzm.pal`, `db/pzm2.pal`, `db/pzm0.pal` (`Q384`-`Q396`) are hand-written alias files over `db/pz4` with the OID list
+`db/pzm.msk` (both OIDs) and `OID_MASK_TYPE` 1, 2 and 0: under a type other than 0 NCBI's header read filters the set
+it read, so the header of no bytes at OID 1 stops every read of it with `Attempt to access NULL pointer.`, as a
+`-taxids` list does; under 0 it writes nothing for it.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

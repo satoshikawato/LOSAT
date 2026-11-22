@@ -445,7 +445,9 @@ fn retrieval_is_ncbi_s_bytes() {
 /// a set of no lines from no set. `db/lc/lc4` and `db/lc/lc5` (makeblastdb `-parse_seqids`, version 4
 /// and 5) hold local ids, read with `-target_only` in each format: `%b` reads the target with
 /// `fParse_AnyRaw` (a bare local id is "Malformatted ID", a number is a GI that matches the local
-/// id of its label), the other formats with the lookup's flags.
+/// id of its label), the other formats with the lookup's flags. `db/pzm`, `db/pzm2` and `db/pzm0` are
+/// alias files over `db/pz4` with `OID_MASK_TYPE` 1, 2 and 0: NCBI's header read filters the set
+/// under any type other than 0, and the filter of no set throws "Attempt to access NULL pointer.".
 #[rustfmt::skip]
 const ASN_TEXTS: &[(&str, &[&str], i32)] = &[
     ("Q101", &["-db", "db/p5", "-entry", "all", "-outfmt", "%d"], 0),
@@ -601,6 +603,19 @@ const ASN_TEXTS: &[(&str, &[&str], i32)] = &[
     ("Q381", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%d"], 0),
     ("Q382", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%f"], 0),
     ("Q383", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q384", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("Q385", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("Q386", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all"], 1),
+    ("Q387", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("Q388", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("Q389", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "XP_5001.1", "-outfmt", "%d"], 1),
+    ("Q390", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "XP_5001.1", "-target_only", "-outfmt", "%a"], 1),
+    ("Q391", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("Q392", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("Q393", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("Q394", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all"], 1),
+    ("Q395", &["-db", "db/pzm0", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("Q396", &["-db", "db/pzm0", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
 ];
 
 /// The cases of `%d` and `%b` that read a taxonomy database (`BLASTDB`, a directory of

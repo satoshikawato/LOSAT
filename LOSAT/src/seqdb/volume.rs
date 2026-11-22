@@ -25,6 +25,9 @@ pub struct Volume {
     /// model sequences after `defline_rule` (`m_OidMaskType & fExcludeModel`,
     /// `oid_mask::excludes_models`; `SeqDb::read_alias_tree`).
     exclude_model: bool,
+    /// The volume's `OID_MASK_TYPE` itself, 0 without one (`m_OidMaskType`): any type makes the
+    /// header reads go through NCBI's filter, which needs a set (`Volume::has_oid_mask_type`).
+    oid_mask_type: u32,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
     /// The failure of NCBI's OID list that a search meets at its first read of a sequence
@@ -119,6 +122,7 @@ impl Volume {
             hdr: OnceLock::new(),
             defline_rule: None,
             exclude_model: false,
+            oid_mask_type: 0,
             columns: OnceLock::new(),
             read_failure: None,
         })
@@ -602,10 +606,18 @@ impl Volume {
         self.defline_rule = Some(LineRule { rule, volume_start });
     }
 
-    /// Sets whether the reads of this volume erase the definition lines of model sequences
-    /// (the volume's `OID_MASK_TYPE`, `SeqDb::read_alias_tree`).
-    pub(super) fn set_exclude_model(&mut self, exclude_model: bool) {
-        self.exclude_model = exclude_model;
+    /// Sets the volume's `OID_MASK_TYPE` (`SeqDb::read_alias_tree`) and with it whether the reads
+    /// of this volume erase the definition lines of model sequences (`oid_mask::excludes_models`).
+    pub(super) fn set_oid_mask_type(&mut self, mask_type: u32) {
+        self.oid_mask_type = mask_type;
+        self.exclude_model = super::oid_mask::excludes_models(mask_type);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
+    /// Whether the volume has an `OID_MASK_TYPE` other than 0, of any bits: NCBI's header read
+    /// then filters the set it read (`SeqDb::filters_header_sets`).
+    pub(super) fn has_oid_mask_type(&self) -> bool {
+        self.oid_mask_type != 0
     }
 
     /// Whether the reads of this volume remove definition lines: a list's rule or the erasure of

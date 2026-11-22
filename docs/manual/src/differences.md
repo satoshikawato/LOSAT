@@ -47,11 +47,11 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI reads memory outside its buffer there. LOSAT reads the letters past the end as the end marker. Under valgrind, NCBI's output is LOSAT's output in all the cases of the test.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
-### `blastn -db_hard_mask` when a sequence's first mask runs to its end
+### `-db_hard_mask` when a sequence's first mask runs to its end
 
-- **What you see.** LOSAT searches such a sequence before its mask, as NCBI searches every other piece. NCBI scans the masked letters past that piece and can report an extra alignment, lose the alignments of the next sequence, or crash.
-- **When.** `-db_hard_mask` with a word size of 11 or more (megablast, blastn, dc-megablast), on a sequence whose first mask with letters runs to its end with nothing before it but one piece (a sequence masked entirely, or a masked poly-A tail). With `-task blastn-short` LOSAT refuses such a database (see [What LOSAT refuses](refusals.md)).
-- **Why.** NCBI uses two lengths for one subject there. LOSAT gives NCBI's result wherever its scan past the piece finds nothing more.
+- **What you see.** LOSAT searches such a sequence before its mask, as NCBI searches every other piece. NCBI scans the masked letters past that piece and can report an extra alignment or a different one, lose the alignments of the next sequence, write one alignment many times (`tblastx`), or crash.
+- **When.** `-db_hard_mask` on a sequence whose first mask with letters runs to its end with nothing before it but one piece (a sequence masked entirely, or a masked tail such as a poly-A tail): `blastn` with a word size of 11 or more (megablast, blastn, dc-megablast), and `blastp` and `blastx` at every word size. `tblastn` and `tblastx` read this in each reading frame: a frame whose first piece, from its first letter, ends at a mask with no other piece of the frame after it (masks at or near either end of a sequence). With `blastn -task blastn-short` LOSAT refuses such a database (see [What LOSAT refuses](refusals.md)).
+- **Why.** NCBI uses two lengths for one subject there. In `blastn` LOSAT gives NCBI's result wherever its scan past the piece finds nothing more. In the other programs LOSAT searches the piece as NCBI searches it in the same database with the mask shortened until a letter follows the piece (one letter in `blastp` and `blastx`, a few bases in `tblastn` and `tblastx`). The masked letters stay masked in the alignments and the statistics, so LOSAT's result is NCBI's result for that database with the freed letters masked (`X`, or `N` in nucleotides). Where no such shorter mask exists (a mask of one or two bases at the end of a very short sequence), LOSAT's result is NCBI's own.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### Titles made only of punctuation

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.73
+- Version: 1.74
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -335,12 +335,14 @@
   2026-09-29, restated 2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
   of dev that brought line NP items O2b's 1.68 and M4b-3's 1.69, then line RG item D1b-2's 1.70 and line
   DBID item pfoff-3's 1.71)
-  1.73 2026-11-22 (BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
+  1.74 2026-11-22 (approved exception 22, BLASTP and BLASTX `-db_hard_mask` with overlapping masks
+  after which NCBI's word hits reach the table of diagonals of the sequences searched before or
+  after a sequence: each such sequence searched on its own, the Owner's answer Q5 = B of M4b of
+  2026-11-22 22:34 JST, in place of the explicit rejection `StaleDiagonals` of this version's first
+  draft; BLASTP and BLASTX `-db_hard_mask` with masks that overlap, nest or are stored out
   of order: searched as NCBI searches them, rule 4, also the seed that NCBI's two-hit scan saves from
   the one word of a part between overlapping masks shorter than the word; the explicit rejections,
-  rule 3, of a sequence whose overlapping masks make NCBI's word hits reach the table of diagonals of
-  the sequences searched before it (not for the first searched sequence) or after it (not for the
-  last) (`StaleDiagonals`), of such a part whose seed's alignment NCBI's interval tree splits without
+  rule 3, of such a part whose seed's alignment NCBI's interval tree splits without
   end (`short_chunk_tree_refusal`), of a part between masks shorter than the word whose one word NCBI
   reads past the sequence's end, only for a BLASTP query that holds residue 0, which no query read
   from FASTA does (`WordPastEnd`), of a mask that runs to the end after the part from the start with
@@ -350,8 +352,8 @@
   part whose alignments meet another part's in that merge (`short_chunk_merge_refusal`), line NP item
   M4b-3d; TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the Owner's decision of 2026-11-21
   (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07, for the rejections; numbered after 1.72; first 1.72, then 1.73 at the merge of dev that
-  brought line NP items M5a and M5b's 1.72)
+  2026-10-07, for the rejections; numbered after 1.73, line RG item X4b-1; first 1.72, then 1.73 at
+  the merge of dev that brought line NP items M5a and M5b's 1.72, then 1.74 after dev's 1.73)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1148,8 +1150,9 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     before a tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13)
     stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do a mask that ends
     past its sequence and in BLASTP and BLASTX a range longer than 5,000,000 letters. Masks out of
-    order and overlapping masks stayed refused in this version; from version 1.73 BLASTP and BLASTX
-    search them (rule 4) except the rejections of 1.73 (the end of the Explicit rejections list),
+    order and overlapping masks stayed refused in this version; from version 1.74 BLASTP and BLASTX
+    search them (rule 4, and approved exception 22) except the rejections of 1.74 (the end of the
+    Explicit rejections list),
     and TBLASTN and TBLASTX still refuse them. `blastinput::db_mask::HardScan`,
     `HardMaskShape::of_scan`, `algorithm::common::translated_chunks::translated_db_mask_chunks`,
     `algorithm::blastp::blast_engine::db_masked::hard_chunks`.
@@ -1193,6 +1196,93 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     (`LOSAT/src/blastinput/db_mask_tests.rs`),
     `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
     (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
+
+## Approved exception 22 (BLASTP and BLASTX `-db_hard_mask`, diagonal entries that reach another sequence, version 1.74)
+
+The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
+Q10=A Q11=A Q12=A Q13=OK」 to the question batch of that day, whose Q7 is line NP's question Q5 of
+M4b, `M/m4b/OWNER_QUESTIONS.md`) option B: 「配列ごとに独立に探す（前の配列の印が届かない所まで
+目盛りを進めます。今の判定の式を置き換えるだけで、速さは変わりません）」, with the merit
+「こうした DB も探せて、スレッド数によらず同じ結果になります」 and the demerit 「前の配列の印が次の配列に
+届く場合だけ、NCBI の 1 スレッドと bytes が違います…新しい例外になります」. Not taken: option A,
+refusing a database with such a sequence before the search (the explicit rejection `StaleDiagonals`
+of the first draft of version 1.74), which refuses whole seg-masked proteomes; option C, writing
+NCBI's 1-thread rows at every thread count, which carries the entries of one sequence into the
+next on purpose and makes the search depend on the order of the sequences. Its version is in the
+list at the top; elsewhere it is cited by its number and name, "approved exception 22 (diagonal
+entries that reach another sequence)". Line NP item M4b-3b.
+
+22. **`-db_hard_mask` in BLASTP and BLASTX: overlapping masks after which NCBI's word hits reach
+    the table of diagonals of another sequence.** NCBI's protein scan keeps one table of diagonals
+    per thread (made at `blast_extend.c:40-66`, cleared at `:87-107`) and moves its offset after
+    each chunk of a sequence by the chunk's length plus the window (`Blast_ExtendWordExit`,
+    `blast_extend.c:162-173`, which clears the table once the offset reaches INT4_MAX / 4). A chunk
+    between overlapping masks has a negative length (`blast_engine.c:221-276`), so the offset moves
+    back and a later chunk's hits (`aa_ungapped.c:519-551` two-hit, `:771-802` one-hit) meet the
+    entries of earlier chunks: of the same sequence (searched as NCBI searches them, rule 4) or,
+    where the walk of the chunks reaches below the sequence's start or leaves entries past the next
+    sequence's start, of another sequence. Which sequence a thread searched before depends on how
+    the threads share out the database, so NCBI's rows for such a sequence depend on its neighbours
+    at 1 thread and change from run to run with several threads.
+    LOSAT searches each such sequence with every entry of the other sequences out of reach. Before
+    a sequence that is not the first the search reads (the first with letters; NCBI does not search
+    an empty one, `blast_engine.c:1429-1432`), it moves the offset up by the walk's margin below the
+    sequence's start; after a sequence it moves the offset up by the margin of its entries past the
+    next sequence's start (`algorithm::common::hard_chunk_walk::DiagonalWalk::start` and
+    `DiagonalWalk::after`, the one walk that `algorithm::blastp::blast_engine::db_masked` and
+    `algorithm::blastx::search_db_masked` read). Where a move would bring the offset to INT4_MAX / 4
+    or past it, or a sequence whose walk reads back (below its start, or into the entries of an
+    earlier chunk of its own) would pass INT4_MAX / 4 before its last chunk, LOSAT clears the table
+    first, so no clear falls inside such a walk. NCBI's own search of a sequence first on a new
+    table never clears inside it: from the window, a walk reaches INT4_MAX / 4 (536,870,911) only
+    for a protein of more than 536 million letters or about 12 million masks at the window 40 (each
+    chunk adds its length plus the window; the chunks with words are disjoint parts of the sequence),
+    and the longest walk of A. thaliana TAIR10 reaches 5,324 positions. The first sequence keeps
+    NCBI's new table, every sequence without such a margin keeps NCBI's offsets, and the search
+    without `-db_hard_mask` is unchanged. The kernels count every one word of a chunk past a
+    sequence's end as a hit (as for a query with the gap letter), so they also move the offset for a
+    word that no query read from FASTA hits, which changes no row.
+    So every thread's table, new or cleared, holds no entry within reach of the next sequence, which
+    is what each sequence's search leaves: LOSAT's rows are the same at every thread count, and they
+    are NCBI's rows for the near input, the same database with a spacer of `X` (which no query word
+    hits; its length the database's average) before each sequence that such an entry reaches, under
+    an alias with the database's NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN (the statistics read
+    those, `seqsrc_seqdb.cpp:160-205`). Not taken: a new table before every sequence. NCBI's new
+    table holds entries 0 at the window below the start, which a hit below the start meets (the
+    one-hit scan skips such a hit), so it would differ from NCBI's 1-thread rows also where no entry
+    of another sequence reaches; the Owner's option moves the offset only "where the previous marks
+    do not reach", and the bytes differ from NCBI's 1-thread run only where an entry of another
+    sequence changes a result.
+    Evidence (NCBI BLAST+ 2.17.0 under a 4 GB limit and 60 s; line NP's task folder `M/m4b3b`,
+    `Q5B_PROGRESS.md`, `q5b/ncbi`, `q5b/ncbi_near.sh`):
+    - `ov_lk` (A with masks [40,200) [60,238), then B with [230,235)): A's word hits reach 98
+      positions past its end, 137 in the one-hit scan. Its near input `ov_lkn` (A, 240 `X`, then B,
+      the masks the same, an alias with `ov_lk`'s statistics) keeps A's rows and gives the same bytes
+      at 1 and 4 threads. NCBI's own runs of `ov_lk`: at the default the near input's rows; at
+      `-evalue 1000` one more row of B in BLASTP (two in BLASTX) at 1 thread and the near input's
+      rows at 4; at `-window_size 0` BLASTP misses B's identical row 1-33/8-40 (E 3.27e-23) and the
+      row 6-13/86-93 at 1 and 4 threads, BLASTX misses B's two rows at 1 thread and has them at 4;
+      with `-ungapped -comp_based_stats 0 -evalue 1000` six more rows of B in BLASTP and nine in
+      BLASTX, where two of B's rows also take other E-values.
+    - `ov_atha` (40 TAIR10 proteins whose seg masks overlap): 6 of them reach another sequence in
+      the one-hit scan (3 below their start, 3 past their end); its near input, a spacer of 357 `X`
+      at each of the six boundaries, gives NCBI's own bytes of `ov_atha` in every run (BLASTP and
+      BLASTX; the default, `-evalue 1000`, `-window_size 0`, `-ungapped`; 1 and 4 threads).
+    - `lk400` (200 pairs of A then B, BLASTP `-window_size 0`, `M/m4b3b/NOTES_M4B3B.md`): at 1 thread
+      two runs gave B's identical row in 0 of 200 pairs and A's in 200 of 200; at 4 threads three runs
+      gave B's in 5, 6 and 3 of 200 and A's in 197, 196 and 200, every run another md5.
+    - Counts with segmasker 2.17.0's defaults (each database in its order, `M/m4b3b/scripts/stale_stats.py`,
+      the model of `DiagonalWalk::start` and `after`): A. thaliana TAIR10 118 of its 35,642 proteins
+      with masks at the default window (each past its end), 578 with `-window_size 0` (318 below their
+      start, 293 past their end), 118 with `-task blastp-short` and 116 at word 6; a UniRef50 sample
+      (its first 60,000 sequences) 242 of its 59,484 with masks, 1,436 with `-window_size 0`, 242 with
+      `-task blastp-short` and 229 at word 6. Both databases are searched.
+    Fixture rows `db.pmask.{bp,bx}.hard.ov_lk.*` (NCBI's bytes at the default; with `ncbi-near:`
+    those of NCBI's run of the near input, rows `db.pmask.{bp,bx}.hard.near.ov_lkn.*`, otherwise) and
+    `db.pmask.{bp,bx}.hard.ov_atha.21.w0.6` (NCBI's bytes) of
+    `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`, checked at 1 and 4 threads; the
+    database `ov_lkn` of `LOSAT/tests/db_search/dbmaskp/` (`make_dbmaskp_ov.py`, `near_db`). Unit test
+    `each_sequence_is_searched_on_its_own` (`LOSAT/src/algorithm/common/hard_chunk_walk_tests.rs`).
 
 ## Approved difference (`losat rpsbproc`, the order of tied hits, version 1.67)
 
@@ -2475,7 +2565,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     positions NCBI counts in 32 bits.
 
 - BLASTP and BLASTX `-db_hard_mask` on a database whose masks overlap, nest or are stored out of
-  order (version 1.73, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction
+  order (version 1.74, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07). Such a database is searched as NCBI searches it (rule 4): NCBI
   cuts each sequence into parts at the complement of its masks in the order stored, a part
   between overlapping masks "ends before it starts" and holds no letters, and its table of
@@ -2486,29 +2576,15 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   extension reads the letters up to the gapped start, the right one runs only before the part's
   last letter) and kept in an interval tree whose subject bounds that length sets
   (`blast_itree.c:510-795`), or are the part's HSPs in an ungapped search; LOSAT does the same
-  (`BlastpPrelimKernel::one_word_gapped`, `blastx::search::one_word_hits`). The first searched
-  sequence meets a new table (each thread makes its own, `blast_extend.c:40-66`, and the first
-  sequence is the first a thread takes) and the last has no sequence after it, so their margins
-  below the start or past the end are searched. Fixture rows `db.pmask.bp.hard.ov_*` and
+  (`BlastpPrelimKernel::one_word_gapped`, `blastx::search::one_word_hits`). A sequence whose
+  chunks' word hits reach the table of diagonals of another sequence is searched on its own
+  (approved exception 22). Fixture rows `db.pmask.bp.hard.ov_*` and
   `db.pmask.bx.hard.ov_*` of `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`, databases
   `ov_*` of `LOSAT/tests/db_search/dbmaskp/` (`ov_s2`: the seed of a part of 2 letters, NCBI's rows
   the same at 1 thread twice and at 4 threads; `ov_nest` and `ov_big` at `-window_size 0`: hits
   below the start of the only sequence). LOSAT refuses (exit 1) the shapes below, one refused
   sequence refusing the whole database. Evidence: NCBI BLAST+ 2.17.0 runs of probe 2 of line NP's
   `M/m4b3b/NOTES_M4B3B.md` and of `M/m4b3b/probe/fix1`, each capped.
-  - `blastinput::db_mask::HardMaskShape::StaleDiagonals`, before the search: a sequence with
-    overlapping masks after which NCBI's word hits reach entries of its table of diagonals that
-    belong to the sequences searched before it (not for the first searched sequence), or leave
-    entries that the next sequence reads (not for the last). NCBI keeps one table per thread.
-    Evidence: `lk400` (200 pairs of sequences A then B, BLASTP `-window_size 0`): at 1 thread two
-    runs gave the same bytes, B's identical row in 0 of 200 pairs and A's in 200 of 200; at 4 threads
-    three runs gave B's in 5, 6 and 3 of 200 and A's in 197, 196 and 200, every run another md5.
-    Counts with segmasker 2.17.0's defaults and LOSAT's criterion (each database in its order):
-    A. thaliana TAIR10 118 of its 35,642 proteins with masks at the default window, 578 with
-    `-window_size 0`, 118 with `-task blastp-short` and 116 at word 6; a UniRef50 sample (its first
-    60,000 sequences) 242 of its 59,484 with masks, 1,436 with `-window_size 0`, 242 with
-    `-task blastp-short` and 229 at word 6. Both databases are refused as a whole. Whether to search
-    such sequences each on its own is the Owner's question Q5 of M4b (pending).
   - `algorithm::blastp::hard_chunk_scan::short_chunk_tree_refusal`, during the search: a part
     between overlapping masks shorter than the word whose seed's gapped alignment lies outside the
     subject bounds of the tree that the part's length (negative) sets, where NCBI's insertion splits

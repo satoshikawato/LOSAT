@@ -2340,13 +2340,26 @@ end after the chunk from the start, with a mask stored after it, which LOSAT ref
 letters with masks [10,60) [20,99) [30,40), whose one word at 99 covers A's sentinel and B's first letter, then B; searched
 for `qov2.faa` and for `qwpe.faa`, `qov2.faa`'s protein with `W-W`, whose `-` the FASTA reader drops), `ov_r37` and
 `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different words) and `ov_lk` (two
-subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan (`-window_size 0`)
-NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads (the row of B at
-38-40 is missing); LOSAT refuses `ov_lk` at every window (A's word hits reach 98 positions past its end, 137 in the one-hit
-scan), so all its rows are refusals). `ov_atha` at `-window_size 0` is refused too: 6 of its 40 proteins (AT1G02550.1, AT1G02800.1,
-AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) leave diagonal entries that the next subject reads (decision 52); `ov_athaw`
-(`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for `ov_atha`) gives the one-hit rows
-`.ov_athaw.21.w0.6` their NCBI bytes. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every
+subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B, 98 positions past A's end, 137 in the
+one-hit scan (`-window_size 0`); NCBI's rows of B depend on the thread order). LOSAT searches B with A's entries out of reach
+(PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
+NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000`, `-window_size 0` and `-ungapped` expect NCBI's run
+of `ov_lkn` (`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240
+`X`, which no query word hits, then B) and `ov_lkn.asnt` (A's and B's masks, `local id` renumbered), and the alias `ov_lkn.pal`
+over the volume `ov_lknv` keeps `ov_lk`'s NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN, so that NCBI's statistics are
+`ov_lk`'s:
+
+```
+makeblastdb -in ov_lkn.faa -dbtype prot -out ov_lknv -title "overlapping masks lk" -mask_data ov_lkn.asnt && rm -f ov_lknv.pjs
+printf 'TITLE overlapping masks lk\nDBLIST ov_lknv\nNSEQ 2\nLENGTH 480\nSTATS_NSEQ 2\nSTATS_TOTLEN 480\n' > ov_lkn.pal
+```
+
+6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
+their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before
+exception 22 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`
+at each of the six boundaries (at 1 and 4 threads, BLASTP and BLASTX; `ncbi-parity-20261019/M/m4b3b/Q5B_PROGRESS.md`), so
+they are `ncbi` rows. `ov_athaw` (`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for
+`ov_atha`) has the one-hit rows `.ov_athaw.21.w0.6`. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every
 frozen row. `ov_atha` holds 40 proteins of the A. thaliana TAIR10 set (150-600 letters) whose
 `segmasker` masks (`-outfmt maskinfo_asn1_bin`, algorithm 21) overlap: the first ten by name with two or more consecutive
 overlaps, the first five of the rest with a nested mask and then the first with an overlap up to 40, none with a mask that

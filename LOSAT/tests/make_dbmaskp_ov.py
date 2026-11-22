@@ -29,16 +29,22 @@ named. The queries are random (no W) + WWW + random: `qov1.faa` / `qov1.fna` (th
            A's chunk end 40; B holds the same letters and the mask [230,235).
 Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order of the subject; no -parse_seqids, as the
 `edge_*.asnt`), algorithm seg; `makeblastdb -mask_data` gives them the algorithm number 21.
+  ov_lkn:  the near input of ov_lk (PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22):
+           A, a spacer of 240 `X` (no word hit), then B, with A's and B's masks (`near_db`), over which the alias
+           `ov_lkn.pal` keeps ov_lk's number of sequences and total length: NCBI searches B with every diagonal entry
+           of A out of reach, as LOSAT searches B of ov_lk.
 
     python3 make_dbmaskp_ov.py [--out DIR] [--ncbi-bin DIR]
 
 writes DIR/ov_*.faa, DIR/ov_*.asnt, DIR/qov1.faa, DIR/qov1.fna, DIR/qov2.faa, DIR/qov2.fna, DIR/qwpe.faa (DIR defaults to
 db_search/dbmaskp next to this script), and with --ncbi-bin runs `makeblastdb -dbtype prot -out DIR/ov_X -title
-"overlapping masks X" -mask_data ov_X.asnt` (BLAST_USAGE_REPORT=false) and removes the .pjs files.
+"overlapping masks X" -mask_data ov_X.asnt` (BLAST_USAGE_REPORT=false) and removes the .pjs files; ov_lkn as `near_db`
+says.
 """
 import argparse
 import os
 import random
+import re
 import subprocess
 from pathlib import Path
 
@@ -138,6 +144,39 @@ def probe3():
     return {"wpe": [(a, [(10, 60), (20, 99), (30, 40)]), (b, [])]}
 
 
+def near_db(out, db, title, records, masks, before, ncbi_bin):
+    """The near input `{db}n` of a database whose diagonal entries reach across subjects (PD-LOSAT-NCBI-DEFECTS exception
+    22): `records` [(header, letters)] in order, `masks` its `Blast-db-mask-info` ASN.1 text (`local id N`, N the 1-based
+    order), `before` the 0-based orders that get a spacer before them (never 0). Each spacer is the average length of
+    the database (total // count) of `X`, which no word of a query without `X` hits, so that NCBI's scan moves the
+    diagonal offset past it by its length and the window and searches the next subject with every entry of the ones
+    before it out of reach. Writes `{db}n.faa` and `{db}n.asnt` (the masks with N renumbered), and with `ncbi_bin`
+    `makeblastdb -out {db}nv` and the alias `{db}n.pal` over it, whose NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN are the
+    database's (the statistics and the reports read those, not the spacers)."""
+    assert before and 0 not in before
+    count, total = len(records), sum(len(s) for _, s in records)
+    spacer = "X" * (total // count)
+    rows, order = [], {}
+    for i, (header, seq) in enumerate(records):
+        if i in before:
+            rows.append((f"xspacer{len(rows) + 1} hitless spacer", spacer))
+        rows.append((header, seq))
+        order[i + 1] = len(rows)
+    name = db + "n"
+    with open(out / f"{name}.faa", "w") as f:
+        for header, seq in rows:
+            f.write(f">{header}\n" + "\n".join(seq[i:i + 60] for i in range(0, len(seq), 60)) + "\n")
+    (out / f"{name}.asnt").write_text(re.sub(r"local id (\d+)", lambda m: f"local id {order[int(m.group(1))]}", masks))
+    if ncbi_bin:
+        env = dict(os.environ, BLAST_USAGE_REPORT="false")
+        subprocess.run([str(Path(ncbi_bin) / "makeblastdb"), "-in", f"{name}.faa", "-dbtype", "prot", "-out", name + "v",
+                        "-title", title, "-mask_data", f"{name}.asnt"], cwd=out, env=env, check=True,
+                       stdout=subprocess.DEVNULL)
+        (out / f"{name}v.pjs").unlink(missing_ok=True)
+        (out / f"{name}.pal").write_text(f"TITLE {title}\nDBLIST {name}v\nNSEQ {count}\nLENGTH {total}\n"
+                                         f"STATS_NSEQ {count}\nSTATS_TOTLEN {total}\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "db_search" / "dbmaskp")
@@ -165,6 +204,9 @@ def main():
                                 "-title", f"overlapping masks {name}", "-mask_data", f"{db}.asnt"],
                                cwd=out, env=env, check=True, stdout=subprocess.DEVNULL)
                 (out / f"{db}.pjs").unlink(missing_ok=True)
+    subjects = probe2()[2]["lk"]
+    near_db(out, "ov_lk", "overlapping masks lk", [(f"lk{'AB'[i]} probe", s) for i, (s, _) in enumerate(subjects)],
+            asnt([(i + 1, m) for i, (_, m) in enumerate(subjects)], "overlap lk"), {1}, args.ncbi_bin)
 
 
 if __name__ == "__main__":

@@ -136,10 +136,25 @@ pub(super) unsafe fn align(
     tb: bool,
     check_fence: bool,
     em: bool,
+    row: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if em {
-        dispatch::<true>(
+    if em && row {
+        dispatch::<true, true>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    } else if em {
+        dispatch::<true, false>(
             q,
             s,
             scores,
@@ -153,7 +168,7 @@ pub(super) unsafe fn align(
             sc,
         )
     } else {
-        dispatch::<false>(
+        dispatch::<false, false>(
             q,
             s,
             scores,
@@ -174,7 +189,7 @@ pub(super) unsafe fn align(
 /// # Safety
 /// `available()` must be true.
 #[inline(always)]
-unsafe fn dispatch<const EM: bool>(
+unsafe fn dispatch<const EM: bool, const R: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -188,8 +203,93 @@ unsafe fn dispatch<const EM: bool>(
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
+    // EXPERIMENT (LOSAT_X_FNROW): the alphabet size as a type constant of the `R` instances
+    if R && m8.is_some() {
+        let small = scores.ncols() <= 16;
+        return match (tb, m8, small) {
+            (true, Some(m), true) if sc.x_nib => align8::<true, EM, true, true, true>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            (true, Some(m), false) if sc.x_nib => align8::<true, EM, true, true, false>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            (true, Some(m), true) => align8::<true, EM, false, true, true>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            (true, Some(m), false) => align8::<true, EM, false, true, false>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            (false, Some(m), true) => align8::<false, EM, false, true, true>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            (false, Some(m), false) => align8::<false, EM, false, true, false>(
+                q,
+                s,
+                scores,
+                m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            ),
+            _ => None,
+        };
+    }
     match (tb, m8) {
-        (true, Some(m)) if sc.x_nib => align8::<true, EM, true>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true, false, false>(
             q,
             s,
             scores,
@@ -202,7 +302,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, Some(m)) => align8::<true, EM, false>(
+        (true, Some(m)) => align8::<true, EM, false, false, false>(
             q,
             s,
             scores,
@@ -215,7 +315,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false, EM, false>(
+        (false, Some(m)) => align8::<false, EM, false, false, false>(
             q,
             s,
             scores,
@@ -1120,7 +1220,7 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const R: bool, const S: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1222,7 +1322,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         Scores::Tables { t, .. } => Some(t.data.as_ptr()),
         _ => None,
     };
-    let small_alphabet = ncols <= 16;
+    let small_alphabet = if R { S } else { ncols <= 16 };
     let mut cells: u64 = 0;
 
     let mut base: i32 = 0;
@@ -1233,40 +1333,91 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     let mut fence_hit = false;
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
+    // EXPERIMENT (LOSAT_X_FNROW, `R`): the four tests at the head of a row (room, columns filled,
+    // bad residue, fence) as one comparison with `row_ok`, the largest `b_size` for which all four
+    // are false (none of their inputs changes outside them); the row residues read 16 at a time
+    // (`qwin`, rows `qlo..qhi`, each checked as the row check does); the row pointers kept from row
+    // to row (`pa`: the row read, `pb`: the row written) and taken again after the tests, which
+    // may move or grow the rows.
+    let mut row_ok = 0usize;
+    let mut qwin = [0u8; 16];
+    let (mut qlo, mut qhi) = (1usize, 1usize);
+    let (mut pa, mut pb) = (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD));
+    let mut pe = sc.e8.as_mut_ptr().add(PAD);
+    let mut ps = sc.sb.as_ptr().add(PAD);
 
     // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        if !sc.fits(b_size + num_extra + 64) {
-            let d = sc.x_room(first, b_size + num_extra + 64, false);
-            first -= d;
-            b_size -= d;
-            len2 -= d;
-            wend[0] = wend[0].saturating_sub(d);
-            wend[1] = wend[1].saturating_sub(d);
-        }
-        if sc.sb_filled < b_size {
-            fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
-        }
-        if sc.bad_k < b_size {
-            return None;
+        let tests = !R || b_size > row_ok;
+        if tests {
+            if !sc.fits(b_size + num_extra + 64) {
+                let d = sc.x_room(first, b_size + num_extra + 64, false);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
+            if sc.sb_filled < b_size {
+                fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
+            }
+            if sc.bad_k < b_size {
+                return None;
+            }
         }
         let mut limit = len2 + 1;
         let mut bend = b_size;
         let mut fence_row = false;
-        if sc.fence_k < b_size {
-            limit = sc.fence_k;
-            bend = sc.fence_k;
-            fence_row = true;
-            if bend <= first {
-                fence_hit = true;
-                break;
+        if tests {
+            if sc.fence_k < b_size {
+                limit = sc.fence_k;
+                bend = sc.fence_k;
+                fence_row = true;
+                if bend <= first {
+                    fence_hit = true;
+                    break;
+                }
+            }
+            if R {
+                row_ok = sc
+                    .ha
+                    .len()
+                    .saturating_sub(num_extra + 128 + 2 * PAD)
+                    .min(sc.sb_filled)
+                    .min(sc.bad_k)
+                    .min(sc.fence_k);
+                let (h0, h1) = (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD));
+                (pa, pb) = if cur == 0 { (h0, h1) } else { (h1, h0) };
+                pe = sc.e8.as_mut_ptr().add(PAD);
+                ps = sc.sb.as_ptr().add(PAD);
             }
         }
-        let qa = q.get(a)? as usize;
-        if qa >= ncols {
-            return None;
-        }
+        let qa = if R {
+            if a >= qhi {
+                let mut n = 0usize;
+                while n < 16 && a + n <= len1 {
+                    match q.get(a + n) {
+                        Some(v) if (v as usize) < ncols => {
+                            qwin[n] = v;
+                            n += 1;
+                        }
+                        _ => break,
+                    }
+                }
+                if n == 0 {
+                    return None;
+                }
+                (qlo, qhi) = (a, a + n);
+            }
+            *qwin.get_unchecked(a - qlo) as usize
+        } else {
+            let qa = q.get(a)? as usize;
+            if qa >= ncols {
+                return None;
+            }
+            qa
+        };
         cells += (b_size - first) as u64;
         let t: *const u8 = if let Some(tabs) = static_tabs {
             tabs.add(qa * TAB)
@@ -1279,13 +1430,15 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
             }
             sc.tabs.as_ptr().add(qa * TAB)
         };
-        let (hr, hw) = if cur == 0 {
+        let (hr, hw) = if R {
+            (pa, pb)
+        } else if cur == 0 {
             (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD))
         } else {
             (sc.h8b.as_mut_ptr().add(PAD), sc.h8a.as_mut_ptr().add(PAD))
         };
-        let e = sc.e8.as_mut_ptr().add(PAD);
-        let sb = sc.sb.as_ptr().add(PAD);
+        let e = if R { pe } else { sc.e8.as_mut_ptr().add(PAD) };
+        let sb = if R { ps } else { sc.sb.as_ptr().add(PAD) };
         let t0 = bcast128(t.add(64));
         let t1 = bcast128(t.add(80));
 
@@ -1421,6 +1574,9 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        if R {
+            core::mem::swap(&mut pa, &mut pb);
+        }
         let rec = if TB {
             sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
         } else {

@@ -102,10 +102,10 @@ impl<S: AsnSource> TextIn<S> {
     // (The members and variants of these types have the automatic tags 0, 1, ... in module
     // order. Their names start with a lower case letter, so `GetAltItemIndex`, which looks up the
     // name with an upper case first letter, finds nothing.)
-    /// `ReadMemberId(SkipWhiteSpace())` and the member or variant it names among `names`, searched
-    /// (`count` of them, by position) from `pos` on; one that is not there is an error
-    /// (`UnexpectedMember`, which lists them all). `choice`: an empty name is `BeginChoiceVariant`'s
-    /// error.
+    /// `ReadMemberId` of what `SkipWhiteSpace` returns, and the member or variant it names among
+    /// `names`, searched (`count` of them, by position) from `pos` on; one that is not there is an
+    /// error (`UnexpectedMember`, which lists them all). `choice`: an empty name is
+    /// `BeginChoiceVariant`'s error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
     fn find_member(
         &mut self,
@@ -117,7 +117,7 @@ impl<S: AsnSource> TextIn<S> {
         let member = self.r.member_or_tag().map_err(|e| self.fail(e))?;
         let (id, found) = match member {
             MemberId::Tag(digits) => {
-                // `NStr::StringToInt(id)` of the tag's digits: a number that does not fit is its
+                // `NStr::StringToInt` of `id`, the tag's digits: a number that does not fit is its
                 // `CStringException`.
                 let id = self.r.bytes(digits);
                 let tag = string_to_int(id, 0).map_err(Fail::exception)?;
@@ -145,7 +145,7 @@ impl<S: AsnSource> TextIn<S> {
         }
     }
 
-    /// `UnexpectedMember(id, items)` of the members or variants `names`.
+    /// `UnexpectedMember` of `id` and the items, of the members or variants `names`.
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, id: &[u8], names: impl Iterator<Item = &'static str>) -> Fail {
@@ -316,8 +316,9 @@ impl<S: AsnSource> Input for TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1643-1646
-    /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of
-    /// `(size_t)-1` bytes that `CTempString::operator string` asks for: `std::length_error`.
+    /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of the largest
+    /// `size_t` count of bytes (-1 cast to `size_t`) that `CTempString::operator string` asks for:
+    /// `std::length_error`.
     fn read_other_pointer(&mut self) -> R<Vec<u8>> {
         let id = self.r.type_id();
         match id.map_err(|e| self.fail(e))? {

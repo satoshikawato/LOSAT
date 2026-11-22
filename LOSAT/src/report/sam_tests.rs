@@ -72,6 +72,7 @@ fn document(
 ) -> String {
     let run = RunRecord {
         program: crate::blastinput::app::Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -251,6 +252,7 @@ fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
 fn run_record() -> RunRecord<'static> {
     RunRecord {
         program: crate::blastinput::app::Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     }
@@ -384,9 +386,9 @@ fn an_empty_document_writes_nothing_and_finish_empties_it() {
 // (`CreateDensegFromDendiag`): an ungapped search's Seq-align of a subject holds a Dense-diag per
 // HSP, which the formatter joins into one Dense-seg: one record per subject. Its tags are the
 // first HSP's (the first of each score, sam_formatter.cpp:247-279), PI over the summed lengths;
-// the sort key is `min(GetSeqStart(0), GetSeqStop(0))` by the strand of the first segment
-// (Dense_seg.cpp:165-238), ties broken by the last HSP's e-value (`s_GetBlastScore` keeps the
-// last one, align_format_util.cpp:229-270). NCBI BLAST+ 2.17.0 sorts the same way (a subject
+// the sort key is the lesser of `GetSeqStart` and `GetSeqStop` of row 0 by the strand of the first
+// segment (Dense_seg.cpp:165-238), ties broken by the last HSP's e-value (`s_GetBlastScore` keeps
+// the last one, align_format_util.cpp:229-270). NCBI BLAST+ 2.17.0 sorts the same way (a subject
 // whose lowest query start is lower sorts after one with a lower key; the tie above).
 #[test]
 fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
@@ -473,10 +475,10 @@ fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
 
 // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276 and
 // c++/src/objtools/format/cigar_formatter.cpp:164, :324-346: the aligned length that PI divides
-// by is `int len = GetAlignLength(false)` (a `TSeqPos` sum) and the CIGAR count a `TSeqPos` sum.
-// NCBI BLAST+ 2.17.0 on a 16-letter unit repeated 11,600 and 16,400 times against itself
-// (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M` (4303359968 - 2^32)
-// with `PI:f:3.13`.
+// by is `len`, an `int`, from `GetAlignLength` with false (a `TSeqPos` sum) and the CIGAR count a
+// `TSeqPos` sum. NCBI BLAST+ 2.17.0 on a 16-letter unit repeated 11,600 and 16,400 times against
+// itself (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M`
+// (4303359968 - 2^32) with `PI:f:3.13`.
 #[test]
 fn an_ungapped_record_sums_its_lengths_in_32_bits() {
     let run = RunRecord {

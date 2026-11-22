@@ -12,6 +12,7 @@
 //! reader reads it, as one database (`SeqDb::open_in`).
 
 mod args;
+mod bioseq;
 mod fasta;
 mod format;
 mod letters;
@@ -37,8 +38,8 @@ const PROGRAM: &str = "BLASTDBCMD";
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:907-909
 /// The text of `blastdbcmd -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
-/// descriptions in `args`). Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the
-/// argument errors print.
+/// descriptions of `CBlastDBCmdApp::Init`). Its part before `OPTIONAL ARGUMENTS` is the usage
+/// that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
@@ -49,8 +50,6 @@ static TOOL: Tool = Tool {
     program: "blastdbcmd",
     refusal_name: PROGRAM,
     help: HELP,
-    descs: args::DESCS,
-    dependencies: args::dependencies,
     post_prefix: Some("blastdbcmd"),
     components: &[],
 };

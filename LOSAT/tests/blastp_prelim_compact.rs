@@ -53,10 +53,10 @@ const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 /// Blocks of several batches of `queries` (a block takes batches while it holds fewer letters):
 /// {BDT62581.1 to BDT62583.1} (1,595 letters) and {BDT62584.1, BDT62553.1}.
 const TWO_BLOCKS: (&str, &str) = ("LOSAT_X_BPQBLOCK", "1000");
-/// A batch of `queries` is split into chunks when it holds at least twice `CHUNK_SIZE -
-/// OVERLAP_CHUNK_SIZE` letters (700): {BDT62582.1, BDT62583.1} (897 letters) into two, the first
-/// of which holds parts of both queries, and {BDT62584.1} (944) into two; {BDT62581.1} (698) and
-/// {BDT62553.1} are not split.
+/// A batch of `queries` is split into chunks when it holds at least twice the difference of
+/// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in letters (700): {BDT62582.1, BDT62583.1} (897 letters)
+/// into two, the first of which holds parts of both queries, and {BDT62584.1} (944) into two;
+/// {BDT62581.1} (698) and {BDT62553.1} are not split.
 const CHUNKS: [(&str, &str); 2] = [("CHUNK_SIZE", "450"), ("OVERLAP_CHUNK_SIZE", "100")];
 /// Windows of the redo of one job per thread (`LOSAT_X_BPREDOPARWINDOW`, as in
 /// `blastp_redo_par.rs`; the default holds 64 jobs per thread).

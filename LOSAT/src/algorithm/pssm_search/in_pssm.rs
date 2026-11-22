@@ -37,8 +37,8 @@ const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 /// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
 const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
 
-/// What `-in_pssm` makes of the file: the `switch` on `CFormatGuess().Format(in)` and the first steps of the
-/// reader it picks.
+/// What `-in_pssm` makes of the file: the `switch` on the format that `CFormatGuess` guesses for the stream and the
+/// first steps of the reader it picks.
 #[derive(Debug)]
 enum PssmFileFormat {
     /// `eTextASN`: the text reader reads the stream from `start` (the start of the file, or its end after
@@ -69,10 +69,10 @@ const NOT_TEXT: &str = "a PSSM file that is not ASN.1 text";
 const UNDECIDED_GUESS: &str =
     "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
 
-/// `CFormatGuess().Format(in)` (`utils::format_guess`, the whole order of `sm_CheckOrder` without hints) and
-/// the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when the formats it
-/// could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); the binary
-/// reader's first tag decides `eBinaryASN` (`ber_first_tag`); `eXml` is refused (the XML reader's first failure
+/// The format that `CFormatGuess` guesses for the stream (`utils::format_guess`, the whole order of `sm_CheckOrder`
+/// without hints) and the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when
+/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); the
+/// binary reader's first tag decides `eBinaryASN` (`ber_first_tag`); `eXml` is refused (the XML reader's first failure
 /// is its file header: `CObjectIStreamXml::ReadFileHeader`, objistrxml.cpp:582-660, with the declaration's
 /// attributes and encodings, comments, `DOCTYPE` and namespace prefixes, not ported).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
@@ -103,19 +103,20 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     }
 }
 
-/// The binary reader's first steps on `bytes` (`in >> MSerial_AsnBinary >> *m_Pssm`): the file header (a byte to
-/// peek at), then `BeginClass` of `PssmWithParameters`, `ExpectTag(eUniversal, eConstructed, eSequence)`. A first
-/// byte whose class and form bits are not those of a universal constructed tag (0x20), or whose tag number is not
-/// 16, is a `CSerialException`; a long tag (0x3F) reads its number from the next bytes (a number of 2^24 or more is
-/// `fOverflow`, the end of the file a `CEofException`, which `HandleEOF` passes on at the root, NCBI BLAST+ 2.17.0:
-/// exit status 0 and nothing written). Tag 16 (0x30, or 0x3F with the number 16) begins a binary PSSM: refused.
+/// The binary reader's first steps on `bytes` (the stream read as `MSerial_AsnBinary` into `m_Pssm`): the file header
+/// (a byte to peek at), then `BeginClass` of `PssmWithParameters`, `ExpectTag` with `eUniversal`, `eConstructed` and
+/// `eSequence`. A first byte whose class and form bits are not those of a universal constructed tag (0x20), or whose
+/// tag number is not 16, is a `CSerialException`; a long tag (0x3F) reads its number from the next bytes (a number of
+/// 2^24 or more is `fOverflow`, the end of the file a `CEofException`, which `HandleEOF` passes on at the root, NCBI
+/// BLAST+ 2.17.0: exit status 0 and nothing written). Tag 16 (0x30, or 0x3F with the number 16) begins a binary PSSM:
+/// refused.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1121-1126
 /// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1041
 /// NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:167-219
 /// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:150-171
 /// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:174-216 (`UnexpectedTagClassByte`,
-/// `UnexpectedTagValue`: `ThrowError(fFormatError, ...)`)
+/// `UnexpectedTagValue`: `ThrowError` with `fFormatError`)
 /// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 fn ber_first_tag(bytes: &[u8]) -> PssmFileFormat {
     const UNIVERSAL_CONSTRUCTED: u8 = 0x20;
@@ -275,8 +276,8 @@ pub(crate) fn read_in_pssm(
     // exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters ::=` alone; line RG D3-1 probe e01).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
     // (`CBlastAppDiagHandler::Post`, cited in `report::diag_log`): the BLAST archive saves each post as one message of its
-    // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
-    // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
+    // severity; the reader's posts are errors (`ERR_POST_X` of subcode 7 for a replaced byte, whose text
+    // has three lines, and `ERR_POST` at error severity in `PostRead`; NCBI BLAST+ 2.17.0 tblastn
     // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
     // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
     // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand
@@ -690,8 +691,8 @@ pub(crate) fn psi_search_and_object_of(
     // string or the integer's decimal digits (`CObject_id::AsString`). Any other id (`gi 4504347`
     // of a `-parse_deflines` PSSM, `swissprot`, `pdb`, ...), and several ids, are shown with or
     // without `-parse_deflines`, as `-parse_deflines` shows the ids of a FASTA query (NCBI BLAST+
-    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString(cbs,
-    // believe_local_id)` asks `believe_local_id` of a local id only, align_format_util.cpp).
+    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString` with `cbs` and
+    // `believe_local_id` asks `believe_local_id` of a local id only, align_format_util.cpp).
     let ids = query.ids.as_slice();
     if ids.is_empty() {
         return Err(reader.refuse(

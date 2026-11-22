@@ -1,8 +1,8 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
 use crate::blastinput::value_parsers::{
-    blastx_query_coverage, blastx_real, blastx_threshold, genetic_code, ncbi_boolean,
-    ncbi_input_path, ncbi_int8, ncbi_integer, ncbi_output_path, ncbi_positive_integer,
-    nonnegative_ncbi_integer, protein_word_size, report_count, SegSpec,
+    best_hit_value, blastx_query_coverage, blastx_real, blastx_threshold, genetic_code,
+    ncbi_boolean, ncbi_input_path, ncbi_int8, ncbi_integer, ncbi_output_path,
+    ncbi_positive_integer, nonnegative_ncbi_integer, protein_word_size, report_count, SegSpec,
 };
 use crate::stats::protein_options::{
     protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
@@ -158,6 +158,15 @@ pub struct BlastxArgs {
         help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]"
     )]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions; BLASTP's `best_hit_overhang`).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329-3329
     #[arg(long)]
     pub subject_besthit: bool,
@@ -259,6 +268,13 @@ pub struct BlastxArgs {
     /// calls before (`local::DatabaseReports::unrecorded_calls`). Not a public option.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -378,9 +394,6 @@ impl ResolvedOptions {
     /// reports (outfmt 7 counts their hits before it, as rpsblast's `psiblast_hits_found`) and
     /// the Seq-annots (8, 9, 12), `TrimSeqAlign` before BLAST XML, XML2 and JSON (5, 13 to 16);
     /// the archive (11) and the organism report (18) take every list. All of them otherwise.
-    /// RPSTBLASTN writes only the pairwise and tabular reports until item PS15a
-    /// (`rpsblast::args::check_rps_outfmt` refuses the rest), so the cut of the structured
-    /// reports is the writers' rule for when it does.
     pub(crate) fn shown_lists(&self) -> usize {
         if self.merged_volumes() {
             usize::try_from(self.hitlist_size).unwrap_or(0)
@@ -408,6 +421,21 @@ impl ResolvedOptions {
     pub(crate) fn pairwise_view(&self) -> Option<crate::report::pairwise::PairwiseView> {
         crate::blastinput::app::ReportFormat::from_number(i32::from(self.outfmt))
             .and_then(crate::report::pairwise::PairwiseView::of)
+    }
+
+    /// How the pairwise report reads each query's subjects, as its writer reads them
+    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions` and
+    /// `-num_alignments`), `None` for the other formats.
+    pub(crate) fn pairwise_reading(&self) -> Option<crate::report::pairwise::PairwiseReading> {
+        self.pairwise_view().map(|view| {
+            view.reading(
+                self.report_sort(),
+                crate::report::db_subject::Shown {
+                    descriptions: usize::try_from(self.num_descriptions).unwrap_or(0),
+                    alignments: usize::try_from(self.num_alignments).unwrap_or(0),
+                },
+            )
+        })
     }
 }
 
@@ -501,6 +529,9 @@ pub struct ResolvedOptions {
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
     pub culling_limit: i32,
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
+    /// them (`BlastxArgs::best_hit`).
+    pub(crate) best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     pub subject_besthit: bool,
     pub hitlist_size: i32,
     pub num_descriptions: i32,
@@ -587,6 +618,16 @@ impl BlastxArgs {
     /// sets for such a search; a gapped one refuses the name first).
     pub(crate) fn unknown_matrix_name(&self) -> bool {
         self.ungapped && blastx_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")).is_none()
+    }
+
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
@@ -723,7 +764,7 @@ impl BlastxArgs {
         let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:288-300
         // (BLASTX's query is protein for these arguments: blastx_args.cpp:74 passes
-        // `!kQueryIsProtein`.) A word size given on the command line above 4 is the compressed
+        // the negation of `kQueryIsProtein`.) A word size given on the command line above 4 is the compressed
         // table with its own threshold (19.3, 21 or 20.25), and one of 4 or less leaves the task's:
         // `-task blastx-fast -word_size 3` is the standard table with threshold 20
         // (api/blast_options_local_priv.hpp:612-619).
@@ -822,6 +863,7 @@ impl BlastxArgs {
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit.unwrap_or(0),
+            best_hit: self.best_hit(),
             subject_besthit: self.subject_besthit,
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,

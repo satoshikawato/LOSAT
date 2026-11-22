@@ -309,10 +309,10 @@ const LOST_DEVICES: [&[u8]; 8] = [
     b"/dev/net/tun",
 ];
 
-/// The files of procfs that a process may open for writing as a user, of the process (`SELF`)
-/// and of its thread (`THREAD`): those of the model's host's Linux 5.15 that
-/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20). The
-/// file descriptors 0 to 2 (`fd/0`...) are the standard streams.
+/// The files of procfs that a process may open for writing as a user, of the process (`SELF`) and
+/// of its thread (`THREAD`): those of the model's host's Linux 5.15 that `open` opens with
+/// `O_WRONLY`, `O_APPEND` and `O_CREAT` (line WQA's sweep, D11 round 2, 2026-11-20). The file
+/// descriptors 0 to 2 (`fd/0`...) are the standard streams.
 const PROCESS_FILES: [&[u8]; 18] = [
     b"attr/current",
     b"attr/exec",

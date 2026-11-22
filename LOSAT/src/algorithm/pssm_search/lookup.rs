@@ -36,7 +36,7 @@ struct PssmNeighbors<'a, R: PssmRows> {
 
 /// The lookup table of `rows` for a query of one context (offset 0) indexed whole: NCBI's
 /// `BlastAaLookupTableNew`, `s_AddPSSMNeighboringWords` over the lookup segment `[0, len - 1]`
-/// and `BlastAaLookupFinalize`. `threshold` is `(Int4)opt->threshold`.
+/// and `BlastAaLookupFinalize`. `threshold` is `opt->threshold` cast to `Int4`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:236-247
 #[cfg(test)]
@@ -149,7 +149,7 @@ fn add_pssm_word_hits<R: PssmRows>(
 /// words whose exact score reaches the threshold.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:695-748
-/// `info->matrix` is the PSSM from the word's first position (`row = matrix + from` advanced to
+/// `info->matrix` is the PSSM from the word's first position (`matrix` advanced by `from`, then to
 /// the offset), so `matrix[current_pos]` is the row of query position `offset + current_pos`.
 fn add_pssm_word_hits_core<R: PssmRows>(
     thin: &mut ThinBackbone,

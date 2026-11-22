@@ -1,5 +1,5 @@
 //! NCBI's buffer of a report stream, as its Linux builds make it: where the bytes of an insertion
-//! (`out << value`) reach the file or device, from the insertions alone.
+//! (`operator<<`) reach the file or device, from the insertions alone.
 //!
 //! Two buffers exist. Standard output (`cout`, the stream that NCBI's formatter and rpsbproc write
 //! to) is C's `stdout`: a fully buffered stream of `block` bytes, or a line-buffered one on a

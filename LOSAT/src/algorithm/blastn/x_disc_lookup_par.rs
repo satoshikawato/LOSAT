@@ -10,7 +10,7 @@
 //!
 //! Why the tables are the same. The update of a word for the first template reads and writes
 //! only the cell `ecode1` of `hashtable`, the presence-vector word `ecode1 >> pv_array_bts`,
-//! the counter `ecode1 / kCompressionFactor` of `helper_array` and `next_pos[index]`; the
+//! the counter `ecode1` divided by `kCompressionFactor` of `helper_array` and `next_pos[index]`; the
 //! update for the second template only the cell `ecode2` of `hashtable2`, the presence-vector
 //! word `ecode2 >> pv_array_bts` (of the same `pv_array`), the counter of `helper_array2` and
 //! `next_pos2[index]`. `index` is the word's own 1-based query offset, unique within a template,

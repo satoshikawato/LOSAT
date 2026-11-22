@@ -12,6 +12,7 @@ mod archive;
 // `web_adapter::give_strategy`).
 pub(crate) use archive::option_inputs;
 pub mod args;
+mod besthit;
 pub mod blast_aascan;
 pub mod blast_engine;
 pub mod blast_extend;

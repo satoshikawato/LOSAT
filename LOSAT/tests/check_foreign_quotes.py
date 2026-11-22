@@ -31,7 +31,8 @@ Python's docstrings; every line of Markdown and text files):
   - In a Rust, Python, TOML, YAML or shell file, a C or C++ expression in backticks inside a
     comment's prose (`inline_expression`): a span holds names, values, paths, command lines,
     messages and LOSAT's own code, not an assignment, an operation or a call with arguments of
-    C or C++.
+    C or C++. One with a mark of C or C++ is a quote; in Rust, so is one that uses a name
+    LOSAT's code nowhere uses.
 - LABEL: a comment line labelled as NCBI's (`NCBI reference ...`, `NCBI <path>`) whose label or
   path names another project's source (the code is not NCBI's).
 - PIN (source files): a citation of NCBI's source that does not name the pinned tree: an
@@ -189,9 +190,10 @@ LABELLED_RE = re.compile(
 )
 # A line that starts with `<project> [<version>] reference`.
 LABEL_START_RE = re.compile(r"^[A-Za-z][\w.+ -]{0,40}\breference\b")
-# A line labelled as NCBI's by a path: `NCBI c++/src/...:<lines>`, `NCBI 2.17.0 boost_erf.c:...`.
+# A line labelled as NCBI's by a path: `NCBI c++/src/...:<lines>`, `NCBI 2.17.0 boost_erf.c:...`,
+# the path in backticks or not.
 NCBI_PATH_LABEL_RE = re.compile(
-    r"^NCBI(?:\s+[^\s:]+){0,4}?\s+(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
+    r"^NCBI(?:\s+[^\s:`]+){0,4}?\s+`?(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
 )
 # A comment line that is a line of C or C++: a statement, a brace, a definition, a `#define`.
 CODE_LINE_RE = re.compile(
@@ -201,7 +203,7 @@ CODE_LINE_RE = re.compile(
     # C statements: an `if` with a `continue`, an increment, `break`, `} else {`, `case X:`, a call
     # with the semicolon after each
     r"|^\s*(?:\}\s*)?(?:if|for|while|switch)\s*\(.*\)\s*(?:\{|[^`]*;)?\s*$"
-    r"|^\s*(?:break|continue)\s*;\s*$|\w(?:\+\+|--)\s*;\s*$"
+    r"|^\s*(?:break|continue)\s*;\s*$|\w(?:\+\+|--)\s*;\s*$|^\s*(?:\+\+|--)\w+\s*;\s*$"
     r"|^\s*\}\s*else\b|^\s*else\s*\{\s*$|^\s*case\s+[\w:]+\s*:\s*|^\s*default\s*:\s*$"
     r"|^\s*[\w*&>.\[\]-]*\w\([^`]*\)\s*;\s*$|^\s*[\w*&>.\[\]-]*\w\([^()`]*,\s*$"
     r"|^\s*[\w.>-]*\w\([^`]*\)\s*,\s*$"
@@ -497,9 +499,11 @@ def inline_statement(span: str) -> bool:
 # observed; `(m_Pos = <n>)`), or LOSAT's own Rust. An expression is an assignment, a comparison,
 # arithmetic, a stream `<<`, a logical or bitwise operation, a cast, `++`, `new`, a declaration,
 # or a call with arguments. It is C or C++ when it has a mark of C or C++ (`C_EXPRESSION_MARK_RE`)
-# and none of Rust (`RUST_MARK_RE`); without either it is the cited code's when its comment cites
-# a source and it uses a name that the file's code does not have (`buffer[length] = 0` above the
-# Rust that reads into `text`). Other expressions without marks are LOSAT's code or arithmetic.
+# and none of Rust (`RUST_MARK_RE`). Without either, in Rust, it is LOSAT's when its names are
+# LOSAT's: a name that LOSAT's code nowhere uses (a test of NCBI's `fff` for the end of a string)
+# makes it the cited code's, and so does, for a statement under a citation, a name it acts on that
+# the file's code does not have (an assignment to `buffer` above the Rust that reads into `text`).
+# Names of one or two letters are the symbols of a formula, not names of code.
 INLINE_EXPRESSION = "expression in backticks"
 # The files whose comments are read for expressions: their own language is not of C's family.
 NON_C_FAMILY = frozenset({".rs", ".py", ".toml", ".yml", ".yaml", ".sh"})
@@ -515,15 +519,31 @@ PATH_SPAN_RE = re.compile(r"^[\w.+<>*-]*(?:/[\w.+<>*|-]+)+/?(?::[\d,-]+)?$")
 SETTING_SPAN_RE = re.compile(r"^(?:[\w.\[\]-]*=[^\s=]*\s*)+$")
 COMMAND_SPAN_RE = re.compile(
     r"(?:^|\s)--?[a-z][\w-]*(?:\s|$|=)|^(?:cargo|python3?|git|gh|ssh|losat|blast\w*|makeblastdb|npm"
-    r"|bash|sh|cd|ls|env|export|make|rustc|perf|time|valgrind)\b|^[A-Z][A-Z0-9_]*=\S*(?:\s|$)"
+    r"|bash|sh|cd|ls|env|export|make|rustc|perf|time|valgrind)\b(?!\s*\()|^[A-Z][A-Z0-9_]*=\S*(?:\s|$)"
+    r"|^set\s+[A-Z_]\w*=|^\S+\.(?:sh|py)(?:\s|$)"
 )
-PLACEHOLDER_RE = re.compile(r"(?<![\w:])<[a-z][\w ]*>")
+PLACEHOLDER_RE = re.compile(r"(?<![\w:])<[a-z][\w +*/-]*>")
 # Text, not code: a sentence or a labelled line (`Database: ...`), a diagnostic line
 # (`[X_STATS] ...`), a markup tag or a FASTA line,
 # a word in quotes (`'abc'`), a label of output (`Length=`, `Frame type= ...`), a power (`2^k`).
+# (A word between two operands is text too: `'x' to Int8 (m_Pos = 0)`, `(which is N)`.)
+_C_WORDS = (
+    "return|new|delete|sizeof|case|const|static|unsigned|signed|long|short|int|char|double|float|void"
+    "|bool|struct|enum|class|union|else|goto|throw|typename|template|virtual|inline|extern|volatile"
+    "|register|auto|string|operator|if|while|for|switch|do|catch|try|default|public|private|using"
+    "|namespace|typedef"
+)
 TEXT_SPAN_RE = re.compile(
-    r"^[A-Z][a-z]+(?: [a-z]+){2}\b|^[A-Z][a-z]+: |^\[[\w-]+\]|^[<>][A-Za-z]|'[^']{2,}'|=$|\w= |\d\^\w"
+    r"^[A-Z][a-z]+(?: [a-z]+){2}\b|^[A-Z][a-z]+: |^\[[\w-]+\]|^[<>][A-Za-z]|'[^']{2,}'|=$|\w= |\d\^[\w(]"
     r"|\w\^\d"
+    # an ASN.1 definition, an alignment row, a Seq-id in FASTA, a manual page (`unlink(2)`), a
+    # setting of NCBI's registry (`DATA_LOADERS = none`)
+    r"|\s::=\s|^-*[A-Z][A-Z*-]*$|^(?:lcl|gi|ref|gb|emb|dbj|pdb|sp|tr|gnl)\||^[a-z_]\w*\([1-8]\)$"
+    r"|^[A-Z][A-Z0-9_]+ = \w+$"
+    # a formula: an absolute value, a subscript (`max_{j<i}`, `sum_i`), a half-open interval, `~`
+    r"|(?:^|\s)\|[^|\s][^|]*[^|\s]\|(?:\s|$)|\w_\{|\b(?:sum|max|min|prod)_[a-z]\s+[\w(]"
+    r"|^\[[^\[\]]*,[^\[\]]*\)$|^\([^()]*,[^()]*\]$|\s~\s"
+    rf"|[\w\"')\]]\s+(?!(?:{_C_WORDS})\b)[A-Za-z][a-z]+\s+(?=[\w\"'(])"
 )
 RUST_ATTRIBUTE_RE = re.compile(
     r"^#?\[?(?:inline|cfg|cfg_attr|derive|allow|deny|warn|expect|doc|target_feature|repr|must_use"
@@ -532,53 +552,63 @@ RUST_ATTRIBUTE_RE = re.compile(
 EXPRESSION_RE = re.compile(
     r"(?<![=!<>+\-*/%&|^])=(?![=>])|[-+*/%&|^]=|<<=|>>=|==|!=|<=|>=|\s[<>]\s|<<|>>|&&|\|\|"
     r"|\s\?\s.*\s:\s|\s[-+*/%]\s|\s[&|^]\s|(?:^|[\s(])[!~]\s?[\w(]"
-    r"|\w\s*\(\s*[^)\s]"  # a call with arguments
-    r"|(?<=\w)(?<!\b[Cc])(?:\+\+|--)|(?:\+\+|--)(?=\w)"
-    r"|\((?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_]\w*\s*\**\s*\)\s*[\w(&*]"  # a cast
+    r"|[\w>]\s*\(\s*[^)\s]"  # a call with arguments
+    r"|(?<=\w)(?<!\b[Cc])(?:\+\+|--)(?!\w)|(?<![\w+-])(?:\+\+|--)(?=[A-Za-z_])"
+    r"|\((?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_]\w*\s*\**\s*\)\s*[\w(&*-]"  # a cast
+    r"|(?:^|[\s(&|^=])~\s*[\w(]|(?<=[\w)\]])[<>](?=-?\d)"
     r"|\bnew\s+[A-Z]|\bsizeof\b"
     # a declaration
     r"|^(?:static\s+|const\s+|unsigned\s+|signed\s+|long\s+)*(?:Int[1248]|Uint[1248]|int|long|short"
     r"|char|double|float|Boolean|size_t|void|string|bool|TSeqPos|TGi|[A-Z]\w*<[^>]*>)"
-    r"(?:\s*[*&]+\s*|\s+)[*&]*[A-Za-z_]\w*\b"
+    r"(?:\s*[*&]+\s*|\s+)[*&]*(?!(?:int|long|short|char|double|float|unsigned|signed|const)\b)[A-Za-z_]\w*\b"
 )
-# What a statement does, not only says: an assignment, an increment, a call with arguments (not
-# a function of arithmetic such as `ceil(x / k)`), `new`, a declaration.
-ACTION_RE = re.compile(
-    r"(?<![=!<>+\-*/%&|^])=(?![=>])|[-+*/%&|^]=|<<=|>>=|(?<=\w)(?<!\b[Cc])(?:\+\+|--)|(?:\+\+|--)(?=\w)"
-    r"|(?<![\w.:])(?!(?:ceil|floor|exp|expl|exp2|log|log2|log10|ln|sqrt|max|min|abs|fabs|pow|round"
-    r"|trunc|sat|erf|erfc|sum|acos|asin|atan|cos|sin|tan)\s*\()[A-Za-z_][\w.:>-]*\s*\(\s*[^)\s]"
-    r"|\bnew\s+[A-Z]|^(?:static\s+|const\s+|unsigned\s+|signed\s+|long\s+)*(?:Int[1248]|Uint[1248]"
-    r"|int|long|short|char|double|float|Boolean|size_t|void|string|bool|TSeqPos|TGi|[A-Z]\w*<[^>]*>)"
-    r"(?:\s*[*&]+\s*|\s+)[*&]*[A-Za-z_]\w*\b"
+# What a statement without a mark acts on: the variable an assignment writes (`buffer` of
+# `buffer[length] = 0`), and a call's function and receiver (`reserve` and `str` of
+# `str.reserve(count)`); a function of arithmetic (`ceil(x / k)`) is not a call.
+ASSIGNMENT_RE = re.compile(r"^(?P<place>[A-Za-z_][\w.]*(?:\[[^\]=]*\])*)\s*(?:[-+*/%&|^]|<<|>>)?=(?![=>])")
+CALL_RE = re.compile(r"(?<![\w.:])(?P<receiver>(?:[A-Za-z_]\w*\.)*)(?P<function>[A-Za-z_]\w*)\s*\(\s*[^)\s]")
+ARITHMETIC_FUNCTIONS = frozenset(
+    "ceil floor exp expl exp2 log log2 log10 ln sqrt max min abs fabs pow round trunc sat erf erfc "
+    "sum acos asin atan cos sin tan".split()
 )
 # Arithmetic without spaces counts in a span with a mark of C or C++ (`3 - i%4`; not the hyphen
 # of `Site-annot-set`).
-TIGHT_ARITHMETIC_RE = re.compile(r"[\w)\]][+*/%][\w(]|[\d)\]]-[\w(]|[\w)\]]-[\d(]")
+TIGHT_ARITHMETIC_RE = re.compile(r"[\w)\]][+*/%&|^][\w(]|[\d)\]]-[\w(]|[\w)\]]-[\d(]")
 C_EXPRESSION_MARK_RE = re.compile(
     r"(?<=[\w)\]])->(?=[\w(*])"  # a member through a pointer (Rust's `->` has spaces)
     r"|(?<![\w.])m_[A-Za-z]\w*"  # a member
     r"|(?<![\w.])[kef][A-Z][a-z]\w*"  # a constant, an enum value, a flag
     r"|(?:\.|->)[A-Z]\w*\("  # a method in CamelCase
-    r"|(?<![\w:.!])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\s*\("  # a macro
+    r"|(?<![\w:.!])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\s*\(|(?<![\w:.!])[A-Z][A-Z0-9]{2,}\("  # a macro
     r"|(?<![\w:.!])(?:MIN|MAX|ABS|ASSERT|_ASSERT|ITERATE|NON_CONST_ITERATE)\s*\("
-    r"|(?<![\w:])[A-Za-z][a-z0-9]*_[A-Z][A-Za-z0-9]*[a-z]\w*\s*\("  # Prefix_Name(
+    r"|(?<!\w)[A-Za-z][a-z0-9]*_[A-Z][A-Za-z0-9]*[a-z]\w*\s*\("  # Prefix_Name(, x_Name(
     r"|(?<![\w:.])[A-Z][a-z0-9]+[A-Z]\w*\s*\("  # a function in CamelCase
     r"|\b[CNS][A-Z][a-z]\w*(?:<[^>]*>)?::[A-Z]\w*\s*\(|\bC[A-Z][a-z]\w*\s*\("  # a class's
     r"|<<\s*(?:\"|'|\b(?:endl|NcbiEndl|Warning|Error|Info|Fatal|Critical|Trace|Note|MSerial\w*|setw"
     r"|setprecision|flush|fixed|scientific)\b)|\b(?:cout|cerr|ostr|os|out|\w*[Ss]tream\w*)\s*<<"
     r"|\((?:const\s+)?(?:unsigned\s+|signed\s+)?(?:Int[1248]|Uint[1248]|int|long|short|char|double"
-    r"|float|Boolean|size_t|void|TSeqPos|\w+_t)\s*\**\s*\)\s*[\w(&*]"  # a cast
+    r"|float|Boolean|size_t|void|TSeqPos|\w+_t)\s*\**\s*\)\s*[\w(&*-]"  # a cast
     r"|^(?:static\s+|const\s+|unsigned\s+|signed\s+)*(?:Int[1248]|Uint[1248]|int|long|short|char"
-    r"|double|float|Boolean|size_t|void|string|bool|\w+_t)(?:\s*[*&]+\s*|\s+)[*&]*[A-Za-z_]\w*\b"
+    r"|double|float|Boolean|size_t|void|string|bool|\w+_t)(?:\s*[*&]+\s*|\s+)[*&]*(?!(?:int|long|short|char|double|float|unsigned|signed|const)\b)[A-Za-z_]\w*\b"
     r"|\b(?:sizeof|malloc|calloc|realloc|memcpy|memset|memmove|strlen|strcmp|strncmp|strcpy|sprintf"
     r"|snprintf|fprintf|printf|static_cast|reinterpret_cast|const_cast|dynamic_cast|NULL|nullptr"
     r"|TRUE|FALSE|INT\d*_M(?:IN|AX)|UINT\d*_MAX|CHAR_BIT|DBL_\w+|FLT_\w+)\b"
     r"|\bnew\s+[A-Z]\w*|\bconst\s+\w+\s*[&*]|!!|\bios(?:_base)?::|::npos\b"
     r"|\.(?:c_str|push_back|emplace_back|substr|empty|find_first_of|find_last_of|find_first_not_of"
-    r"|tellg|seekg|tellp|seekp|rdbuf)\(|(?<=\w)(?<!\b[Cc])\+\+|\+\+(?=\w)"
+    r"|tellg|seekg|tellp|seekp|rdbuf)\(|(?<=\w)(?<!\b[Cc])\+\+(?!\w)|(?<![\w+-])\+\+(?=[A-Za-z_])"
     r"|\bstd::(?:string|vector|map|set|pair|ostream|istream|cout|cerr|endl)\b"
     r"|^(?:\}\s*)?(?:if|while|for|switch|catch)\s*\(|^\}?\s*else\b|\btry\s*\{"
+    r"|(?<=[\w)\]])\s+\?\s+\S.*?\s:\s+\S"  # a ternary
+    r"|(?<![\w.])(?:0[xX][0-9A-Fa-f]+|\d+)(?:[uU](?:ll|LL|l|L)?|(?:ll|LL|l|L)[uU]?)\b"  # 1U, 8191L
+    r"|(?<=\w)--(?![\w-])"  # a decrement
 )
+# Rust has `!` for a bitwise not, so `~` there is C's (Python has `~` too).
+BITWISE_NOT_RE = re.compile(r"(?:^|[\s(&|^=])~\s*(?:\(|\w+\b(?!:))")
+# The arguments of a template (`map<CSeq_id_Handle, CConstRef<CSeq_loc>>` is a name).
+TEMPLATE_ARGS_RE = re.compile(r"(?<=\w)<[\w:, *&]*>")
+# A call of a name in camel case or in capitals: C or C++'s, unless it has arguments and LOSAT's
+# Rust has the name (a tuple struct or an enum variant).
+CAMEL_CASE_CALL_RE = re.compile(r"[A-Z][a-z0-9]+[A-Z]\w*\s*\(|[A-Z][A-Z0-9]{2,}\(")
 # In Rust and Python a variable is in snake case: a name in camel case (`alnLen`) is C or C++'s,
 # and a statement that uses one is theirs (arithmetic on one may be reasoning about its value).
 CAMEL_CASE_VARIABLE_RE = re.compile(r"(?<![\w.:'\"])[a-z][a-z0-9]*[A-Z]\w*(?![\w(])")
@@ -586,9 +616,10 @@ RUST_MARK_RE = re.compile(
     r"^(?:let|mod|use|pub|fn|impl|struct|enum|type|match|loop|unsafe|#\[)\b|=>|::<|&mut\b"
     r"|\bas (?:[iuf]\d+|usize|isize)\b|\bSome\(|\bOk\(|\bErr\(|\bNone\b|\bself\b|\bSelf\b"
     r"|\.(?:unwrap|expect)\(|\w!\(|\w!\[|\?(?:$|[.;)])|\w\.\.=?\w|\.\.=\w|\|\w*\||\bfn\b"
-    r"|\b(?:Vec|Option|Result|Box)<|&\[|\b[iuf](?:8|16|32|64|128|size)\b|::[a-z_]\w*\s*\("
+    r"|\b(?:Vec|Option|Result|Box)<|&\[|\b[iuf](?:8|16|32|64|128|size)\b"
     r"|\.(?:len|is_empty|iter|into_iter|map|collect|as_ref|as_slice|to_vec|to_string|clone"
-    r"|saturating_\w+|wrapping_\w+|checked_\w+)\("
+    r"|saturating_\w+|wrapping_\w+|checked_\w+)\(|'_\b|[<&]'[a-z]\w*\b|\b(?:Fn|FnMut|FnOnce)\("
+    r"|\b(?:impl|dyn)\s|\b(?:core|std|alloc)::[a-z_]+::"
 )
 # Words of Rust and its types: not the names of a file's code.
 RUST_WORDS = frozenset(
@@ -598,20 +629,37 @@ RUST_WORDS = frozenset(
     "Option Some None Ok Err Result Box".split()
 )
 IDENTIFIER_RE = re.compile(r"[A-Za-z_]\w*")
+# A name in an expression (not the digits and suffix of a number: `0x11`, `1e-5`).
+NAME_RE = re.compile(r"(?<!\w)[A-Za-z_]\w*")
+# Words that are no name of code: the keywords of Rust and Python, functions and constants of
+# arithmetic (`Lambda` of a score's statistics).
+NOT_NAMES = RUST_WORDS | frozenset(
+    "true false None True False and or not in is if else lambda Lambda NaN nan inf Inf INF".split()
+)
 
 
 def inline_expression(
-    span: str, names: Callable[[], frozenset[str]], cited: bool, snake_case: bool = True
+    span: str,
+    names: Callable[[], frozenset[str]],
+    cited: bool,
+    snake_case: bool = True,
+    losat: Callable[[], frozenset[str]] = frozenset,
+    rust: bool = False,
 ) -> bool:
     """Whether the text of a backtick span is a C or C++ expression. `names` gives the names of
-    the file's code; `cited` says whether the span's comment cites a source; `snake_case`, that the
-    file's language names variables in snake case (Rust, Python)."""
+    the file's code and the functions LOSAT defines, `losat` every name of LOSAT's code; `cited`
+    says whether the span's comment cites a source; `snake_case`, that the file's language names
+    variables in snake case (Rust, Python); `rust`, that it is Rust."""
     text = " ".join(span.split()).rstrip(";").strip()
     bare = STRING_LITERAL_RE.sub('""', text)
+    plain = bare
+    while TEMPLATE_ARGS_RE.search(plain):
+        plain = TEMPLATE_ARGS_RE.sub("", plain)
     if (
         not bare
         or VALUE_SPAN_RE.match(bare)
         or NAME_SPAN_RE.match(bare)
+        or NAME_SPAN_RE.match(plain)
         or PATH_SPAN_RE.match(bare)
         or SETTING_SPAN_RE.match(text)
         or RUST_ATTRIBUTE_RE.match(bare)
@@ -623,25 +671,58 @@ def inline_expression(
         or PROSE_RE.search(bare)
     ):
         return False
-    marked = C_EXPRESSION_MARK_RE.search(bare) is not None
+    marks = [mark.group(0) for mark in C_EXPRESSION_MARK_RE.finditer(bare)]
+    calls = [mark for mark in marks if CAMEL_CASE_CALL_RE.fullmatch(mark)]
+    marked = (
+        len(calls) < len(marks)
+        or (rust and BITWISE_NOT_RE.search(bare) is not None)
+        or any(
+            not re.search(re.escape(call) + r"\s*[^)\s]", bare) or call.rstrip("( ") not in names()
+            for call in calls
+        )
+    )
     if not (EXPRESSION_RE.search(bare) or (marked and TIGHT_ARITHMETIC_RE.search(bare))):
         return False
-    if RUST_MARK_RE.search(bare) or re.search(r"\b[A-Z]\w*::[A-Z]\w*\(", bare) and not marked:
-        return False  # LOSAT's Rust (an enum variant: `QueryEnd::Error(e)`)
+    if RUST_MARK_RE.search(bare):
+        return False  # LOSAT's Rust
     if marked:
         return True
-    # Without a mark, only a statement that does something, with a name of C or C++ or of the
-    # cited code: a comparison or arithmetic may be reasoning about the values.
-    if not ACTION_RE.search(bare):
-        return False
-    if snake_case and CAMEL_CASE_VARIABLE_RE.search(bare):
+    # Without a mark: a statement that uses a variable in camel case, or that acts on a name
+    # foreign to the file's code under a citation, is the cited code's.
+    acted = acted_names(bare)
+    if acted and snake_case and CAMEL_CASE_VARIABLE_RE.search(bare):
         return True
-    if not cited:
+    if acted and cited and any(name not in names() for name in acted if len(name) > 1):
+        return True
+    # In Rust, any expression with a name that LOSAT's code nowhere uses is the cited code's, and
+    # one with LOSAT's names is LOSAT's code or reasoning about its values (`last_hit <= diag_offset`).
+    if not rust:
         return False
-    code = names()
-    return any(
-        word not in code for word in IDENTIFIER_RE.findall(bare) if len(word) > 1 and word not in RUST_WORDS
-    )
+    foreign = {
+        name
+        for name in NAME_RE.findall(bare)
+        if len(name) > 2 and name not in NOT_NAMES and name not in ARITHMETIC_FUNCTIONS
+    }
+    if not foreign:
+        return False
+    known = names()
+    return any(name not in known and name not in losat() for name in foreign)
+
+
+def acted_names(bare: str) -> list[str]:
+    """The names that a statement without a mark acts on (`ASSIGNMENT_RE`, `CALL_RE`); none for
+    a comparison or arithmetic."""
+    acted = []
+    assignment = ASSIGNMENT_RE.match(bare)
+    if assignment is not None:
+        acted.append(IDENTIFIER_RE.match(assignment.group("place")).group(0))
+    for call in CALL_RE.finditer(bare):
+        if call.group("function") in ARITHMETIC_FUNCTIONS:
+            continue
+        acted.append(call.group("function"))
+        if call.group("receiver"):
+            acted.append(IDENTIFIER_RE.match(call.group("receiver")).group(0))
+    return acted
 
 
 def code_names(style: str, lines: Sequence[str], texts: Sequence[str | None]) -> frozenset[str]:
@@ -652,17 +733,48 @@ def code_names(style: str, lines: Sequence[str], texts: Sequence[str | None]) ->
         except (SyntaxError, tokenize.TokenError, IndentationError, ValueError):
             tokens = []
         return frozenset(t.string for t in tokens if t.type == tokenize.NAME)
-    if style == "slash":
-        code = rust_code("\n".join(lines))
-    else:
-        code = "\n".join(line for line, text in zip(lines, texts) if text is None)
-    code = re.sub(r'b?r(#*)".*?"\1', " ", code)
-    code = STRING_LITERAL_RE.sub(" ", code)
-    return frozenset(IDENTIFIER_RE.findall(code)) - RUST_WORDS
+    return frozenset(IDENTIFIER_RE.findall(code_lines(lines, texts))) - RUST_WORDS
+
+
+# The names of LOSAT's Rust anywhere in the tree: the functions it defines (`fn name`) and the
+# names in camel case of its code (types, tuple structs, enum variants). A call of one is LOSAT's.
+FN_DEFINITION_RE = re.compile(r"\bfn\s+(?P<name>[a-z_]\w*)")
+CAMEL_CASE_NAME_RE = re.compile(r"\b[A-Z][a-z0-9]+[A-Z]\w*\b")
+
+
+def code_lines(lines: Sequence[str], texts: Sequence[str | None]) -> str:
+    """The code of a file without its comments, docstrings and strings (line comments after
+    code too), as one text."""
+    out = []
+    for line, text in zip(lines, texts):
+        if text is None:
+            line = STRING_LITERAL_RE.sub(" ", line)
+            out.append(line.split("//", 1)[0] if "//" in line else line)
+    return "\n".join(out)
+
+
+def rust_names(root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    """The names of LOSAT's Rust under `root`: those a call may use (`FN_DEFINITION_RE`,
+    `CAMEL_CASE_NAME_RE`), and every identifier of its code."""
+    functions: set[str] = set()
+    identifiers: set[str] = set()
+    for path in source_files(root):
+        if path.suffix == ".rs":
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            code = code_lines(lines, comment_texts("slash", lines))
+            functions.update(match.group("name") for match in FN_DEFINITION_RE.finditer(code))
+            functions.update(CAMEL_CASE_NAME_RE.findall(code))
+            identifiers.update(IDENTIFIER_RE.findall(code))
+    return frozenset(functions), frozenset(identifiers)
 
 
 def inline_statement_findings(
-    rel: str, texts: Sequence[str | None], lines: Sequence[str] = (), style: str = "slash"
+    rel: str,
+    texts: Sequence[str | None],
+    lines: Sequence[str] = (),
+    style: str = "slash",
+    functions: frozenset[str] = frozenset(),
+    identifiers: frozenset[str] = frozenset(),
 ) -> list[Finding]:
     """QUOTE findings for statements and expressions in backticks; a span may go on to the next
     comment line, so each comment run (up to a code line, an empty comment line or a fence) is
@@ -674,10 +786,11 @@ def inline_statement_findings(
     # In C, C++, JavaScript and TypeScript, an expression in backticks is the file's own syntax.
     non_c_family = Path(rel).suffix in NON_C_FAMILY
     snake_case = Path(rel).suffix in (".rs", ".py")
+    rust = Path(rel).suffix == ".rs"
 
     def names() -> frozenset[str]:
         if not known:
-            known.append(code_names(style, lines, texts))
+            known.append(code_names(style, lines, texts) | functions)
         return known[0]
 
     def flush() -> None:
@@ -692,7 +805,9 @@ def inline_statement_findings(
             if source is None:
                 if cited is None:
                     cited = any(cites_source(text) for _, text in run)
-                if non_c_family and inline_expression(span, names, cited, snake_case):
+                if non_c_family and inline_expression(
+                    span, names, cited, snake_case, lambda: identifiers, rust
+                ):
                     source = INLINE_EXPRESSION
             if source is not None:
                 number = [n for offset, n in starts if offset <= match.start()][-1]
@@ -745,13 +860,16 @@ def check_text(
     style: str = "slash",
     table: dict[str, int] | None = None,
     dirs: frozenset[str] | None = None,
+    functions: frozenset[str] = frozenset(),
+    identifiers: frozenset[str] = frozenset(),
 ) -> list[Finding]:
     """The findings of one file, whose lines are `lines` (comments of `style`). PIN and REF are
-    checked in source files when `table` is given."""
+    checked in source files when `table` is given; `functions` are the functions and types LOSAT
+    defines, `identifiers` every name of LOSAT's code (`rust_names`)."""
     findings: list[Finding] = []
     texts = comment_texts(style, lines)
     if style != "text":
-        findings.extend(inline_statement_findings(rel, texts, lines, style))
+        findings.extend(inline_statement_findings(rel, texts, lines, style, functions, identifiers))
     last_citation: tuple[int, str] | None = None
     # The citations among the comment lines above the current line, back to a code line, an
     # empty comment line or a fence (the run): the last labelled one decides; without one, every
@@ -854,11 +972,12 @@ def find(root: Path, table: dict[str, int] | None = None) -> list[Finding]:
     if table is None:
         table = load_table()
     dirs = directories(table)
+    functions, identifiers = rust_names(root)
     for path in source_files(root):
         text = path.read_text(encoding="utf-8", errors="replace")
         style = COMMENT_STYLES[path.suffix]
         rel = path.relative_to(root).as_posix()
-        findings.extend(check_text(rel, text.splitlines(), style, table, dirs))
+        findings.extend(check_text(rel, text.splitlines(), style, table, dirs, functions, identifiers))
     return findings
 
 

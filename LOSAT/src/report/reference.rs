@@ -3,8 +3,8 @@
 //! one reference (`CBlastFormatUtil::BlastPrintReference`, blastfmtutil.cpp) and the references of
 //! `CBlastFormat::PrintProlog` (blast_format.cpp), in their plain and their `-html` forms.
 //!
-//! The pairwise prologs of every program (`pairwise::write_blastp_pairwise_intro` and the
-//! others) and the XML reports (`blast_xml::REFERENCE_GAPPED_BLAST`) read the table here.
+//! The pairwise prolog of every program (`pairwise::write_prolog`) and the XML reports
+//! (`blast_xml::REFERENCE_GAPPED_BLAST`) read the table here.
 
 use std::io::{self, Write};
 
@@ -280,8 +280,8 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// `blastn`, ...; compared without case, so the callers may pass the version line's name).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
-/// (The `NcbiEndl` pair is the callers': their flushes differ. LOSAT has no deltablast and no
-/// domain database: their branches are not taken.)
+/// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. LOSAT has no
+/// deltablast and no domain database: their branches are not taken.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
     html: bool,

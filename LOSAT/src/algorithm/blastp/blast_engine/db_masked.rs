@@ -23,7 +23,7 @@
 //!   sequence whose hits can meet entries that the scans of its own chunks did not write (a new
 //!   table, a walk back) is searched on NCBI's tables of the call's query batches
 //!   (`DiagonalWalk::apart`), so that each batch's hits read what NCBI's search of that batch
-//!   reads (PD-LOSAT-NCBI-DEFECTS exception 23 keeps the rows NCBI's one-thread rows for every
+//!   reads (PD-LOSAT-NCBI-DEFECTS exception 24 keeps the rows NCBI's one-thread rows for every
 //!   batching).
 //!
 //! The masks come from `SeqDb::read_mask_block`, a window of sequences at a time
@@ -392,7 +392,7 @@ enum ShortChunkRefusal {
 /// `common::hard_chunk_walk::NcbiWalk`), out of reach of them where its walk reads back; else on
 /// the worker's table with the diagonal offset moved so that no entry of another sequence reaches
 /// its hits or theirs (`DiagonalWalk::start`, `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS
-/// exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22). A chunk that holds a word is
+/// exception 24, the Owner's answer Q5 = B of M4b, 2026-11-22). A chunk that holds a word is
 /// searched over its own letters, the chunk from the start before a mask that runs to the end
 /// included, which NCBI scans
 /// past its end (its "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS

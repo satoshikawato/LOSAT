@@ -438,7 +438,7 @@ pub enum HardScan {
     /// chunk that runs past the sequence's sentinel where it can change a result
     /// (`HardMaskShape::WordPastEnd`). Chunks whose word hits would reach the diagonal entries of
     /// other sequences are searched with those entries out of reach (PD-LOSAT-NCBI-DEFECTS
-    /// exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22: `algorithm::common::
+    /// exception 24, the Owner's answer Q5 = B of M4b, 2026-11-22: `algorithm::common::
     /// hard_chunk_walk::DiagonalWalk::start`), and those whose hits meet entries that no sequence
     /// wrote in NCBI's one-thread search start on such a table at NCBI's offset (`algorithm::
     /// common::hard_chunk_walk::NcbiWalk`).

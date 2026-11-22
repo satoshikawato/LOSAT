@@ -13,10 +13,8 @@ use crate::ncbi_app::Diag;
 use crate::utils::winmask::{MaskerParams, PctSettings};
 
 use super::counts;
-use super::ids::{fill_id_list, EmptyId, IdLists, IdSet, SeqIdSet, TextMatchIds};
-use super::work::{
-    self, config_exception, report, unsupported, Failure, Options, CONFIG, INCONSISTENT,
-};
+use super::ids::{fill_id_list, IdLists, IdSet, SeqIdSet, TextMatchIds};
+use super::work::{self, config_exception, report, Failure, Options, CONFIG, INCONSISTENT};
 
 /// `CWinMaskApplication::Run` on `args`; the exit status.
 ///
@@ -141,8 +139,9 @@ fn masking_run(
 /// `-mk_counts` sets to true.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:374-376,405-445
-/// An id of no words in a list matched as text is NCBI's crash (`ids::EmptyId`): refused. The
-/// ids that `CSeq_id` cannot read are posted as they are read (`SeqIdSet::insert`).
+/// An id of no words in a list matched as text (`ids::EmptyId`), where NCBI posts its error and
+/// crashes, is posted as it is read and skipped (`PD-LOSAT-NCBI-DEFECTS` approved exception 22),
+/// as are the ids that `CSeq_id` cannot read (`SeqIdSet::insert`).
 fn id_lists(
     args: &Args,
     infmt: &str,
@@ -165,12 +164,11 @@ fn id_lists(
         }
         if text_match {
             let mut set = TextMatchIds::default();
-            fill_id_list(name, |id| set.insert(id)).map_err(|EmptyId { id }| {
-                Failure::Refused(unsupported(&format!(
-                    "an id list with an empty id ('{}': NCBI BLAST+ indexes its id sets at -1 and crashes)",
-                    String::from_utf8_lossy(&id)
-                )))
-            })?;
+            fill_id_list(name, |id| {
+                if let Err(empty) = set.insert(id) {
+                    diag.err_post_bytes(&empty.post());
+                }
+            });
             return Ok(Some(IdSet::Text(set)));
         }
         if infmt != "blastdb" {
@@ -182,10 +180,7 @@ fn id_lists(
             )));
         }
         let mut set = SeqIdSet::default();
-        let Ok(()) = fill_id_list(name, |id| {
-            set.insert(id, diag);
-            Ok::<(), std::convert::Infallible>(())
-        });
+        fill_id_list(name, |id| set.insert(id, diag));
         Ok(Some(IdSet::SeqId(set)))
     };
     Ok(IdLists {

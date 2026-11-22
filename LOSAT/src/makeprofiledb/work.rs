@@ -586,13 +586,18 @@ fn read_profile(
         match post {
             Post::BadChar(replaced) => diag.post_replaced(std::slice::from_ref(replaced)),
             Post::Error(text) => diag.err_post(text),
+            // Posts of a text reader's string and byte blocks (makeprofiledb's application has no
+            // diagnostic prefix, as `Diag::err_post`).
+            other => diag.write_text(&other.line(None)),
         }
     }
     use crate::blastinput::pssm_text::PssmReadError;
     match read.result {
         Ok(pssm) => Ok(pssm),
-        Err(PssmReadError::Ncbi(ReadError::Serial(message))) => {
-            Err(RunError::Exception(message.into_bytes()))
+        // `GetMsg()` of the newest exception (the stream's position, or the rethrow of a member
+        // with a set flag), which `CATCH_ALL` prints after "ERROR: ".
+        Err(PssmReadError::Ncbi(ReadError::Serial(exception))) => {
+            Err(RunError::Exception(exception.get_msg().to_vec()))
         }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => Err(RunError::Exception(
             b" Frame type= eFrameNamed, Object type= PssmWithParameters".to_vec(),
@@ -600,7 +605,9 @@ fn read_profile(
         Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
             Err(RunError::Exception(exception.get_msg().to_vec()))
         }
-        Err(PssmReadError::Ncbi(ReadError::Std(_))) => Err(RunError::Unknown),
+        Err(PssmReadError::Ncbi(ReadError::Std(_) | ReadError::OutOfMemory)) => {
+            Err(RunError::Unknown)
+        }
         Err(PssmReadError::Refused(what))
         | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
             Err(RunError::Refused(format!(

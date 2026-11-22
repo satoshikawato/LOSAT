@@ -179,7 +179,7 @@ impl WriteDbError {
             WriteDbError::Exception(e) => text("Error: ", &e.what()),
             WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
             WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
-            WriteDbError::OutOfMemory => b"BLAST ran out of memory".to_vec(),
+            WriteDbError::OutOfMemory => crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             WriteDbError::Io { path, source } => [
                 b"Error: ".as_slice(),
                 &crate::utils::os_bytes::path_bytes(path),

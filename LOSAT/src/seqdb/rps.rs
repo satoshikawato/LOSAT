@@ -53,8 +53,8 @@ pub(crate) const RPS_BUCKET_BITS: u32 = 11;
 /// more instructions than 64).
 pub(crate) const RPS_GROUP_BUCKETS: usize = 64;
 
-/// The concatenated position of a table entry's word (`entry - (BLAST_WORDSIZE_PROT - 1)`, NCBI's
-/// `q_off = cell->entries[i] - table_correction`): the one producer of it.
+/// The concatenated position of a table entry's word (`entry` less `BLAST_WORDSIZE_PROT`, plus one;
+/// NCBI's `q_off` is `cell->entries[i]` minus `table_correction`): the one producer of it.
 #[inline(always)]
 pub(crate) fn entry_q_off(entry: i32) -> u32 {
     entry.wrapping_sub(RPS_WORDSIZE as i32 - 1) as u32
@@ -611,7 +611,7 @@ impl RpsVolumeFiles {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:594-601
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:485-499
     /// The rows start after the header and `num_profiles + 1` offsets, with the profile count
-    /// of the `.rps` file (`freq_header->start_offsets + num_profiles + 1`,
+    /// of the `.rps` file (`freq_header->start_offsets` plus `num_profiles` plus one,
     /// blast_traceback.c:956-957), and their stride is the `.rps` alphabet.
     pub(crate) fn open_freq(
         &mut self,

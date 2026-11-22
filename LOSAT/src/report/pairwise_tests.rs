@@ -1110,6 +1110,7 @@ fn matrix_only_prolog_is_rmblastns() {
             "2.17.0+",
             BlastnIntro {
                 megablast,
+                indexed_megablast: false,
                 matrix_only: true,
             },
             b"User specified sequence set (Input: s1.fa)",
@@ -1204,6 +1205,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         version: "2.17.0+".to_string(),
         intro: BlastnIntro {
             megablast: true,
+            indexed_megablast: false,
             matrix_only: false,
         },
         database_name: b"subjects".to_vec(),

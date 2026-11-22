@@ -130,7 +130,7 @@ impl IntervalNode {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:952
-    /// Whether the node is a leaf (`hsp != NULL`).
+    /// Whether the node is a leaf (its `hsp` is not NULL).
     #[inline]
     fn is_leaf(&self) -> bool {
         self.hsp != 0

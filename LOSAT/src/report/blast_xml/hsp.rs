@@ -4,7 +4,7 @@
 use super::matrix::FormattingMatrix;
 use super::records::QueryMask;
 
-/// `sprintf("%.*g", 6, x)` then `atof` (blastxml_format.cpp:131-136):
+/// `sprintf` with the format "%.*g" and the precision 6, then `atof` (blastxml_format.cpp:131-136):
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:119-124
 /// Both conversions are correctly rounded (glibc's `printf` and `strtod`; Rust's `{:e}` with a
 /// precision and `parse`), ties to even on the exact binary value.
@@ -28,9 +28,9 @@ pub enum MaskLetter {
 /// (`s_MaskQuerySeq`, blastfmtutil.cpp:446-521), literally.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:446-521
-/// `GetAlnPosFromSeqPos(0, position)` is -1 for a position outside the HSP's query range, so a
-/// mask that starts before the HSP is dropped whole, and a mask that ends after it is cut at
-/// the last column.
+/// `GetAlnPosFromSeqPos` of row 0 and `position` is -1 for a position outside the HSP's query
+/// range, so a mask that starts before the HSP is dropped whole, and a mask that ends after it is
+/// cut at the last column.
 ///
 /// `row` is the unmasked query row, `segments` the Dense-seg segments as inclusive column
 /// ranges (`GetAlnStart` / `GetAlnStop`), `masks` the query's masked regions in record
@@ -40,8 +40,8 @@ pub enum MaskLetter {
 /// 3 (a translated query, plus frame); at `first - 3j - 2 ..= first - 3j` for `step` -3 (minus
 /// frame, the row runs from the high end: `first` is the highest nucleotide). A position
 /// maps to the column of the residue that holds it
-/// (`delta = (seq_pos - start) / GetWidth(row)`, alnmap.cpp:593-595), and to -1 outside the
-/// row's residues. The masked row is written to `out`; `columns` is scratch.
+/// (the delta is `seq_pos` less `start`, divided by `GetWidth` of the row, alnmap.cpp:593-595), and
+/// to -1 outside the row's residues. The masked row is written to `out`; `columns` is scratch.
 #[allow(clippy::too_many_arguments)]
 pub fn mask_query_row(
     row: &[u8],

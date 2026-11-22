@@ -252,8 +252,8 @@ pub(crate) fn x_scan_subject_bf(
 }
 
 // No NCBI counterpart: the layout of a sparse group table of the unit path (`x_pair_par.rs`
-// `XGroup`). NCBI's backbone has a cell for every word (blast_aalookup.c:327-333, `bbc =
-// calloc(lookup->backbone_size, ...)`); a group table of a short query group has entries in a
+// `XGroup`). NCBI's backbone has a cell for every word (blast_aalookup.c:327-333, `bbc` is
+// a `calloc` of `lookup->backbone_size` elements); a group table of a short query group has entries in a
 // tenth to a half of them (the tables `x_scan_bf_for` sends to the branch-free loop), and the
 // empty cells were most of its memory. The kept cells, their entries, the overflow array and
 // the presence vector are the table's; only the empty cells go.

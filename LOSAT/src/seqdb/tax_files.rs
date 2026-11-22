@@ -129,7 +129,7 @@ pub fn acc_first_oid<R: ReadAt + ?Sized>(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:261-303
-/// All OIDs of an accession key in LMDB duplicate order (`GetOid(.., allow_dup = true)`):
+/// All OIDs of an accession key in LMDB duplicate order (`GetOid` with `allow_dup` true):
 /// `memcmp` order of the 4 LE bytes, so {1, 256, 512} come as 256, 512, 1. Empty when absent.
 /// Works for keys with a sub-database (more than about 500 OIDs), where NCBI fails.
 pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>, ReadError> {
@@ -434,8 +434,9 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
     }
 
     let oids_sz = oids.len();
-    // NCBI: sort when `oids_sz * log(oids_sz) < m_NumOids`, else scan the bit vector. (For 0 the
-    // product is NaN and the scan finds nothing.) Both give ascending unique OIDs.
+    // NCBI: sort when `oids_sz` times the log of `oids_sz` is below `m_NumOids`, else scan the bit
+    // vector. (For 0 the product is NaN and the scan finds nothing.) Both give ascending unique
+    // OIDs.
     if (oids_sz as f64) * (oids_sz as f64).glibc_ln() < num_oids as f64 {
         oids.sort_unstable();
     } else {

@@ -40,11 +40,11 @@ pub enum SeqId<'a> {
 }
 
 impl SeqId<'_> {
-    /// Appends the Seq-id as the SAM formatter prints it: `GetSeqIdString(true)` of the
+    /// Appends the Seq-id as the SAM formatter prints it: `GetSeqIdString` with true, under the
     /// `fSAM_PlainSeqIds` flag (the local string, or `BL_ORD_ID:<oid>` for a database
     /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them. A
-    /// parsed Seq-id prints `GetSeqIdString(true)` (`seqid::label::content`) of the id it
-    /// holds: the caller passes the id that NCBI's `GetId(eGetId_ForceAcc)` and
+    /// parsed Seq-id prints `GetSeqIdString` with true (`seqid::label::content`) of the id it
+    /// holds: the caller passes the id that NCBI's `GetId` with `eGetId_ForceAcc` and
     /// `AdjustSeqIdType` give.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:111-115
@@ -77,8 +77,8 @@ impl SeqId<'_> {
                 enc.end_member();
                 enc.member("tag", 1);
                 enc.variant("Object-id", "id", 0);
-                // An OID is an `Int4` in NCBI (`int oid`); a database has fewer than 2^31
-                // sequences.
+                // An OID is an `Int4` in NCBI (`oid` is an `int` there); a database has fewer than
+                // 2^31 sequences.
                 enc.int(oid.get() as i32);
                 enc.end_variant();
                 enc.end_member();

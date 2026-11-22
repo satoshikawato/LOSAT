@@ -216,8 +216,8 @@ fn gap_lines_become_runs_of_n_or_x() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:157-172 and
-// c++/include/objects/seq/Seq_gap.hpp:93 (`gapTypeMap.find(CanonicalizeString(sName).c_str())`
-// on a `const char*` map: a gap-type is looked up up to its first NUL byte). The messages are
+// c++/include/objects/seq/Seq_gap.hpp:93 (`gapTypeMap.find` of the canonical string of `sName`
+// as a C string, on a `const char*` map: a gap-type is looked up up to its first NUL byte). The messages are
 // NCBI BLAST+ 2.17.0's for the same lines (`blastn -outfmt 6`, audit A-1 of session SFc):
 // `within-scaffold` forbids linkage evidence (an ignored problem, no message),
 // `between-scaffolds` needs one, a value that starts with NUL is unknown (the message keeps
@@ -355,7 +355,7 @@ fn seq_id_lines_are_rejected_with_data_loaders() {
         assert!(source.end(), "{text:?}");
     }
     // After a rejection the source is past the one line that NCBI reads as the Seq-id
-    // (`*++GetLineReader()` with no `UngetLine` when the CSeq_id parse succeeds,
+    // (the line from `GetLineReader` after an increment, with no `UngetLine` when the CSeq_id parse succeeds,
     // blast_fasta_input.cpp:132-144), and the local-ID counter has not moved: the next
     // call reads from the following line, as NCBI's next ReadOneSeq does after a Seq-id
     // record (oracle BI net2: `AB123456` then `>q1`; net5: five Seq-id lines, then the

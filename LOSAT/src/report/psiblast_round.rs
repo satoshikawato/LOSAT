@@ -86,6 +86,7 @@ pub(crate) fn write_psiblast_round_report(
             false,
             false,
             false,
+            false,
         )?;
         match database {
             Some(database) => write_blast_database_header(writer, database)?,

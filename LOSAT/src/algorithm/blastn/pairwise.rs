@@ -477,14 +477,14 @@ pub(crate) fn shown_query_masks(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
 // The subject masks shown with the HSPs of one subject (`GetMasks` of the subject set's
 // `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
-// holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
-// the closed range `[offset, end]` of an HSP in the searched letters (the end is one past the
-// HSP), in the order of `masks`, unmerged (the merged lowercase of a subject set's record is kept
-// as it is), which outfmt 0 and the query-anchored reports place by `x_FillLocList`
-// (`query_anchored::fill_row_loc_list`, `fill_loc_list`). With `-subject_loc` the
-// record's coordinates and the searched letters' differ by the interval's start, so a region of
-// the record is kept by where it would lie in the interval, and shown where it lies in the
-// record.
+// holds a letter (a stored database mask is the `TSeqRange` from `first` to one less than
+// `second`, empty where it holds none) and meets the closed range `[offset, end]` of an HSP in
+// the searched letters (the end is one past the HSP), in the order of `masks`, unmerged (the
+// merged lowercase of a subject set's record is kept as it is), which outfmt 0 and the
+// query-anchored reports place by `x_FillLocList` (`query_anchored::fill_row_loc_list`,
+// `fill_loc_list`). With `-subject_loc` the record's coordinates and the searched letters'
+// differ by the interval's start, so a region of the record is kept by where it would lie in
+// the interval, and shown where it lies in the record.
 fn subject_mask_regions<'m>(
     masks: &'m [MaskedInterval],
     hsps: &'m [BlastnHsp],

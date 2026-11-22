@@ -35,7 +35,7 @@
 //! makeblastdb writes the same files on every platform except where NCBI's source asks the
 //! platform: the page size of the LMDB files of version 5 (`GET_PAGESIZE`, mdb.c), their
 //! default map sizes (`DEFAULT_LMDB_MAP_SIZE`, `NCBI_OS_MSWIN`), the length LMDB gives a data
-//! file on Windows (`mdb_env_map`, `_WIN32`), `sizeof(long)` in the header size of an index
+//! file on Windows (`mdb_env_map`, `_WIN32`), the `sizeof` of `long` in the header size of an index
 //! file (`x_Overhead`, versions 4 and 5) and the `size_t` that holds a map size. A build takes
 //! these from the host once ([`Platform::host`]); the byte-for-byte tests, whose expected files
 //! are makeblastdb's on Linux x86-64, pin [`Platform::LINUX_X86_64`] so that they hold on every
@@ -70,9 +70,10 @@ pub struct Platform {
     pub default_taxid_map_size: u64,
     /// LMDB sets the length of a data file to the map size whenever it maps it (Windows).
     pub file_length_is_map_size: bool,
-    /// `sizeof(long)` in `CWriteDB_IndexFile::x_Overhead`.
+    /// The `sizeof` of `long` in `CWriteDB_IndexFile::x_Overhead`.
     pub sizeof_long: u64,
-    /// The largest map size the platform's `size_t` holds (`mdb_env_set_mapsize(size_t)`).
+    /// The largest map size the platform's `size_t` holds (`mdb_env_set_mapsize`, which takes a
+    /// `size_t`).
     pub max_map_size: u64,
 }
 
@@ -172,7 +173,7 @@ impl LmdbPlatform {
 }
 
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:321,395,3969
-/// LMDB's `GET_PAGESIZE` on the host: `GetSystemInfo` on Windows, `sysconf(_SC_PAGE_SIZE)`
+/// LMDB's `GET_PAGESIZE` on the host: `GetSystemInfo` on Windows, `sysconf` of `_SC_PAGE_SIZE`
 /// elsewhere. On Linux the C library's `sysconf` returns the kernel's `AT_PAGESZ`, which is
 /// the kernel's page size; LOSAT asks the kernel for that size directly
 /// ([`kernel_page_size`]), without `/proc` and without the C library (rustix reads `AT_PAGESZ`
@@ -196,7 +197,7 @@ fn os_page_size() -> std::io::Result<usize> {
 
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn os_page_size() -> std::io::Result<usize> {
-    // rustix's libc backend: `sysconf(_SC_PAGESIZE)`, which cannot fail.
+    // rustix's libc backend: `sysconf` of `_SC_PAGESIZE`, which cannot fail.
     Ok(rustix::param::page_size())
 }
 

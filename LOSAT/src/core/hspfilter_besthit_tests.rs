@@ -36,7 +36,7 @@ fn either_option_turns_the_filter_on() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:245-262: a
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:271-288: a
 // contained HSP with a worse e-value and a lower score per letter (by more than the score
 // edge) is dropped; a contained HSP with a higher score per letter is kept.
 #[test]
@@ -52,7 +52,7 @@ fn a_contained_worse_hsp_is_dropped() {
     assert_eq!(kept(lists), vec![(0, vec![(0, vec![1]), (2, vec![3])])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:264-294: a new
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:290-323: a new
 // better HSP removes the HSPs it contains, within its overhang (the pipe's) but not past it.
 #[test]
 fn a_better_hsp_removes_the_ones_it_contains() {
@@ -71,7 +71,7 @@ fn a_better_hsp_removes_the_ones_it_contains() {
     assert_eq!(kept(lists), vec![(0, vec![(1, vec![2]), (3, vec![4])])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:265-267: an
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:291-296: an
 // overhang whose `Int4` overflows is `INT_MIN` (the oracle's conversion), and the new HSP
 // removes nothing; a smaller overhang removes the HSP it holds.
 #[test]
@@ -91,7 +91,7 @@ fn an_overhang_past_int4_removes_nothing() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221: the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231: the
 // subjects come in the order of their first HSP in the list (by start), each list sorted.
 #[test]
 fn the_lists_follow_the_starts_and_queries_apart() {
@@ -109,7 +109,7 @@ fn the_lists_follow_the_starts_and_queries_apart() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:85-182,322-327:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:88-186,340-345:
 // past twice `prelim_hitlist_size` HSPs the list is rebuilt without the overhangs, so an
 // HSP that the stored overhang of another held is no longer dropped.
 #[test]
@@ -138,4 +138,16 @@ fn a_rebuild_drops_the_overhangs() {
             vec![(3, vec![4]), (0, vec![1]), (1, vec![2]), (2, vec![3])]
         )]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:141-161: 2 plus the
+// plus strand's three frames, or the minus strand's when the first plus frame is empty.
+#[test]
+fn a_translated_query_length_is_its_frames_plus_two() {
+    // 100 letters: frames of 33, 33 and 32 residues on each strand.
+    assert_eq!(translated_query_length(&[33, 33, 32, 33, 33, 32]), 100);
+    assert_eq!(translated_query_length(&[0, 0, 0, 33, 33, 32]), 100);
+    assert_eq!(translated_query_length(&[33, 33, 32, 0, 0, 0]), 100);
+    // 2 letters: no frame has a residue.
+    assert_eq!(translated_query_length(&[0; 6]), 2);
 }

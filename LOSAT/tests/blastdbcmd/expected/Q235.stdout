@@ -1,0 +1,686 @@
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 0
+    }
+  },
+  descr {
+    title "eta, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A106574612C207061727469616C205B205D0000A1803080AA8030
+80A0801A09424C5F4F52445F49440000A180A080020100000000000000000000000000A2800202
+1389000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Caf## sp.",
+        common "caf## common",
+        db {
+          {
+            db "taxon",
+            tag id 5001
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  descr {
+    title "MAG: (plastid) [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A124D41473A2028706C617374696429205B205D0000A1803080AA
+803080A0801A09424C5F4F52445F49440000A180A080020101000000000000000000000000A280
+02021389000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Caf## sp.",
+        common "caf## common",
+        db {
+          {
+            db "taxon",
+            tag id 5001
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  },
+  descr {
+    title "beta2, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1262657461322C207061727469616C205B205D0000A1803080AA
+803080A0801A09424C5F4F52445F49440000A180A080020102000000000000000000000000A280
+02021389000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Caf## sp.",
+        common "caf## common",
+        db {
+          {
+            db "taxon",
+            tag id 5001
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 120,
+    seq-data ncbistdaa '0B0E1301110A0307050E120A0F16050A0109100B070F0704061106
+060101090907070C0D09160907090F0C010E1007060B040D0C010D040C0E0C120D07121207030B
+010E0F0116100E0F0111030709050A110E130E130B11050E0C031004090D130E060D0B16040C0D
+0C0704060C12070304160F030A0E0B'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  descr {
+    title "theta, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1274686574612C207061727469616C205B205D0000A1803080AA
+803080A0801A09424C5F4F52445F49440000A180A080020103000000000000000000000000A280
+0202138A000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Ctl# name",
+        common "c#common",
+        db {
+          {
+            db "taxon",
+            tag id 5002
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  descr {
+    title "iota, partial [Homo sapiens]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1C696F74612C207061727469616C205B486F6D6F207361706965
+6E735D0000A1803080AA803080A0801A09424C5F4F52445F49440000A180A08002010400000000
+0000000000000000A2800202138A000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Ctl# name",
+        common "c#common",
+        db {
+          {
+            db "taxon",
+            tag id 5002
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  descr {
+    title "btheta, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A136274686574612C207061727469616C205B205D0000A1803080
+AA803080A0801A09424C5F4F52445F49440000A180A080020105000000000000000000000000A2
+800202138A000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Ctl# name",
+        common "c#common",
+        db {
+          {
+            db "taxon",
+            tag id 5002
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 120,
+    seq-data ncbistdaa '0B0E1301110A0307050E120A0F16050A0109100B070F0704061106
+060101090907070C0D09160907090F0C010E1007060B040D0C010D040C0E0C120D07121207030B
+010E0F0116100E0F0111030709050A110E130E130B11050E0C031004090D130E060D0B16040C0D
+0C0704060C12070304160F030A0E0B'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 6
+    }
+  },
+  descr {
+    title "lambda, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A136C616D6264612C207061727469616C205B205D0000A1803080
+AA803080A0801A09424C5F4F52445F49440000A180A080020106000000000000000000000000A2
+800203012FD1000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 77777
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 7
+    }
+  },
+  descr {
+    title "blambda [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0B626C616D626461205B205D0000A1803080AA803080A0801A09
+424C5F4F52445F49440000A180A080020107000000000000000000000000A2800203012FD10000
+00000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 77777
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 120,
+    seq-data ncbistdaa '0B0E1301110A0307050E120A0F16050A0109100B070F0704061106
+060101090907070C0D09160907090F0C010E1007060B040D0C010D040C0E0C120D07121207030B
+010E0F0116100E0F0111030709050A110E130E130B11050E0C031004090D130E060D0B16040C0D
+0C0704060C12070304160F030A0E0B'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 8
+    }
+  },
+  descr {
+    title "mu, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0F6D752C207061727469616C205B205D0000A1803080AA803080
+A0801A09424C5F4F52445F49440000A180A080020108000000000000000000000000A280020225
+86000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Homo sapiens",
+        common "human",
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  },
+  descr {
+    title "nu, partial [Homo sapiens]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1A6E752C207061727469616C205B486F6D6F2073617069656E73
+5D0000A1803080AA803080A0801A09424C5F4F52445F49440000A180A080020109000000000000
+000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Homo sapiens",
+        common "human",
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 10
+    }
+  },
+  descr {
+    title "bmu, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A10626D752C207061727469616C205B205D0000A1803080AA8030
+80A0801A09424C5F4F52445F49440000A180A08002010A000000000000000000000000A2800202
+2586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Homo sapiens",
+        common "human",
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 120,
+    seq-data ncbistdaa '0B0E1301110A0307050E120A0F16050A0109100B070F0704061106
+060101090907070C0D09160907090F0C010E1007060B040D0C010D040C0E0C120D07121207030B
+010E0F0116100E0F0111030709050A110E130E130B11050E0C031004090D130E060D0B16040C0D
+0C0704060C12070304160F030A0E0B'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 11
+    }
+  },
+  descr {
+    title "chi, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A106368692C207061727469616C205B205D0000A1803080AA8030
+80A0801A09424C5F4F52445F49440000A180A08002010B000000000000000000000000A2800203
+018696000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Last entry sp.",
+        common "last common",
+        db {
+          {
+            db "taxon",
+            tag id 99990
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 12
+    }
+  },
+  descr {
+    title "alpha, partial [Homo sapiens]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1D616C7068612C207061727469616C205B486F6D6F2073617069
+656E735D0000A1803080AA803080A0801A09424C5F4F52445F49440000A180A08002010C000000
+000000000000000000A2800203018696000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Last entry sp.",
+        common "last common",
+        db {
+          {
+            db "taxon",
+            tag id 99990
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 13
+    }
+  },
+  descr {
+    title "hypothetical protein [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A186879706F746865746963616C2070726F7465696E205B205D00
+00A1803080AA803080A0801A09424C5F4F52445F49440000A180A08002010D0000000000000000
+00000000A2800203018696000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Last entry sp.",
+        common "last common",
+        db {
+          {
+            db "taxon",
+            tag id 99990
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 130,
+    seq-data ncbistdaa '0C140C050811130B0A010D0601130B100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E030D0B140903
+14090E0A050C01120E0714140D1204120B080C11050C070B140C080A160E0A030C03130C13100E
+12040F110B1008140A090C0804010D06050A0B0A090608160C'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "BL_ORD_ID",
+      tag id 14
+    }
+  },
+  descr {
+    title "bchi, partial [ ]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A11626368692C207061727469616C205B205D0000A1803080AA80
+3080A0801A09424C5F4F52445F49440000A180A08002010E000000000000000000000000A28002
+03018696000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        taxname "Last entry sp.",
+        common "last common",
+        db {
+          {
+            db "taxon",
+            tag id 99990
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 120,
+    seq-data ncbistdaa '0B0E1301110A0307050E120A0F16050A0109100B070F0704061106
+060101090907070C0D09160907090F0C010E1007060B040D0C010D040C0E0C120D07121207030B
+010E0F0116100E0F0111030709050A110E130E130B11050E0C031004090D130E060D0B16040C0D
+0C0704060C12070304160F030A0E0B'H
+  }
+}

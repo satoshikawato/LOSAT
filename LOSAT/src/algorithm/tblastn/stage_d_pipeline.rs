@@ -3533,11 +3533,14 @@ fn ungapped_subject_steps(
             "the ungapped re-evaluation",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:322-370
+    // The re-evaluation's fetch is a stage's: with `-db_hard_mask` the masked bases read as `B`
+    // (`XDbStream::read_stage`), which the results' counts read again (`finish_local_ungapped`).
     let x_store;
     let subject_nt = match subject {
         XPrelimSubject::Nt(subject) => subject,
         XPrelimSubject::Stream(stream, oid, _) => {
-            x_store = stream.read_shared(oid)?;
+            x_store = stream.read_stage(oid)?;
             crate::sequence::packed_subject::SubjectNt::Packed(&x_store)
         }
     };

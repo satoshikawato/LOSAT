@@ -68,7 +68,8 @@ pub(super) fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
 }
 
 /// The local time that `LocalTime::index_date` formats as `date`
-/// ("Oct 12, 2026  3:22 PM").
+/// ("Oct 12, 2026  3:22 PM"), second 0, at the instant of that time in UTC (the seed of
+/// `-randomize`: the cases of `-randomize` ran makeblastdb at that instant, in the zone UTC).
 pub(super) fn time_of(date: &str) -> LocalTime {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -86,8 +87,22 @@ pub(super) fn time_of(date: &str) -> LocalTime {
         hour: hour12 % 12 + if *half == "PM" { 12 } else { 0 },
         minute: minute.parse().unwrap(),
         second: 0,
+        unix_seconds: 0,
     };
     assert_eq!(time.index_date(), date);
+    // The days since 1970-01-01 of the date (Gregorian calendar, years from 1 March).
+    let year = i64::from(time.year) - i64::from(time.month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((i64::from(time.month) + 9) % 12) + 2) / 5 + i64::from(time.day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let unix_seconds = days * 86_400 + i64::from(time.hour) * 3_600 + i64::from(time.minute) * 60;
+    let time = LocalTime {
+        unix_seconds,
+        ..time
+    };
+    assert_eq!(LocalTime::from_unix_seconds(unix_seconds), time);
     time
 }
 
@@ -532,6 +547,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             mask_desc: None,
             gi_mask: false,
             gi_mask_name: None,
+            randomize: false,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -635,6 +651,7 @@ fn makedb_version(
         mask_desc: None,
         gi_mask: false,
         gi_mask_name: None,
+        randomize: false,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
@@ -1652,6 +1669,20 @@ fn oid_masks_runs_as_makeblastdb() {
 )]
 fn blastdb_input_runs_as_makeblastdb() {
     run_v5_cases("B_");
+}
+
+/// `-randomize` as makeblastdb 2.17.0 has it, run at a fixed instant (the seed: the date stored,
+/// in UTC): the copies of `-input_type blastdb` in the order of NCBI's shuffle, of versions 5 and
+/// 4, protein and nucleotide, several definition lines, several volumes in and out, two names and
+/// mixed algorithms, `-hash_index` and `-oid_masks`, a PIG, alias files with an OID list and a
+/// range, 289 and 5,002 sequences, and the error for another input type (line RG item D3d).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn randomize_runs_as_makeblastdb() {
+    run_v5_cases("R_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed

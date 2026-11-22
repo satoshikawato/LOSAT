@@ -104,6 +104,7 @@ LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` an
 - The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
 - `-taxid`, `-taxid_map`, `-mask_data`, `-gi_mask`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` and `-gi_mask` still need `-parse_seqids` on the command line.
 - With `-gi_mask` the masks of the input databases go to GI-indexed mask files too, one set for each of their algorithms, named after the algorithm and its id in the input (`dust11` and so on), as NCBI's `makeblastdb` names them. A sequence's masks go under the GIs of all its definition lines.
+- `-randomize` (hidden in `makeblastdb`'s help, and in LOSAT's) copies the sequences in a random order, which depends on the second of the clock. LOSAT reads the clock when the build starts; `makeblastdb` reads it when the copy starts, after reading the input's definition lines. With the same second the order is the one `makeblastdb` 2.17.0 gives on Linux. `makeblastdb` on Windows and macOS shuffles with other C++ libraries, whose order has not been compared. With another `-input_type`, `-randomize` stops with `makeblastdb`'s error.
 - With `-title` or several names, an input name that is not a database is reported (`Unable to open input NAME as BLAST db`), and the build stops with the database error. A single name without `-title` that is not a database stops the build earlier, when its title is read, with the database error alone. Both are as in `makeblastdb`.
 
 ## Output
@@ -130,13 +131,12 @@ The sequence and header files have the same bytes as NCBI's. The index and metad
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end. NCBI's `makeblastdb` stops after the first stream and drops the rest without a message. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - `-gi_mask` on a database in one volume: LOSAT's alias file names the volume by its file name, so the database opens and the build ends normally (exit status 0, with the metadata file). NCBI's names the database by its full path, which no program can open, and ends with exit status 2. See [GI-indexed masks](#gi-indexed-masks) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - When the database path (`-out`) contains a space or a double quote, or when an old database of the same name has to be replaced, LOSAT removes and replaces the old files as one database, where `makeblastdb` treats the path as a list of names. Normal names are not affected. See [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
-- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there.
+- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
 The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`: it stops with an error that names the option.
 - `-gi_mask` with two mask files whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path), when both would write one data file at the same time. NCBI's files then depend on how its C++ runtime buffers two streams on one file. LOSAT stops at the sequence where the second would start writing that file (see [What LOSAT refuses](../refusals.md)). Where one of the two writes nothing, or their data files are written one after the other, LOSAT writes NCBI's files.
 - `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.

@@ -986,7 +986,7 @@ impl WriteDb {
     // as the list of several volumes names each volume: NCBI's reader takes a `DBLIST` entry
     // without a directory and with the alias file's own name as the volume
     // (`CSeqDBAliasNode::x_ExpandAliases`, seqdbalias.cpp:764-797), so the database opens and
-    // the build goes on as a build of several volumes does (approved exception 20 of
+    // the build goes on as a build of several volumes does (approved exception 22 of
     // PD-LOSAT-NCBI-DEFECTS, the Owner's decision of 2026-11-20; NCBI BLAST+ 2.17.0 reads such a
     // database: `docs/evidence/gi_mask_single_volume/`). `MASKLIST` names the GI masks that got
     // GIs, each followed by a space.

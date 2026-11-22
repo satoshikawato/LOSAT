@@ -4,4 +4,4 @@
   the database itself, so that no program can open it (the build ends with `DB alias files are mutually recursive`,
   exit status 2); LOSAT's names the volume by its file name, so the database opens, the build ends normally, and
   NCBI's programs read it and its masks. LOSAT's own programs do not read GI masks yet. Two mask files whose GI-mask
-  files would be the same files are refused.
+  files are the same files are refused only where both would write one data file at the same time.

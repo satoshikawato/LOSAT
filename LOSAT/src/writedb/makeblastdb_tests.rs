@@ -228,7 +228,7 @@ fn the_declaration_order_holds_every_argument() {
     let mut listed: Vec<String> = MAKEBLASTDB_ARGUMENTS
         .iter()
         .map(|(name, _)| name.to_string())
-        .filter(|name| !["randomize", "verbose", "limit_defline"].contains(&name.as_str()))
+        .filter(|name| !["verbose", "limit_defline"].contains(&name.as_str()))
         .collect();
     listed.sort();
     assert_eq!(registered, listed);

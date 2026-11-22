@@ -238,6 +238,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(defaults.max_file_sz, "3GB");
     assert_eq!(defaults.blastdb_version, 5);
     assert_eq!(defaults.logfile, None);
+    assert!(!defaults.randomize);
+
+    // The hidden flag `-randomize` is read (its check against the input type is the build's).
+    assert!(args(makedb(&["-dbtype", "nucl", "-randomize"]).unwrap()).randomize);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
@@ -472,15 +476,6 @@ fn makedb_takes_makeblastdb_s_option_names() {
         assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
         assert!(err.to_string().contains(sentence), "{words:?}: {err}");
     }
-
-    // The option of makeblastdb that LOSAT does not implement is named (`-h` and
-    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    let err = makedb(&["-in", "x.faa", "-dbtype", "prot", "-randomize"]).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb"),
-        "-randomize: {err}"
-    );
 
     // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
     for help in ["-help", "--help"] {
@@ -2424,10 +2419,13 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         (args.input.as_str(), args.out.as_deref()),
         ("x.faa", Some("db"))
     );
-    // The checks that name the command apply.
-    let error = makedb(&["-randomize"]).unwrap_err().to_string();
+    // The checks that name the command apply: makeblastdb's dependencies.
+    let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb"),
+        error.contains(
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'"
+        ),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());
@@ -2468,7 +2466,7 @@ fn short_help_h_is_display_help_for_every_program() {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 // `cli::try_parse_from`)
 // NCBI's reader stops at its help flags, the words before them read; `-help-full` is `-help` with
-// the hidden arguments, of which LOSAT's programs run none (NCBI BLAST+ 2.17.0: the same bytes in
+// the hidden arguments, which LOSAT's help does not list (NCBI BLAST+ 2.17.0: the same bytes in
 // every place but makeblastdb's hidden `-randomize`; line RG item E2).
 #[test]
 fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {

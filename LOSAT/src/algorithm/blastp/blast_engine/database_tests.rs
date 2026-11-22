@@ -926,6 +926,7 @@ mod x_db_cut_blocks {
             mask_desc: None,
             gi_mask: false,
             gi_mask_name: None,
+            randomize: false,
         };
         let now = crate::writedb::time::LocalTime {
             year: 2026,
@@ -934,6 +935,7 @@ mod x_db_cut_blocks {
             hour: 13,
             minute: 30,
             second: 0,
+            unix_seconds: 1_792_157_400,
         };
         let (mut log, mut messages) = (Vec::new(), Vec::new());
         let status = crate::writedb::makeblastdb::run_with(

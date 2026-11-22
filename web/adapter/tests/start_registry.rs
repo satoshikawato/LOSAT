@@ -32,7 +32,7 @@ fn run_blastp(words: &[&str]) -> Result<(), String> {
         subject,
         words,
         Some(true),
-        |queries, subjects| run::run(words, queries, subjects),
+        |queries, end, subjects| run::run(words, queries, end, subjects),
     );
     store::release(query).unwrap();
     store::release(subject).unwrap();

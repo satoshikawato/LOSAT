@@ -232,7 +232,7 @@ fn the_declaration_order_holds_every_argument() {
         .collect();
     listed.sort();
     assert_eq!(registered, listed);
-    for (first, _, second) in MAKEBLASTDB_DEPENDENCIES {
+    for (first, _, second) in makeblastdb_dependencies() {
         for name in [first, second] {
             assert!(
                 MAKEBLASTDB_ARGUMENTS

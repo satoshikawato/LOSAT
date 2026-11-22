@@ -41,7 +41,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 | `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
-| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ reads for an alias file with `OID_MASK_TYPE 1` (LOSAT refuses that alias key for now). |
+| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ and LOSAT read for an alias file with `OID_MASK_TYPE 1`. |
 
 For every option: `losat makeblastdb -help`.
 
@@ -102,6 +102,7 @@ LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` an
 - `-in` names one database or several, separated by spaces, as `-db` does for the search programs. Alias names work. `-out` is required and must not be the `-in` value.
 - Without `-title` the new database takes the title of the input database. With several input databases, give `-title`.
 - The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
+- An alias name keeps the sequences its OID ranges and lists keep. Under `OID_MASK_TYPE 1` the definition lines with a predicted RefSeq accession are left out, as in NCBI; a sequence left with no line is refused (NCBI's `makeblastdb` stops with a null-pointer report).
 - `-taxid`, `-taxid_map`, `-mask_data`, `-gi_mask`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` and `-gi_mask` still need `-parse_seqids` on the command line.
 - With `-gi_mask` the masks of the input databases go to GI-indexed mask files too, one set for each of their algorithms, named after the algorithm and its id in the input (`dust11` and so on), as NCBI's `makeblastdb` names them. A sequence's masks go under the GIs of all its definition lines.
 - `-randomize` (hidden in `makeblastdb`'s help, and in LOSAT's) copies the sequences in a random order, which depends on the second of the clock. LOSAT reads the clock when the build starts; `makeblastdb` reads it when the copy starts, after reading the input's definition lines. With the same second the order is the one `makeblastdb` 2.17.0 gives on Linux. `makeblastdb` on Windows and macOS shuffles with other C++ libraries, whose order has not been compared. With another `-input_type`, `-randomize` stops with `makeblastdb`'s error.

@@ -1,0 +1,6 @@
+TITLE omp4 limited by exclude model oid masks
+DBLIST omp4
+OIDLIST omp4.pxm
+OID_MASK_TYPE 1
+NSEQ 6
+LENGTH 851

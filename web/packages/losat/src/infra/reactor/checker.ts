@@ -21,6 +21,7 @@ export class ReactorInputChecker implements InputChecker {
       throw error;
     }
     abi.release(registered.handle);
-    return { ok: true, records: registered.records };
+    const { readerError } = registered;
+    return { ok: true, records: registered.records, ...(readerError === undefined ? {} : { readerError }) };
   }
 }

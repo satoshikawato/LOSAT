@@ -1559,9 +1559,13 @@ impl SeqDb {
                 alias::AliasOids {
                     words: None,
                     all_bits_special_set: false,
+                    mask_types: Vec::new(),
                 }
             }
         };
+        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
+            volume.set_exclude_model(oid_mask::excludes_models(mask_type));
+        }
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -2340,6 +2344,19 @@ impl SeqDb {
     pub fn read_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
         let at = self.locate_oid(oid)?;
         self.sequence_header(at.volume, oid, self.volumes[at.volume].header(at.vol_oid))
+    }
+
+    /// [`SeqDb::read_header_of_oid`] with every definition line the header stores
+    /// (`Volume::stored_header`): the read of a volume that NCBI's RPS search of a database of
+    /// several volumes searches bare, where neither a list nor the alias files' `OID_MASK_TYPE`
+    /// reaches the Seq-aligns' ids.
+    pub fn read_stored_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.sequence_header(
+            at.volume,
+            oid,
+            self.volumes[at.volume].stored_header(at.vol_oid),
+        )
     }
 
     /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the

@@ -21,7 +21,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
-use crate::ncbi_app::args::{dependency_multimap, walk_dependencies, Dep};
+use crate::ncbi_app::args::{walk_dependencies, Dep};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -419,18 +419,14 @@ pub fn check_registry_settings(
     }
 }
 
-/// The `SetDependency` calls of makeblastdb's `Init`, in their order (makeblastdb.cpp:276-329,
-/// cited at `MakedbArgs`).
-const MAKEBLASTDB_DEPENDENCIES: [(&str, Dep, &str); 8] = [
-    ("mask_id", Dep::Requires, "mask_data"),
-    ("mask_desc", Dep::Requires, "mask_id"),
-    ("gi_mask", Dep::Excludes, "mask_id"),
-    ("gi_mask", Dep::Requires, "parse_seqids"),
-    ("gi_mask_name", Dep::Requires, "mask_data"),
-    ("gi_mask_name", Dep::Requires, "gi_mask"),
-    ("taxid", Dep::Excludes, "taxid_map"),
-    ("taxid_map", Dep::Requires, "parse_seqids"),
-];
+/// NCBI's `m_Dependencies` of makeblastdb, from its `-xmlhelp` XML (`ncbi_app::args`, the
+/// tables of `src/ncbi_xmlhelp/makeblastdb.xml`): the `SetDependency` calls of its `Init`
+/// (makeblastdb.cpp:276-329, cited at `MakedbArgs`) in the order of NCBI's `multimap`.
+fn makeblastdb_dependencies() -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
+    crate::ncbi_app::args::arguments("makeblastdb")
+        .expect("makeblastdb's -xmlhelp XML (src/ncbi_xmlhelp)")
+        .dependencies()
+}
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:225-332
 /// makeblastdb's arguments in the order its `Init` declares them, each with whether it is
@@ -493,16 +489,12 @@ fn given(args: &MakedbArgs, name: &str) -> bool {
 /// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers. `given` is
 /// asked only of the arguments of a dependency and of the mandatory one.
 pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
-    // A dependency is checked only for an argument that is given (both sides of an exclusion):
-    // when none of them is, nothing can fail, and the multimap is not built.
-    if !MAKEBLASTDB_DEPENDENCIES
-        .iter()
-        .any(|&(first, dep, second)| given(first) || (dep == Dep::Excludes && given(second)))
-    {
+    // A dependency is checked only for an argument that is given (the map holds an exclusion in
+    // both directions): when none of them is, nothing can fail, and the walk is not made.
+    if !makeblastdb_dependencies().any(|(first, _, _)| given(first)) {
         return None;
     }
-    let deps = dependency_multimap(MAKEBLASTDB_DEPENDENCIES.to_vec());
-    let walk = match walk_dependencies(&deps, given) {
+    let walk = match walk_dependencies(makeblastdb_dependencies(), given) {
         Ok(walk) => walk,
         Err(message) => return Some(message),
     };

@@ -8,7 +8,8 @@
 //! range leaves out (NCBI's `PigToOid` asks the volumes, and its formatters read that OID), and (D1a-2
 //! part 2) `FIRST_OID` / `LAST_OID` of 2^31 or more and the iteration range of the only alias file
 //! of a `-db`, as each sub-command reads NCBI's OID list (`make_d1a2a_fixtures.py`), and (D1b-1)
-//! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21). The
+//! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21) and (D1b-2) `OID_MASK_TYPE`
+//! (`make_d1b2_blastdbcmd.py`, 2026-11-21). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -390,6 +391,40 @@ const CASES: &[(&str, &[&str], i32)] = &[
     // `CSeqDBException` that NCBI's guess of the type catches to look for a nucleotide database.
     ("A239", &["-db", "db/ak/ol/p_h4", "-info"], 2),
     ("A240", &["-db", "db/ak/ol/p_h4", "-entry", "all", "-outfmt", "%o|%a"], 2),
+    // OID_MASK_TYPE (D1b-2, `make_d1b2_blastdbcmd.py`) over ../db_search/oidmask: bit 0 erases
+    // the lines with a predicted RefSeq id; a sequence left without a line has no line to print
+    // (`%a`, `%t`, `%T`, FASTA), but its OID, length and letters are printed (`%o`, `%l`, `%s`);
+    // an id erased still finds its sequence, whose other lines are printed, and `-target_only`
+    // then finds no line of the id; the value converts as NCBI's unsigned int (A265, A269).
+    ("A242", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
+    ("A243", &["-db", "../db_search/oidmask/ompx", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
+    ("A244", &["-db", "../db_search/oidmask/ntall", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
+    ("A245", &["-db", "../db_search/oidmask/omnx", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
+    ("A246", &["-db", "../db_search/oidmask/tall", "-entry", "all"], 0),
+    ("A247", &["-db", "../db_search/oidmask/omnx", "-dbtype", "nucl", "-entry", "all"], 0),
+    ("A248", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A249", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o %l"], 0),
+    ("A250", &["-db", "../db_search/oidmask/ompx", "-entry", "all", "-outfmt", "%o %s"], 0),
+    ("A251", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o %T"], 0),
+    ("A252", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000003.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A253", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000003.1"], 0),
+    ("A254", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000002.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A255", &["-db", "../db_search/oidmask/ompx", "-entry", "XP_000002.1", "-outfmt", "%o|%a|%t"], 1),
+    ("A256", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000004.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A257", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000004.1", "-target_only", "-outfmt", "%o|%a|%t"], 1),
+    ("A258", &["-db", "../db_search/oidmask/tall", "-entry", "XP_000004.1", "-target_only"], 1),
+    ("A259", &["-db", "../db_search/oidmask/tall", "-entry_batch", "in/om_batch.txt", "-outfmt", "%o|%a"], 0),
+    ("A260", &["-db", "../db_search/oidmask/ompx", "-entry_batch", "in/om_batch.txt", "-outfmt", "%o|%a"], 1),
+    ("A261", &["-db", "../db_search/oidmask/omp4x", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A262", &["-db", "../db_search/oidmask/j5", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A263", &["-db", "../db_search/oidmask/j2", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A264", &["-db", "../db_search/oidmask/t2", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A265", &["-db", "../db_search/oidmask/tabc", "-info"], 255),
+    ("A266", &["-db", "../db_search/oidmask/tnol", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A267", &["-db", "../db_search/oidmask/omnx", "-dbtype", "nucl", "-entry", "XM_000003.1,NM_000004.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A268", &["-db", "../db_search/oidmask/j1", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
+    ("A269", &["-db", "../db_search/oidmask/tover", "-entry", "all", "-outfmt", "%o"], 255),
+    ("A270", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o|%a|%l|%s", "-line_length", "20"], 0),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
@@ -425,6 +460,37 @@ const RANGE_REFUSALS: &[(&str, &[&str])] = &[
     ("A238", &["-db", "db/ak/ol/p_pb", "-entry", "all", "-outfmt", "%o|%a"]),
     ("A241", &["-db", "db/ak/ol/p_pc", "-entry", "all", "-outfmt", "%o|%a"]),
 ];
+
+/// A definition line with bytes NCBI reads as '#' that an alias file's `OID_MASK_TYPE` erases
+/// (`../db_search/oidmask/ombx`, line RG D1b-2, review A B1): NCBI decodes the whole header and
+/// writes its error for each such byte before it erases the line (probe b1); LOSAT refuses it
+/// as it refuses such bytes in a line it prints.
+#[test]
+fn removed_lines_with_bytes_ncbi_reads_as_hash_are_refused() {
+    let config = TestDir::new("hash-refusals");
+    let words = [
+        "-db",
+        "../db_search/oidmask/ombx",
+        "-entry",
+        "all",
+        "-outfmt",
+        "%o|%a|%t",
+    ];
+    let (stdout, stderr, code) = blastdbcmd(&words, &config.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(
+        (stdout.as_slice(), code),
+        (b"".as_slice(), 1),
+        "A271: {stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "sequence 0 of the volume: a definition line that a list or the alias \
+             files' OID_MASK_TYPE removes, with bytes NCBI reads as '#'"
+        ),
+        "A271: {stderr}"
+    );
+}
 
 #[test]
 fn ranges_outside_the_bit_array_below_them_are_refused() {

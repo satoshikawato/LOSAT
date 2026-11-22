@@ -131,8 +131,8 @@ pub(super) fn requested_reports(
             if let Some(kind) = blastp_xml2_kind(format.outfmt) {
                 return Ok(BlastpReport::Xml2(kind));
             }
-            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`; psiblast and rpsblast
-            // refuse them, line RG PS15).
+            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's too
+            // (item PS15a-2); psiblast refuses them (line PS item PS15b).
             if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }

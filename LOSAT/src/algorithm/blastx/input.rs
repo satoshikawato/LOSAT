@@ -47,19 +47,58 @@ pub struct FastaRecord {
 pub struct SkippedRecord {
     pub internal_id: String,
     pub believed: Option<std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>>,
+    /// The letters of the whole record, by which NCBI's reader counts a later record with its id
+    /// (`query_batch::BatchCount`).
+    pub length: usize,
+    /// The records of the batch that the reader kept before it (its place in the batch).
+    pub kept_before: usize,
 }
 
 impl SkippedRecord {
-    /// What NCBI's scope holds of `record`, which the range skips.
-    pub fn of(record: &FastaRecord) -> Self {
+    /// What NCBI's scope holds of `record`, which the range skips after `kept_before` records of
+    /// its batch.
+    pub fn of(record: &FastaRecord, kept_before: usize) -> Self {
         Self {
             internal_id: record.internal_id.clone(),
             believed: record
                 .source
                 .as_ref()
                 .and_then(|source| source.believed.clone()),
+            length: record.sequence.len(),
+            kept_before,
         }
     }
+}
+
+/// The records of a reader batch `records` in the order NCBI's reader read them, the records
+/// that the range skipped (`FastaRecord::skipped`) among them: the ids that `-parse_deflines`
+/// read, the letters of the whole record, and the record's place in `records` (`None` for a
+/// skipped record). NCBI's scope holds every record read, so the scopes of the queries
+/// (`query_batch::QueryScopes::add_batch_ids`) take them all (line WQA D10 round 6, 2026-11-20:
+/// NCBI BLAST+ 2.17.0 counts and sets up a `q1` after a `q1` that `-query_loc` skips by the
+/// skipped record's letters, `r6/probe/skip2`, `xskip`).
+pub fn scope_records(
+    records: &[FastaRecord],
+) -> Vec<(
+    Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    usize,
+    Option<usize>,
+)> {
+    let skipped: &[SkippedRecord] = records
+        .first()
+        .and_then(|first| first.skipped.as_deref())
+        .unwrap_or_default();
+    let mut skipped = skipped.iter().peekable();
+    let mut ordered = Vec::with_capacity(records.len());
+    for place in 0..=records.len() {
+        while let Some(record) = skipped.next_if(|record| record.kept_before <= place) {
+            ordered.push((record.believed.as_deref(), record.length, None));
+        }
+        if let Some(record) = records.get(place) {
+            ordered.push((record.believed(), record.placement().length, Some(place)));
+        }
+    }
+    ordered
 }
 
 /// The local ids and believed Seq-ids (`QueryScope::of_shown`) of the query records of a reader
@@ -382,6 +421,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         None,
         0,
         false,
+        None,
         deliver,
         warn,
     )
@@ -398,6 +438,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     range: Option<&SequenceRange>,
     around: usize,
     keep_skipped: bool,
+    count: Option<crate::blastinput::query_batch::BatchCount>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -410,6 +451,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         around,
         kept: keep_records.then(Vec::new),
         keep_skipped,
+        count,
         ..ReaderBatch::default()
     };
 
@@ -885,7 +927,9 @@ mod tests;
 ///
 /// With a range (`-query_loc`) the batch counts the length of the whole record and cuts the record
 /// to its interval; a record whose interval starts more than one letter past its end adds nothing
-/// and is not kept (it keeps its number: `ReaderBatch::skipped`).
+/// and is not kept (it keeps its number: `ReaderBatch::skipped`). Under `-parse_deflines` a
+/// record counts as NCBI's reader counts it (`ReaderBatch::count`, `query_batch::BatchCount`: a
+/// repeated id by its first record's letters).
 fn emit_fasta_batch(
     records: &mut Vec<FastaRecord>,
     batch_size: usize,
@@ -895,25 +939,32 @@ fn emit_fasta_batch(
     let record = records.last_mut().expect("completed FASTA record");
     let length = record.sequence.len();
     batch.read += 1;
-    match batch.range.map(|range| record_interval(range, length)) {
-        None => batch.length += length,
+    let interval = batch.range.map(|range| record_interval(range, length));
+    let skipped = matches!(interval, Some(RecordInterval::PastEnd));
+    batch.length += match batch.count.as_mut() {
+        Some(count) => count.count(record.believed(), length, skipped),
+        None if skipped => 0,
+        None => length,
+    };
+    match interval {
+        None => {}
         Some(RecordInterval::Letters { from, to }) => {
             // The letter before the interval is the only one outside it that a split query's
             // chunks read (`split::x_chunk_masks`); a record keeps its whole letters for it.
             let keep_whole = batch.keep_whole || record.lower_case_before(from);
             record.keep_around(from, to + 1, batch.around);
             record.cut_in_place(from, to + 1, keep_whole);
-            batch.length += length;
         }
         Some(RecordInterval::Empty) => {
             record.cut_in_place(length, length, batch.keep_whole);
-            batch.length += length;
         }
         Some(RecordInterval::PastEnd) => {
             let skipped = records.pop().expect("completed FASTA record");
             batch.skipped += 1;
             if batch.keep_skipped {
-                batch.skipped_records.push(SkippedRecord::of(&skipped));
+                batch
+                    .skipped_records
+                    .push(SkippedRecord::of(&skipped, records.len()));
             }
         }
     }
@@ -927,6 +978,9 @@ fn emit_fasta_batch(
         batch.release(records);
         batch.length = 0;
         batch.read = 0;
+        if let Some(count) = batch.count.as_mut() {
+            count.end_batch();
+        }
     }
     Ok(())
 }
@@ -957,6 +1011,8 @@ struct ReaderBatch<'r> {
     skipped_records: Vec<SkippedRecord>,
     /// Whether the batch keeps the records that the range skipped (`FastaStream::keep_skipped`).
     keep_skipped: bool,
+    /// Under `-parse_deflines`, NCBI's count of the records (`FastaStream::batch_count`).
+    count: Option<crate::blastinput::query_batch::BatchCount>,
 }
 
 impl ReaderBatch<'_> {
@@ -1093,6 +1149,10 @@ pub(crate) struct FastaStream<R: Read> {
     /// a prefetch of the run can stop (`BlastxDatabase::prefetch_can_stop`; review 5 of line DBID
     /// loadord, L2). Off by default.
     pub(crate) keep_skipped: bool,
+    /// Under `-parse_deflines`, NCBI's count of the records into the reader batches
+    /// (`query_batch::BatchCount`, `QueryStreamSettings::batch_count`); `None` counts each record
+    /// by its own letters.
+    pub(crate) batch_count: Option<crate::blastinput::query_batch::BatchCount>,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 impl<R: Read> FastaStream<R> {
@@ -1120,6 +1180,7 @@ impl<R: Read> FastaStream<R> {
             unget_line: None,
             around: 0,
             keep_skipped: false,
+            batch_count: None,
         }
     }
 
@@ -1331,6 +1392,9 @@ pub(crate) struct QueryStreamSettings {
     pub(crate) data_loaders: bool,
     /// The program of the reader's messages (`FastaStream::program`).
     pub(crate) program: super::args::ProgramName,
+    /// NCBI's count of the records into the batches (`FastaStream::batch_count`), from the first
+    /// record on.
+    pub(crate) batch_count: Option<crate::blastinput::query_batch::BatchCount>,
 }
 
 impl QueryStreamSettings {
@@ -1345,6 +1409,10 @@ impl QueryStreamSettings {
         stream.strand = self.strand;
         stream.seq_id_role = self.data_loaders.then_some("query");
         stream.program = self.program;
+        stream.batch_count = self.batch_count.clone();
+        // The records that `-query_loc` skips join the scopes of the queries
+        // (`scope_records`).
+        stream.keep_skipped = self.parse_deflines;
         stream
     }
 
@@ -1522,6 +1590,7 @@ fn read_fasta_stream<R: Read>(
         }
     }
     let (around, keep_skipped) = (stream.around, stream.keep_skipped);
+    let count = stream.batch_count.take();
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -1533,6 +1602,7 @@ fn read_fasta_stream<R: Read>(
         range,
         around,
         keep_skipped,
+        count,
         &mut |records| {
             delivered = true;
             deliver(records)

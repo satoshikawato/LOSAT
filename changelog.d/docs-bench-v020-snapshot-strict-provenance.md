@@ -1,0 +1,1 @@
+- Benchmarks: `benchmarks/v0.2.0/scripts/build_snapshot.py` now requires `bp_db_parity.tsv` and `<tag>_sha.txt` provenance inputs, checks non-empty consistent output hashes for utilities and single-thread downstream tools, guards `disk_bytes` parsing, and removes unused WebAssembly/import boilerplate.

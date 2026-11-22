@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import hashlib
 import json
 import os
@@ -111,16 +110,43 @@ def sanitize_input_key(path: Path, base: Path) -> str:
 
 
 def collect_input_checksums(paths: list[Path], base: Path) -> dict[str, str]:
-    """Validate input paths against base, reject duplicate keys, and hash existing files."""
+    """Validate input paths against base, reject missing/unreadable files and duplicate keys, and hash them."""
     checksums: dict[str, str] = {}
     for p in paths:
         if not p.is_file():
-            continue
+            sys.exit(f"missing input file: {p}")
         key = sanitize_input_key(p, base)
         if key in checksums:
             sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
-        checksums[key] = sha256_file(p)
+        try:
+            checksums[key] = sha256_file(p)
+        except OSError as exc:
+            sys.exit(f"cannot read input file {p}: {exc}")
     return checksums
+
+
+def require_single_sha16(values: list[str], context: str) -> str:
+    """Ensure all rounds in an arm report one identical, non-empty sha16."""
+    cleaned = {(v or "").strip() for v in values}
+    if not cleaned or "" in cleaned:
+        sys.exit(f"missing or empty sha16 for {context}")
+    if len(cleaned) != 1:
+        sys.exit(f"sha16 differs across rounds for {context}: {sorted(cleaned)}")
+    return next(iter(cleaned))
+
+
+def parse_disk_bytes(inputs_ext: dict[str, dict[str, str]], inp_key: str) -> int:
+    """Validate and parse positive integer disk_bytes from inputs_ext."""
+    if inp_key not in inputs_ext:
+        sys.exit(f"missing inputs_ext entry for {inp_key}")
+    raw = (inputs_ext[inp_key].get("disk_bytes") or "").strip()
+    try:
+        val = int(raw)
+    except ValueError:
+        sys.exit(f"invalid disk_bytes for inputs_ext entry {inp_key}: {raw!r}")
+    if val <= 0:
+        sys.exit(f"non-positive disk_bytes for inputs_ext entry {inp_key}: {raw!r}")
+    return val
 
 
 def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
@@ -276,19 +302,19 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> list[dict[str, ob
 
     # Load dt1/dt13/dt15 for single-thread tools
     dt_cache: dict[str, dict[tuple[str, str], list[float]]] = {}
-    dt_meta: dict[str, dict[tuple[str, str], set[str]]] = {}
+    dt_meta: dict[str, dict[tuple[str, str], list[str]]] = {}
     wanted: dict[str, set[str]] = defaultdict(set)
     for _prog, _tool, _th, tag, case_ids in ST_TOOLS:
         wanted[tag].update(case_ids)
     for tag in DT_TAGS:
         p = dt_dir / f"{tag}.tsv"
         g: dict[tuple[str, str], list[float]] = defaultdict(list)
-        s: dict[tuple[str, str], set[str]] = defaultdict(set)
+        s: dict[tuple[str, str], list[str]] = defaultdict(list)
         for row in read_tsv(p):
             if row["case"] in wanted.get(tag, set()) and row.get("rc", "0") != "0":
                 sys.exit(f"{tag} rc != 0: {row}")
             g[(row["case"], row["arm"])].append(float(row["wall_s"]))
-            s[(row["case"], row["arm"])].add(row.get("sha16", ""))
+            s[(row["case"], row["arm"])].append((row.get("sha16") or "").strip())
         dt_cache[tag] = g
         dt_meta[tag] = s
 
@@ -303,9 +329,11 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> list[dict[str, ob
             lo_vals = g.get((cid, "losat"))
             if not nc_vals or not lo_vals:
                 sys.exit(f"missing {cid} in {tag}")
+            nc_sha = require_single_sha16(s.get((cid, "ncbi"), []), f"{tag} {cid} NCBI")
+            lo_sha = require_single_sha16(s.get((cid, "losat"), []), f"{tag} {cid} LOSAT")
             nc_tot += statistics.median(nc_vals)
             lo_tot += statistics.median(lo_vals)
-            if s.get((cid, "ncbi")) != s.get((cid, "losat")):
+            if nc_sha != lo_sha:
                 shas_match = False
         out.append({
             "program": prog,
@@ -326,7 +354,7 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> list[dict[str, ob
     return out
 
 
-def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, float]] | None) -> list[dict[str, object]]:
+def build_webassembly(wasm_csv: Path) -> list[dict[str, object]]:
     rows = []
     with wasm_csv.open(newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
@@ -339,9 +367,6 @@ def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, flo
             was = float(r["wasm_s"])
             ncbi = float(r["ncbi_s"]) if r["ncbi_s"] else None
             note = f"commit_{r['commit']}"
-            if c == "tbx" and ncbi is None and j_tblastx_ncbi and th in j_tblastx_ncbi:
-                ncbi, _ = j_tblastx_ncbi[th]
-                note = f"commit_{r['commit']}_ncbi_j2"
             rows.append({
                 "case": c,
                 "mode_label": r["mode_label"],
@@ -394,7 +419,17 @@ def main() -> int:
     ext_bp_path = args.ext_dir / "bp_db_parity.tsv"
     dt_sha_paths = [args.dt_dir / f"{tag}_sha.txt" for tag in DT_TAGS]
 
-    for req in (j_n16_path, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, *dt_source_paths, args.wasm_csv):
+    for req in (
+        j_n16_path,
+        j_inputs_path,
+        ext_n0_path,
+        ext_n1_path,
+        ext_inputs_path,
+        ext_bp_path,
+        *dt_source_paths,
+        *dt_sha_paths,
+        args.wasm_csv,
+    ):
         if not req.is_file():
             sys.exit(f"missing completed input file: {req}")
     if not j_n1_paths:
@@ -446,7 +481,7 @@ def main() -> int:
         if int(r["rc"]) != 0:
             sys.exit(f"ext n0 rc != 0: {r}")
         ext_n0[(r["case"], int(r["threads"]), r["arm"])].append(
-            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, (r.get("sha16") or "").strip(), parse_rss_anon_mib(r))
         )
 
     ext_n1: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
@@ -542,8 +577,8 @@ def main() -> int:
         nc_w = statistics.median(x[0] for x in nc)
         lo_m = statistics.median(x[1] for x in lo)
         nc_m = statistics.median(x[1] for x in nc)
-        lo_sha = {x[2] for x in lo}
-        nc_sha = {x[2] for x in nc}
+        lo_sha16 = require_single_sha16([x[2] for x in lo], f"utility {cid} LOSAT t=1")
+        nc_sha16 = require_single_sha16([x[2] for x in nc], f"utility {cid} NCBI t=1")
         util_rows.append({
             "case": cid,
             "label": label,
@@ -554,8 +589,8 @@ def main() -> int:
             "losat_rss_mib": round(lo_m, 2),
             "ncbi_rss_mib": round(nc_m, 2),
             "mem_reduction": round(nc_m / lo_m, 4),
-            "losat_sha16": next(iter(lo_sha)),
-            "ncbi_sha16": next(iter(nc_sha)),
+            "losat_sha16": lo_sha16,
+            "ncbi_sha16": nc_sha16,
             "runs": len(lo),
         })
 
@@ -623,9 +658,7 @@ def main() -> int:
         nc = ext_n1[(cid, 16, "ncbi")]
         if not lo or not nc:
             sys.exit(f"missing db-scaling runs for {cid} t=16")
-        if inp_key not in inputs_ext:
-            sys.exit(f"missing inputs_ext entry for {inp_key}")
-        db_bytes = int(inputs_ext[inp_key]["disk_bytes"])
+        db_bytes = parse_disk_bytes(inputs_ext, inp_key)
         lo_w = statistics.median(x[0] for x in lo)
         nc_w = statistics.median(x[0] for x in nc)
         lo_m = statistics.median(x[1] for x in lo)
@@ -645,10 +678,8 @@ def main() -> int:
     for tm_key, inp_key, cache in (("M3_rprc", "m3_rpr", "cold"), ("M3_cnt", "m3_cnt", "warm"), ("M3_cntc", "m3_cnt", "cold")):
         if tm_key not in tm:
             sys.exit(f"missing toolmt entry for {tm_key}")
-        if inp_key not in inputs_ext:
-            sys.exit(f"missing inputs_ext entry for {inp_key}")
+        db_bytes = parse_disk_bytes(inputs_ext, inp_key)
         r = tm[tm_key]
-        db_bytes = int(inputs_ext[inp_key]["disk_bytes"])
         sc_rows.append({
             "panel": "2cd_db_size",
             "case": tm_key.lower(),
@@ -662,8 +693,8 @@ def main() -> int:
             "ncbi_rss_mib": round(float(r["ncbi_rss_mib"]), 2),
         })
 
-    # 5. webassembly.tsv (strictly paired 7f7db49c runs; tblastx BLAST+ left unmeasured)
-    wasm_rows = build_webassembly(args.wasm_csv, None)
+    # 5. webassembly.tsv (provenance recorded via wasm_derived / wasm_derived_from; tblastx BLAST+ left unmeasured)
+    wasm_rows = build_webassembly(args.wasm_csv)
 
     # 6. Combine inputs & bp_db parity metadata
     in_rows = []
@@ -672,13 +703,17 @@ def main() -> int:
     for r in read_tsv(ext_inputs_path):
         in_rows.append({"source": "bench_v020_ext", **r})
 
-    bp_par = read_tsv(ext_bp_path) if ext_bp_path.is_file() else []
+    bp_par = read_tsv(ext_bp_path)
+    if not bp_par:
+        sys.exit(f"empty bp_db_parity provenance file: {ext_bp_path}")
     toolmt_builds = sorted({str(r.get("build", "")) for r in json.loads(args.toolmt.read_text(encoding="utf-8"))} - {""})
     wasm_commits = sorted({str(r["commit"]) for r in wasm_rows})
     dt_builds = {}
-    for tag in DT_TAGS:
-        sp = args.dt_dir / f"{tag}_sha.txt"
-        dt_builds[tag] = sp.read_text(encoding="utf-8").strip() if sp.is_file() else ""
+    for tag, sp in zip(DT_TAGS, dt_sha_paths):
+        commit = sp.read_text(encoding="utf-8").strip()
+        if not commit:
+            sys.exit(f"empty commit in provenance file: {sp}")
+        dt_builds[tag] = commit
     meta: dict[str, object] = {
         "losat_version": args.losat_version,
         "losat_commit": args.losat_commit,

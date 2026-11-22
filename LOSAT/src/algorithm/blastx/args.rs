@@ -260,6 +260,13 @@ pub struct BlastxArgs {
     /// calls before (`local::DatabaseReports::unrecorded_calls`). Not a public option.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -379,9 +386,6 @@ impl ResolvedOptions {
     /// reports (outfmt 7 counts their hits before it, as rpsblast's `psiblast_hits_found`) and
     /// the Seq-annots (8, 9, 12), `TrimSeqAlign` before BLAST XML, XML2 and JSON (5, 13 to 16);
     /// the archive (11) and the organism report (18) take every list. All of them otherwise.
-    /// RPSTBLASTN writes only the pairwise and tabular reports until item PS15a
-    /// (`rpsblast::args::check_rps_outfmt` refuses the rest), so the cut of the structured
-    /// reports is the writers' rule for when it does.
     pub(crate) fn shown_lists(&self) -> usize {
         if self.merged_volumes() {
             usize::try_from(self.hitlist_size).unwrap_or(0)
@@ -409,6 +413,21 @@ impl ResolvedOptions {
     pub(crate) fn pairwise_view(&self) -> Option<crate::report::pairwise::PairwiseView> {
         crate::blastinput::app::ReportFormat::from_number(i32::from(self.outfmt))
             .and_then(crate::report::pairwise::PairwiseView::of)
+    }
+
+    /// How the pairwise report reads each query's subjects, as its writer reads them
+    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions` and
+    /// `-num_alignments`), `None` for the other formats.
+    pub(crate) fn pairwise_reading(&self) -> Option<crate::report::pairwise::PairwiseReading> {
+        self.pairwise_view().map(|view| {
+            view.reading(
+                self.report_sort(),
+                crate::report::db_subject::Shown {
+                    descriptions: usize::try_from(self.num_descriptions).unwrap_or(0),
+                    alignments: usize::try_from(self.num_alignments).unwrap_or(0),
+                },
+            )
+        })
     }
 }
 

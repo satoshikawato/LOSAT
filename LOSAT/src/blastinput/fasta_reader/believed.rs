@@ -247,7 +247,9 @@ pub(crate) fn duplicate_id(
     // Where two queries are in one scope (`query_batch::QueryScopeSpan`): psiblast's batches
     // hold one query, after each of which NCBI's formatter empties the scope against a database
     // (`CBlastFormat::ResetScopeHistory`), so only `-subject` keeps two, where NCBI BLAST+ 2.17.0
-    // crashes on such queries (review of RG Q1, S1; series Q, Q1c).
+    // searches the first's letters for both or crashes (review of RG Q1, S1; series Q, Q1c; review
+    // 5 of line WQA D10, L3: g2a with `-subject` exits 1 with the reader's error after two searched
+    // batches, g2b crashes, exit 139).
     let scope = match (role, program) {
         ("query", "PSIBLAST") => " with -subject",
         ("query", _) => " in one query batch, or in any with -subject or outfmt 5",
@@ -259,7 +261,9 @@ pub(crate) fn duplicate_id(
         scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
             let why = match (role, program) {
-                ("query", "PSIBLAST") => "NCBI BLAST+'s psiblast crashes",
+                ("query", "PSIBLAST") => {
+                    "NCBI BLAST+'s psiblast searches the letters of the first for both, or crashes"
+                }
                 ("query", _) => {
                     "NCBI BLAST+'s scope holds both and searches the letters of the first for both"
                 }

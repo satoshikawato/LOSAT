@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.71
+- Version: 1.73
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -304,7 +304,31 @@
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
   near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
   M4b-3; numbered after 1.68);
-  1.70 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
+  1.70 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
+  of a Seq-id on which NCBI's accession guide posts a warning under the key, which NCBI posts again at
+  each read of the header that its cache does not answer; the rejection of 1.61 extended to an old
+  style `losat makembindex` index of a sequence whose every definition line the key erases;
+  dustmasker's `CUnassignedMember` error at such a sequence reproduced, rule 2; the rejection of a
+  definition line with bytes NCBI reads as '#' extended to the lines that the key or a list removes,
+  as NCBI's decoder writes its error for them before they are removed; the rejection of 1.56
+  extended to a reported RPS profile of a database of several volumes whose lines the key removes,
+  in the classes of 1.10 and 1.37; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.69; first 1.65, then 1.66, 1.68 and 1.69 at the merges of dev that brought
+  line RG item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67, then line NP's 1.68, then
+  line NP's 1.69)
+  1.71 2026-11-22 (outfmt 0 to 4 of such a sequence are written as NCBI writes them: its
+  description line is the Seq-align id and `Unknown`; outfmt 0 stops with `BLAST Database error`
+  where the first alignment shown is of such a sequence under a Seq-align id that is not local,
+  else writes the skipped line for each of its HSPs; outfmt 1 to 4 stop where any alignment shown
+  is; the description lines load the sequences that they show, in psiblast's rounds after the
+  first those of the two-part table of the first `-num_descriptions` HSPs (at least the first:
+  `-num_descriptions 0` shows its sequence too; psiblast ignores `-sorthits` and `-sorthsps`, as
+  NCBI's does); a report that stops the run ends it there, and no later batch is prefetched; the
+  refusal of 1.31 no longer covers outfmt 0 to 4, but in a call of LOSAT's library that writes
+  them with a format of another writer it covers the whole call, also where the call searches
+  once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07);
+  1.72 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
   a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first query holds
   a redone match, on which NCBI's clean-up crashes, extended from BLASTP to TBLASTN, rule 3,
   within the class of 1.30, after the reports of the query batches before; a subject excluded
@@ -312,10 +336,10 @@
   NCBI fails, crashes, does not end or writes rows that change from run to run, refused at the
   first match the redo reaches instead of before the search; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.55, line RG item X6, then after
-  1.56 and 1.57, line RG item D1a-4, after 1.58, line RG item Q-BM, and after 1.59 to 1.69
+  1.56 and 1.57, line RG item D1a-4, after 1.58, line RG item Q-BM, and after 1.59 to 1.71
   at the merges of dev);
-  1.71 2026-11-21 (BLASTX `-use_sw_tback`, line RG item X4b-2: the explicit rejections of 1.53
-  and 1.70, a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first
+  1.73 2026-11-21 (BLASTX `-use_sw_tback`, line RG item X4b-2: the explicit rejections of 1.53
+  and 1.72, a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first
   query holds a redone match, extended to BLASTX, rule 3, within the class of 1.30, after the
   reports of the query batches before; approved exception 22, the Owner's decision of 2026-11-21
   on line RG's question Q-HEAP, 「Q-HEAP=B」: the heap test of NCBI's redo in e-value mode that
@@ -324,7 +348,7 @@
   where it searches the batch alike); a new explicit rejection, rule 3: `-ungapped
   -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it searches;
   otherwise Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
-  1.70, line RG item X4b-1, and after exception 21)
+  1.72, line RG item X4b-1, and after exception 21)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1532,7 +1556,14 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   pfoff-2: the row that the `catch` of the subject block leaves, or the stop at a row that reads the
   sequence after that block; the organism report leaves its HSPs out; a throwing row loads nothing,
   and the names and tax ids are looked up only for the sequences that a report loads; refused at
-  the first row of a query's report with `sacc`, `saccver` or `staxid`, below), a
+  the first row of a query's report with `sacc`, `saccver` or `staxid`, below) or outfmt 0 to 4
+  (since version 1.71, line DBID item pfoff-3: the description line of the Seq-align id and
+  `Unknown`, then the stop at outfmt 0's first alignment that loads such a sequence under a
+  Seq-align id that is not local, or at any alignment of outfmt 1 to 4 that loads one, or outfmt
+  0's skipped line for each of its HSPs; the description lines load the sequences that they show,
+  in psiblast's rounds after the first those of the two-part table of the first
+  `-num_descriptions` HSPs, at least the first, then the alignments theirs up to the stop, after
+  which no later batch is prefetched), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more
@@ -1920,7 +1951,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   nor crashes NCBI, and LOSAT reproduces that (rule 2; version 1.59; 2026-11-21, line RG item
   X4-excl, rows `db.x4excl.*`).
 
-- TBLASTN `-use_sw_tback` (version 1.70, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
+- TBLASTN `-use_sw_tback` (version 1.72, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of 1.53; P2,
   P3: the same match body and round loop as BLASTP's,
   `core::composition_adjustment::smith_waterman_match`): TBLASTN's redo of a match holds the
@@ -1975,16 +2006,16 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   local alignment down to that score, slow but finite: LOSAT gives NCBI's output (rows
   `db.x4b.cut.*`).
 
-- BLASTX `-use_sw_tback` (version 1.71, 2026-11-21, line RG item X4b-2, Owner-delegated, standing
+- BLASTX `-use_sw_tback` (version 1.73, 2026-11-21, line RG item X4b-2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the endless redo and the failed batch within the
-  class of 1.30 and the rules of 1.53 and 1.70; a new rule-3 rejection, line decision X4b-0 (c);
+  class of 1.30 and the rules of 1.53 and 1.72; a new rule-3 rejection, line decision X4b-0 (c);
   approved exception 22, the Owner's decision Q-HEAP=B of 2026-11-21;
   P2, P3: the same match body and round loop as BLASTP's and TBLASTN's,
   `core::composition_adjustment::smith_waterman_match`, with the windows of the query's frames):
   NCBI redoes each frame of a match on its own, with the Karlin block of the frame's query context
   and one array of heaps of redone matches per batch, one heap per query
   (`blast_kappa.c:3601-3622`), with composition-based statistics 0 to 3 (0: scale 1 and the
-  unadjusted matrix). The endless redo and the failed batch behave as in 1.70: LOSAT refuses a match
+  unadjusted matrix). The endless redo and the failed batch behave as in 1.72: LOSAT refuses a match
   whose redo NCBI never ends (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not
   end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's BLASTX"; tks_M back-translated against
   X4's endless subjects, rows `db.x4b2.rej.endless.*`; with `-dbsize 1` and sum statistics the
@@ -1994,7 +2025,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `db.x4b2.dbsize1.*`) and refuses the batch where its first query holds a redone match, on whose
   clean-up NCBI crashes (`blast_kappa.c:3795-3802`; exit 1, "... with which NCBI BLAST+ 2.17.0's
   blastx crashes, is not supported by LOSAT's BLASTX"; rows `db.x4b2.rej.crash.*`). A subject that
-  NCBI's fetch excludes clears the batch's status as in 1.70 (rows `db.x4b2.excl.*`). New in BLASTX:
+  NCBI's fetch excludes clears the batch's status as in 1.72 (rows `db.x4b2.excl.*`). New in BLASTX:
   in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4, with which NCBI turns
   sum statistics off in a gapped search, `blast_parameters.c:793-805`) NCBI tests a window against
   the heap that its query context indexes in the batch's array of heaps
@@ -2314,6 +2345,22 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`, `db.rps.1v.fo3.*`,
   `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`; for `OIDLIST` `db.ol.rps.rej.no2w`, `db.ol.rps.rej.only2w`,
   `db.ol.rtbn.rej.no2w` and `db.ol.rps.only2w.mts1.6`).
+- RPSBLAST and RPSTBLASTN over an alias file whose `OID_MASK_TYPE` removes a definition line of a
+  profile, in a database of several volumes (version 1.70, 2026-11-21, line RG item D1b-2,
+  Owner-delegated, the form above): NCBI searches the volumes bare (`rpsblast_local.cpp:380-399`),
+  so its Seq-aligns keep a profile that the key leaves without a line under its stored Seq-id,
+  while its formatter, over the `-db` name with the key, does not find it (probe xp3v of D1b-2,
+  profile `ref|XP_000102.1|` in the second of three volumes): outfmt 0 writes `XP_000102.1 Unknown`
+  and "Sequence with id XP_000102 no longer exists in database...alignment skipped" (exit status
+  0, the class of 1.10), and the default fields of outfmt 6, 7 and 10 stop with a null pointer
+  exception, exit status 255 (the class of 1.37). LOSAT refuses (exit 1, "a hit of the profile of
+  OID N whose definition lines the RPS-BLAST database's alias files' OID_MASK_TYPE removes, in a
+  database of several volumes ... is not supported by LOSAT's RPSBLAST") where such a profile is
+  among a query's reported profiles (the same cut as above, the Seq-ids of the stored headers);
+  past the cut it is NCBI's run, its HSPs counted in outfmt 7 (rows `db.om.rps.x3vc.*`). With one
+  volume NCBI searches the `-db` name, whose Seq-aligns leave such a profile out, and LOSAT does
+  the same (rows `db.om.rps.x.*`, `db.om.rtbn.x.*`; refusal rows `db.om.rps.rej.x3v`,
+  `db.om.rtbn.rej.x3v`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
   concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (2026-11-17, line RG
@@ -2405,6 +2452,18 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
   (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
   taxonomy lookup for it.
+- `losat makembindex -old_style_index true -iformat blastdb` of an alias file whose `OID_MASK_TYPE`
+  erases every definition line of a sequence (version 1.70, 2026-11-21, line RG item D1b-2,
+  Owner-delegated): `CSeqDBVol::GetBioseq` gives no Bioseq for it either (`seqdbvol.cpp:1362-1366`),
+  dereferenced as above (probe `mk_old_ntall` of D1b-2: exit status 3, a stack trace). LOSAT refuses
+  (exit 1) at that sequence; a new style index reads no alias key, as NCBI's. NCBI's dustmasker stops
+  at such a sequence with `CUnassignedMember::eGet` `Seq_entry.set` (exit status 3), which LOSAT
+  writes as NCBI does (rule 2); segmasker and the windowmasker masking step skip it, as NCBI's.
+- A sequence of a volume under an alias file's `OID_MASK_TYPE` with bit 0 set, one of whose Seq-ids
+  NCBI's accession guide posts a warning for (same version and line, Owner-delegated): NCBI
+  identifies the ids of the lines at each read of the header that its cache of filtered headers
+  does not answer (`seqdbvol.cpp:1977-1988`, 2006-2058) and posts the warning each time, so their
+  number follows that cache. LOSAT refuses (exit 1) where the sequence's lines are first read.
 
 - An alias file's `OIDLIST` file (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS D1b1-1 of line RG) that
   is empty: NCBI maps nothing and reads the 4-byte header through a null pointer (SIGSEGV, probe G5 of
@@ -2636,9 +2695,9 @@ request that added it.
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
 
-## Approved exception 22 (BLASTX `-use_sw_tback`, a heap test past the batch's heaps in e-value mode, version 1.71)
+## Approved exception 22 (BLASTX `-use_sw_tback`, a heap test past the batch's heaps in e-value mode, version 1.73)
 
-Version 1.71, line RG item X4b-2 (line RG `DECISIONS.md` X4b-9). On 2026-11-21 (21:1x JST) the
+Version 1.73, line RG item X4b-2 (line RG `DECISIONS.md` X4b-9). On 2026-11-21 (21:1x JST) the
 Owner answered line RG's question Q-HEAP with option B (「O2b-Q1=A Q-HEAP=B Q-CAP=A」): a heap test
 that NCBI makes past its array of the batch's heaps tests an empty heap. Until this version
 LOSAT refused such a batch under rule 3 (line RG `DECISIONS.md` X4b-0 (a), 2026-11-20). Not taken:
@@ -2652,7 +2711,7 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     against the heap of redone matches that the context indexes (`redo_alignment.c:1465-1474`), in an array of one heap per query
     of the batch (`blast_kappa.c:3282-3296`). A BLASTX query has six contexts, 6 x q + f for the
     batch's query q and its frame f (0 to 5 for frames +1, +2, +3, -1, -2, -3). Below the batch's
-    query count the index names another query's heap, which LOSAT reproduces (rule 2, the 1.71
+    query count the index names another query's heap, which LOSAT reproduces (rule 2, the 1.73
     entry of the rule-3 list above); at or above it the index lies past the array's end, in NCBI's
     other allocations. With one query in a batch (a search of a single query, as most are, the
     last query of a file after a full batch, or a query that fills BLASTX's batch of 10,002 letters
@@ -2681,7 +2740,7 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     split with the pads, so the padded run checks only shorter queries (the longest of the evidence
     has 5,600 letters); LOSAT splits such a query as NCBI does as is. Where the padded batch reaches the clean-up crash of
     1.30's class (its last redone match fails after its first query kept one), NCBI crashes with the
-    pads too, and LOSAT refuses the batch (rule 3, the 1.71 entry above).
+    pads too, and LOSAT refuses the batch (rule 3, the 1.73 entry above).
     Evidence: the `ncbi` rows `db.x4b2.past.*.pad.*` of
     `LOSAT/tests/db_search_manifest/blastx.x4b2.tsv` hold NCBI's runs of the padded inputs
     (`LOSAT/tests/fasta/x4b2/*_pad.fna`, `LOSAT/tests/db_search/x4b2/make_x4b2.py`), and the rows

@@ -378,7 +378,7 @@ fn sw_redo_context(
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's
 /// `Traceback failed` (exit 3), or LOSAT's refusal where NCBI's clean-up crashes, when the
 /// batch's first query holds a redone match (`first_query_holds_match`, the heap of the batch's
-/// first query is not empty; PD-LOSAT-NCBI-DEFECTS 1.53, 1.70 and 1.71, rule 3), after the reports
+/// first query is not empty; PD-LOSAT-NCBI-DEFECTS 1.53, 1.72 and 1.73, rule 3), after the reports
 /// of the batches before (`ErrorAfterBatchReports`, which `native::search_error_as_is` passes).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
@@ -391,7 +391,7 @@ pub(crate) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
 
 /// LOSAT's refusal of a batch with a match whose Smith-Waterman redo does not end in NCBI (a
 /// significant score of 0 in a window of two or more preliminary HSPs whose first query letter,
-/// the window's first, scores the subject's first letter above 0; PD-LOSAT-NCBI-DEFECTS 1.71, in
+/// the window's first, scores the subject's first letter above 0; PD-LOSAT-NCBI-DEFECTS 1.73, in
 /// the class of 1.30, rule 3), after the reports of the batches before. What makes the score of
 /// 0 significant: a cutoff score of 0 with sum statistics (`do_link_hsps`), or its e-value in
 /// e-value mode.
@@ -411,7 +411,7 @@ pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
 /// its set-up reads the gapped Karlin blocks of every context, which an ungapped search does not
 /// make, and crashes (SIGSEGV) at every query batch NCBI searches, with hits or without, with
 /// `-subject` and with `-db` (line RG X4b's survey, a debugger's trace; probes `u.*` of item X4b-2
-/// on ws, 2026-11-21). PD-LOSAT-NCBI-DEFECTS 1.71, rule 3. The caller refuses at the traceback of
+/// on ws, 2026-11-21). PD-LOSAT-NCBI-DEFECTS 1.73, rule 3. The caller refuses at the traceback of
 /// the first query batch that is searched, after the reports of the batches before it: batches
 /// without a valid context (a two-base query alone), which NCBI reports with a warning and does
 /// not search (rows `db.x4b2.rej.ungapped.ac.b1.*`).

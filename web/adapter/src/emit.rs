@@ -36,18 +36,22 @@ pub const STREAM_MESSAGES: u32 = 10;
 /// `-version-full-json`). Line WQA's D14, 2026-11-20.
 pub const STREAM_PRINTED: u32 = 11;
 /// The files that a tool run writes (`-out FILE`, `-logfile FILE`), each as it is written
-/// (docs/web/abi_v2.md §5, version 13; line NP WW3a, D-WW3-6, 2026-11-22): every `emit` is one
+/// (docs/web/abi_v2.md §5, version 13; line NP WW3a, D-WW3-6 and D-WW3-9): every `emit` is one
 /// frame of 8 bytes, the file's number in the run (from 0, in the order the run opens its files)
-/// and the frame's kind (`FRAME_BEGIN`, `FRAME_BYTES`, `FRAME_END`), each an unsigned 32-bit
-/// little-endian number, then its payload: the file's name (UTF-8) for a beginning, bytes of the
-/// file for bytes (at most `CHUNK` - 8 a frame), none for an end. A file's frames come in order:
-/// its beginning, its bytes, its end, which comes when the run closes the file; the frames of two
-/// open files may alternate.
+/// and the frame's kind (`FRAME_BEGIN`, `FRAME_BYTES`, `FRAME_END`, `FRAME_TRUNCATE`), each an
+/// unsigned 32-bit little-endian number, then its payload: the file's name (UTF-8) for a beginning;
+/// for bytes the offset in the file where they go (unsigned 64-bit little-endian), then the bytes
+/// (at most `CHUNK` - 16 a frame); for a truncation the file's new length (unsigned 64-bit
+/// little-endian); none for an end. A file begins empty; its bytes and truncations come in the
+/// order the run makes them, as the system applies them to the file (a run that opens one file
+/// twice writes it through each opening at its own offset); its end comes when the run ends, the
+/// files' in the order of their numbers; the frames of two files may alternate.
 pub const STREAM_TOOL_FILES: u32 = 12;
 /// The frame kinds of `STREAM_TOOL_FILES`.
 pub const FRAME_BEGIN: u32 = 0;
 pub const FRAME_BYTES: u32 = 1;
 pub const FRAME_END: u32 = 2;
+pub const FRAME_TRUNCATE: u32 = 3;
 /// The place "nowhere" in the signals of `STREAM_DISCARD` and `STREAM_MESSAGES` (`place`): the
 /// messages of TBLASTX's `-logfile ""` or `-logfile /dev/null`, which the run writes nowhere.
 pub const PLACE_NOWHERE: u32 = u32::MAX;

@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 
 use super::args::{arg_message, ArgException};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::run_files::{Created, OpenedFile, RunFiles, Unopened};
+use crate::report::run_files::{Created, OpenFiles, OpenedFile, Unopened};
 
 /// The exception of a file argument whose stream does not open.
 ///
@@ -293,7 +293,7 @@ pub(crate) fn input_lines(bytes: &[u8], platform: LineEnds) -> Vec<&[u8]> {
 }
 
 /// The stream of an `eOutputFile` argument (`AsOutputFile()`): the standard output, or the file,
-/// made or emptied (`RunFiles::create`: on the file system, or LOSAT Web's file in memory). On
+/// made or emptied (`OpenFiles::create`: on the file system, or LOSAT Web's file). On
 /// Windows NCBI's stream of a text output (opened without `fBinary`) writes each `\n` as `\r\n`;
 /// LOSAT's programs write their bytes as they are on every platform.
 pub(crate) enum OutputFile<'a> {
@@ -444,14 +444,14 @@ impl Write for Ostream<'_> {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
 /// `AsOutputFile()` of the argument `name` whose value is `value`: `-` is `stdout`, the empty
 /// name opens nothing, and another name makes or empties the file (`IOS_BASE::out`, without
-/// `fCreatePath`) of the run's files `files` (`RunFiles::create`: the file system on the command
+/// `fCreatePath`) of the run's files `files` (`OpenFiles::create`: the file system on the command
 /// line and in the library, LOSAT Web's files; a name of the standard output is `stdout` there).
 /// `Err` is NCBI's `eNoFile`.
 pub(crate) fn open_output_file<'a>(
     name: &str,
     value: &str,
     stdout: &'a mut dyn Write,
-    files: &RunFiles,
+    files: &OpenFiles,
 ) -> Result<OutputFile<'a>, ArgException> {
     if value == "-" {
         return Ok(OutputFile::Stdout(stdout));

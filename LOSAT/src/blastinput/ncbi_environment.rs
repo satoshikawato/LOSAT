@@ -1367,10 +1367,10 @@ pub enum DiagTarget {
     /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
     /// one; a `RefCell` would take both away from that public type).
     Memory(std::sync::Mutex<Vec<u8>>),
-    /// The file of `-logfile` of a run whose files LOSAT Web's host takes as they are written
-    /// (`report::run_files::FileReceiver::open`: a tool's run, line NP WW3a, 2026-11-22): the
-    /// host's writer, which gets the bytes as they come; the file is complete when the target is
-    /// dropped. Behind a lock, as `Memory`.
+    /// The file of `-logfile` of a tool's run whose files LOSAT Web gives its host
+    /// (`report::run_files::OpenFiles`, line NP WW3a, 2026-11-22): an opening of the run's file of
+    /// that path that appends to it, as NCBI's does, and that the run's other openings of the
+    /// file share (`-out x -logfile x`, D-WW3-9). Behind a lock, as `Memory`.
     Stream(std::sync::Mutex<Box<dyn Write + Send>>),
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host, where the name is the
     /// process's standard error (`report::run_files::RunFiles::log_target`: `/dev/stderr`): a file,

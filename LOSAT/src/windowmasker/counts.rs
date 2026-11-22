@@ -7,7 +7,7 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
-use crate::report::run_files::{Created, OpenedFile, RunFiles};
+use crate::report::run_files::{Created, OpenFiles, OpenedFile};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
@@ -32,7 +32,7 @@ use super::work::{
 enum Sink {
     /// The standard output (`-out -`).
     Stdout,
-    /// A file opened by name (`RunFiles::create`); after a failed write the rest is lost, as
+    /// A file opened by name (`OpenFiles::create`); after a failed write the rest is lost, as
     /// NCBI's `ofstream` loses it.
     File(Option<BufWriter<OpenedFile>>),
     /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
@@ -83,7 +83,7 @@ impl Write for SinkStream<'_, '_> {
 /// format starts with an extra word on (written to `stdout`, where the next post brings it
 /// out); otherwise the name constructor, whose `ofstream` makes or empties the file at once
 /// (an ascii writer given an empty name writes to the standard output), a file of the run's
-/// files (`RunFiles::create`; LOSAT Web's name of the standard output writes there, without the
+/// files (`OpenFiles::create`; LOSAT Web's name of the standard output writes there, without the
 /// stream's extra word). `Err` with LOSAT's refusal of a name that LOSAT Web does not write.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
@@ -92,7 +92,7 @@ fn open_sink(
     name: &str,
     format: CountsFormat,
     stdout: &mut Ostream<'_>,
-    files: &RunFiles,
+    files: &OpenFiles,
 ) -> Result<Sink, Failure> {
     if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
         if name == "-" {
@@ -291,6 +291,17 @@ pub(super) fn mk_counts(
     }
 }
 
+/// The refusal of `-mk_counts` before it reads its input (LOSAT Web's validation too,
+/// `app::check`): `-infmt seqids`, whose sequences NCBI fetches over the network.
+pub(super) fn check_mk_counts(args: &Args) -> Result<(), Failure> {
+    if args.value("infmt") == Some("seqids") {
+        return Err(Failure::Refused(unsupported(
+            "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over the network)",
+        )));
+    }
+    Ok(())
+}
+
 /// The settings of the generator from `args`; `to_file` when the counts go to a named file,
 /// whose constructor alone takes the `-t_*_pct` percentages.
 ///
@@ -331,12 +342,8 @@ fn mk_counts_run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
+    check_mk_counts(args)?;
     let infmt = args.value("infmt").expect("-infmt has a default");
-    if infmt == "seqids" {
-        return Err(Failure::Refused(unsupported(
-            "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over the network)",
-        )));
-    }
     let mut stdout = Ostream::new(out);
     let result = make_counts(args, settings, lists, infmt, &mut stdout, diag);
     output_then(&mut stdout, result)
@@ -457,14 +464,25 @@ fn convert_failure(file: &str, error: WinMaskError) -> Failure {
     }
 }
 
-/// `CWinMaskCountsConverter` of `-in` to `-out`.
-fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
-    let input = args.value("in").expect("-in has a default");
-    let output = args.value("out").expect("-out has a default");
-    if input == "-" {
-        let line = if output == "-" { 77 } else { 55 };
+/// The exception of `-convert` before it reads its counts (LOSAT Web's validation too,
+/// `app::check`): `-in -`, which the converter's constructors refuse.
+pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
+    if args.value("in") == Some("-") {
+        let line = if args.value("out") == Some("-") {
+            77
+        } else {
+            55
+        };
         return Err(Failure::Ncbi(input_name_exception(line)));
     }
+    Ok(())
+}
+
+/// `CWinMaskCountsConverter` of `-in` to `-out`.
+fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
+    check_convert(args)?;
+    let input = args.value("in").expect("-in has a default");
+    let output = args.value("out").expect("-out has a default");
     diag.post("reading counts...");
     let file = format!("-in {input}");
     let istat = open_counts(

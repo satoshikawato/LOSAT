@@ -8,7 +8,7 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::blastinput::ncbi_environment::{diag_target, special_log_target, DiagTarget};
 
@@ -20,16 +20,29 @@ pub trait FileReceiver: Send + Sync {
     /// contents.
     fn receive(&self, name: &[u8], bytes: &[u8]) -> io::Result<()>;
 
-    /// Opens the file `name` of a run (`RunFiles::create`, `RunFiles::log_target`) to take its
-    /// bytes as the run writes them: the writer gets them in order, and the file is complete when
-    /// the writer is dropped (when the run closes the file). `None`, the default: the receiver
-    /// takes each file whole, which `RunFiles` keeps in memory and hands to `receive` when it is
-    /// complete (the files of a search, whose bytes and order this keeps). LOSAT Web's run of a
-    /// tool streams its files, which may be larger than the browser's memory (line NP WW3a,
-    /// D-WW3-6, 2026-11-22).
-    fn open(&self, _name: &[u8]) -> Option<Box<dyn Write + Send>> {
+    /// Opens the file `name` of a tool's run (`OpenFiles`: `-out FILE`, `-logfile FILE`) to take
+    /// the run's writes as the run makes them (`FileStream`); the file is complete when the stream
+    /// is dropped, when the run ends. `None`, the default: the receiver takes each file whole, which
+    /// the run keeps in memory and hands to `receive` when it ends (the files of a search, whose
+    /// bytes and order this keeps). LOSAT Web's run of a tool streams its files, which may be larger
+    /// than the browser's memory (line NP WW3a, D-WW3-6, 2026-11-22).
+    fn open(&self, _name: &[u8]) -> Option<Box<dyn FileStream>> {
         None
     }
+}
+
+/// A file of a tool's run that the receiver takes as the run writes it (`FileReceiver::open`): the
+/// writes and the changes of length of the one file of that path, in the order the run makes them,
+/// as the system applies them to the file (line NP WW3a, D-WW3-9, 2026-11-23). Most writes come
+/// at the end of what came before; a run that opens the file twice (`-out x -logfile x`) writes
+/// through each opening at its own position, which may be before the end.
+pub trait FileStream: Send {
+    /// Writes `bytes` at `offset` of the file; past its end, the bytes between are zero (a hole).
+    fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<()>;
+
+    /// Makes the file `length` bytes long: cut, or with zero bytes added. The run sends it when it
+    /// opens the file again to write it, which empties it (length 0).
+    fn set_len(&mut self, length: u64) -> io::Result<()>;
 }
 
 /// Where the files of a run go.
@@ -38,7 +51,7 @@ pub enum RunFiles {
     /// The file system, at the names that the arguments give (the command line, the library).
     Disk,
     /// The caller's receiver, which gets each file whole when it is complete, or as it is written
-    /// (`FileReceiver::open`; LOSAT Web).
+    /// (`FileReceiver::open`, a tool's run; LOSAT Web).
     Receiver(Arc<dyn FileReceiver>),
 }
 
@@ -70,39 +83,114 @@ impl RunFiles {
     /// file in memory under the whole name, which `deliver_log` hands over (`logs/run.log`,
     /// `logs/`, `/tmp/run.log`, `/var/lock/run.log`, and `/dev/stdout`, whose bytes the command
     /// line writes into its standard output among the report's, where their place depends on the
-    /// report's buffering).
+    /// report's buffering). A tool's run opens its files through `OpenFiles`, which reads the
+    /// names the same way (`received_log_target`).
     pub fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
         match self {
             RunFiles::Disk => diag_target(name),
-            RunFiles::Receiver(receiver) => match (special_log_target(name), name) {
-                (Some(target), _) => target,
-                (None, None) => DiagTarget::Stderr,
-                (None, Some(name)) => match log_name(name.as_encoded_bytes()) {
-                    LogName::Unopened => DiagTarget::Stderr,
-                    LogName::StandardError => DiagTarget::StderrFile,
-                    LogName::Nowhere => DiagTarget::Discard,
-                    LogName::File => match receiver.open(name.as_encoded_bytes()) {
-                        Some(writer) => DiagTarget::Stream(std::sync::Mutex::new(writer)),
-                        None => DiagTarget::Memory(Default::default()),
-                    },
-                },
-            },
+            RunFiles::Receiver(_) => {
+                received_log_target(name, |_| DiagTarget::Memory(Default::default()))
+            }
         }
     }
 
     /// Hands the file of the `-logfile` value `name`, which `target` holds (`log_target`), to the
-    /// receiver; a file that the receiver took as it was written is complete (closed). Nothing on
-    /// `Disk` (the file is written) and for a target without a file.
+    /// receiver. Nothing on `Disk` (the file is written) and for a target without a file.
     pub fn deliver_log(&self, name: Option<&OsStr>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
             (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => receiver
                 .receive(
                     name.as_encoded_bytes(),
-                    &bytes
-                        .into_inner()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                    &bytes.into_inner().unwrap_or_else(PoisonError::into_inner),
                 ),
             _ => Ok(()),
+        }
+    }
+}
+
+/// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
+/// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading; `file` gives the
+/// target of a name that is a file (`LogName::File`), from the name.
+fn received_log_target(name: Option<&OsStr>, file: impl FnOnce(&[u8]) -> DiagTarget) -> DiagTarget {
+    match (special_log_target(name), name) {
+        (Some(target), _) => target,
+        (None, None) => DiagTarget::Stderr,
+        (None, Some(name)) => match log_name(name.as_encoded_bytes()) {
+            LogName::Unopened => DiagTarget::Stderr,
+            LogName::StandardError => DiagTarget::StderrFile,
+            LogName::Nowhere => DiagTarget::Discard,
+            LogName::File => file(name.as_encoded_bytes()),
+        },
+    }
+}
+
+/// The files that one run of a tool opens by name for writing (`ncbi_app::run_app`: the file of
+/// `-logfile` and the outputs, `-out FILE`), as the system opens them (line NP WW3a, D-WW3-9,
+/// 2026-11-23). On `Disk` the file system's: `-logfile` as `diag_target` opens it, an output made
+/// or emptied by `File::create`, as before. For a `Receiver`, each name as the command line of a
+/// user on Linux opens it in the run's working directory (`log_name`, `output_name`), and every
+/// name of one path is one file (`file_key`: `x`, `./x` and `sub/../x` are one), shared as the
+/// system shares a file that a process opens twice (`-out x -logfile x`): each opening writes at
+/// its own position, the output's opening empties the file, the log's appends to its end. A file
+/// goes to the receiver as it is written (`FileReceiver::open`) or whole when the run ends; the
+/// run's files end when the run ends (when the last clone of this and every opening of a file is
+/// dropped), in the order the run opened them.
+#[derive(Clone)]
+pub(crate) struct OpenFiles(Option<Arc<FileTable>>);
+
+impl std::fmt::Debug for OpenFiles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "Receiver" } else { "Disk" })
+    }
+}
+
+/// The files that a `Receiver`'s run opened (`OpenFiles`), in the order it opened them, by their
+/// paths (`file_key`).
+struct FileTable {
+    receiver: Arc<dyn FileReceiver>,
+    files: Mutex<Vec<(Vec<u8>, Arc<Mutex<SharedFile>>)>>,
+}
+
+/// How an opening writes to its file (`FileTable::open`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Opening {
+    /// To its end, for every write: the file of `-logfile`, which NCBI opens to append to it.
+    Append,
+    /// From its start, at its own position, after it emptied the file: an output (`create`).
+    Create,
+}
+
+impl OpenFiles {
+    /// The files of a run whose files go to `files`.
+    pub(crate) fn new(files: &RunFiles) -> Self {
+        OpenFiles(match files {
+            RunFiles::Disk => None,
+            RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
+                receiver: receiver.clone(),
+                files: Mutex::new(Vec::new()),
+            })),
+        })
+    }
+
+    /// The files of a run on the file system (`RunFiles::Disk`).
+    pub(crate) fn disk() -> Self {
+        OpenFiles(None)
+    }
+
+    /// The target of the `-logfile` value `name` (`RunFiles::log_target`), whose file, for a
+    /// `Receiver`, is an opening of the run's file of that path that appends to it
+    /// (`DiagTarget::Stream`).
+    pub(crate) fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
+        match &self.0 {
+            None => diag_target(name),
+            Some(table) => received_log_target(name, |bytes| {
+                let key = log_key(bytes).expect("a file of log_name has a path");
+                DiagTarget::Stream(Mutex::new(Box::new(table.open(
+                    bytes,
+                    key,
+                    Opening::Append,
+                ))))
+            }),
         }
     }
 
@@ -110,52 +198,182 @@ impl RunFiles {
     /// name: `-out FILE` of windowmasker, which made or emptied the file; the callers take `-` and
     /// the empty name first). On `Disk` the file of the file system, made or emptied
     /// (`File::create`, as before); `Err` where it does not open. For a `Receiver`, the name as the
-    /// command line of a user on Linux opens it in the run's working directory (`output_name`): a
-    /// file under the whole name, which the receiver takes as it is written (`FileReceiver::open`)
-    /// or whole, from memory, when it is closed (when the tool drops it, before the run ends); the
-    /// run's standard output for a name of it
+    /// command line of a user on Linux opens it in the run's working directory (`output_name`): the
+    /// run's file of that path, emptied (a file that the run opened before under that path or
+    /// another name of it, `file_key`, is that file); the run's standard output for a name of it
     /// (`/dev/stdout`); writes that are lost (the null device) or that fail (`/dev/full`); `Err`
     /// where that command line cannot open it (a directory, a folder that the run's directory does
     /// not have, a directory of root's); and LOSAT's refusal of the names whose writes LOSAT Web
     /// does not reproduce (`Created::Refused`).
     pub(crate) fn create(&self, name: &str) -> Result<Created, Unopened> {
-        match self {
-            RunFiles::Disk => File::create(name)
+        let Some(table) = &self.0 else {
+            return File::create(name)
                 .map(|file| Created::File(OpenedFile::Disk(file)))
-                .map_err(|_| Unopened),
-            RunFiles::Receiver(receiver) => {
-                match output_name(name.as_bytes(), &run_directory_entry) {
-                    OutputName::Unopened => Err(Unopened),
-                    OutputName::File => Ok(Created::File(match receiver.open(name.as_bytes()) {
-                        Some(writer) => OpenedFile::Stream(writer),
-                        None => OpenedFile::Memory(MemoryFile {
-                            name: name.as_bytes().to_vec(),
-                            bytes: Vec::new(),
-                            receiver: receiver.clone(),
-                        }),
-                    })),
-                    OutputName::Stdout => Ok(Created::Stdout),
-                    OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
-                    OutputName::Full => Ok(Created::File(OpenedFile::Full)),
-                    OutputName::Special => Ok(Created::Refused(format!(
-                        "an output file '{name}' that is the standard error, a device or a file of \
-                         procfs (LOSAT Web writes no such file)"
-                    ))),
-                    OutputName::Existing => Ok(Created::Refused(format!(
-                        "an output file '{name}' that is a file of the run's directory (the command \
-                         line empties it; LOSAT Web reads the run's files and writes none of them)"
-                    ))),
-                }
+                .map_err(|_| Unopened);
+        };
+        match output_name(name.as_bytes(), &run_directory_entry) {
+            OutputName::Unopened => Err(Unopened),
+            OutputName::File => {
+                let key = output_key(name.as_bytes()).expect("a file of output_name has a path");
+                Ok(Created::File(OpenedFile::Shared(table.open(
+                    name.as_bytes(),
+                    key,
+                    Opening::Create,
+                ))))
             }
+            OutputName::Stdout => Ok(Created::Stdout),
+            OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
+            OutputName::Full => Ok(Created::File(OpenedFile::Full)),
+            OutputName::Special => Ok(Created::Refused(format!(
+                "an output file '{name}' that is the standard error, a device or a file of \
+                 procfs (LOSAT Web writes no such file)"
+            ))),
+            OutputName::Existing => Ok(Created::Refused(format!(
+                "an output file '{name}' that is a file of the run's directory (the command \
+                 line empties it; LOSAT Web reads the run's files and writes none of them)"
+            ))),
         }
     }
 }
 
-/// An output file that `RunFiles::create` could not open: the command line's open fails.
+impl FileTable {
+    /// An opening of the run's file at the path `key` (`file_key`), named `name` where the run
+    /// opens it first: the file that the run opened before at that path, which an output's opening
+    /// empties (`O_TRUNC`), or a new file, which the receiver takes as it is written or whole.
+    fn open(&self, name: &[u8], key: Vec<u8>, opening: Opening) -> SharedOpening {
+        let mut files = self.files.lock().unwrap_or_else(PoisonError::into_inner);
+        let file = match files.iter().find(|(path, _)| *path == key) {
+            Some((_, file)) => {
+                if opening == Opening::Create {
+                    // A receiver's stream takes every change of length (LOSAT Web's emits it).
+                    let _ = file
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .set_len(0);
+                }
+                file.clone()
+            }
+            None => {
+                let held = match self.receiver.open(name) {
+                    Some(stream) => Held::Stream(stream),
+                    None => Held::Memory {
+                        name: name.to_vec(),
+                        bytes: Vec::new(),
+                        receiver: self.receiver.clone(),
+                    },
+                };
+                let file = Arc::new(Mutex::new(SharedFile { length: 0, held }));
+                files.push((key, file.clone()));
+                file
+            }
+        };
+        SharedOpening {
+            file,
+            position: 0,
+            opening,
+        }
+    }
+}
+
+/// A file of a `Receiver`'s run (`FileTable`): its length and where its bytes go. It ends when its
+/// last holder drops it (the run's table and its openings), at the end of the run: the receiver's
+/// stream is dropped, or the file in memory goes to `receive`.
+struct SharedFile {
+    length: u64,
+    held: Held,
+}
+
+/// Where the bytes of a `SharedFile` go.
+enum Held {
+    /// To the receiver as they are written (`FileReceiver::open`).
+    Stream(Box<dyn FileStream>),
+    /// Into memory, for the receiver's `receive` when the file ends.
+    Memory {
+        name: Vec<u8>,
+        bytes: Vec<u8>,
+        receiver: Arc<dyn FileReceiver>,
+    },
+}
+
+impl SharedFile {
+    /// Writes `bytes` at `offset`, as the system writes them to the file.
+    fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<()> {
+        let end = offset + bytes.len() as u64;
+        match &mut self.held {
+            Held::Stream(stream) => stream.write_at(offset, bytes)?,
+            Held::Memory { bytes: kept, .. } => {
+                let (start, end) = (to_index(offset)?, to_index(end)?);
+                if kept.len() < end {
+                    kept.resize(end, 0);
+                }
+                kept[start..end].copy_from_slice(bytes);
+            }
+        }
+        self.length = self.length.max(end);
+        Ok(())
+    }
+
+    /// Makes the file `length` bytes long (`FileStream::set_len`).
+    fn set_len(&mut self, length: u64) -> io::Result<()> {
+        match &mut self.held {
+            Held::Stream(stream) => stream.set_len(length)?,
+            Held::Memory { bytes, .. } => bytes.resize(to_index(length)?, 0),
+        }
+        self.length = length;
+        Ok(())
+    }
+}
+
+/// An offset of a file in memory, which fits the address space.
+fn to_index(offset: u64) -> io::Result<usize> {
+    usize::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))
+}
+
+impl Drop for SharedFile {
+    fn drop(&mut self) {
+        if let Held::Memory {
+            name,
+            bytes,
+            receiver,
+        } = &self.held
+        {
+            // LOSAT Web's receiver keeps every file it gets (it fails for none).
+            let _ = receiver.receive(name, bytes);
+        }
+    }
+}
+
+/// An opening of a `Receiver`'s file by the run (`FileTable::open`), which writes as the system
+/// writes through a descriptor of the file: at the end of the file for an `Opening::Append`, else
+/// at its own position, which each write moves on.
+pub(crate) struct SharedOpening {
+    file: Arc<Mutex<SharedFile>>,
+    position: u64,
+    opening: Opening,
+}
+
+impl Write for SharedOpening {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut file = self.file.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = match self.opening {
+            Opening::Append => file.length,
+            Opening::Create => self.position,
+        };
+        file.write_at(at, buf)?;
+        self.position = at + buf.len() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// An output file that `OpenFiles::create` could not open: the command line's open fails.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Unopened;
 
-/// What `RunFiles::create` opened.
+/// What `OpenFiles::create` opened.
 pub(crate) enum Created {
     /// A file, written by the tool.
     File(OpenedFile),
@@ -166,14 +384,12 @@ pub(crate) enum Created {
     Refused(String),
 }
 
-/// An output file that `RunFiles::create` opened.
+/// An output file that `OpenFiles::create` opened.
 pub(crate) enum OpenedFile {
     /// A file of the file system (`RunFiles::Disk`).
     Disk(File),
-    /// A `Receiver`'s file in memory.
-    Memory(MemoryFile),
-    /// A `Receiver`'s file that it takes as it is written (`FileReceiver::open`).
-    Stream(Box<dyn Write + Send>),
+    /// A `Receiver`'s file, through this opening of it.
+    Shared(SharedOpening),
     /// A `Receiver`'s file whose writes are lost (the null device).
     Discard,
     /// A `Receiver`'s file whose writes fail for want of space (`/dev/full`).
@@ -184,11 +400,7 @@ impl Write for OpenedFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             OpenedFile::Disk(file) => file.write(buf),
-            OpenedFile::Stream(writer) => writer.write(buf),
-            OpenedFile::Memory(file) => {
-                file.bytes.extend_from_slice(buf);
-                Ok(buf.len())
-            }
+            OpenedFile::Shared(file) => file.write(buf),
             OpenedFile::Discard => Ok(buf.len()),
             OpenedFile::Full => Err(io::Error::from(io::ErrorKind::StorageFull)),
         }
@@ -197,7 +409,6 @@ impl Write for OpenedFile {
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         match self {
             OpenedFile::Disk(file) => file.write_all(buf),
-            OpenedFile::Stream(writer) => writer.write_all(buf),
             _ => self.write(buf).map(|_| ()),
         }
     }
@@ -205,25 +416,72 @@ impl Write for OpenedFile {
     fn flush(&mut self) -> io::Result<()> {
         match self {
             OpenedFile::Disk(file) => file.flush(),
-            OpenedFile::Stream(writer) => writer.flush(),
             _ => Ok(()),
         }
     }
 }
 
-/// A `Receiver`'s output file in memory, named by the whole name that the tool opened: its bytes go
-/// to the receiver when the tool closes it (drops it), as the command line's file is complete when
-/// its stream is closed. LOSAT Web's receiver keeps every file it gets (it fails for none).
-pub(crate) struct MemoryFile {
-    name: Vec<u8>,
-    bytes: Vec<u8>,
-    receiver: Arc<dyn FileReceiver>,
+/// The path of a file of a run's working directory `cwd` (`working_directory`), without links,
+/// as one name of the run's files (`OpenFiles`): every name that the system opens at that path
+/// gives it (`x`, `./x`, `sub/../x`, `/proc/self/cwd/x`). A path in the working directory's tree
+/// (`WORKING_TREE`) is told by its place from the working directory (how many directories above
+/// it, then the rest), as each name has a working directory of its own depth; any other path is
+/// itself.
+fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
+    let depth = cwd.len() / WORKING_TREE.len();
+    let (mut rest, mut inside) = (path, 0);
+    while inside < depth {
+        match rest.strip_prefix(WORKING_TREE) {
+            Some(after) if after.first().is_none_or(|byte| *byte == b'/') => {
+                rest = after;
+                inside += 1;
+            }
+            _ => break,
+        }
+    }
+    if inside == 0 {
+        return path.to_vec();
+    }
+    let mut key = format!("\0{}", depth - inside).into_bytes();
+    key.extend_from_slice(rest);
+    key
 }
 
-impl Drop for MemoryFile {
-    fn drop(&mut self) {
-        let _ = self.receiver.receive(&self.name, &self.bytes);
-    }
+/// The working directory in which a name is read (`WORKING_TREE`): deeper than the name's `..`
+/// reach, so that no name climbs out of it.
+fn working_directory(name: &[u8]) -> Vec<u8> {
+    let climbs = name
+        .split(|byte| *byte == b'/')
+        .filter(|part| *part == b"..")
+        .count();
+    WORKING_TREE.repeat(climbs + 1)
+}
+
+/// The path of the file that the output name `name` opens (`file_key`), where `output_name` gives
+/// a file; `None` where the system refuses the name.
+fn output_key(name: &[u8]) -> Option<Vec<u8>> {
+    let cwd = working_directory(name);
+    Walk::resolve(name, &cwd).map(|path| file_key(&path, &cwd))
+}
+
+/// The path of the file that the `-logfile` name `name` opens (`file_key`), where `log_name` gives
+/// a file: the path that NCBI opens (`log_file_name`); `None` where the system refuses it.
+fn log_key(name: &[u8]) -> Option<Vec<u8>> {
+    let (cwd, file) = log_file(name);
+    Walk::resolve(&file.path, &cwd).map(|path| file_key(&path, &cwd))
+}
+
+/// The working directory of the `-logfile` name `name` (`working_directory`) and the paths that
+/// NCBI reads from it there (`log_file_name`, Unix).
+fn log_file(name: &[u8]) -> (Vec<u8>, crate::blastinput::ncbi_environment::LogFileName) {
+    let cwd = working_directory(crate::ncbi_str::truncate_spaces(name));
+    let file = crate::blastinput::ncbi_environment::log_file_name(
+        crate::blastinput::ncbi_environment::PathRules::Unix,
+        name,
+        Some(&cwd),
+    )
+    .expect("NCBI's Unix reading reads every name");
+    (cwd, file)
 }
 
 /// What an entry of the run's working directory is (`output_name`): LOSAT Web's host gives the
@@ -300,12 +558,7 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
     if name.is_empty() || !fits(name) {
         return OutputName::Unopened;
     }
-    // A working directory deeper than the name's ".." reach (`WORKING_TREE`).
-    let climbs = name
-        .split(|byte| *byte == b'/')
-        .filter(|part| *part == b"..")
-        .count();
-    let cwd = WORKING_TREE.repeat(climbs + 1);
+    let cwd = working_directory(name);
     // The path inside the run's directory of a path inside the working directory.
     let inside = |path: &[u8]| -> Option<Vec<u8>> {
         path.strip_prefix(cwd.as_slice())?
@@ -923,18 +1176,7 @@ thread_local! {
 /// line is a user's (not root), with no terminal, its standard output and error being pipes, as a
 /// shell's `|` gives.
 fn log_name(name: &[u8]) -> LogName {
-    // A working directory deeper than the name's ".." reach (`WORKING_TREE`).
-    let climbs = crate::ncbi_str::truncate_spaces(name)
-        .split(|byte| *byte == b'/')
-        .filter(|part| *part == b"..")
-        .count();
-    let cwd = WORKING_TREE.repeat(climbs + 1);
-    let file = crate::blastinput::ncbi_environment::log_file_name(
-        crate::blastinput::ncbi_environment::PathRules::Unix,
-        name,
-        Some(&cwd),
-    )
-    .expect("NCBI's Unix reading reads every name");
+    let (cwd, file) = log_file(name);
     // The directories that the walk of the checked directory passes, each a directory of the
     // system: the opened path is none of them nor an ancestor of one.
     let mut directories: Vec<Vec<u8>> = Vec::new();

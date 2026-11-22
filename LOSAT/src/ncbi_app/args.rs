@@ -14,7 +14,7 @@ use std::io::Write;
 
 use super::files::{self, OutputFile};
 use super::Tool;
-use crate::report::run_files::RunFiles;
+use crate::report::run_files::OpenFiles;
 
 #[path = "constraint.rs"]
 mod constraint;
@@ -310,8 +310,8 @@ pub(crate) struct Args {
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
     /// Where the files that the program opens by name for writing go (`output_file`): the file
-    /// system, or LOSAT Web's files (`RunFiles`), which the application gives the arguments.
-    files: RunFiles,
+    /// system, or LOSAT Web's files (`OpenFiles`), which the application gives the arguments.
+    files: OpenFiles,
 }
 
 impl Args {
@@ -363,12 +363,12 @@ impl Args {
     }
 
     /// The run's files, where the files that the program opens by name for writing go.
-    pub(crate) fn files(&self) -> &RunFiles {
+    pub(crate) fn files(&self) -> &OpenFiles {
         &self.files
     }
 
     /// The arguments of a run whose files go to `files` (the application's: `ncbi_app::run_in`).
-    pub(crate) fn with_files(self, files: &RunFiles) -> Self {
+    pub(crate) fn with_files(self, files: &OpenFiles) -> Self {
         Args {
             files: files.clone(),
             ..self
@@ -460,7 +460,7 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
         values,
         numbers,
         given,
-        files: RunFiles::Disk,
+        files: OpenFiles::disk(),
     })
 }
 

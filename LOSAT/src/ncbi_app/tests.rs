@@ -75,7 +75,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
     };
     let mut stderr = Vec::new();
     let mut diag = Diag {
-        target: &mut DiagTarget::Stderr,
+        target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
         record: None,
@@ -95,7 +95,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
     // `eNoValue` prints no usage.
     let mut stderr = Vec::new();
     let mut diag = Diag {
-        target: &mut DiagTarget::Stderr,
+        target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
         record: None,

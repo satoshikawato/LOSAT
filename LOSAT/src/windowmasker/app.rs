@@ -49,8 +49,13 @@ pub(super) fn run(
     }
 }
 
-/// The check of `run` before it opens a file: the mode (`s_DetermineAppType`), as `run` reports
-/// it; 0 for an argv of a mode. LOSAT Web's validation of the words (`super::check_in`).
+/// The checks of `run` before it reads its input or opens a file, as `run` makes and reports
+/// them (LOSAT Web's validation of the words, `super::check_in`; line NP WW3a, D-WW3-10,
+/// 2026-11-23): the mode (`s_DetermineAppType`); for `-mk_counts` the id lists' exclusion
+/// (`exclusive_id_lists`) and, without an id list to read, its refusal of `-infmt seqids`
+/// (`counts::check_mk_counts`); for `-convert` its exception for `-in -`
+/// (`counts::check_convert`); nothing more for the masking, which opens `-in` first. 0 for an
+/// argv that passes them, as `run` goes on to open its files.
 pub(super) fn check(
     args: &Args,
     _settings: &ApplicationSettings,
@@ -58,10 +63,28 @@ pub(super) fn check(
     _out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    if args.flag("mk_counts") || args.flag("convert") || args.given("ustat") {
-        0
+    let checked = if args.flag("mk_counts") {
+        exclusive_id_lists(args).and_then(|()| {
+            let lists = ["ids", "exclude_ids"]
+                .iter()
+                .any(|name| !args.value(name).unwrap_or_default().is_empty());
+            if lists {
+                // `id_lists` reads the list before `mk_counts` refuses -infmt seqids.
+                Ok(())
+            } else {
+                counts::check_mk_counts(args)
+            }
+        })
+    } else if args.flag("convert") {
+        counts::check_convert(args)
+    } else if args.given("ustat") {
+        Ok(())
     } else {
-        report(no_mode(), diag)
+        Err(no_mode())
+    };
+    match checked {
+        Ok(()) => 0,
+        Err(failure) => report(failure, diag),
     }
 }
 
@@ -143,7 +166,7 @@ fn masking_run(
     };
     let mut source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
-    // LOSAT Web's refusal of an output that it does not write (`RunFiles::create`).
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`).
     if let Some(reason) = output.refusal() {
         return Err(Failure::Refused(unsupported(reason)));
     }
@@ -160,6 +183,23 @@ fn masking_run(
     work::run(options, source, writer, &lists, &mut output, diag)
 }
 
+/// The exception of `-ids` with `-exclude_ids`, which `CWinMaskConfig` throws before it reads
+/// either list (`id_lists`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:412
+fn exclusive_id_lists(args: &Args) -> Result<(), Failure> {
+    let given = |name| !args.value(name).unwrap_or_default().is_empty();
+    if given("ids") && given("exclude_ids") {
+        return Err(Failure::Ncbi(config_exception(
+            412,
+            INCONSISTENT,
+            CONFIG,
+            "only one of -ids or -exclude_ids can be specified",
+        )));
+    }
+    Ok(())
+}
+
 /// The id lists of `-ids` and `-exclude_ids` (`CIdSet_TextMatch`, or `CIdSet_SeqId` with
 /// `-text_match false`), or the configuration's exception. `text_match` is `-text_match`, which
 /// `-mk_counts` sets to true.
@@ -174,16 +214,9 @@ fn id_lists(
     text_match: bool,
     diag: &mut Diag,
 ) -> Result<IdLists, Failure> {
+    exclusive_id_lists(args)?;
     let ids = args.value("ids").unwrap_or_default();
     let exclude_ids = args.value("exclude_ids").unwrap_or_default();
-    if !ids.is_empty() && !exclude_ids.is_empty() {
-        return Err(Failure::Ncbi(config_exception(
-            412,
-            INCONSISTENT,
-            CONFIG,
-            "only one of -ids or -exclude_ids can be specified",
-        )));
-    }
     let mut list = |name: &str, line: u32| -> Result<Option<IdSet>, Failure> {
         if name.is_empty() {
             return Ok(None);

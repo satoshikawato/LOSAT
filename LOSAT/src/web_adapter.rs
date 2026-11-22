@@ -51,7 +51,10 @@ pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
-pub use crate::report::run_files::{FileReceiver, RunFiles};
+pub use crate::report::run_files::{FileReceiver, FileStream, RunFiles};
+/// The names of the command line's programs (`losat <program>`, and the names that run one without
+/// its word): LOSAT Web's tool run tells a program that it does not run from a name that is none.
+pub use crate::utils::entry_names::ENTRY_NAMES as PROGRAMS;
 
 /// The NCBI application start of a run of `program` with the arguments `words` (after the
 /// program's name), as the command line's (`cli::main_entry`) in an environment of the
@@ -79,8 +82,10 @@ pub fn start_run(
 /// where the command line reads its standard input, writes its standard output to `out` and its
 /// standard error to `err`, and gives the files that it writes (`-out FILE`, `-logfile FILE`) to
 /// `run_files` (`RunFiles::Receiver`: each file as it is written when the receiver opens it,
-/// `FileReceiver::open`, else whole when it is complete). The application start is the command line's (its environment and its registry files:
-/// the run's `.ncbirc`, the file of `-conffile`), and `-xmlhelp` prints NCBI's XML, as there.
+/// `FileReceiver::open`, else whole when the run ends; one file per path, also where the run opens
+/// it twice, `-out x -logfile x`, as the system shares it). The application start is the command
+/// line's (its environment and its registry files: the run's `.ncbirc`, the file of `-conffile`),
+/// and `-xmlhelp` prints NCBI's XML, as there.
 pub fn run_windowmasker(
     words: &[&str],
     run_files: &RunFiles,
@@ -92,12 +97,15 @@ pub fn run_windowmasker(
     crate::windowmasker::run_in(&words, run_files, input, out, err)
 }
 
-/// Checks the words of a `windowmasker` run as `run_windowmasker` runs them, up to the work of its
-/// mode: the application start, the arguments (NCBI's reader and its checks), LOSAT's settings and
-/// the mode, which read no file (LOSAT Web's validation of a tool's words, `losat_web2_validate`;
-/// line NP WW3a, D-WW3-7, 2026-11-22). `Err` with what the command line writes for the words that
-/// it refuses: its standard error, then the file of `-logfile` where the argv has one, without the
-/// last line end.
+/// Checks the words of a `windowmasker` run as `run_windowmasker` runs them, up to where the tool
+/// reads its input or opens a file: the application start (which reads the registry files of the
+/// run's working directory, `.ncbirc`, the file of `-conffile`, as the command line does), the
+/// arguments (NCBI's reader and its checks), LOSAT's settings and the checks of the mode before its
+/// files (`-mk_counts` with `-ids` and `-exclude_ids`, or with `-infmt seqids`; `-convert -in -`)
+/// (LOSAT Web's validation of a tool's words, `losat_web2_validate`; line NP WW3a, D-WW3-7 and
+/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
+/// its standard error, then the file of `-logfile` where the argv has one, without the last line
+/// end.
 pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
     /// The file of `-logfile`, kept for the message.

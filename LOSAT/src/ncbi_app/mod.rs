@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
 };
-use crate::report::run_files::RunFiles;
+use crate::report::run_files::{OpenFiles, RunFiles};
 use crate::report::serial::encoder::ReplacedChar;
 
 use args::{ArgException, Args, ArgsError};
@@ -67,7 +67,7 @@ pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
 /// standard error stream, on which the usage of an argument error is printed.
 pub(crate) struct Diag<'a> {
-    target: &'a mut DiagTarget,
+    target: DiagTarget,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -331,8 +331,8 @@ fn ncbi_xml(program: &str) -> Option<String> {
 /// report's messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the
 /// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
 /// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML. The
-/// run's files go to `files`: the file of `-logfile` (`RunFiles::log_target`, given to `files` when
-/// the run ends, `LogFile`) and the files that the program opens by name (`Args::files`).
+/// run's files go to `files`: the file of `-logfile` and the files that the program opens by name
+/// (`Args::files`), through the run's `OpenFiles`.
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
@@ -343,9 +343,10 @@ fn run_app(
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
-    let mut log = LogFile::open(files, words);
-    let target = &mut log.target;
-    start.write_log_setup(target, err);
+    // The files that the run opens by name, which end when the run ends (`OpenFiles`).
+    let files = OpenFiles::new(files);
+    let mut target = files.log_target(log_file(words));
+    start.write_log_setup(&mut target, err);
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
@@ -379,7 +380,7 @@ fn run_app(
     };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).
-    match start.write_config_load(diag.target, diag.stderr) {
+    match start.write_config_load(&mut diag.target, diag.stderr) {
         Ok(None) => {}
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),
@@ -419,41 +420,12 @@ fn run_app(
         return 0;
     }
     body(
-        &args.with_files(files),
+        &args.with_files(&files),
         &settings,
         &mut files::Cin::new(input),
         out,
         &mut diag,
     )
-}
-
-/// The file of `-logfile` of a run (`RunFiles::log_target` of its name, `log_file`), which goes to
-/// the run's files when the run ends (`RunFiles::deliver_log`, when the run drops it; on `Disk` the
-/// file was written as it came): LOSAT Web's host gets the file also from a run that ends before its
-/// arguments, as the command line's file then holds what it wrote.
-struct LogFile<'f> {
-    files: &'f RunFiles,
-    name: Option<&'f std::ffi::OsStr>,
-    target: DiagTarget,
-}
-
-impl<'f> LogFile<'f> {
-    fn open(files: &'f RunFiles, words: &'f [OsString]) -> Self {
-        let name = log_file(words);
-        LogFile {
-            files,
-            name,
-            target: files.log_target(name),
-        }
-    }
-}
-
-impl Drop for LogFile<'_> {
-    fn drop(&mut self) {
-        let target = std::mem::replace(&mut self.target, DiagTarget::Discard);
-        // LOSAT Web's receiver keeps every file that it gets (it fails for none).
-        let _ = self.files.deliver_log(self.name, target);
-    }
 }
 
 #[cfg(test)]

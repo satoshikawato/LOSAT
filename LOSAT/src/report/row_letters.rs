@@ -8,8 +8,9 @@
 //! NCBI's reports read the letters of every row from its Bioseq and compare them as they are; a
 //! mask lowers a letter only where outfmt 0 prints the row. A FASTA record's Bioseq holds its
 //! letters in upper case (NCBI's reader keeps the lower case as a mask, fasta.cpp:945-949), and
-//! LOSAT's outfmt 0 rows carry those masks in lower case, so the reports compare the capitals of
-//! such a row (`QueryCase::Masked`). The Bioseq of a PSSM query (`-in_pssm`) holds iupacaa letters
+//! the rows of LOSAT's hit records may carry those masks in lower case (`HspMasks::lower_row`,
+//! as the library API hands them out), so the reports compare the capitals of such a row
+//! (`QueryCase::Masked`). The Bioseq of a PSSM query (`-in_pssm`) holds iupacaa letters
 //! as the file has them, in lower case too (`pssm_search::PsiSearch::bioseq_letters`), which the
 //! search reads as their capitals; its rows show no mask (NCBI's PSSM search sets no filtered
 //! regions: `CPsiBlastImpl::Run`, psiblast_impl.cpp:150), so the reports compare its letters as

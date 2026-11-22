@@ -987,3 +987,87 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
         }
     }
 }
+
+/// `seq` with the letters of `run` in lower case.
+fn with_lower_run(seq: &[u8], run: std::ops::Range<usize>) -> Vec<u8> {
+    let mut seq = seq.to_vec();
+    seq[run].make_ascii_lowercase();
+    seq
+}
+
+/// The reverse complement of `seq`, each letter keeping its case.
+fn reverse_complement_keeping_case(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&base| {
+            let complement = match base.to_ascii_uppercase() {
+                b'A' => b'T',
+                b'C' => b'G',
+                b'G' => b'C',
+                b'T' => b'A',
+                other => other,
+            };
+            if base.is_ascii_lowercase() {
+                complement.to_ascii_lowercase()
+            } else {
+                complement
+            }
+        })
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
+// `x_OutputSeq` puts the masked letters of a sequence row (not of the middle line or features)
+// in lower case.
+// The rows of the hit records that the library API hands out (`HspRecord::query_aligned`,
+// `subject_aligned`) show the masks in lower case as outfmt 0 shows them (`HspMasks::lower_row`
+// with the masks that `x_OutputSeq` reads): with `-lcase_masking`, the query's lowercase and a
+// subject set's, the subject on either strand (its row reverse-complemented with the query's
+// plus strand for a minus-strand HSP).
+#[test]
+fn hit_record_rows_show_the_lowercase_masks() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let upper = genome[30_000..30_400].to_ascii_uppercase();
+    let query = with_lower_run(&upper, 100..140);
+    let plus = with_lower_run(&upper, 250..290);
+    let minus_row = with_lower_run(&upper, 300..330);
+    let minus = reverse_complement_keeping_case(&minus_row);
+    let fasta = |records: &[(&str, &[u8])]| -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for (id, seq) in records {
+            bytes.extend_from_slice(format!(">{id}\n").as_bytes());
+            bytes.extend_from_slice(seq);
+            bytes.push(b'\n');
+        }
+        bytes
+    };
+    let queries = read_fasta(Program::Blastn, Role::Query, &fasta(&[("q", &query)])).unwrap();
+    let subjects = read_fasta(
+        Program::Blastn,
+        Role::Subject,
+        &fasta(&[("plus", &plus), ("minus", &minus)]),
+    )
+    .unwrap();
+    let search = validate(Program::Blastn, &["-lcase_masking", "-dust", "no"]).unwrap();
+    let outcome =
+        crate::api::run_collect(&search, ApiInputs::new(&queries, &subjects), &["6", "0"]).unwrap();
+    let text = |row: &[u8]| String::from_utf8(row.to_vec()).unwrap();
+    for (s_idx, subject_row) in [(0, &plus), (1, &minus_row)] {
+        let whole: Vec<_> = outcome
+            .hsps
+            .iter()
+            .filter(|hsp| hsp.s_idx == s_idx && hsp.q_start == 1 && hsp.q_end == upper.len())
+            .collect();
+        assert_eq!(
+            whole.len(),
+            1,
+            "subject {s_idx}: one HSP over the whole query"
+        );
+        assert_eq!(whole[0].query_aligned.as_deref(), Some(&text(&query)[..]));
+        assert_eq!(
+            whole[0].subject_aligned.as_deref(),
+            Some(&text(subject_row)[..]),
+            "subject {s_idx}"
+        );
+    }
+}

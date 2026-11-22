@@ -54,14 +54,26 @@ impl<'a> AnchoredSequences<'a> {
         for batch in batches {
             for qidx in 0..batch.queries.len() {
                 let absolute = batch.query_ordinal + qidx;
-                masks[absolute] = super::blast_xml::query_masks(batch, qidx, &queries[absolute])
-                    .into_iter()
-                    .map(|mask| (mask.from as u32, mask.to as u32, mask.frame as i8))
-                    .collect();
+                masks[absolute] = query_record_masks(batch, qidx, &queries[absolute]);
             }
         }
         masks
     }
+}
+
+/// The masks of query `qidx` of `batch` (its record `query`) as `Mask`s: its contexts' masks in
+/// their order, each with its context's frame, in record positions (`blast_xml::query_masks`,
+/// NCBI's `TMaskedQueryRegions`). The query-anchored reports (`AnchoredSequences::query_masks`)
+/// and outfmt 0's query rows (`report::pairwise_hits`) place them (`x_FillLocList`).
+pub(super) fn query_record_masks(
+    batch: &BatchResults,
+    qidx: usize,
+    query: &FastaRecord,
+) -> Vec<Mask> {
+    super::blast_xml::query_masks(batch, qidx, query)
+        .into_iter()
+        .map(|mask| (mask.from as u32, mask.to as u32, mask.frame as i8))
+        .collect()
 }
 
 /// Appends the letters `from..=to` (positions in `record`'s whole record) of `record`, whose

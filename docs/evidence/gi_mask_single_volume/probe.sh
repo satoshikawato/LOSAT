@@ -1,7 +1,7 @@
 #!/bin/bash
 # Does NCBI BLAST+ 2.17.0 read a single-volume `makeblastdb -gi_mask` database once the alias file's DBLIST line
 # holds the database's file name without a directory instead of NCBI's absolute path? (PD-LOSAT-NCBI-DEFECTS
-# approved exception 22; line NP item M4c-1, 2026-11-20.)
+# approved exception 23; line NP item M4c-1, 2026-11-20.)
 # Builds single-volume -gi_mask databases with NCBI (version 5 and 4, nucleotide and protein, -out in a
 # subdirectory, the default GI-mask name), rewrites only the DBLIST line, then reads them with NCBI's blastdbcmd
 # (-info, %m0, -mask_sequence_with 0, -metadata) and blastn/blastp -db_soft_mask 0, from the database's directory

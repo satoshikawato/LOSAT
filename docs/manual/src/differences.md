@@ -162,7 +162,7 @@ These cases are about what the program prints around the search, not the search 
 ### Argument errors and help
 
 - **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs, with LOSAT's name and version in its description line.
-- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
+- **What does not change.** Errors that NCBI raises after it has read the arguments (where NCBI writes `BLAST query/options error: ...`, input errors and engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
 
 ### Wording of messages
 
@@ -223,6 +223,13 @@ Records: [The decision record on NCBI BLAST+ defects](https://github.com/satoshi
 LOSAT writes correct output where NCBI's `blastdbcmd` writes letters or sequences that do not belong to the header or id you asked for. The six cases are `-long_seqids` with `-range` on the minus strand; `gnl|BL_ORD_ID|N` in a version 4 database of several volumes; `-mask_sequence_with` with `-strand minus`; two or more `%m` in one `-outfmt`; `-mask_sequence_with` on a protein without a range; a batch line without masks after a line with masks for the same sequence. In each, LOSAT's output is NCBI's own output for the neighbouring input that does not reach the defect.
 
 Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md).
+
+### `windowmasker`: an empty id in `-ids` or `-exclude_ids`
+
+- **What you see.** LOSAT writes NCBI's error `bad id: ...: ignoring` for the line, skips it, and masks (or counts) as NCBI does for the file without that line. NCBI BLAST+ 2.17.0 writes the same error and then crashes (exit status 139) without output.
+- **When.** `windowmasker` with an `-ids` or `-exclude_ids` file matched as text (without `-text_match F`), in masking or with `-mk_counts`, when a line gives an empty id: a line that starts with a space or a tab, or a line `>`, `|`, `>|`, `>>` or `>>|` (alone or before a space or a tab).
+- **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## The library
 

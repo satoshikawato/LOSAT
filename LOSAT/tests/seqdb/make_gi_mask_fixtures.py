@@ -15,7 +15,7 @@ the directory of the case before it), with the input files copied in first, so t
 the command line, in the log and in the files are relative as a user types them.
 
 One expectation leaves NCBI's bytes, in one place: `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS
-approved exception 22, the Owner's decision of 2026-11-20). NCBI's makeblastdb gives a
+approved exception 23, the Owner's decision of 2026-11-20). NCBI's makeblastdb gives a
 single-volume database built with `-gi_mask` an alias file whose DBLIST is the database's own
 absolute path; no program can open that database, and makeblastdb itself ends with "BLAST Database
 error: Illegal configuration: DB alias files are mutually recursive." (exit status 2, no metadata
@@ -514,7 +514,7 @@ def write_ncbi_single_alias(bin_dir, inputs, work, env):
 
 def single_volume_exception(bin_dir, case_dir, argv, rc, stderr, stamp, env):
     """The one place where an expectation leaves NCBI's bytes (PD-LOSAT-NCBI-DEFECTS approved
-    exception 22; the module's docstring). Where this run of makeblastdb with `-gi_mask` wrote the
+    exception 23; the module's docstring). Where this run of makeblastdb with `-gi_mask` wrote the
     alias file of a single-volume database (DBLIST = the database's absolute path), that line
     becomes the database's file name without a directory; where the run then ended on "DB alias
     files are mutually recursive" (exit status 2), the line goes from the standard error or the

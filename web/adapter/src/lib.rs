@@ -29,6 +29,7 @@ fn last_error() -> &'static Mutex<Vec<u8>> {
 
 /// Runs an export body: records its error, or clears the last error on success.
 fn guarded(body: impl FnOnce() -> Result<i32, String>) -> i32 {
+    run::enter_run_directory();
     let result = body();
     let mut error = last_error().lock().expect("last error");
     match result {
@@ -70,27 +71,27 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 11 since a query is read as the command line's
-/// query batches read it: the records before the reader's error, with the error (`reader_error` of
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 12 since a run of `-db`, which takes no subject
+/// handle and reads the database from the run's working directory, which the host preopens as
+/// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
+/// merged first, then 12 after D10's 11); 11 since a query is read as the command line's query
+/// batches read it: the records before the reader's error, with the error (`reader_error` of
 /// *register*, *inputs* and *scan*), which a run meets in the record's batch (line WQA's D10,
-/// 2026-11-19); 10 since a run prints the text that the command
-/// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and
-/// the *start* field `prints` (line WQA's D14, 2026-11-20; version 9 is taken by another open
-/// branch); 8 since the index scan and `register` read as
-/// the engine's reader with the run's data loaders (`scan_begin` and `register` take the program,
-/// the role and the setting, which *validation* gives on stream 2; a `>?` gap line and the lines
-/// that NCBI's line reader joins are indexed, and the reader's refusals come in its words; line
-/// WQA's D13 and D16, 2026-11-20); 7 since a run that fails keeps the output of the argv up to its
-/// error and drops the other outputs with the signal of stream 9 (line WQA's sweep, D15,
-/// 2026-11-20; versions 5 and 6 are taken by other open branches); 4 since
-/// `losat_web2_register_inputs`, which
-/// reads the inputs of a run with `-parse_deflines`, and the signal of stream 9 for every output
-/// stream that failed (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which
-/// makes the host discard a stream that failed alone after a chunk of it was sent (line RG item
-/// T7-W).
+/// 2026-11-19); 10 since a run prints the text that the command line prints in place of a run (its
+/// help, the XML of `-xmlhelp`, its versions) on stream 11, and the *start* field `prints` (line
+/// WQA's D14, 2026-11-20); 8 since the index scan and `register` read as the engine's reader with
+/// the run's data loaders (`scan_begin` and `register` take the program, the role and the setting,
+/// which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line reader joins
+/// are indexed, and the reader's refusals come in its words; line WQA's D13 and D16, 2026-11-20); 7
+/// since a run that fails keeps the output of the argv up to its error and drops the other outputs
+/// with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 are taken by
+/// other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs of a run with
+/// `-parse_deflines`, and the signal of stream 9 for every output stream that failed (line WQA's
+/// sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard a stream
+/// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    11
+    12
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -427,6 +428,11 @@ pub extern "C" fn losat_web2_inflate_end(handle: u32) -> i32 {
     })
 }
 
+/// Runs the argv on the registered query and subject. A run of `-db` takes the subject handle 0:
+/// the engine opens the database by name in the run's working directory, which the host preopens as
+/// `/work` (docs/web/abi_v2.md §3, §4). The inputs are those read with the argv's data loaders
+/// (`run::data_loaders`, §9).
+///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]

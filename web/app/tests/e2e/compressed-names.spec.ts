@@ -26,13 +26,14 @@ interface UserFile {
 }
 
 /** The native CLI's standard output for the command that the application showed, run from a folder with the user's files. */
-function nativeShown(command: string, files: readonly UserFile[]): Buffer {
+function nativeShown(command: string, files: readonly UserFile[], threads = '1'): Buffer {
   mkdirSync(test.info().outputPath(), { recursive: true });
   const directory = mkdtempSync(join(test.info().outputPath(), 'user-'));
   for (const file of files) writeFileSync(join(directory, file.name), file.bytes);
   const words = command.split(' ');
   expect(words[0], command).toBe('losat');
-  const run = spawnSync(NATIVE!, [...words.slice(1), '-num_threads', '1'], { cwd: directory, maxBuffer: 1 << 28 });
+  // The program is named `losat`, as typed (SAM's command line holds argv[0]).
+  const run = spawnSync(NATIVE!, [...words.slice(1), '-num_threads', threads], { cwd: directory, maxBuffer: 1 << 28, argv0: 'losat' });
   expect(run.status, `${command}: ${run.stderr.toString('utf8')}`).toBe(0);
   return run.stdout;
 }
@@ -97,7 +98,10 @@ test('a compressed query or subject is named as the user gave it: the command, t
     if (NATIVE !== undefined) {
       const text = (await page.getByTestId('result-output').textContent()) ?? '';
       expect(text).toContain('@PG');
-      expect(text, `${shown} -outfmt 17: the native CLI's standard output`).toBe(nativeShown(`${shown} -outfmt 17`, files).toString('utf8'));
+      // SAM's command line holds the run's thread count too (the form's, which the bytes do not depend on): the CLI gets the same.
+      const threads = /-num_threads (\d+) /.exec(text)?.[1];
+      expect(threads, 'the @PG command line holds the thread count').toBeDefined();
+      expect(text, `${shown} -outfmt 17: the native CLI's standard output`).toBe(nativeShown(`${shown} -outfmt 17`, files, threads).toString('utf8'));
     }
     await page.getByTestId('tab-search').click();
     await page.getByTestId('param-extra').fill('');

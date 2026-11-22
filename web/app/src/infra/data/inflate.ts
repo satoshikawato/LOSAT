@@ -4,8 +4,11 @@ import { INFLATED_TOO_LARGE, type FileInflater } from 'losat/ports';
 // the web app read such a file with the same code, so it inflates to the same bytes, or fails with
 // the same sentence (`'x.fa.zst' is named .zst but is not zstd data (…); …`). The engine's name rule
 // (makeblastdb's: the name ends in the suffix, in any case) decides; the inflated bytes are kept as
-// a new File under the engine's plain name, so the engine never sees a plain text under a compressed
-// name. Every member, stream or frame of a concatenated file is read (bgzip, pzstd, `cat`). A
+// a new File under the engine's plain name, which the card shows. The run's argv still names the file
+// the user gave (`SearchDraft.nameOf`): the engine's run takes the bytes of its inputs, never a file,
+// so the name is only what it writes where the command line writes a file name (outfmt 0 and 7's
+// `Input:` line, SAM's command line), and the bytes of a run equal the command line's on the shown
+// command (line WQA's D21, 2026-11-23). Every member, stream or frame of a concatenated file is read (bgzip, pzstd, `cat`). A
 // downloaded Example set (a gzip body) takes the same path in the Data worker, with its byte limit
 // (WholeFileInflater, losat/ports: inflate.ts; infra/browser/example-downloader.ts).
 // A `.bz2` name is read as well (Owner 2026-11-11, swebok-improve SW8 DECISIONS 51). It was refused

@@ -94,6 +94,7 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         Box::new(move |out: &mut Flushes| {
             let intro = BlastnIntro {
                 megablast,
+                indexed_megablast: false,
                 matrix_only: false,
             };
             write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None)

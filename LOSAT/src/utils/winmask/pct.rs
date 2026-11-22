@@ -51,7 +51,7 @@ pub enum PctWhy {
 }
 
 impl PctWhy {
-    /// The words of the refusal that follow "the percentage line '<line>' of the counts file".
+    /// The words of the refusal that follow `the percentage line '<line>' of the counts file`.
     pub(super) fn text(self) -> &'static str {
         match self {
             PctWhy::RuntimeWord => "holds a number that C++ libraries read differently (an infinity, a NaN, a hexadecimal number, a number with letters after it, or one beyond the range of a normal double), so LOSAT does not read it",

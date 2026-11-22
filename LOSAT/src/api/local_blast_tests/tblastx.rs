@@ -672,7 +672,13 @@ fn hit_records_keep_the_query_masks_in_lower_case() {
     };
     let (queries, subjects) = (queries(&query.0), subjects(&subject.0));
     let run = run_formats(&["0"], true, |outputs| {
-        run_local_tblastx(args, &queries, &subjects, outputs)
+        run_local_tblastx(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            outputs,
+        )
     });
     let report = String::from_utf8(run.outputs[0].clone()).expect("UTF-8 report");
     for (frame, shown) in [

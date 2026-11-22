@@ -29,9 +29,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
-    query_rows, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
-    BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_rows,
+    result_query_masks, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject,
+    BlastpRanges, BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -278,7 +278,7 @@ pub(super) fn write_archive(
         }
         _ => crate::report::record::SubjectNames::Records(subject_records),
     };
-    let masks = query_record_masks(query_frames, &ranges.query_input.placements);
+    let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
     let spans = batch_spans();
     let call = archive::ArchiveCall {
         handle,
@@ -519,7 +519,7 @@ pub(super) fn write_xml(
     // volumes takes volume 0's, rpsblast_local.cpp:174-175): XML2 and JSON list none for its
     // queries, which have an alignment set there (`no_alignment_set`).
     let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
-        query_record_masks(query_frames, &ranges.query_input.placements)
+        result_query_masks(args.app, query_frames, &ranges.query_input.placements)
             .into_iter()
             .zip(query_batch_skipped)
             .map(|(masks, &skipped)| {
@@ -864,16 +864,11 @@ pub(super) fn write_pairwise(
     if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
         found.refuse_unsure_shown(shown.iter().copied())?;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
-    // blastp's results carry the query masks; psiblast's `CPsiBlastImpl::Run` returns
-    // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
-    // no lowercase masking.
-    let query_masks = match args.app {
-        BlastpApp::Blastp | BlastpApp::Rpsblast => {
-            let masks = query_record_masks(query_frames, &ranges.query_input.placements);
-            (!masks.iter().all(Vec::is_empty)).then_some(masks)
-        }
-        BlastpApp::Psiblast => None,
+    // The results' query masks (`result_query_masks`: none for psiblast's rounds), which the rows
+    // show in lower case.
+    let query_masks = {
+        let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
+        (!masks.iter().all(Vec::is_empty)).then_some(masks)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // The windows of queries whose rows are made and written together

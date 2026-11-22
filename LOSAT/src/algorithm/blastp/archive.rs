@@ -142,8 +142,8 @@ pub(crate) struct CallBatches<'a> {
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query, in record
-    /// coordinates (`query_record_masks`).
+    /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query that the
+    /// results carry, in record coordinates (`blast_engine::result_query_masks`).
     pub masks: &'a [Vec<(i32, i32)>],
     /// `-lcase_masking`.
     pub lcase_masking: bool,
@@ -282,10 +282,9 @@ pub(crate) fn for_each_batch(
 
         // The results' masks are those of the search, so only a searched batch has them: one
         // `notset` mask per query with the SEG intervals and lower-case runs (a protein query).
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:120-168
-        // psiblast's results have none in any round (`CPsiBlastImpl::Run` sets no masks on them).
+        // `call.masks` are the results' (`blast_engine::result_query_masks`: none for psiblast).
         let mut masks: Vec<MaskEntry> = Vec::new();
-        if searched && psi.is_none() {
+        if searched {
             for index in span.clone() {
                 if !call.masks[index].is_empty() {
                     masks.push(MaskEntry {

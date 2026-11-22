@@ -150,6 +150,35 @@ pub enum ProgramType {
     RpsTblastn,
 }
 
+impl ProgramType {
+    /// The program's name (`Blast_ProgramNameFromType`, the one spelling of each): the Seq-annots'
+    /// "Blast Type" and BLAST XML's `BlastOutput_program`.
+    pub fn name(self) -> &'static str {
+        match self {
+            ProgramType::PsiBlast => "psiblast",
+            ProgramType::PsiTblastn => "psitblastn",
+            ProgramType::RpsBlast => "rpsblast",
+            ProgramType::RpsTblastn => "rpstblastn",
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:120-168
+/// Whether the results of a search of `program_type` (`RunRecord::program_type`; `None`: its
+/// `Program`'s own) carry the query's masks, the SEG intervals and `-lcase_masking` runs that the
+/// reports show (outfmt 0's lower case, BLAST XML's masked letters, the archive's masks):
+/// `CLocalBlast::Run` sets them on its results (BLASTP, RPS-BLAST and the others), while
+/// `CPsiBlastImpl::Run` returns the traceback's results without them (psiblast in every round,
+/// also a FASTA query's first, and PSI-TBLASTN of tblastn `-in_pssm`). The one owner of this rule
+/// for every report of these searches.
+pub fn carries_query_masks(program_type: Option<ProgramType>) -> bool {
+    !matches!(
+        program_type,
+        Some(ProgramType::PsiBlast | ProgramType::PsiTblastn)
+    )
+}
+
 impl RunRecord<'_> {
     /// Whether the Seq-aligns are remapped to their subjects' locations: a `-subject` search,
     /// whose sequence source can return partial sequences (a database's cannot).

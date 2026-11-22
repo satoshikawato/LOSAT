@@ -28,6 +28,13 @@ use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
 pub(super) const PROGRAM: &str = "PSITBLASTN";
 
+/// The program type of a TBLASTN search (`RunRecord::program_type`): PSI-TBLASTN's with
+/// `-in_pssm` (`pssm`), whose reports name it and show no query masks
+/// (`report::record::carries_query_masks`); `None` (TBLASTN's own) without.
+pub(super) fn program_type(pssm: bool) -> Option<crate::report::record::ProgramType> {
+    pssm.then_some(crate::report::record::ProgramType::PsiTblastn)
+}
+
 /// Reads `-in_pssm path` for tblastn: psiblast's reader (NCBI's `CPsiBlastArgs`, the same handler
 /// for both programs), whose refusals name LOSAT's TBLASTN and whose scores of a PSSM of
 /// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and

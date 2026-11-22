@@ -394,17 +394,10 @@ impl PreparedXml {
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:682-684
-        let (program, version) = if self.values.pssm {
-            (
-                "psitblastn",
-                concat!("PSITBLASTN ", crate::wording::report_version!()),
-            )
-        } else {
-            (
-                "tblastn",
-                concat!("TBLASTN ", crate::wording::report_version!()),
-            )
-        };
+        // The program's name, and its upper case with the version (outfmt 7's program line).
+        let program_type = super::in_pssm::program_type(self.values.pssm);
+        let program = program_type.map_or("tblastn", crate::report::record::ProgramType::name);
+        let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program,
             version,
@@ -475,10 +468,9 @@ impl PreparedXml {
             // A query of a batch NCBI did not search has no masks (its result is made
             // without the search, probe `BATCH_SIZE=10` with `-lcase_masking`); XML2 and JSON
             // list the masks of every other query, also one without hits.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:120-168
-            // A PSSM query's results have no masks (`CPsiBlastImpl::Run` sets none on them).
+            // A PSSM query's results have no masks (`report::record::carries_query_masks`).
             if self.searched[q_idx]
-                && !self.values.pssm
+                && crate::report::record::carries_query_masks(program_type)
                 && (self.all_masks
                     || hitlist
                         .lists()

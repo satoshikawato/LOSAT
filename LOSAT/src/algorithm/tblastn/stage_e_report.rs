@@ -555,7 +555,9 @@ pub(super) fn render(
             seg,
             mask_lowercase,
             ranges,
-            pssm.is_none(),
+            crate::report::record::carries_query_masks(super::in_pssm::program_type(
+                pssm.is_some(),
+            )),
             query_bioseq,
             anchored_formats.then_some(&mut section_masks),
         )?))
@@ -867,7 +869,7 @@ pub(super) fn render(
                     hitlists,
                     ranges,
                     // PSI-TBLASTN's own "Blast Type" (`psitblastn`).
-                    pssm.map(|_| crate::report::record::ProgramType::PsiTblastn),
+                    super::in_pssm::program_type(pssm.is_some()),
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
@@ -1196,7 +1198,8 @@ fn pairwise_hits(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     ranges: &ReportRanges<'_>,
-    // Whether the alignments show the query's masks (not a PSSM query's).
+    // Whether the alignments show the query's masks (`report::record::carries_query_masks`: not a
+    // PSSM query's).
     query_masks: bool,
     // The PSSM query's Bioseq letters where they are not its record's (`PsiSearch::bioseq_letters`),
     // which the rows show (`QueryLetters`); a run of such a query has no other.

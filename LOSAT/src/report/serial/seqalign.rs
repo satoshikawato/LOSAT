@@ -591,10 +591,15 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
 fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
     use crate::report::record::ProgramType;
     match run.program_type {
-        Some(ProgramType::RpsBlast) => ("rpsblast", 6),
-        Some(ProgramType::RpsTblastn) => ("rpstblastn", 7),
-        Some(ProgramType::PsiBlast) => ("psiblast", 10),
-        Some(ProgramType::PsiTblastn) => ("psitblastn", 11),
+        Some(program_type) => (
+            program_type.name(),
+            match program_type {
+                ProgramType::RpsBlast => 6,
+                ProgramType::RpsTblastn => 7,
+                ProgramType::PsiBlast => 10,
+                ProgramType::PsiTblastn => 11,
+            },
+        ),
         None => match run.program {
             Program::Blastn => ("blastn", 1),
             Program::Blastp => ("blastp", 2),

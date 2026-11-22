@@ -2772,6 +2772,21 @@ fn set_row_masks(
     }
 }
 
+/// The query masks of the search's results, which every report of the call reads (outfmt 0's
+/// lower case, BLAST XML's masked letters, the archive's masks, outfmt 0's refusal of a query
+/// that is also a subject): `query_record_masks`, or none for each query of a PSSM search
+/// (`report::record::carries_query_masks` of `app`'s program type: psiblast in every round).
+fn result_query_masks(
+    app: crate::algorithm::blastp::args::BlastpApp,
+    query_frames: &[Vec<QueryFrame>],
+    offsets: &seq_range::Placements,
+) -> Vec<Vec<(i32, i32)>> {
+    if !crate::report::record::carries_query_masks(app.program_type()) {
+        return vec![Vec::new(); query_frames.len()];
+    }
+    query_record_masks(query_frames, offsets)
+}
+
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
 /// api/blast_aux.cpp:825-842): the SEG masks merged, a mask that covers the whole query
 /// dropped, and the rest moved into the query's record by the start of its interval
@@ -10385,7 +10400,7 @@ fn run_call(
             )
         })
     {
-        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
+        let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
         crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
             outputs
                 .formats

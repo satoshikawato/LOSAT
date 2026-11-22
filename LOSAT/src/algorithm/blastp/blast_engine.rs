@@ -6082,6 +6082,11 @@ fn search(
     // search writes the requests where its call ends, after the searches, which would hold the
     // reports). A batch that stops with LOSAT's refusal of an id is read first too.
     if batches.first_request_end().is_some() {
+        // NCBI's prolog comes before that request (`StrategyExport::refused`).
+        let refused = crate::report::archive::strategy::StrategyExport::refused;
+        if args.strategy.as_ref().is_some_and(refused) {
+            write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+        }
         crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its

@@ -164,9 +164,9 @@ struct Shared {
     options: OptionsHandle,
     /// LOSAT's refusal of the file (`create_strategy_file`, `check_report_stream`).
     refusal: Option<String>,
-    /// The report stream's bytes, held from the run's start until NCBI's first request
-    /// (`ReportHold`): only for a file that LOSAT refuses.
-    hold: Option<ReportHold>,
+    /// The run's report stream (`report::ostream::ReportStream::of_cli`), whose writes of NCBI's
+    /// before its first request `check_report_stream` makes: only for a file that LOSAT refuses.
+    report: Mutex<Option<crate::report::ostream::RequestPoint>>,
     state: Mutex<State>,
 }
 
@@ -205,7 +205,7 @@ pub struct StrategyFile {
 /// ends before that point (an empty query, a database error, an option or format error, a first
 /// batch it cannot read) writes no request, and its bytes are NCBI's. The refusal is therefore
 /// only recorded here and raised where NCBI makes its first request (`check_report_stream`);
-/// until then the run goes on as NCBI's, its report stream held back (`hold_report`).
+/// until then the run goes on as NCBI's.
 pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
         return Ok(StrategyFile {
@@ -235,10 +235,13 @@ pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Res
 /// the file of the output), raised where NCBI writes its first request: after its formatter and
 /// its prolog, once the first batch is read and before it is searched (`SaveSearchStrategy`).
 /// Every stop of NCBI's before that point (an empty query, a database or option error, a query
-/// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`) comes first
-/// with NCBI's own bytes: the run's report stream holds what the run writes meanwhile
-/// (`hold_report`), and `end_run` writes it before the error. Here the held bytes are dropped
-/// and the run refuses, so the stream has no byte of the report before the refusal. The
+/// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`, a device
+/// that fails at the prolog's flush) comes first with NCBI's own bytes, because the run's report
+/// stream is NCBI's until here. Here the stream makes NCBI's writes so far while the formatter
+/// lives (`RequestPoint::make_writes`): a write that fails ends the run as NCBI's failed write
+/// ends it (`BLAST failed to write output`, exit code 6, on `/dev/full`), before any request.
+/// Otherwise the run refuses; what the stream holds then is written before the refusal, as at
+/// LOSAT's other refusals (NCBI's prolog, which NCBI writes before its request too). The
 /// programs call it where they make the first batch's request (`StrategyExport::write_with`
 /// calls it too, so no request is ever written to such a file) and, where they write that
 /// request after searching, at NCBI's point (BLASTP's `search`).
@@ -248,8 +251,14 @@ pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
     };
     match strategy.0.refusal.as_deref() {
         Some(refusal) => {
-            if let Some(hold) = &strategy.0.hold {
-                hold.drop_held();
+            let report = strategy
+                .0
+                .report
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(report) = report {
+                report.make_writes()?;
             }
             Err(anyhow::anyhow!("{refusal}"))
         }
@@ -257,124 +266,24 @@ pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
     }
 }
 
-/// What a report stream gets of the bytes held back until NCBI's first request
-/// (`check_report_stream`).
-enum HoldState {
-    /// The run's bytes so far.
-    Holding(Vec<u8>),
-    /// The run ended without the request (`end_run`): the bytes wait to be written, once, before
-    /// the next write or flush of the stream.
-    Released(Vec<u8>),
-    /// The request point refused the run: the stream takes no byte.
-    Dropped,
-}
-
-/// The shared state of the held report stream of a run whose strategy file LOSAT refuses.
-#[derive(Clone)]
-struct ReportHold(Arc<Mutex<HoldState>>);
-
-impl Default for ReportHold {
-    fn default() -> Self {
-        ReportHold(Arc::new(Mutex::new(HoldState::Holding(Vec::new()))))
-    }
-}
-
-/// What a write of the held stream does (`ReportHold::step`).
-enum HoldStep {
-    /// The bytes are kept (or, dropped, thrown away).
-    Kept,
-    /// Write these bytes first, then the write itself.
-    Through(Vec<u8>),
-}
-
-impl ReportHold {
-    fn with_state<R>(&self, f: impl FnOnce(&mut HoldState) -> R) -> R {
-        f(&mut self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner))
+impl StrategyExport {
+    /// Whether LOSAT refuses the file (`check_report_stream`). NCBI writes its prolog before its
+    /// first request, so a program that writes its prolog with its first reports writes it before
+    /// that refusal: a device that fails at the prolog's flush then ends the run as NCBI's.
+    pub fn refused(&self) -> bool {
+        self.0.refusal.is_some()
     }
 
-    /// A write of `bytes` (a flush writes none).
-    fn step(&self, bytes: &[u8]) -> HoldStep {
-        self.with_state(|state| match state {
-            HoldState::Holding(held) => {
-                held.extend_from_slice(bytes);
-                HoldStep::Kept
-            }
-            HoldState::Released(held) => HoldStep::Through(std::mem::take(held)),
-            HoldState::Dropped => HoldStep::Kept,
-        })
-    }
-
-    fn drop_held(&self) {
-        self.with_state(|state| *state = HoldState::Dropped);
-    }
-
-    /// The run ended: the held bytes are the stream's, as NCBI's error left them, unless
-    /// `keep` is false (LOSAT's refusal, which has no byte before it).
-    fn end(&self, keep: bool) {
-        self.with_state(|state| {
-            if let HoldState::Holding(held) = state {
-                *state = if keep {
-                    HoldState::Released(std::mem::take(held))
-                } else {
-                    HoldState::Dropped
-                };
-            }
-        });
-    }
-}
-
-/// The destination of a report stream (`cli::report_destination`) behind its hold.
-struct HeldReport<W: Write> {
-    inner: W,
-    hold: ReportHold,
-}
-
-impl<W: Write> Write for HeldReport<W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        match self.hold.step(bytes) {
-            HoldStep::Kept => Ok(bytes.len()),
-            HoldStep::Through(held) => {
-                self.inner.write_all(&held)?;
-                self.inner.write(bytes)
-            }
+    /// The run's report stream (`report::ostream::ReportStream::of_cli`), whose writes before
+    /// NCBI's first request `check_report_stream` makes where LOSAT refuses the file.
+    pub(crate) fn attach_report(&self, report: crate::report::ostream::RequestPoint) {
+        if self.0.refusal.is_some() {
+            *self
+                .0
+                .report
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report);
         }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self.hold.step(&[]) {
-            HoldStep::Kept => Ok(()),
-            HoldStep::Through(held) => {
-                self.inner.write_all(&held)?;
-                self.inner.flush()
-            }
-        }
-    }
-}
-
-impl<W: Write> Drop for HeldReport<W> {
-    fn drop(&mut self) {
-        let _ = Write::flush(self);
-    }
-}
-
-/// The destination `inner` of the command line's report stream (the `-out` file or standard
-/// output) behind the hold of a run whose strategy file LOSAT refuses (`strategy`): from the
-/// run's start until NCBI's first request (`check_report_stream`) the stream's bytes are held,
-/// not written. NCBI writes nothing to the stream before its formatter, and its first request
-/// only after its prolog, so what is held is the prolog (and the reports of the stops that come
-/// first); the run's end writes them before its error (`end_run`), the request point drops them
-/// and refuses. The destination as it is, without a hold or a cost. The hold is the device of the
-/// one report stream (`report::ostream::ReportStream::of_cli`), below NCBI's buffer.
-pub(crate) fn hold_report(
-    strategy: Option<&StrategyExport>,
-    inner: Box<dyn Write + Send>,
-) -> Box<dyn Write + Send> {
-    match strategy.and_then(|strategy| strategy.0.hold.clone()) {
-        Some(hold) => Box::new(HeldReport { inner, hold }),
-        None => inner,
     }
 }
 
@@ -495,7 +404,7 @@ impl StrategyExport {
         Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
-            hold: refusal.is_some().then(ReportHold::default),
+            report: Mutex::new(None),
             refusal,
             state: Mutex::new(State {
                 held: (!sink.can_cut()).then(std::collections::VecDeque::new),
@@ -781,12 +690,6 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
         return result;
     };
     let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
-    // The report stream's held bytes (`hold_report`): where the run ends before NCBI's first
-    // request they are NCBI's, written before its error (or its success); LOSAT's refusal has
-    // none before it.
-    if let Some(hold) = &strategy.0.hold {
-        hold.end(result.is_ok() || native);
-    }
     let ended = strategy.with_state(|state| -> std::io::Result<()> {
         state.unreached.clear();
         if !native {

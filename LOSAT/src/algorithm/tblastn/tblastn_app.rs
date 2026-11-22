@@ -1883,6 +1883,19 @@ fn search(
             Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
+        // NCBI's prolog comes before the first batch's request (`StrategyExport::refused`).
+        let refused = crate::report::archive::strategy::StrategyExport::refused;
+        if searched_done > 0 && args.strategy.as_ref().is_some_and(refused) {
+            write_first_batch_prologs(
+                outputs,
+                subject_path.map(|path| path.as_path()),
+                subjects.len(),
+                subject_letters,
+                pairwise_database.as_ref(),
+                args.tabular_taxdb.unwrap_or(false),
+                pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
+            )?;
+        }
         for range in query_input
             .batches(batch_size)
             .into_iter()

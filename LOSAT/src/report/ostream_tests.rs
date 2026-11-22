@@ -884,3 +884,47 @@ fn a_failed_standard_error_is_bad_and_the_run_goes_on_without_its_tie() {
     assert!(stream.finish(Ok(())).is_ok());
     assert_eq!(lock(&took).as_slice(), b"firstsecond");
 }
+
+#[test]
+fn the_request_point_of_a_refused_strategy_file_makes_ncbis_writes_first() {
+    // merge 4's edge (fix 3): `-out /dev/full -export_search_strategy /dev/full` outfmt 0. NCBI's
+    // prolog flush fails before its first request: `BLAST failed to write output`, exit 6.
+    use std::io::Write;
+    let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Report);
+    let point = RequestPoint(std::sync::Arc::downgrade(&stream.0));
+    let mut ostream = NcbiOstream::report(stream_of(&mut stream));
+    ostream.write_all(b"BLASTN (LOSAT 0.2.0)\n\n").unwrap();
+    ostream.ncbi_flush().unwrap();
+    let failed = point.make_writes().unwrap_err();
+    assert!(is_report_write_failure(&failed));
+    drop(ostream);
+    assert_eq!(
+        native(stream.finish(Err(failed.into()))),
+        (6, "BLAST failed to write output\n".to_string())
+    );
+    // A device that takes them: NCBI's writes so far are made, and the refusal follows them.
+    let took = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut stream = ReportStream::file(
+        Box::new(Limited {
+            took: took.clone(),
+            limit: usize::MAX,
+        }),
+        "blastn",
+        Site::Report,
+    );
+    let point = RequestPoint(std::sync::Arc::downgrade(&stream.0));
+    let mut ostream = NcbiOstream::report(stream_of(&mut stream));
+    ostream.write_all(b"BLASTN (LOSAT 0.2.0)\n\n").unwrap();
+    ostream.ncbi_flush().unwrap();
+    ostream.write_all(b"Reference: ...").unwrap();
+    assert!(lock(&took).is_empty());
+    point.make_writes().unwrap();
+    assert_eq!(lock(&took).as_slice(), b"BLASTN (LOSAT 0.2.0)\n\n");
+    drop(ostream);
+    let refusal = stream.finish(Err(anyhow::anyhow!("refused"))).unwrap_err();
+    assert_eq!(refusal.to_string(), "refused");
+    assert_eq!(
+        lock(&took).as_slice(),
+        b"BLASTN (LOSAT 0.2.0)\n\nReference: ..."
+    );
+}

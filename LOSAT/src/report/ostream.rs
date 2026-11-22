@@ -1024,30 +1024,25 @@ impl ReportStream {
     /// (NCBI's file buffer, `NcbiStdio::File`: 8,190 bytes held, the 8,191st written with them)
     /// or, with `None`, standard output (`NcbiStdio::cout`, tied to standard error).
     ///
-    /// Nearest the device is the hold of a run whose strategy file `strategy` LOSAT refuses
-    /// (`strategy::hold_report`): until NCBI's first request the stream's device writes are
-    /// held, and the request point drops them or the run's end writes them.
+    /// A run whose strategy file `strategy` LOSAT refuses gives it the stream's request point
+    /// (`RequestPoint`), where NCBI's writes so far are made before the refusal.
     pub fn of_cli(
         out_file: Option<std::fs::File>,
         program: &'static str,
         outfmt: &str,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     ) -> Self {
-        use crate::report::archive::strategy::hold_report;
         let number = crate::blastinput::app::parse_formatting_string(outfmt)
             .map_or(0, |choice| choice.number);
         let stream = match out_file {
-            Some(file) => Self::file(
-                hold_report(strategy, Box::new(file)),
-                program,
-                Site::of_format(number),
-            ),
-            None => Self::standard_output(
-                hold_report(strategy, standard_output_device()),
-                program,
-                Site::of_format(number),
-            ),
+            Some(file) => Self::file(Box::new(file), program, Site::of_format(number)),
+            None => {
+                Self::standard_output(standard_output_device(), program, Site::of_format(number))
+            }
         };
+        if let Some(strategy) = strategy {
+            strategy.attach_report(RequestPoint(std::sync::Arc::downgrade(&stream.0)));
+        }
         if crate::cli::is_command_line_run() {
             *lock(&RUN_PROGRAM) = Some(program);
             *lock(&TIED_REPORT) = Some(std::sync::Arc::downgrade(&stream.0));
@@ -1140,6 +1135,21 @@ impl std::io::Write for ReportStream {
     /// are made before a text on standard error, `tie_standard_output`).
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// The command line's report stream where NCBI writes its first search strategy request
+/// (`archive::strategy::check_report_stream`), for a strategy file that LOSAT refuses.
+pub struct RequestPoint(std::sync::Weak<std::sync::Mutex<Core>>);
+
+impl RequestPoint {
+    /// Makes NCBI's writes so far, while the formatter lives: a failed write ends the run as
+    /// NCBI's run ends there, before its request. A stream already gone has nothing to make.
+    pub fn make_writes(&self) -> std::io::Result<()> {
+        match self.0.upgrade() {
+            Some(core) => lock(&core).sync(),
+            None => Ok(()),
+        }
     }
 }
 

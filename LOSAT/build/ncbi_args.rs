@@ -19,9 +19,12 @@
 //! `optional="true"` for an optional argument or a flag, then one line for each of its parts,
 //! and a `<constraint>` element of the usage text and the constraint's own lines.)
 //!
-//! Four things the XML cannot carry are taken on trust. Each holds for the 16 XMLs LOSAT embeds:
-//! checked against the 598d8ae6 source of the programs on 2026-11-21 (line RG K4i review L1), and
-//! to be checked again whenever an XML is replaced.
+//! Four things the XML cannot carry are taken on trust. Each holds for the 15 BLAST+ XMLs LOSAT
+//! embeds: checked against the 598d8ae6 source of the programs on 2026-11-21 (line RG K4i review
+//! L1), and to be checked again whenever an XML is replaced. rpsbproc's XML is RpsbProc 0.5.1's,
+//! whose source is not in that tree: (a) and (d) cannot apply to it (its XML has no real bound and
+//! no integer key with permissible values); (b) and (c) are to be checked against RpsbProc's source
+//! when rpsbproc moves onto this reader (line RG K4i-2).
 //!
 //! (a) A real bound is read back from its text, `%g` with six significant digits: the `<min>` and
 //! `<max>` of `<Doubles>` and the numbers of BLAST's usage texts. A bound with more digits would
@@ -52,8 +55,9 @@ use std::path::Path;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2207-2219
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2253-2350
-// The constructor of the description adds the help flags; `AddStdArguments` adds `-logfile`, `-conffile`, `-version`, the three `-version-full` flags and
-// `-dryrun` that the program has not, unless the program hides them.
+// The constructor of the description adds the help flags; `AddStdArguments` adds `-logfile`,
+// `-conffile`, `-version`, the three `-version-full` flags and `-dryrun` that the program has not,
+// unless the program hides them.
 /// The arguments that every NCBI application's description has (the help flags of the
 /// `CArgDescriptions` constructor, `-logfile` and `-conffile` of `AddDefaultFileArguments`, and the
 /// ones `AddStdArguments` adds before the XML is printed): the reader of `ncbi_app::args` knows the

@@ -653,11 +653,37 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// The generated tables hold no pointer: one text (`TEXT`) and rows of integers, so that loading
 /// LOSAT relocates nothing of them (a `&str` or a slice in a static is an address that the dynamic
 /// loader relocates in every run of every program; line RG item K4i-1 fix 1). Every line of the
-/// generated file but its comments and `TEXT` is without a reference and without a string.
+/// generated file but its comments and `TEXT` is made of the row forms alone: no reference, no
+/// string, no other punctuation; names in capitals only where a table is declared (a use of another
+/// static could copy a reference); lower-case names only for the rows' fields, `static`, the
+/// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
+    const LOWER: [&str; 20] = [
+        "name",
+        "kind",
+        "default",
+        "constraint",
+        "mandatory",
+        "first",
+        "count",
+        "at",
+        "len",
+        "min",
+        "max",
+        "inclusive",
+        "descs",
+        "aliases",
+        "dependencies",
+        "static",
+        "true",
+        "false",
+        "i32",
+        "u32",
+    ];
     let generated = include_str!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
     let mut texts = 0;
+    let mut tables = 0;
     for line in generated.lines() {
         if line.starts_with("//") {
             continue;
@@ -666,11 +692,39 @@ fn the_tables_hold_no_pointer() {
             texts += 1;
             continue;
         }
-        assert!(!line.contains('&') && !line.contains('"'), "{line}");
         assert!(
-            !line.starts_with("const ") || line.starts_with("const TEXT"),
+            line.chars()
+                .all(|c| c.is_ascii_alphanumeric() || " _()[]{},.:;=-".contains(c)),
             "{line}"
         );
+        let declares = line.starts_with("static ");
+        tables += usize::from(declares);
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
+            let end = i + bytes[i..]
+                .iter()
+                .position(|b| {
+                    !(b.is_ascii_alphanumeric() || *b == b'_' || (c.is_ascii_digit() && *b == b'.'))
+                })
+                .unwrap_or(bytes.len() - i);
+            if end == i {
+                i += 1;
+                continue;
+            }
+            let word = &line[i..end];
+            if c.is_ascii_lowercase() {
+                assert!(LOWER.contains(&word), "{word} in {line}");
+            } else if c.is_ascii_uppercase()
+                && word.len() > 1
+                && word.bytes().all(|b| !b.is_ascii_lowercase())
+            {
+                assert!(declares, "{word} in {line}");
+            }
+            i = end;
+        }
     }
     assert_eq!(texts, 1);
+    assert!(tables > 0);
 }

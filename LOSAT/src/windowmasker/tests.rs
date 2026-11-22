@@ -111,10 +111,10 @@ fn the_keys_read_as_ncbi_s() {
     assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-dust", "maybe"])).is_err());
 }
 
-// The dependencies are NCBI's 38 `SetDependency` calls, all exclusions (win_mask_config.cpp:
-// 212-254), as its `multimap` holds them (the XML's): each in both directions, ordered by the
-// first name. Which of two exclusions NCBI reports is checked against NCBI's outputs
-// (`tests/windowmasker/ncbi/x_*.err`).
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:213-254
+// The dependencies are NCBI's 38 `SetDependency` calls, all exclusions, as its `multimap` holds
+// them (the XML's): each in both directions, ordered by the first name. Which of two exclusions
+// NCBI reports is checked against NCBI's outputs (`tests/windowmasker/ncbi/x_*.err`).
 #[test]
 fn the_dependencies_are_ncbi_s() {
     use crate::ncbi_app::args::Dep;

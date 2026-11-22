@@ -4,7 +4,8 @@ use super::*;
 // line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0), and its
 // reader takes a word's bytes as they are: its errors and its help words come first, and quote
 // the bytes (line RG item K4i-2a, probe `K/k4i2/nonutf8`). LOSAT refuses a value that is not
-// UTF-8 after the read, but that of `-logfile`, which the application opens by its bytes.
+// UTF-8 where the body would start, after the read and `-dryrun`, but those it opens by their
+// bytes: `-out` (`Args::output_file`) and `-logfile`.
 #[cfg(unix)]
 #[test]
 fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
@@ -16,14 +17,17 @@ fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
         post_prefix: None,
         components: &[],
     };
+    // The run writes one line into its `-out`.
     fn body(
-        _: &Args,
+        args: &Args,
         _: &ApplicationSettings,
         _: &mut files::Cin<'_>,
-        _: &mut dyn Write,
+        out: &mut dyn Write,
         _: &mut Diag,
     ) -> i32 {
-        unreachable!("the run")
+        let mut output = args.output_file("out", out).unwrap();
+        output.write_all(b"ran\n").unwrap();
+        0
     }
     let run = |words: Vec<OsString>| {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -47,22 +51,42 @@ fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
     ] {
         let printed = crate::ncbi_version::print(request, "dustmasker");
         assert_eq!(
-            run(vec!["-out".into(), bytes(), word.into()]),
+            run(vec!["-infmt".into(), bytes(), word.into()]),
             (0, printed.into_bytes(), Vec::new())
         );
     }
     let refusal = b"Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, \
                     which is not supported by LOSAT's DUSTMASKER\n";
     assert_eq!(
-        run(vec!["-out".into(), bytes()]),
+        run(vec!["-infmt".into(), bytes()]),
         (1, Vec::new(), refusal.to_vec())
     );
+    // `-dryrun` runs no body: status 0 (NCBI BLAST+ 2.17.0 dustmasker `-infmt $'\xff' -dryrun`).
+    assert_eq!(
+        run(vec!["-infmt".into(), bytes(), "-dryrun".into()]),
+        (0, Vec::new(), Vec::new())
+    );
+    // `-out` is opened by its bytes, as NCBI's `AsOutputFile` opens it.
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-app-out-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut path = dir.clone().into_os_string().into_vec();
+    path.extend_from_slice(b"/o\xff");
+    let path = OsString::from_vec(path);
+    assert_eq!(
+        run(vec!["-out".into(), path.clone()]),
+        (0, Vec::new(), Vec::new())
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"ran\n");
+    std::fs::remove_dir_all(&dir).unwrap();
     // A help word stops the reader: the help, status 0.
-    let (status, out, err) = run(vec!["-out".into(), bytes(), "-h".into()]);
+    let (status, out, err) = run(vec!["-infmt".into(), bytes(), "-h".into()]);
     assert_eq!((status, err), (0, Vec::new()));
     assert!(out.starts_with(b"USAGE\n  dustmasker"), "{out:?}");
     // The reader's errors come first, also after the word: an unknown argument.
-    let (status, out, err) = run(vec!["-out".into(), bytes(), "-bogus".into()]);
+    let (status, out, err) = run(vec!["-infmt".into(), bytes(), "-bogus".into()]);
     let err = String::from_utf8(err).unwrap();
     assert_eq!((status, out), (1, Vec::new()));
     assert!(err.contains("Unknown argument: \"bogus\""), "{err}");

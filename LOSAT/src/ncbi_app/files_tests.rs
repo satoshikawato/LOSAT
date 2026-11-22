@@ -231,14 +231,18 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
     );
     let mut stdout = Vec::new();
     assert!(matches!(
-        open_output_file("out", "-", &mut stdout),
+        open_output_file("out", std::ffi::OsStr::new("-"), &mut stdout),
         Ok(OutputFile::Stdout(_))
     ));
     assert_eq!(
-        open_output_file("out", "/no/such/dir/x.out", &mut stdout)
-            .err()
-            .unwrap()
-            .message_text(),
+        open_output_file(
+            "out",
+            std::ffi::OsStr::new("/no/such/dir/x.out"),
+            &mut stdout
+        )
+        .err()
+        .unwrap()
+        .message_text(),
         "Argument \"out\". File is not accessible:  `/no/such/dir/x.out'"
     );
 }

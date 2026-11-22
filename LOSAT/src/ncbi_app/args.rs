@@ -392,12 +392,31 @@ fn no_value(name: &str) -> ArgException {
     )
 }
 
+/// A key's value as the command line gives it: its text, or its bytes where they are not UTF-8
+/// (NCBI's argument holds the bytes; LOSAT's programs of `ncbi_app` read text,
+/// `Args::text_values_refusal`). The word is read as UTF-8 once, when the reader takes it.
+#[derive(Debug)]
+enum Value {
+    Text(String),
+    Bytes(OsString),
+}
+
+impl Value {
+    /// The value of the word `word`.
+    fn of(word: OsString) -> Self {
+        match word.into_string() {
+            Ok(text) => Value::Text(text),
+            Err(bytes) => Value::Bytes(bytes),
+        }
+    }
+}
+
 /// The arguments of one command line: those given and the defaults NCBI adds.
 #[derive(Debug)]
 pub(crate) struct Args {
-    /// The value of each argument that has one: the value given, its bytes (`None` for a flag),
-    /// else the default of a key that no given argument excludes.
-    values: BTreeMap<&'static str, Option<OsString>>,
+    /// The value of each argument that has one: the value given (`None` for a flag), else the
+    /// default of a key that no given argument excludes.
+    values: BTreeMap<&'static str, Option<Value>>,
     /// The converted value of each `eBoolean`, `eInteger` and `eDouble` key that has a value
     /// (`CArg_Boolean`, `CArg_Integer`, `CArg_Double`).
     numbers: BTreeMap<&'static str, Number>,
@@ -415,26 +434,30 @@ impl Args {
     /// value that is not UTF-8, which the programs of `ncbi_app` do not run
     /// (`text_values_refusal`).
     pub(crate) fn value(&self, name: &str) -> Option<&str> {
-        self.values
-            .get(name)
-            .and_then(|value| value.as_deref())
-            .and_then(OsStr::to_str)
+        match self.values.get(name) {
+            Some(Some(Value::Text(text))) => Some(text),
+            _ => None,
+        }
     }
 
     // No NCBI counterpart: NCBI's `AsString` is the value's bytes; LOSAT's programs of `ncbi_app`
     // read their values as text.
     /// LOSAT's refusal of a value that is not UTF-8 of an argument that a program of `ncbi_app`
-    /// reads as text (`value`), which `ncbi_app::run_app` writes after the reader, so that NCBI's
-    /// errors of the reader come first: NCBI's `Run` reads the bytes. The file arguments of
-    /// every application (`-logfile`, `-conffile`) are not the program's: the application reads
-    /// their bytes before the reader (`ncbi_environment`).
+    /// reads as text (`value`), which `ncbi_app::run_app` writes where the body would start, so
+    /// that NCBI's errors of the reader come first: NCBI's `Run` reads the bytes. The values read
+    /// by their bytes are not refused: an `eOutputFile` key, which the programs open by its name's
+    /// bytes (`output_file`), and the file arguments of every application (`-logfile`,
+    /// `-conffile`), which the application reads before the reader (`ncbi_environment`).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
-        let not_text = self.values.iter().any(|(name, value)| {
-            !FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
-                && value
-                    .as_deref()
-                    .is_some_and(|value| value.to_str().is_none())
-        });
+        let read_as_bytes = |name: &str| {
+            FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
+                || find_desc(tool_arguments(tool), name)
+                    .is_some_and(|desc| desc.kind == Kind::OutputFile)
+        };
+        let not_text = self
+            .values
+            .iter()
+            .any(|(name, value)| matches!(value, Some(Value::Bytes(_))) && !read_as_bytes(name));
         not_text.then(|| {
             format!(
                 "a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which is \
@@ -481,20 +504,23 @@ impl Args {
         }
     }
 
-    /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, `stdout` for
-    /// `-`, or NCBI's exception when it does not open. A `CArgException` thrown in `Run` is
-    /// reported by the application as one of the reader's (`Diag::run_arg_exception`). The
-    /// stream of an `eInputFile` key is `files::open_input_file` of its value, which the
-    /// programs open where NCBI's `Run` reads it.
+    /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, the file of its
+    /// value's bytes as NCBI opens it, `stdout` for `-`, or NCBI's exception when it does not
+    /// open. A `CArgException` thrown in `Run` is reported by the application as one of the
+    /// reader's (`Diag::run_arg_exception`). The stream of an `eInputFile` key is
+    /// `files::open_input_file` of its value, which the programs open where NCBI's `Run` reads
+    /// it.
     pub(crate) fn output_file<'a>(
         &self,
         name: &str,
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
-        match self.value(name) {
-            Some(value) => files::open_output_file(name, value, stdout),
-            None => Err(no_value(name)),
-        }
+        let value = match self.values.get(name) {
+            Some(Some(Value::Text(text))) => OsStr::new(text.as_str()),
+            Some(Some(Value::Bytes(bytes))) => bytes.as_os_str(),
+            _ => return Err(no_value(name)),
+        };
+        files::open_output_file(name, value, stdout)
     }
 }
 
@@ -508,7 +534,7 @@ impl Args {
 /// a name that is not ASCII is not an argument's name (`is_argument_name`).
 pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> {
     let arguments = tool_arguments(tool);
-    let mut values: BTreeMap<&'static str, Option<OsString>> = BTreeMap::new();
+    let mut values: BTreeMap<&'static str, Option<Value>> = BTreeMap::new();
     let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
     let mut given: Vec<&'static str> = Vec::new();
     // `n_plain`: `None` until the positional arguments start (NCBI's `kMax_UInt`).
@@ -558,7 +584,7 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
                 ),
             ));
         }
-        values.insert(desc.name(), value);
+        values.insert(desc.name(), value.map(Value::of));
         if let Some(number) = number {
             numbers.insert(desc.name(), number);
         }
@@ -585,10 +611,10 @@ fn create_arg(
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:921-929
     // The lookup of `name` (`x_Find`) makes a `CArgDesc_NameOnly` of it, so a name that is no
     // argument name fails there.
-    let Some(name) = std::str::from_utf8(name)
-        .ok()
-        .filter(|name| is_argument_name(name))
-    else {
+    let text = is_argument_name(name)
+        .then(|| std::str::from_utf8(name).ok())
+        .flatten();
+    let Some(name) = text else {
         return Err(invalid(
             "eInvalidArg",
             [b"Invalid argument name: ".as_slice(), name].concat(),
@@ -690,8 +716,7 @@ struct Created {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1786-1789
 /// `CArgDescriptions::VerifyName`: whether `name` can be an argument's name (ASCII letters
 /// and digits, `_` and `-`, not `-` alone or starting with `--`; the empty name can).
-fn is_argument_name(name: &str) -> bool {
-    let bytes = name.as_bytes();
+fn is_argument_name(bytes: &[u8]) -> bool {
     if bytes.first() == Some(&b'-') && matches!(bytes.get(1), None | Some(b'-')) {
         return false;
     }
@@ -789,7 +814,7 @@ fn boolean_value(desc: &Desc, value: &[u8]) -> Result<bool, ArgsError> {
 fn post_check(
     tool: &Tool,
     arguments: Arguments,
-    values: &mut BTreeMap<&'static str, Option<OsString>>,
+    values: &mut BTreeMap<&'static str, Option<Value>>,
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
@@ -838,7 +863,7 @@ fn post_check(
                     if let Some(number) = number {
                         numbers.insert(desc.name(), number);
                     }
-                    values.insert(desc.name(), Some(OsString::from(default)));
+                    values.insert(desc.name(), Some(Value::Text(default.to_string())));
                     continue;
                 }
                 Err(error) => error,

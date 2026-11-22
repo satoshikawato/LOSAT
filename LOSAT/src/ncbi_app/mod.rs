@@ -284,9 +284,9 @@ pub(crate) type Body = fn(
 /// messages go where the diagnostics go; a `<program>.ini` that NCBI reports as malformed ends the
 /// run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments (`read`, which
 /// writes what NCBI writes for a help word and an argument error); `-xmlhelp`, whose XML only the
-/// command line writes, is refused where the reader takes it. A value that is not UTF-8 is refused
-/// after the reader (`Args::text_values_refusal`), and `-dryrun` ends the run with exit status 0
-/// after the arguments and the settings. Then `body` runs.
+/// command line writes, is refused where the reader takes it. `-dryrun` ends the run with exit
+/// status 0 after the arguments and the settings. A value that is not UTF-8 is refused where the
+/// body would start (`Args::text_values_refusal`). Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
@@ -358,9 +358,6 @@ fn run_app(
         Ok(args) => args,
         Err(status) => return status,
     };
-    if let Some(refusal) = args.text_values_refusal(tool) {
-        return diag.refuse(&refusal);
-    }
     let settings = match start.settings() {
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
@@ -372,6 +369,11 @@ fn run_app(
     // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
     if dryrun {
         return 0;
+    }
+    // The programs read their values as text (`Args::value`): one that is not UTF-8 is refused
+    // where NCBI's `Run` starts, after the reader's errors and `-dryrun`, which runs no body.
+    if let Some(refusal) = args.text_values_refusal(tool) {
+        return diag.refuse(&refusal);
     }
     body(
         &args,

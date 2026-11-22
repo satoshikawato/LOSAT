@@ -963,10 +963,8 @@ def _closing_paren(text: str, open_idx: int) -> int | None:
 
 
 def _has_c_control_statement(clean: str) -> bool:
-    """Whether `clean` (double-quoted strings masked) contains an unbackticked C/C++ control or
-    struct/typedef statement."""
-    if UNBACKTICKED_STRUCT_RE.search(clean):
-        return True
+    """Whether `clean` (double-quoted strings masked) contains an unbackticked C/C++ control
+    statement (`if`, `while`, `for`, `switch`, `catch`)."""
     for match in CONTROL_START_RE.finditer(clean):
         kw = match.group("kw")
         open_idx = match.end() - 1

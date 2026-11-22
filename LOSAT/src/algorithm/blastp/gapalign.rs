@@ -946,13 +946,7 @@ fn with_x_scores<R>(
         BlastpScoreMatrix::Adjusted(m) => {
             // LOSAT_X_BPADJTABS: the tables the matrix keeps for every call with it
             // (`AdjustedProteinMatrix::x_tables`), else each call builds the rows it reads
-            let tables = if x_bpadjtabs() {
-                let t = m.x_tables();
-                crate::utils::xreach::x_reach!("LOSAT_X_BPADJTABS", t.is_some());
-                t
-            } else {
-                None
-            };
+            let tables = if x_bpadjtabs() { m.x_tables() } else { None };
             run(&match tables {
                 Some(t) => Scores::Tables { t, n: 28 },
                 None => Scores::Rows28(m.scores()),

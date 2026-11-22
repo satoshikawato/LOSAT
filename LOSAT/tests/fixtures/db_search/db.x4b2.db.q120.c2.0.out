@@ -1,0 +1,113 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: protein slice of a shrimp virus proteome
+           35 sequences; 14,391 total letters
+
+
+
+Query= m_fam_120 bases 1-120 of m_fam
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]       26.2    6e-04
+BDT61945.1 hypothetical protein [Penaeus monodon majanivirus A]       18.5    0.43 
+BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]        16.2    2.6  
+BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]        15.0    7.5  
+BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus mon...  15.0    8.0  
+
+
+>BDT61960.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=492
+
+ Score = 26.2 bits (56),  Expect = 6e-04, Method: Compositional matrix adjust.
+ Identities = 10/15 (67%), Positives = 14/15 (93%), Gaps = 0/15 (0%)
+ Frame = -1
+
+Query  117  KAYSVDNIMKLASCT  73
+            K Y+V+N+M+LASCT
+Sbjct  49   KIYTVNNVMELASCT  63
+
+
+>BDT61945.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=251
+
+ Score = 18.5 bits (36),  Expect = 0.43, Method: Compositional matrix adjust.
+ Identities = 11/19 (58%), Positives = 12/19 (63%), Gaps = 1/19 (5%)
+ Frame = -1
+
+Query  117  KAYSVDNIM-KLASCTNYD  64
+            K+YSV  IM KLA   N D
+Sbjct  3    KSYSVIGIMNKLAKKENRD  21
+
+
+>BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]
+Length=592
+
+ Score = 16.2 bits (30),  Expect = 2.6, Method: Composition-based stats.
+ Identities = 5/7 (71%), Positives = 7/7 (100%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  35  MKMQSVY  15
+           +KMQ+VY
+Sbjct  80  LKMQAVY  86
+
+
+>BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]
+Length=918
+
+ Score = 15.0 bits (27),  Expect = 7.5, Method: Composition-based stats.
+ Identities = 3/7 (43%), Positives = 7/7 (100%), Gaps = 0/7 (0%)
+ Frame = +3
+
+Query  96   YYPQSMP  116
+            ++P+S+P
+Sbjct  580  HFPRSLP  586
+
+
+>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=728
+
+ Score = 15.0 bits (27),  Expect = 8.0, Method: Composition-based stats.
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  119  TRHTLW  102
+            T+H +W
+Sbjct  329  TQHAMW  334
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 361426
+
+
+  Database: protein slice of a shrimp virus proteome
+    Posted date:  Oct 16, 2026  1:46 AM
+  Number of letters in database: 14,391
+  Number of sequences in database:  35
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

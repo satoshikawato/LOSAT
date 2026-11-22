@@ -245,6 +245,8 @@ impl RpstblastnArgs {
             subject_besthit: false,
             ungapped: self.ungapped,
             lcase_masking: self.lcase_masking,
+            // RPSTBLASTN's `-use_sw_tback` is its RPS search's (`rps_search`).
+            use_sw_tback: false,
             strand: self.strand,
             query_loc: self.query_loc,
             query_gencode: self.query_gencode,

@@ -32,6 +32,7 @@ import { instantiateSerial } from 'losat';
 import type { HspRecord } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { hspTable } from '../../src/domain/hsp-table';
+import { htmlShownText } from '../../src/domain/outfmt0';
 import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import { buildResultIndex } from '../../src/domain/result-index';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../../packages/losat/src/infra/reactor/abi';
@@ -69,8 +70,6 @@ function fixtures(): Map<string, Fixture[]> {
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;
-    // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web checks keep to the plain rows.
-    if (words.includes('-html')) continue;
     const stream = ({ '': 0, '0': 0, '6': 6, '7': 7 } as const)[row['outfmt'] ?? ''];
     const fixture: Fixture = {
       id: row['fixture_id']!,
@@ -295,6 +294,9 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   const out0 = outputs.streams.get(0) ?? new Uint8Array();
   const records = [...outputs.records].sort((a, b) => a.index - b.index);
   const where = (record: HspRecord) => `${fixture.id} HSP ${record.index}`;
+  // A run with -html wrote NCBI's HTML: the ranges are read as the app shows them (`htmlShownText`).
+  const html = fixture.words.includes('-html');
+  const outfmt0Text = (bytes: Uint8Array): string => (html ? htmlShownText(decoder.decode(bytes)) : decoder.decode(bytes));
   /** The name of each subject's heading, by subject (-parse_deflines). */
   const headingNames = new Map<number, string>();
 
@@ -345,7 +347,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     if (!sortsPairwise) expect(start, `${where(record)} section order`).toBeGreaterThanOrEqual(previousEnd);
     const [hStart, hEnd] = record.out0_subject!;
     expect(hEnd, `${where(record)} heading before section`).toBeLessThanOrEqual(start);
-    const section = decoder.decode(out0.subarray(start, end));
+    const section = outfmt0Text(out0.subarray(start, end));
     if (skippedLine.test(section)) {
       expect(hEnd, `${where(record)} the empty heading of a skipped alignment`).toBe(hStart);
       skippedHeadings.add(hStart);
@@ -354,7 +356,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       continue;
     }
     sections++;
-    const heading = decoder.decode(out0.subarray(hStart, hEnd));
+    const heading = outfmt0Text(out0.subarray(hStart, hEnd));
     expect(heading.startsWith('>'), `${where(record)} heading text`).toBe(true);
     expect(heading, `${where(record)} heading Length=`).toMatch(/\nLength=\d+\n/);
     // The heading is the record's subject (not another subject with the same coordinates); a record without an ID has
@@ -392,7 +394,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // The text has as many sections and subject headings as the records point to: no section or
   // heading of outfmt 0 lacks its records. In a run of two searches outfmt 0 has a hit list of its own:
   // a section or heading that no record points to is a pair whose records are absent or differ.
-  const text = decoder.decode(out0);
+  const text = outfmt0Text(out0);
   const pointed = new Set([...headings.values()].flatMap((range) => (range === null || skippedHeadings.has(range[0]) ? [] : [range[0]])));
   const twice = searchedTwice(fixture);
   let unpointed = 0;
@@ -475,9 +477,11 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
         } catch (error) {
           // The search of these fixtures is outfmt 0 (the fixture's other format only adds its search):
           // LOSAT refuses outfmt 0 of a record that is both a query and a subject and has masks, as on the
-          // command line (the pd.self rows of formats other than 0).
-          const shared = /is both a query and a subject under -parse_deflines and has masks/.test(String(error));
-          if (!shared || !fixture.words.includes('-parse_deflines')) throw error;
+          // command line (the pd.self rows of formats other than 0), and the id of the other molecule in a
+          // subject (the html.bp.smix.* rows: NCBI reads it, LOSAT refuses it, OWNER_DECISIONS 7,
+          // 2026-10-30; line RG item X7 owns the lift).
+          const refusal = /is both a query and a subject under -parse_deflines and has masks|names the other molecule under -parse_deflines/.test(String(error));
+          if (!refusal || !fixture.words.includes('-parse_deflines')) throw error;
           summary.refused++;
           continue;
         }

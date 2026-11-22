@@ -2113,8 +2113,22 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
     let mut minus = hsp(-12, -2);
     minus.query_frame = -1;
     assert_eq!(minus.seqalign_query_start(), 102);
+    // `starts_left_of_record` is `record_query_start(..) < 0`, tested first as X1b-o tested an
+    // HSP outside its context: inside it (and on its right) no start is below 0.
+    assert!(left.outside_query_context() && left.starts_left_of_record(0, false));
+    assert!(left.starts_left_of_record(12, false) && left.starts_left_of_record(12, true));
+    assert!(!left.starts_left_of_record(13, true));
+    assert!(minus.outside_query_context() && !minus.starts_left_of_record(0, true));
+    for inside in [hsp(0, 12), hsp(88, 100)] {
+        assert!(!inside.outside_query_context());
+        assert!(!inside.starts_left_of_record(0, false) && !inside.starts_left_of_record(0, true));
+    }
+    assert!(hsp(-1, 11).outside_query_context() && hsp(100, 112).outside_query_context());
+    assert!(!hsp(100, 112).starts_left_of_record(0, false));
     (minus.internal_q_offset_0, minus.internal_q_end_0) = (95, 104);
     assert_eq!(minus.seqalign_query_start(), -4);
+    assert!(minus.starts_left_of_record(0, false) && minus.starts_left_of_record(3, true));
+    assert!(!minus.starts_left_of_record(4, true) && minus.starts_left_of_record(4, false));
     assert_eq!(
         crate::algorithm::blastn::hsp::score_compare_hsps(&left, &hsp(0, 12)),
         std::cmp::Ordering::Less

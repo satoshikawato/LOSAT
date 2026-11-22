@@ -365,6 +365,27 @@ impl BlastnHsp {
             start
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1126-1129
+    /// Whether the HSP lies outside its query context (`query.offset < 0`, or `query.end` past the
+    /// context's length `query_length`): an HSP from a hit whose ungapped extension passed an end
+    /// of its context (an ungapped X-drop of 2^30 raw or more, remaining-gaps X1b-o).
+    #[inline]
+    pub fn outside_query_context(&self) -> bool {
+        self.internal_q_offset_0 < 0 || self.internal_q_end_0 as i64 > self.query_length as i64
+    }
+
+    /// Whether `record_query_start(offset, dense_diag)` is below 0, where the mapping of a subject
+    /// set's Seq-align throws (`run::left_of_query_refusal`). Only an HSP outside its query
+    /// context (`outside_query_context`) starts there: a start below 0 is a plus-strand
+    /// `query.offset` below 0 or a minus-strand `query.end` past the context's length, which the
+    /// interval's start does not lower. So each HSP of a batch is tested as X1b-o tested it, and
+    /// the start, which reads the strand and the interval, is made only for an HSP outside its
+    /// context (remaining-gaps X1b-p).
+    #[inline]
+    pub fn starts_left_of_record(&self, offset: usize, dense_diag: bool) -> bool {
+        self.outside_query_context() && self.record_query_start(offset, dense_diag) < 0
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1136

@@ -7661,7 +7661,7 @@ fn ungapped_subject_stage(
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1288-1294, 2901-2904
 /// LOSAT's refusal (`hsp_left_of_query`) of the first query of a batch whose final hit list keeps
 /// an HSP that NCBI keeps outside its query context (`BlastnHsp::internal_q_offset_0`) with a
-/// Seq-align query start below 0 in the query's record (`BlastnHsp::record_query_start`: a
+/// Seq-align query start below 0 in the query's record (`BlastnHsp::starts_left_of_record`: a
 /// plus-strand HSP left of its context, a minus-strand one right of it, that the `-query_loc`
 /// interval's start does not move to 0 or past it); `hit_lists`, `lengths`, `offsets` (the
 /// intervals' starts, `Placements::offset`) and `records` (the searched records) are the
@@ -7697,7 +7697,7 @@ fn left_of_query_refusal(
             .hsplist_array
             .iter()
             .flat_map(|hsp_list| &hsp_list.hsps)
-            .any(|hsp| hsp.record_query_start(offset, dense_diag) < 0)
+            .any(|hsp| hsp.starts_left_of_record(offset, dense_diag))
     };
     let q_idx = hit_lists.iter().enumerate().position(|(q_idx, hit_list)| {
         let offset = offsets.get(q_idx).copied().unwrap_or(0);

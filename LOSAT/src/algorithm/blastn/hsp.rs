@@ -384,7 +384,17 @@ impl BlastnHsp {
     /// context (remaining-gaps X1b-p).
     #[inline]
     pub fn starts_left_of_record(&self, offset: usize, dense_diag: bool) -> bool {
-        self.outside_query_context() && self.record_query_start(offset, dense_diag) < 0
+        self.outside_query_context() && self.record_start_below_zero(offset, dense_diag)
+    }
+
+    /// `record_query_start(offset, dense_diag) < 0` for an HSP outside its query context, out of
+    /// the loops that test each HSP of a batch (`starts_left_of_record`): only an ungapped X-drop
+    /// of 2^30 raw or more gives such an HSP, so the loops keep none of its fields in registers
+    /// for it.
+    #[cold]
+    #[inline(never)]
+    fn record_start_below_zero(&self, offset: usize, dense_diag: bool) -> bool {
+        self.record_query_start(offset, dense_diag) < 0
     }
 }
 
